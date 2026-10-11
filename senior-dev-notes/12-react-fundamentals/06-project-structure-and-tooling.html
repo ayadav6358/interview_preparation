@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Project Structure &amp; Tooling — React Fundamentals — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">React Fundamentals</a><span class="sep">›</span>Project Structure &amp; Tooling</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>Project Structure &amp; Tooling: Vite, File Layout, Build &amp; Env Vars</h1>
+      <p class="meta-line"><span>⏱ 1.5 hrs</span><span>📍 Chapter 6 of 6</span></p>
+      <p><strong>One-line summary:</strong> A modern React project is a thin layer of your source files on top
+      of a build tool (Vite, in 2025–26 the default choice over Create React App) that bundles, transforms,
+      and serves them — knowing what that tool actually does, how to organize files by feature, and how env
+      vars/npm scripts fit together is table-stakes project literacy for a senior dev.</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>Every real React job involves onboarding into (or designing) a project structure, debugging a build
+      failure, and knowing why an env var "isn't working." These are mundane, high-frequency problems that
+      separate someone who's only ever worked inside a pre-built scaffold from someone who understands what's
+      actually happening when <code>npm run dev</code> and <code>npm run build</code> execute. It's also
+      directly relevant to system design-adjacent interview questions about bundle size, code splitting, and
+      why Create React App was officially deprecated in favor of Vite-based tooling.</p>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>Requires general comfort with npm/Node.js tooling — see
+      <a href="../13-nodejs-fundamentals/02-npm-and-package-management.html">npm &amp; Package Management</a>
+      (Node.js Fundamentals topic) if that's shaky. Builds on everything in this topic since it's the
+      "how do all these files and routes and components actually get organized and shipped" capstone chapter.
+      Contrast with <a href="../03-react-nextjs-advanced/index.html">React &amp; Next.js Advanced</a>, where
+      the framework (Next.js) takes over most of these concerns (routing-by-file, built-in bundling
+      decisions, server/client boundaries).</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="vite-vs-cra">Why Vite, and what it actually does</h3>
+      <p>Create React App is officially deprecated/unmaintained as of recent years; Vite is the standard
+      modern choice. The core difference that matters: CRA's dev server bundled your entire app with webpack
+      before serving anything, so dev-server startup and rebuild-on-change got slower as the app grew. Vite
+      serves source files over native ES modules in development — the browser itself requests each module as
+      needed, and Vite transforms files on-demand (via esbuild, which is 10-100x faster than JS-based
+      bundlers for transforms) — so dev startup is near-instant regardless of app size, and only the files
+      that actually changed are re-transformed on save. For production, Vite switches to Rollup to produce an
+      optimized, bundled, code-split, minified build — dev and prod intentionally use different strategies
+      optimized for their different goals (fast iteration vs. smallest/fastest-loading output).</p>
+
+      <h3 id="file-structure">Organizing files: by feature, not by file type</h3>
+      <p>Two broad conventions exist. <strong>"By type"</strong> (a top-level <code>components/</code>,
+      <code>hooks/</code>, <code>pages/</code> folder each holding everything of that kind) scales poorly past
+      a small app — finding everything related to "recipes" means hunting across 4+ folders.
+      <strong>"By feature/domain"</strong> colocates a feature's components, hooks, and styles together,
+      with only truly cross-cutting things (a generic <code>Button</code>, a <code>useDebounce</code> hook)
+      living in a shared top-level folder. Most teams at scale converge on feature-based structure:</p>
+      <pre><code class="language-text">src/
+  app/              # top-level App, router setup, providers
+  features/
+    recipes/
+      RecipeCard.jsx
+      RecipeList.jsx
+      useRecipes.js
+      recipes.api.js
+    favorites/
+      FavoritesList.jsx
+      useFavorites.js
+  components/       # truly shared, generic UI (Button, Modal, Spinner)
+  hooks/            # truly shared, generic hooks (useDebounce, useLocalStorage)
+  lib/              # non-React utilities (formatters, constants)
+  main.jsx          # entry point -- createRoot().render(&lt;App /&gt;)
+index.html          # Vite's actual entry point -- not public/index.html like CRA</code></pre>
+      <p>Note the inverted entry point compared to CRA: in Vite, <code>index.html</code> lives at the project
+      root and directly <code>&lt;script type="module" src="/src/main.jsx"&gt;</code>-references your source
+      — CRA hid this behind webpack config and a <code>public/index.html</code> with a magic
+      <code>%PUBLIC_URL%</code> placeholder.</p>
+
+      <h3 id="env-vars">Environment variables: build-time, not runtime, and intentionally exposed</h3>
+      <p>Vite exposes env vars to client code only if prefixed <code>VITE_</code> (a deliberate security
+      boundary — anything NOT prefixed stays server/build-tool-only and never reaches the browser bundle,
+      preventing accidental leakage of secrets meant only for the build process). Access via
+      <code>import.meta.env.VITE_API_URL</code>, not <code>process.env</code> (that's Node/webpack/CRA's
+      convention; Vite's is ESM-native <code>import.meta.env</code>). Critically, these are baked in at
+      <strong>build time</strong>, not read at runtime — a production build has the values from whatever
+      <code>.env</code> file was present when you ran <code>vite build</code> literally inlined into the
+      bundled JS; changing the env var after building does nothing until you rebuild.</p>
+      <pre><code class="language-text"># .env.development
+VITE_API_URL=http://localhost:3001
+
+# .env.production
+VITE_API_URL=https://api.myrecipeapp.com</code></pre>
+      <pre><code class="language-jsx">const res = await fetch(`${import.meta.env.VITE_API_URL}/recipes`);</code></pre>
+
+      <h3 id="npm-scripts">npm scripts: the actual commands behind the workflow</h3>
+      <p>A Vite React project's <code>package.json</code> scripts, and what each literally does:</p>
+      <pre><code class="language-json">{
+  "scripts": {
+    "dev": "vite",            // starts the dev server with HMR, native ESM, instant startup
+    "build": "vite build",     // produces an optimized dist/ build via Rollup -- minified, code-split
+    "preview": "vite preview", // serves the dist/ build locally to sanity-check prod behavior
+    "lint": "eslint ."         // static analysis -- catches hook-rule violations, unused vars, etc.
+  }
+}</code></pre>
+      <p>Senior-level detail that gets tested: <code>vite build</code> output is <strong>static files</strong>
+      — HTML/JS/CSS — meant to be served by any static file server or CDN; there's no Node.js server required
+      to run a plain Vite React app in production (unlike Next.js's server-rendering model), which is exactly
+      why the SPA-fallback deployment gotcha from Chapter 5 exists.</p>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>What actually happens on <code>npm run build</code>:</p>
+      <ol>
+        <li>Vite reads <code>index.html</code> as the entry point, following its <code>&lt;script type="module"&gt;</code>
+        reference into your source graph (every <code>import</code> statement, transitively).</li>
+        <li>JSX/TS is transformed to plain JS (via esbuild) for every file in that graph.</li>
+        <li>Rollup bundles the transformed modules together, applying tree-shaking (removing exported code
+        that's never actually imported anywhere) and code-splitting (separate chunks for lazy-loaded routes,
+        so users don't download JS for pages they haven't visited).</li>
+        <li>Assets (CSS, images) are processed, hashed for cache-busting filenames, and emitted into
+        <code>dist/</code> alongside the final HTML with correct <code>&lt;script&gt;</code>/<code>&lt;link&gt;</code>
+        tags injected.</li>
+        <li><code>import.meta.env.VITE_*</code> references are replaced with their literal values at this
+        build step — they do not exist as runtime lookups in the shipped code.</li>
+      </ol>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+flowchart TD
+  A[npm run dev] --> B[Vite dev server starts]
+  B --> C[Browser requests index.html]
+  C --> D[Browser requests main.jsx as native ES module]
+  D --> E[Vite transforms JSX/TS on-demand via esbuild]
+  E --> F[Only changed files re-transformed on save -- HMR]
+
+  G[npm run build] --> H[Vite resolves full import graph from index.html]
+  H --> I[esbuild transforms all files]
+  I --> J[Rollup bundles + tree-shakes + code-splits]
+  J --> K[dist/ -- static HTML/JS/CSS, ready for any static host]
+      </div>
+      <div class="mermaid">
+graph TD
+  Root[src/] --> App[app/]
+  Root --> Features[features/]
+  Root --> Shared[components/, hooks/, lib/]
+  Features --> Recipes[recipes/]
+  Features --> Favorites[favorites/]
+  Recipes --> RC[RecipeCard.jsx]
+  Recipes --> RL[RecipeList.jsx]
+  Recipes --> RH[useRecipes.js]
+  Recipes --> RA[recipes.api.js]
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-jsx">// A feature-colocated custom hook -- keeps data-fetching logic out of
+// components and out of a generic "hooks/" grab-bag, since it's specific
+// to the recipes feature.
+// src/features/recipes/useRecipes.js
+import { useState, useEffect } from "react";
+
+export function useRecipes() {
+  const [recipes, setRecipes] = useState([]);
+  const [status, setStatus] = useState("idle"); // idle | loading | success | error
+
+  useEffect(() =&gt; {
+    const controller = new AbortController();
+    setStatus("loading");
+
+    fetch(`${import.meta.env.VITE_API_URL}/recipes`, { signal: controller.signal })
+      .then(res =&gt; res.json())
+      .then(data =&gt; { setRecipes(data); setStatus("success"); })
+      .catch(err =&gt; { if (err.name !== "AbortError") setStatus("error"); });
+
+    return () =&gt; controller.abort();
+  }, []);
+
+  return { recipes, status };
+}</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4>
+      <p>A team hardcoded their staging API's base URL directly into several fetch calls across the codebase
+      "temporarily" during a sprint, intending to parameterize it later. Weeks later, a production deploy
+      shipped with staging URLs baked into several (but not all) bundled chunks, causing a subset of features
+      to silently talk to the staging backend in production — invisible until someone noticed staging data
+      appearing live. Because env values are inlined at build time, there was no way to "fix" this without a
+      full rebuild and redeploy (a runtime config change could not have patched it). The fix: centralize every
+      external base URL behind <code>import.meta.env.VITE_API_URL</code>, add a lint rule banning hardcoded
+      URLs matching the known API domains, and add a build-time assertion that fails the build if the expected
+      <code>VITE_*</code> vars aren't set for the target environment.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4>
+      <p>Expecting an env var change to take effect without rebuilding: because Vite inlines
+      <code>import.meta.env.VITE_*</code> values at build time, changing a <code>.env</code> file (or a
+      deployment platform's environment variable setting) and just restarting the already-built app does
+      nothing — you must re-run <code>vite build</code> for the new value to actually appear in the shipped
+      JS. This differs from server-side runtime env vars (e.g. in a Node.js backend), which genuinely are read
+      fresh at process start — a common source of confusion for developers moving between frontend and
+      backend env-var mental models.</p></div>
+      <ul>
+        <li>Putting a secret (API key meant to stay server-side) in a <code>VITE_</code>-prefixed var — it
+        gets bundled directly into client-visible JS; anything truly secret must stay out of the client
+        bundle entirely and live behind a backend proxy.</li>
+        <li>Organizing by file-type (<code>components/</code>, <code>hooks/</code>) past the point an app
+        outgrows it, making every feature change require touching 3+ unrelated top-level folders — migrate to
+        feature-based structure before this becomes painful, not after.</li>
+        <li>Assuming <code>vite build</code> output needs a Node server to run — it's static files; deploying
+        it behind an unnecessary Node/SSR server adds operational complexity a plain SPA doesn't need.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>Vite (plain SPA, this topic's capstone)</td><td>Client-only app, no SEO/SSR requirement</td><td>Need server rendering, file-based routing, API routes colocated</td><td>Next.js (topic 03)</td></tr>
+        <tr><td>Feature-based file structure</td><td>App has/will have multiple distinct domains/features</td><td>Truly tiny app (a handful of files total)</td><td>Flat/by-type structure for very small projects</td></tr>
+        <tr><td><code>VITE_</code>-prefixed env vars</td><td>Config that's safe to expose client-side (API base URLs, feature flags)</td><td>Secrets, private keys, anything that must stay server-only</td><td>Backend-only env vars behind a proxy/BFF</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic"><h4>Basic</h4>
+      <details class="qa"><summary>Why has the React community largely moved from Create React App to Vite?</summary><div class="answer"><p>CRA is officially deprecated/unmaintained and its webpack-based dev server bundled the whole app before serving anything, getting slower as apps grew. Vite serves native ES modules on-demand in dev (near-instant startup regardless of app size) and uses esbuild for fast transforms, switching to Rollup for an optimized production build.</p></div><div class="followup">Follow-up: Does Vite use the same bundler for dev and production?</div></details>
+      <details class="qa"><summary>How do you expose an environment variable to client-side code in Vite?</summary><div class="answer"><p>Prefix it `VITE_` in a `.env` file, then access it via `import.meta.env.VITE_YOUR_VAR` in your code -- unprefixed vars are not exposed to client bundles.</p></div><div class="followup">Follow-up: What happens if you try to access a non-VITE_-prefixed var from client code?</div></details>
+      <details class="qa"><summary>What does `npm run build` actually produce, and how is it typically deployed?</summary><div class="answer"><p>A `dist/` folder of static HTML/JS/CSS assets, ready to be served by any static file host or CDN -- no Node.js server is required to run a plain Vite React app in production.</p></div><div class="followup">Follow-up: What deployment gotcha does this create for client-side routing?</div></details>
+      <details class="qa"><summary>What's the practical difference between organizing files "by type" vs. "by feature"?</summary><div class="answer"><p>By-type groups files by what they ARE (all components together, all hooks together); by-feature groups files by what they BELONG TO (everything for "recipes" together). By-feature scales better as an app grows since related changes stay colocated.</p></div><div class="followup">Follow-up: What kind of code should still live in a shared, by-type-ish folder even in a feature-based structure?</div></details>
+      </div>
+      <div class="qa-level medium"><h4>Medium</h4>
+      <details class="qa"><summary>Why are Vite env vars inlined at build time rather than read at runtime, and what practical consequence does that have?</summary><div class="answer"><p>Because the production output is static JS with no runtime process to read `process.env` from -- there's no server process executing your React code in the browser. The consequence: changing an env var after a build is deployed has zero effect until you rebuild and redeploy; this differs from backend Node.js services where env vars genuinely are read at process startup from the live environment.</p></div><div class="followup">Follow-up: How would a CI/CD pipeline need to be structured to support different env values per environment (staging vs. prod)?</div></details>
+      <details class="qa"><summary>Why is the `VITE_` prefix requirement a deliberate security boundary, not just a naming convention?</summary><div class="answer"><p>A Vite project's `.env` files often also hold values meant only for build-time tooling or local scripts (database URLs, deploy tokens) that must never end up in client-visible JS. Requiring an explicit `VITE_` prefix to expose a var to `import.meta.env` means forgetting the prefix is the SAFE default (var stays build-tool-only) rather than the dangerous default (var leaks to the browser) -- an intentional fail-safe design choice.</p></div><div class="followup">Follow-up: What would the safer vs. more dangerous design look like if the prefix requirement were inverted?</div></details>
+      <details class="qa"><summary>What does tree-shaking actually require from your code to work correctly, and what can defeat it?</summary><div class="answer"><p>Tree-shaking relies on statically analyzable ES module `import`/`export` statements -- the bundler needs to determine, without running the code, which exports are never imported anywhere so it can remove them. It's defeated by patterns that hide usage from static analysis: dynamic `require()`-style access, re-exporting an entire module as a namespace object and using only one property off it (sometimes), or side-effectful module code the bundler can't prove is safe to remove even if its exports are unused.</p></div><div class="followup">Follow-up: Why might a `import * as utils from "./utils"` followed by `utils.formatDate()` tree-shake worse than a named import?</div></details>
+      </div>
+      <div class="qa-level advanced"><h4>Advanced</h4>
+      <details class="qa"><summary>Why does Vite deliberately use different bundling strategies for dev (esbuild, native ESM, no real bundling) vs. prod (Rollup, full bundling)?</summary><div class="answer"><p>Dev and prod optimize for different, partially conflicting goals. Dev wants the fastest possible iteration loop -- startup time and per-save rebuild time matter far more than final output size, since nothing in dev is actually shipped to users; serving native ES modules lets the browser fetch only what's needed per page load with zero bundling step, and esbuild's speed advantage (written in Go, highly parallel) minimizes per-file transform latency. Prod wants the smallest, most cache-efficient, fewest-request output for real users on real networks -- which needs full bundling, tree-shaking, and code-splitting, a fundamentally different (slower, more thorough) analysis that would be wasteful to re-run on every file save during development.</p></div><div class="followup">Follow-up: Why doesn't Vite just use Rollup for dev too, given it's "more correct" bundling?</div></details>
+      <details class="qa"><summary>A teammate wants to read a "live" feature-flag value from a backend at runtime rather than bake it into the Vite build. How would you architect that, and why can't `import.meta.env` do it?</summary><div class="answer"><p>`import.meta.env.VITE_*` values are replaced with literal constants at build time -- there's no code left at runtime that "looks up" the value, so it fundamentally cannot change without a rebuild. For genuinely dynamic, runtime-configurable flags, you need an actual runtime data source: a fetch to a feature-flag/config endpoint on app load (stored in state, not baked into the bundle), or a small `config.json` served alongside the static build that's fetched at startup and can be edited/redeployed independently of the JS bundle.</p></div><div class="followup">Follow-up: What's the tradeoff of the config.json approach vs. a feature-flag service API call?</div></details>
+      <details class="qa"><summary>How does code-splitting interact with React Router to affect what a user actually downloads on first load?</summary><div class="answer"><p>Combining Rollup's code-splitting with `React.lazy()` + route-level dynamic `import()` means each route's component code becomes its own chunk, fetched only when that route is actually navigated to, rather than the entire app's JS (every route's code) being downloaded upfront in one bundle. This is a deliberate architectural choice at the routing layer -- Vite/Rollup CAN split automatically at dynamic import boundaries, but the DEVELOPER decides where those boundaries are by choosing to lazy-load a route versus statically importing it.</p></div><div class="followup">Follow-up: What's a reasonable heuristic for which routes/components are worth lazy-loading vs. not?</div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment"><span class="level-tag">Beginner (30-60 min)</span><h4>Scaffold and inspect a Vite project</h4>
+      <p>Run <code>npm create vite@latest</code> (React template), then without writing any app code, read
+      through the generated <code>index.html</code>, <code>vite.config.js</code>, and
+      <code>package.json</code> scripts. Run <code>dev</code>, <code>build</code>, and <code>preview</code>,
+      and inspect the generated <code>dist/</code> folder's contents.</p>
+      <p><strong>Acceptance criteria:</strong> You can explain, in your own words, what each of the three npm
+      scripts actually does and point to the specific files in <code>dist/</code> that correspond to your
+      source code.</p>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>Open the hashed JS filename in `dist/assets/` and search for a distinctive string from your source code to confirm it's really in there.</p></div></details>
+      <p><strong>Bonus:</strong> Add a `VITE_` env var, use it in `App.jsx`, and confirm it appears as a literal string in the built JS (search the `dist/` output for it).</p></div>
+
+      <div class="assignment"><span class="level-tag">Intermediate (2-4 hrs)</span><h4>Migrate a flat project to feature-based structure</h4>
+      <p>Given (or reusing your own) a small app with a flat <code>components/</code>/<code>hooks/</code>
+      structure, reorganize it into feature-based folders, correctly separating truly shared/generic code
+      from feature-specific code, updating all imports.</p>
+      <p><strong>Acceptance criteria:</strong> App still builds and runs identically; a reviewer can find
+      every file related to one feature in a single folder.</p>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>If you're unsure whether something is "shared" or "feature-specific," ask: would a second, unrelated feature plausibly reuse this exact code unmodified?</p></div></details>
+      <p><strong>Bonus:</strong> Set up path aliases (e.g. `@/features/...`) in `vite.config.js` to avoid long relative import chains.</p></div>
+
+      <div class="assignment"><span class="level-tag">Advanced (1-2 days)</span><h4>Finalize the capstone's structure, env config, and production build</h4>
+      <p>Reorganize the capstone project into a feature-based structure (recipes/, favorites/, auth/),
+      centralize the API base URL behind a <code>VITE_API_URL</code> env var with separate
+      <code>.env.development</code>/<code>.env.production</code> values, add <code>React.lazy()</code>
+      code-splitting for at least the add-recipe route, and verify a full production build + preview works
+      correctly including the deep-route-refresh behavior from Chapter 5.</p>
+      <ul><li>No full solution provided — this is the final structural pass on the ongoing capstone project.</li></ul>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>Check your network tab in `vite preview` to confirm the lazy-loaded route's chunk only downloads when you actually navigate to it, not on initial load.</p></div></details>
+      </div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet"><ul>
+        <li>Vite replaces CRA (deprecated): native ESM + esbuild in dev, Rollup for optimized prod builds.</li>
+        <li>Organize by feature/domain past trivial app size — not by file type (components/, hooks/ grab-bags).</li>
+        <li>Env vars need the <code>VITE_</code> prefix to reach client code; access via <code>import.meta.env</code>.</li>
+        <li>Env values are inlined at <strong>build time</strong> — changing them requires a rebuild, not just a restart.</li>
+        <li>Never put real secrets in <code>VITE_</code>-prefixed vars — they ship visibly in the client bundle.</li>
+        <li><code>vite build</code> output is static files — no Node server needed to run a plain SPA in prod.</li>
+        <li>Static-host deploys of an SPA need a rewrite/fallback rule to serve <code>index.html</code> for unmatched paths.</li>
+        <li><code>React.lazy()</code> + route-level dynamic import gives real code-splitting — users don't download unvisited routes' JS.</li>
+      </ul></div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://vite.dev/guide/">vite.dev — Getting Started</a></li>
+        <li><a href="https://vite.dev/guide/env-and-mode">vite.dev — Env Variables and Modes</a></li>
+        <li><a href="https://vite.dev/guide/build">vite.dev — Building for Production</a></li>
+        <li><a href="https://react.dev/reference/react/lazy">react.dev — lazy (code-splitting)</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="05-routing-react-router.html"><span class="dir">← Previous</span>Routing with React Router</a>
+        <a class="next" href="../13-nodejs-fundamentals/01-nodejs-basics-runtime-modules.html"><span class="dir">Next →</span>Node.js Fundamentals</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · React Fundamentals</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-jsx.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-typescript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-tsx.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "12-react-fundamentals", chapterKey: "06-project-structure-and-tooling" });</script>
+</body>
+</html>

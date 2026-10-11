@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Local LLMs Fundamentals</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <input class="searchbox" placeholder="Search topics..." />
+    <a href="../index.html">← Home</a>
+    <h3>27-Local-LLMs</h3>
+    <a href="local-llms-fundamentals.html">Local LLMs Fundamentals</a>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumbs"><a href="../index.html">Home</a> / 27-Local-LLMs</div>
+      <button class="theme-toggle" onclick="toggleTheme()">🌓 Theme</button>
+    </div>
+    <h1>Local LLMs: Ollama, llama.cpp, LM Studio, Local RAG</h1>
+    <span class="tag good">Stable</span><span class="tag">Last verified: 2026-10-06</span>
+
+    <div class="toc">
+      <b>On this page</b>
+      <a href="#what">1. What is this?</a>
+      <a href="#whyexist">2. Why does it exist?</a>
+      <a href="#whyimportant">3. Why is it important?</a>
+      <a href="#whereused">4. Where is it used?</a>
+      <a href="#prereq">5. Prerequisites</a>
+      <a href="#core">6. Core concepts</a>
+      <a href="#terms">7. Terminology</a>
+      <a href="#arch">8. Architecture</a>
+      <a href="#internal">9. How it works internally</a>
+      <a href="#steps">10. Step-by-step: local LLM + RAG + pgvector</a>
+      <a href="#simple">11. Simple example</a>
+      <a href="#real">12. Real-world example</a>
+      <a href="#code">13. Code example</a>
+      <a href="#advanced">14. Advanced example</a>
+      <a href="#mistakes">15. Common mistakes</a>
+      <a href="#best">16. Best practices</a>
+      <a href="#production">17. Production considerations</a>
+      <a href="#security">18. Security considerations</a>
+      <a href="#performance">19. Performance considerations</a>
+      <a href="#cost">20. Cost considerations</a>
+      <a href="#debug">21. Debugging/troubleshooting</a>
+      <a href="#related">22. Related concepts</a>
+      <a href="#comparison">23. Ollama vs LM Studio vs llama.cpp</a>
+      <a href="#exercise">24. Mini practical exercise</a>
+      <a href="#project">25. Practical project</a>
+      <a href="#projectarch">26. Project architecture</a>
+      <a href="#interview-b">27. Interview Questions — Beginner</a>
+      <a href="#interview-i">28. Interview Questions — Intermediate</a>
+      <a href="#interview-a">29. Interview Questions — Advanced</a>
+      <a href="#interview-s">30. Interview Questions — Senior/Architect</a>
+      <a href="#interview-sc">31. Scenario-Based Questions</a>
+      <a href="#revision">32. Quick revision notes</a>
+      <a href="#cheat">33. Cheat sheet</a>
+      <a href="#further">34. Further topics to learn</a>
+    </div>
+
+    <h2 id="what">1. What is this?</h2>
+    <p>Local LLM tooling (Ollama, llama.cpp, LM Studio) lets you download and run open-weight models entirely on your own machine — no API calls, no internet dependency, no data leaving your device — commonly combined with local embeddings and a local vector DB for fully offline RAG.</p>
+
+    <h2 id="whyexist">2. Why does it exist?</h2>
+    <p>Local LLMs exist for scenarios where cloud API dependency is unacceptable (offline use, strict privacy, air-gapped environments) or undesirable (avoiding per-token cost for high-frequency personal/dev use) — llama.cpp specifically was created to make LLM inference feasible on consumer CPUs/GPUs without specialized datacenter hardware.</p>
+
+    <h2 id="whyimportant">3. Why is it important?</h2>
+    <p>Local LLM tooling is how most developers first experiment with open-weight models and is increasingly used for privacy-sensitive prototypes, edge deployment, and cost-free development/testing loops.</p>
+
+    <h2 id="whereused">4. Where is it used?</h2>
+    <p>Developer prototyping, privacy-sensitive applications, offline/edge deployments, personal AI tools, cost-free iterative development before committing to cloud API spend.</p>
+
+    <h2 id="prereq">5. Prerequisites</h2>
+    <p><a href="../26-Open-Source-LLMs/open-source-models.html">Open-Source LLMs</a>.</p>
+
+    <h2 id="core">6. Core concepts</h2>
+    <ul>
+      <li><b>Ollama:</b> a user-friendly tool for downloading and running open models locally with a simple CLI/API, handling quantization and serving details for you.</li>
+      <li><b>llama.cpp:</b> a highly optimized C/C++ inference engine for running LLMs efficiently on CPUs and consumer GPUs — the underlying engine many higher-level tools (including Ollama) build on.</li>
+      <li><b>LM Studio:</b> a GUI application for discovering, downloading, and chatting with local models, popular for non-CLI users.</li>
+      <li><b>Local embeddings:</b> running an embedding model locally (via Ollama or similar) for fully offline RAG pipelines.</li>
+      <li><b>GGUF format:</b> a common quantized model file format used by llama.cpp-based tools.</li>
+    </ul>
+
+    <h2 id="terms">7. Terminology</h2>
+    <table>
+      <tr><th>Term</th><th>Meaning</th></tr>
+      <tr><td>GGUF</td><td>A file format for quantized models optimized for llama.cpp-based inference.</td></tr>
+      <tr><td>Quantization level (e.g., Q4, Q8)</td><td>Indicates bit-precision reduction; lower = smaller/faster but less precise.</td></tr>
+      <tr><td>Context length (local)</td><td>Same concept as cloud models, but constrained more tightly by local hardware memory.</td></tr>
+      <tr><td>OpenAI-compatible API</td><td>Many local serving tools expose an API matching OpenAI's schema, letting existing SDK code point to a local server with minimal changes.</td></tr>
+    </table>
+
+    <h2 id="arch">8. Architecture</h2>
+    <pre><code>Your machine
+ ├── Ollama (or llama.cpp / LM Studio) serving a local model
+ ├── Local embedding model (e.g., via Ollama)
+ ├── Local vector DB (Chroma, or pgvector on local Postgres)
+ └── Application code calling the local OpenAI-compatible API
+       (no network calls to any external provider)</code></pre>
+
+    <h2 id="internal">9. How it works internally</h2>
+    <p>llama.cpp implements the transformer forward pass in highly optimized C/C++ (with CPU SIMD and GPU-offload support), loading quantized GGUF weight files that have been compressed from full-precision training weights down to lower-bit representations — trading a small amount of output quality for the ability to fit and run large models on consumer hardware with limited memory, which would otherwise require datacenter-grade GPUs.</p>
+
+    <h2 id="steps">10. Step-by-step: local LLM + RAG + pgvector</h2>
+    <ol>
+      <li>Install Ollama; pull a chat model (e.g., `ollama pull llama3`) and an embedding model (e.g., `ollama pull nomic-embed-text`).</li>
+      <li>Set up a local PostgreSQL with pgvector (or Chroma for simplicity).</li>
+      <li>Ingest documents: chunk, embed via the local embedding model, store in the local vector DB.</li>
+      <li>At query time, embed the question locally, retrieve relevant chunks.</li>
+      <li>Construct the prompt and call the local chat model via Ollama's API.</li>
+      <li>Return the answer — entirely offline, no external network calls.</li>
+    </ol>
+
+    <h2 id="simple">11. Simple example</h2>
+    <pre><code class="language-bash">ollama pull llama3
+ollama run llama3 "What is retrieval-augmented generation?"
+</code></pre>
+
+    <h2 id="real">12. Real-world example</h2>
+    <p>A developer building a prototype for a client with strict data-residency requirements builds and demos the entire RAG pipeline locally (Ollama + local embeddings + Chroma) before any cloud infrastructure decision is made, proving out the concept with zero data ever leaving their laptop.</p>
+
+    <h2 id="code">13. Code example</h2>
+    <pre><code class="language-python">import requests
+
+def ollama_chat(prompt, model="llama3"):
+    resp = requests.post("http://localhost:11434/api/generate", json={
+        "model": model, "prompt": prompt, "stream": False,
+    })
+    return resp.json()["response"]
+
+def ollama_embed(text, model="nomic-embed-text"):
+    resp = requests.post("http://localhost:11434/api/embeddings", json={
+        "model": model, "prompt": text,
+    })
+    return resp.json()["embedding"]
+
+print(ollama_chat("Explain vector databases in one sentence."))
+</code></pre>
+
+    <h2 id="advanced">14. Advanced example</h2>
+    <pre><code class="language-python"># Full local RAG using Ollama + Chroma
+import chromadb
+
+client = chromadb.Client()
+collection = client.create_collection("local_docs")
+
+def ingest(docs):
+    for i, doc in enumerate(docs):
+        collection.add(ids=[str(i)], embeddings=[ollama_embed(doc)], documents=[doc])
+
+def local_rag_answer(question):
+    q_emb = ollama_embed(question)
+    results = collection.query(query_embeddings=[q_emb], n_results=3)
+    context = "\n".join(results["documents"][0])
+    prompt = f"Context:\n{context}\n\nQuestion: {question}\nAnswer from context only."
+    return ollama_chat(prompt)
+</code></pre>
+
+    <h2 id="mistakes">15. Common mistakes</h2>
+    <ul>
+      <li>Expecting local small-quantized models to match cloud frontier model quality — there's a real capability gap for complex reasoning tasks.</li>
+      <li>Not accounting for available RAM/VRAM when choosing model size, causing crashes or extreme slowness.</li>
+      <li>Using an overly aggressive quantization level for tasks needing higher precision/quality.</li>
+      <li>Assuming local = zero cost; electricity, hardware wear, and your own time are real costs at scale.</li>
+    </ul>
+
+    <h2 id="best">16. Best practices</h2>
+    <ul>
+      <li>Match model size and quantization level to your actual hardware constraints.</li>
+      <li>Use local LLMs for prototyping/privacy-sensitive/offline needs; don't assume they'll match cloud frontier quality for complex tasks.</li>
+      <li>Leverage the OpenAI-compatible API exposed by many local tools to reuse existing application code with minimal changes.</li>
+    </ul>
+
+    <h2 id="production">17. Production considerations</h2>
+    <p>Local/edge deployment for production (not just prototyping) requires the same serving rigor as any self-hosted model (see <a href="../28-LLM-Inference/">LLM Inference</a>) — monitoring, scaling considerations, and update/patch management for the serving tool itself.</p>
+
+    <h2 id="security">18. Security considerations</h2>
+    <p>Running fully locally eliminates data-in-transit exposure to external providers — a genuine security/privacy benefit, but the local model/serving tool itself still needs standard software security hygiene (keeping tools updated, restricting local API access if exposed on a network).</p>
+
+    <h2 id="performance">19. Performance considerations</h2>
+    <p>Performance is entirely bound by local hardware (CPU/GPU, RAM/VRAM) — a consumer laptop will be dramatically slower than cloud-hosted frontier model inference; benchmark realistic expectations before committing to a local-only architecture for latency-sensitive use cases.</p>
+
+    <h2 id="cost">20. Cost considerations</h2>
+    <p>No per-token API cost, but real costs exist: hardware (especially GPU for reasonable performance), electricity, and the opportunity cost of lower quality/speed compared to cloud frontier models for complex tasks.</p>
+
+    <h2 id="debug">21. Debugging/troubleshooting</h2>
+    <ul>
+      <li><b>Model runs extremely slowly:</b> check if it's running on CPU when a GPU is available, or if the model size exceeds available VRAM, forcing slow CPU fallback.</li>
+      <li><b>Out-of-memory errors:</b> choose a smaller model or more aggressive quantization level.</li>
+      <li><b>Poor quality responses compared to cloud models:</b> expected for smaller/more quantized local models on complex tasks — this is a genuine capability trade-off, not necessarily a configuration bug.</li>
+    </ul>
+
+    <h2 id="related">22. Related concepts</h2>
+    <p><a href="../26-Open-Source-LLMs/open-source-models.html">Open-Source LLMs</a> · <a href="../28-LLM-Inference/">LLM Inference</a> · <a href="../12-RAG/rag-fundamentals.html">RAG</a></p>
+
+    <h2 id="comparison">23. Ollama vs LM Studio vs llama.cpp</h2>
+    <table>
+      <tr><th>Tool</th><th>Interface</th><th>Best for</th></tr>
+      <tr><td>Ollama</td><td>CLI + local API</td><td>Developers wanting quick setup and an OpenAI-compatible API</td></tr>
+      <tr><td>LM Studio</td><td>GUI</td><td>Non-CLI users wanting a chat interface and model browser</td></tr>
+      <tr><td>llama.cpp</td><td>Low-level CLI/library</td><td>Maximum control/customization, embedding into custom applications</td></tr>
+    </table>
+
+    <h2 id="exercise">24. Mini practical exercise</h2>
+    <p>Run the same prompt through a local Ollama model and a cloud API model, comparing response quality, latency, and your own subjective assessment of usefulness.</p>
+
+    <h2 id="project">25. Practical project</h2>
+    <p><b>Fully Offline RAG Assistant:</b> build the local RAG example above into a small CLI tool that ingests a folder of text files and answers questions about them, entirely offline using Ollama + Chroma.</p>
+
+    <h2 id="projectarch">26. Project architecture</h2>
+    <pre><code>docs/ → chunk → ollama_embed() → chromadb collection
+CLI: ask "question" → ollama_embed(question) → chroma query
+ → construct prompt → ollama_chat() → print answer
+(zero network calls to any external API)</code></pre>
+
+    <h2 id="interview-b">27. Interview Questions — Beginner</h2>
+    <div class="qa"><b>Q1.</b> What is Ollama?<br><b>A.</b> A user-friendly tool for downloading and running open-weight LLMs locally with a simple CLI/API.</div>
+    <div class="qa"><b>Q2.</b> What is llama.cpp?<br><b>A.</b> A highly optimized inference engine for running LLMs efficiently on CPUs and consumer GPUs.</div>
+    <div class="qa"><b>Q3.</b> What is GGUF?<br><b>A.</b> A file format for quantized models optimized for llama.cpp-based local inference.</div>
+    <div class="qa"><b>Q4.</b> Why would you run an LLM locally instead of via a cloud API?<br><b>A.</b> For privacy/data-residency needs, offline use, or avoiding per-token API cost during development/prototyping.</div>
+    <div class="qa"><b>Q5.</b> What is LM Studio?<br><b>A.</b> A GUI application for discovering, downloading, and chatting with local models.</div>
+    <div class="qa"><b>Q6.</b> Is local LLM performance generally faster or slower than cloud frontier models?<br><b>A.</b> Generally slower, since it's bound by local consumer hardware rather than datacenter-grade infrastructure.</div>
+    <div class="qa"><b>Q7.</b> Does running locally mean zero cost?<br><b>A.</b> No — there are real costs like hardware and electricity, even without per-token API fees.</div>
+    <div class="qa"><b>Q8.</b> What does an "OpenAI-compatible API" mean for a local serving tool?<br><b>A.</b> It exposes an API matching OpenAI's request/response schema, letting existing SDK code point to the local server with minimal changes.</div>
+    <div class="qa"><b>Q9.</b> Can you build a fully offline RAG pipeline using local tools?<br><b>A.</b> Yes — using a local embedding model, a local vector DB (like Chroma), and a local chat model (via Ollama), with zero external network calls.</div>
+    <div class="qa"><b>Q10.</b> Why might a local model underperform a cloud frontier model on complex reasoning tasks?<br><b>A.</b> Local models are often smaller and/or quantized to fit consumer hardware, trading some capability for feasibility, resulting in a real quality gap for harder tasks.</div>
+
+    <h2 id="interview-i">28. Interview Questions — Intermediate</h2>
+    <div class="qa"><b>Q1.</b> How does quantization enable large models to run on consumer hardware, and what's the trade-off?<br><b>A.</b> It reduces the bit-precision of model weights (e.g., from 16-bit to 4-bit), dramatically shrinking memory footprint and enabling larger models to fit in limited VRAM/RAM, at the cost of some output quality/precision compared to the full-precision original.</div>
+    <div class="qa"><b>Q2.</b> Why might Ollama be built on top of llama.cpp rather than reimplementing inference from scratch?<br><b>A.</b> llama.cpp is a mature, highly optimized inference engine; building on it lets Ollama focus on user experience (simple CLI, model management, API) rather than reimplementing low-level performance-critical inference code.</div>
+    <div class="qa"><b>Q3.</b> How would you decide the right quantization level for a given local deployment?<br><b>A.</b> Benchmark quality degradation at different quantization levels (e.g., Q4 vs Q8) against your actual task, balancing against available hardware memory — use the least aggressive quantization that still fits your hardware constraints, rather than defaulting to the smallest option.</div>
+    <div class="qa"><b>Q4.</b> Why is local LLM development a good practice even for teams ultimately deploying to the cloud?<br><b>A.</b> It enables fast, free, offline iteration during early prototyping (no API cost, no network dependency, no rate limits) before committing to cloud infrastructure decisions, and can validate feasibility of the broader architecture (RAG pipeline, prompt design) independent of which final serving choice is made.</div>
+    <div class="qa"><b>Q5.</b> What's a realistic limitation to communicate to stakeholders who expect local LLMs to fully replace cloud API costs?<br><b>A.</b> Local models (especially on consumer hardware) generally can't match cloud frontier model capability for complex reasoning tasks, and self-hosting at meaningful scale/reliability still requires real infrastructure investment — "local" is a strong fit for specific use cases (privacy, prototyping, simple tasks), not a universal drop-in replacement.</div>
+
+    <h2 id="interview-a">29. Interview Questions — Advanced</h2>
+    <div class="qa"><b>Q1.</b> How would you benchmark whether a quantized local model's quality degradation is acceptable for a specific production use case?<br><b>A.</b> Run the same evaluation set against multiple quantization levels and the full-precision model, measuring task-specific accuracy/quality metrics (not just perplexity), and choose the most aggressive quantization level that still meets your defined quality threshold for that specific task — acceptable degradation varies significantly by task type.</div>
+    <div class="qa"><b>Q2.</b> What's a subtle risk of relying on llama.cpp/Ollama's CPU inference for a latency-sensitive local application without a dedicated GPU?<br><b>A.</b> CPU inference is dramatically slower than GPU inference for the same model, and this gap widens with model size — an application tested on GPU-equipped developer hardware could become unacceptably slow for end users on CPU-only devices; test on representative target hardware, not just the best available development machine.</div>
+
+    <h2 id="interview-s">30. Interview Questions — Senior/Architect</h2>
+    <div class="qa"><b>Q1.</b> How would you advise a team building an edge/offline AI product (e.g., for environments with unreliable internet) on their local LLM strategy?<br><b>A.</b> Recommend selecting the smallest model/quantization level that meets the product's quality bar (validated via task-specific benchmarking on representative target hardware), designing the product's UX around realistic local inference latency rather than assuming cloud-like speed, and building a graceful fallback/hybrid mode (using cloud API when connectivity is available) if the product's value proposition can tolerate variable capability depending on connectivity.</div>
+
+    <h2 id="interview-sc">31. Scenario-Based Questions</h2>
+    <div class="qa"><b>Scenario 1.</b> Your local LLM demo worked great on your development machine but is unusably slow on the target deployment hardware. What do you investigate?<br><b>A.</b> Compare GPU/CPU specs and available VRAM/RAM between the two machines — the demo likely relied on GPU acceleration or more memory than the target hardware has, forcing slow CPU fallback or excessive swapping; consider a smaller/more quantized model matched to the actual target hardware.</div>
+    <div class="qa"><b>Scenario 2.</b> A stakeholder insists on fully replacing your cloud API spend with local models for cost savings, but your task requires complex multi-step reasoning. How do you respond?<br><b>A.</b> Benchmark the actual quality gap between available local models and the current cloud frontier model on your specific reasoning task, present the trade-off concretely (cost savings vs. quality/capability loss), and propose a hybrid approach (local for simple sub-tasks, cloud for complex reasoning) if pure local replacement isn't viable for the task's quality requirements.</div>
+
+    <h2 id="revision">32. Quick revision notes</h2>
+    <ul>
+      <li>Ollama (easy CLI/API) built on llama.cpp (optimized inference engine); LM Studio (GUI).</li>
+      <li>Quantization trades precision for smaller memory footprint/faster inference.</li>
+      <li>Local ≠ zero cost; hardware/electricity are real costs.</li>
+      <li>Local models generally underperform cloud frontier models on complex reasoning.</li>
+      <li>Great for prototyping, privacy, offline use; validate quality/performance on target hardware.</li>
+    </ul>
+
+    <h2 id="cheat">33. Cheat sheet</h2>
+    <div class="callout">Ollama = easy local serving (built on llama.cpp). LM Studio = GUI. Quantization trades quality for smaller footprint. Great for privacy/offline/prototyping; benchmark on target hardware; expect a real capability gap vs cloud frontier models for complex tasks.</div>
+
+    <h2 id="further">34. Further topics to learn</h2>
+    <p><a href="../28-LLM-Inference/">LLM Inference</a> → <a href="../29-Fine-Tuning/">Fine-Tuning</a> → <a href="../12-RAG/rag-fundamentals.html">RAG</a></p>
+
+    <div class="prevnext">
+      <a href="../26-Open-Source-LLMs/open-source-models.html">← Open-Source LLMs</a>
+      <a href="../28-LLM-Inference/llm-inference-fundamentals.html">Next: LLM Inference →</a>
+    </div>
+  </main>
+</div>
+<script src="../assets/app.js"></script>
+</body>
+</html>

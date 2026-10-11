@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Intro to Web with Flask/FastAPI — Python Fundamentals — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">Python Fundamentals</a><span class="sep">›</span>Intro to Web with Flask/FastAPI</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>Intro to Web with Flask/FastAPI</h1>
+      <p class="meta-line"><span>⏱ ~2 hrs</span><span>📍 Chapter 6 of 6</span></p>
+      <p><strong>One-line summary:</strong> Flask is Python's Express — minimal, synchronous by default,
+      decades of ecosystem maturity; FastAPI is Python's closer analog to a modern typed framework (think
+      NestJS-with-Pydantic-validation) — async-native, type-hint-driven request validation, and automatic
+      OpenAPI docs out of the box.</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>You already know how to build an HTTP endpoint — you've done it in Express or Fastify a hundred
+      times. What you need here isn't "how does routing work" (you already have that instinct); it's the
+      specific Python-world defaults and idioms: Flask's synchronous-by-default request handling, FastAPI's
+      reliance on type hints as the actual request validation mechanism (not just documentation, unlike
+      everywhere else you've seen Python type hints in this topic), and the dev-server/ASGI vs WSGI
+      distinction that decides whether your framework can handle concurrent I/O-bound requests efficiently
+      at all.</p>
+      <div class="box why"><h4>Why</h4><p>Nearly every Python backend you'll read or extend in a real job —
+      internal tools, ML model-serving endpoints, data platform APIs — is Flask or FastAPI. Knowing both,
+      side by side, lets you correctly answer "which would you pick for this" in an interview instead of
+      defaulting to whichever one you happened to see first in a tutorial.</p></div>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>Requires every prior chapter in this topic, especially
+      <a href="02-control-flow-and-functions.html">Control Flow &amp; Functions</a> (decorators) and
+      <a href="05-error-handling-and-debugging.html">Error Handling &amp; Debugging</a> (exceptions become
+      HTTP error responses here). This is the last chapter of <a href="index.html">Python Fundamentals</a> —
+      next, <a href="../08-python-intermediate/index.html">Python Intermediate</a> covers async Python,
+      packaging, and testing in depth, all of which deepen what's introduced here.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="flask-first-endpoint">A first endpoint in Flask</h3>
+      <p>Flask's decorator-based routing is the direct analog of an Express route handler — a function
+      decorated with the path and method it serves.</p>
+      <pre><code class="language-python">
+# app_flask.py
+from flask import Flask, request, jsonify
+
+app = Flask(__name__)
+
+@app.route("/hello/&lt;name&gt;", methods=["GET"])
+def hello(name: str):
+    return jsonify({"message": f"Hello, {name}!"})
+
+@app.route("/users", methods=["POST"])
+def create_user():
+    data = request.get_json()           # parse JSON body -- like req.body in Express (with middleware)
+    if not data or "name" not in data:
+        return jsonify({"error": "name is required"}), 400   # (body, status_code) tuple
+    return jsonify({"id": 1, "name": data["name"]}), 201
+
+if __name__ == "__main__":
+    app.run(debug=True, port=5000)        # dev server -- NOT for production
+
+# JS/Express equivalent:
+# app.get('/hello/:name', (req, res) => res.json({ message: `Hello, ${req.params.name}!` }));
+# app.post('/users', (req, res) => {
+#   if (!req.body?.name) return res.status(400).json({ error: 'name is required' });
+#   res.status(201).json({ id: 1, name: req.body.name });
+# });
+</code></pre>
+
+      <h3 id="fastapi-first-endpoint">The same endpoint in FastAPI</h3>
+      <p>FastAPI uses the same decorator-routing idea, but request bodies are defined as typed Pydantic
+      models — the type hints you learned in earlier chapters are not just documentation here, they're
+      live runtime validation, which is the single biggest reason FastAPI feels different from everything
+      else you've seen Python type hints do so far.</p>
+      <pre><code class="language-python">
+# app_fastapi.py
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+
+app = FastAPI()
+
+class CreateUserRequest(BaseModel):     # Pydantic model -- the request body's shape AND validation
+    name: str
+    email: str | None = None             # optional field, Python 3.10+ union syntax
+
+@app.get("/hello/{name}")
+def hello(name: str):
+    return {"message": f"Hello, {name}!"}
+
+@app.post("/users", status_code=201)
+def create_user(user: CreateUserRequest):   # FastAPI parses + validates the JSON body automatically
+    if not user.name.strip():
+        raise HTTPException(status_code=400, detail="name must not be blank")
+    return {"id": 1, "name": user.name}
+
+# run with: uvicorn app_fastapi:app --reload --port 8000
+# OpenAPI docs are generated automatically at /docs -- zero extra config required
+</code></pre>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Unlike the type hints covered in earlier chapters (which
+      Python ignores at runtime by default), FastAPI's Pydantic models DO validate at runtime — sending
+      <code>{"name": 123}</code> where <code>name: str</code> is declared will raise a real 422 validation
+      error automatically, before your function body even runs. This is the one place in mainstream Python
+      web development where "the type hint is a real runtime contract," and it's specifically why FastAPI
+      exists rather than people just adding manual validation to Flask.</p></div>
+
+      <h3 id="routing-request-response">Routing, request/response basics, and running a dev server</h3>
+      <table>
+        <tr><th>Concept</th><th>Flask</th><th>FastAPI</th><th>Express/Node</th></tr>
+        <tr><td>Route decorator</td><td><code>@app.route("/x", methods=["GET"])</code></td><td><code>@app.get("/x")</code></td><td><code>app.get('/x', handler)</code></td></tr>
+        <tr><td>Path parameter</td><td><code>/user/&lt;id&gt;</code></td><td><code>/user/{id}</code></td><td><code>/user/:id</code></td></tr>
+        <tr><td>Request body parsing</td><td>Manual: <code>request.get_json()</code></td><td>Automatic via Pydantic model parameter</td><td>Manual: <code>express.json()</code> middleware + <code>req.body</code></td></tr>
+        <tr><td>Response as JSON</td><td><code>jsonify(dict)</code></td><td>Just return a dict/Pydantic model — auto-serialized</td><td><code>res.json(obj)</code></td></tr>
+        <tr><td>Default execution model</td><td>Synchronous (WSGI) — one request blocks a worker thread/process</td><td>Async-native (ASGI) — supports <code>async def</code> handlers for concurrent I/O</td><td>Async by default (event loop)</td></tr>
+        <tr><td>Dev server command</td><td><code>flask run</code> or <code>app.run(debug=True)</code></td><td><code>uvicorn app:app --reload</code></td><td><code>node server.js</code> / <code>nodemon</code></td></tr>
+        <tr><td>Auto-generated API docs</td><td>Not built in — needs an extension (flask-swagger, etc.)</td><td>Built in, at <code>/docs</code> (Swagger UI) and <code>/redoc</code></td><td>Not built in — needs a library (swagger-jsdoc, etc.)</td></tr>
+      </table>
+      <p>FastAPI handlers can be <code>async def</code> or plain <code>def</code> — if plain, FastAPI runs
+      them in a thread pool automatically so they don't block the event loop, giving you Node-like
+      concurrency for I/O-bound work without forcing every handler to be async. Flask historically has no
+      native async request handling story (classic Flask is WSGI, synchronous-only); Flask 2.0+ added
+      limited <code>async def</code> view support, but the underlying WSGI server still processes one
+      request per worker — true concurrent I/O benefits still require an ASGI-based setup, which is part of
+      why FastAPI (ASGI-native from day one) is the more common choice for I/O-heavy modern services.</p>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>WSGI (Web Server Gateway Interface, what Flask is built on by default) defines a synchronous
+      contract: a single callable that receives an environ dict and returns a response — one request
+      occupies one worker (thread or process) for its entire duration, so concurrency comes from running
+      multiple worker processes/threads (e.g. via Gunicorn), not from a single process handling many
+      requests concurrently. ASGI (Asynchronous Server Gateway Interface, what FastAPI/Uvicorn is built on)
+      defines an async contract compatible with <code>asyncio</code>'s event loop, letting a single worker
+      process handle many concurrent I/O-bound requests the way Node handles many concurrent connections on
+      one event loop — a slow downstream call in one request doesn't block other requests from being
+      served concurrently, as long as the handler actually awaits properly instead of doing blocking I/O
+      inline. This WSGI-vs-ASGI distinction is the Python ecosystem's version of "sync server" vs
+      "non-blocking event-loop server," and it's the real architectural reason FastAPI scales differently
+      than classic Flask under I/O-bound load, independent of any type-hint/validation features.</p>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+sequenceDiagram
+  participant Client
+  participant Flask as Flask (WSGI worker)
+  participant DB
+  Client->>Flask: POST /users
+  Flask->>DB: blocking query
+  Note over Flask: this worker is fully occupied\nuntil the DB call returns
+  DB-->>Flask: result
+  Flask-->>Client: 201 Created
+  Note over Flask: concurrency comes from running\nMULTIPLE worker processes (Gunicorn)
+      </div>
+      <div class="mermaid">
+sequenceDiagram
+  participant ClientA as Client A
+  participant ClientB as Client B
+  participant FastAPI as FastAPI (ASGI, one worker)
+  participant DB
+  ClientA->>FastAPI: POST /users (async handler)
+  FastAPI->>DB: await query (non-blocking)
+  ClientB->>FastAPI: GET /hello/Bob (concurrent, same worker)
+  FastAPI-->>ClientB: 200 OK (served while A's query is in flight)
+  DB-->>FastAPI: result for A
+  FastAPI-->>ClientA: 201 Created
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-python">
+# ---- BAD: blocking I/O inside an async FastAPI handler defeats the whole point ----
+import time
+from fastapi import FastAPI
+
+app = FastAPI()
+
+@app.get("/slow-bad")
+async def slow_bad():
+    time.sleep(2)     # BLOCKING call inside an async function -- freezes the entire
+    return {"status": "done"}   # event loop for 2s, stalling every other concurrent request
+
+# ---- GOOD: use an async-native sleep/client, or run blocking work in a thread pool ----
+import asyncio
+
+@app.get("/slow-good")
+async def slow_good():
+    await asyncio.sleep(2)     # non-blocking -- other requests are served during this wait
+    return {"status": "done"}
+
+# For a genuinely blocking library you can't avoid (e.g. a sync DB driver),
+# either use a plain `def` handler (FastAPI runs it in a thread pool automatically)
+# or explicitly offload: await loop.run_in_executor(None, blocking_fn)
+
+# ---- Error handling becomes HTTP responses -- direct line to Chapter 5's exceptions ----
+from fastapi import HTTPException
+
+class UserNotFoundError(Exception):
+    pass
+
+fake_db = {1: {"id": 1, "name": "Alice"}}
+
+@app.get("/users/{user_id}")
+def get_user(user_id: int):
+    try:
+        return fake_db[user_id]
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"User {user_id} not found")
+</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4><p>A team ported an internal reporting tool from Flask to
+      FastAPI expecting a free concurrency win, but latency under load barely improved — profiling revealed
+      every handler was <code>async def</code> but called a synchronous ORM driver directly inside the
+      handler body, which is a blocking call masquerading as async code. The event loop was being stalled
+      exactly as badly as the WSGI version, just with extra async overhead layered on top for no benefit.
+      The fix was either switching to the ORM's true async driver and properly <code>await</code>-ing calls,
+      or — more pragmatically for a quick win — declaring the handlers as plain <code>def</code> so FastAPI's
+      automatic thread-pool offloading handled the blocking calls correctly, which is exactly the lesson
+      from the diagrams above: declaring a function <code>async</code> doesn't make blocking code
+      non-blocking; you have to actually use non-blocking primitives throughout the call chain.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Calling a blocking function (<code>time.sleep</code>, a sync
+      DB driver, <code>requests.get</code>) inside an <code>async def</code> FastAPI/asyncio handler. The
+      <code>async</code> keyword doesn't make the code inside it non-blocking by magic — every blocking call
+      inside still blocks the entire event loop, stalling every other concurrent request being served by
+      that worker, which can be worse than a plain synchronous framework in surprising ways.</p></div>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Running <code>app.run(debug=True)</code> (Flask) or Uvicorn's
+      <code>--reload</code> dev server in production. Both are explicitly development-only servers — not
+      hardened, not performant under real load, and debug mode can leak stack traces/source code to
+      clients. Production needs a real WSGI server (Gunicorn) in front of Flask, or Uvicorn workers managed
+      by something like Gunicorn's Uvicorn worker class for FastAPI, typically behind a reverse proxy.</p></div>
+      <ul>
+        <li>Validate request bodies with Pydantic models (FastAPI) rather than manually checking <code>request.get_json()</code> keys (Flask) when you have the choice — it eliminates an entire class of manual validation bugs.</li>
+        <li>Return proper HTTP status codes explicitly — don't let every error default to a 200 with an error message buried in the JSON body.</li>
+        <li>Use FastAPI's automatically generated <code>/docs</code> during development to manually test endpoints instead of hand-writing curl commands for every change.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>Flask</td><td>Simple services, huge existing ecosystem/extension needs, team already deeply familiar with it, sync-is-fine workloads</td><td>Heavy I/O-bound concurrency needs, want built-in request validation/OpenAPI docs</td><td>FastAPI</td></tr>
+        <tr><td>FastAPI</td><td>New services, I/O-bound concurrency matters, want type-hint-driven validation and free API docs</td><td>Team has zero Pydantic/async familiarity and the timeline doesn't allow ramp-up, or you need a very mature/legacy extension ecosystem</td><td>Flask (+ manual validation library)</td></tr>
+        <tr><td><code>async def</code> handler</td><td>The handler does I/O you can genuinely await (async DB driver, httpx async client)</td><td>The handler only calls blocking/sync libraries</td><td>Plain <code>def</code> handler (FastAPI thread-pools it automatically)</td></tr>
+        <tr><td>Dev server (<code>flask run</code>, <code>uvicorn --reload</code>)</td><td>Local development only</td><td>Any production traffic</td><td>Gunicorn (Flask) or Gunicorn+Uvicorn workers / plain Uvicorn without reload (FastAPI)</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic">
+        <h4>Basic</h4>
+        <details class="qa"><summary>What's the Flask equivalent of an Express route handler?</summary><div class="answer"><p>
+        A function decorated with <code>@app.route("/path", methods=["GET"])</code> (or FastAPI's
+        <code>@app.get("/path")</code>) — the decorator registers the function as the handler for that
+        path and HTTP method, the same role an Express <code>app.get('/path', handler)</code> call plays.</p></div><div class="followup">Follow-up: how do you access a path parameter in Flask versus FastAPI?</div></details>
+        <details class="qa"><summary>What's a Pydantic model, in one sentence?</summary><div class="answer"><p>
+        A class (inheriting from <code>BaseModel</code>) that declares typed fields and automatically
+        validates/parses incoming data against those types at runtime, used by FastAPI to define and
+        validate request bodies.</p></div><div class="followup">Follow-up: what happens if a client sends data that doesn't match the Pydantic model's types?</div></details>
+        <details class="qa"><summary>How do you run a Flask app in development versus how you'd run a FastAPI app?</summary><div class="answer"><p>
+        Flask: <code>app.run(debug=True)</code> or <code>flask run</code>. FastAPI: <code>uvicorn app:app --reload</code>
+        (FastAPI itself doesn't include a built-in dev server runner the way Flask does — it needs an ASGI
+        server like Uvicorn).</p></div><div class="followup">Follow-up: why does FastAPI need a separate ASGI server while Flask ships its own dev server?</div></details>
+        <details class="qa"><summary>Does FastAPI give you API documentation automatically?</summary><div class="answer"><p>
+        Yes — Swagger UI at <code>/docs</code> and ReDoc at <code>/redoc</code> are generated automatically
+        from your route definitions and Pydantic models, with zero extra configuration.</p></div><div class="followup">Follow-up: what underlying spec format powers this auto-generated documentation?</div></details>
+        <details class="qa"><summary>What's WSGI, in plain terms?</summary><div class="answer"><p>
+        A synchronous interface standard between Python web servers and web applications — Flask is built
+        on it by default. One worker handles one request fully before being free for the next.</p></div><div class="followup">Follow-up: what's the ASGI equivalent, and what does it add?</div></details>
+        <details class="qa"><summary>In Flask, how do you return a JSON response with a specific status code?</summary><div class="answer"><p>
+        Return a tuple: <code>return jsonify({...}), 201</code> — Flask interprets a (body, status_code)
+        tuple returned from a view function as the response with that status.</p></div><div class="followup">Follow-up: how would you set a custom response header alongside this?</div></details>
+      </div>
+      <div class="qa-level medium">
+        <h4>Medium</h4>
+        <details class="qa"><summary>Why does declaring a FastAPI handler as <code>async def</code> not automatically make it non-blocking?</summary><div class="answer"><p>
+        <code>async def</code> only changes how the function is called (it must be awaited, and it can
+        contain <code>await</code> expressions) — it doesn't transform blocking calls inside it into
+        non-blocking ones. If the body calls a synchronous blocking function (time.sleep, a sync DB driver),
+        that call still blocks the entire event loop for its duration, stalling every other request being
+        served concurrently by that worker.</p></div><div class="followup">Follow-up: what's the correct fix if you must call a genuinely blocking library from an async handler?</div></details>
+        <details class="qa"><summary>Why might a plain `def` handler in FastAPI sometimes perform better under load than a poorly-written `async def` handler?</summary><div class="answer"><p>
+        FastAPI automatically runs plain (non-async) handlers in a thread pool, so a blocking call inside
+        one only occupies a thread-pool thread, not the main event loop — other requests keep flowing
+        through the event loop normally. A poorly-written async handler that blocks the event loop directly
+        can stall ALL concurrent requests on that worker, which is strictly worse.</p></div><div class="followup">Follow-up: is there a limit to how many concurrent plain-def handlers can run via the thread pool, and what happens when it's exhausted?</div></details>
+        <details class="qa"><summary>Compare how Flask and FastAPI each handle an invalid request body (e.g. a required field missing).</summary><div class="answer"><p>
+        Flask does nothing automatically — you must manually check <code>request.get_json()</code> for
+        required keys/types and return your own 400 response. FastAPI validates automatically against the
+        Pydantic model's field types before your handler body even runs, returning a structured 422
+        response listing exactly which fields failed and why, with zero manual validation code.</p></div><div class="followup">Follow-up: can you customize FastAPI's default 422 error response format, and why might you want to?</div></details>
+        <details class="qa"><summary>Why is running a dev server (Flask debug mode, Uvicorn --reload) in production a security and reliability risk, specifically?</summary><div class="answer"><p>
+        Flask's debug mode can expose an interactive debugger in the browser on unhandled exceptions,
+        potentially allowing arbitrary code execution if reachable by an attacker, and both dev servers are
+        single-process/unoptimized for concurrent load and don't handle worker crashes/restarts gracefully
+        the way a production process manager (Gunicorn with multiple workers, often behind a reverse proxy)
+        does.</p></div><div class="followup">Follow-up: what's the role of a reverse proxy (nginx) in front of either framework in a typical production deployment?</div></details>
+        <details class="qa"><summary>How would you decide between Flask and FastAPI for a new internal service today?</summary><div class="answer"><p>
+        If the service is I/O-bound (calls other services/DBs frequently, needs to handle many concurrent
+        requests efficiently) and the team can invest a bit in learning Pydantic/async patterns, FastAPI's
+        ASGI foundation and built-in validation/docs pay off quickly. If it's a simple, low-concurrency
+        internal tool, or the team has deep existing Flask/extension expertise and a tight timeline, Flask's
+        simplicity and massive extension ecosystem can still be the pragmatic choice.</p></div><div class="followup">Follow-up: are there scenarios where you'd actually run both side by side in the same organization, and why?</div></details>
+      </div>
+      <div class="qa-level advanced">
+        <h4>Advanced</h4>
+        <details class="qa"><summary>Walk through exactly what happens, request by request, when 100 concurrent clients hit a FastAPI endpoint with a properly-awaited async DB call versus the same load against Flask with 4 Gunicorn workers.</summary><div class="answer"><p>
+        FastAPI/ASGI: a single worker's event loop accepts all 100 requests, issues the async DB call for
+        each (non-blocking), and while each awaits its DB response, the loop services other requests'
+        work — throughput is limited by how much actual CPU work each request needs between awaits, not by
+        a fixed worker count. Flask/WSGI with 4 Gunicorn workers: only 4 requests can be "in flight" through
+        a worker at once (each occupying a worker fully, blocking, until the DB responds); the remaining 96
+        requests queue until a worker frees up — throughput is bounded by worker count × (1 / blocking time
+        per request), a fundamentally different scaling curve under I/O-bound load.</p></div><div class="followup">Follow-up: at what point does adding more Gunicorn workers stop helping, and why?</div></details>
+        <details class="qa"><summary>Explain how FastAPI's dependency injection system (Depends()) relates to, but differs from, a typical DI container in a framework like NestJS.</summary><div class="answer"><p>
+        FastAPI's <code>Depends()</code> declares a callable (sync or async) whose return value is injected
+        into a route handler's parameter, resolved per-request, with support for nested dependencies and
+        automatic caching within a single request if the same dependency is referenced multiple times. Unlike
+        a full DI container (NestJS's, built on decorators + a module/provider graph resolved mostly at
+        startup), FastAPI's version is request-scoped and function-based rather than class/module-graph based —
+        closer to a request-scoped middleware chain with typed parameters than a true IoC container.</p></div><div class="followup">Follow-up: how would you implement a dependency that needs cleanup after the request (like closing a DB session), analogous to a context manager?</div></details>
+        <details class="qa"><summary>A team reports that their FastAPI service's latency degrades sharply under load despite low CPU usage and a correctly async DB driver. What would you investigate?</summary><div class="answer"><p>
+        Low CPU with degrading latency under concurrency, despite proper async DB usage, points toward
+        something else blocking the event loop: a logging call doing synchronous file/network I/O, a
+        third-party client library that looks async but calls a sync method internally, CPU-bound
+        serialization (large Pydantic model validation/JSON encoding) running inline on the event loop
+        instead of offloaded, or insufficient Uvicorn worker count relative to available cores (a single
+        ASGI worker is still one process — you typically still run multiple Uvicorn/Gunicorn-managed workers
+        for multi-core utilization, since asyncio concurrency within one process doesn't use multiple CPU
+        cores).</p></div><div class="followup">Follow-up: how would you profile an event loop to find exactly which call is blocking it, in a live service?</div></details>
+        <details class="qa"><summary>Design the migration path for moving a mature Flask (WSGI) service to FastAPI (ASGI) incrementally, without a big-bang rewrite.</summary><div class="answer"><p>
+        A pragmatic path: mount new endpoints as FastAPI routes behind the same reverse proxy path prefix
+        while leaving existing Flask routes untouched during a transition window (two services routed by
+        path at the proxy layer), migrating endpoint-by-endpoint as each is touched for other reasons rather
+        than rewriting everything at once; alternatively, some teams run Flask mounted inside an ASGI app via
+        a WSGI-to-ASGI adapter as a stopgap, accepting that the Flask-mounted routes don't get ASGI's
+        concurrency benefits until individually ported. The key senior-level judgment is recognizing this is
+        an infrastructure/routing decision as much as a code-rewrite decision.</p></div><div class="followup">Follow-up: what are the risks of running both frameworks side by side in production during a long transition period?</div></details>
+        <details class="qa"><summary>Why does Pydantic's runtime validation make FastAPI's type hints fundamentally different in kind from the "documentation only" type hints discussed in earlier chapters of this topic — and where's the actual enforcement boundary?</summary><div class="answer"><p>
+        Pydantic generates real validators from the type hints at class-definition time and FastAPI invokes
+        them specifically at the HTTP request boundary (parsing/validating the incoming JSON against the
+        model) — so the enforcement is real but scoped: it validates external input crossing into your
+        application, not arbitrary internal function calls elsewhere in your codebase, which still rely on
+        mypy/pyright or manual checks exactly as covered earlier. This is the single most important
+        "externally-facing boundary gets enforcement, internal code doesn't automatically" distinction to
+        articulate clearly in a senior interview.</p></div><div class="followup">Follow-up: would mypy catch a type error in internal code that calls a FastAPI-validated function with the wrong type, given that Pydantic already validates at the boundary?</div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment">
+        <span class="level-tag">Beginner (30-60 min)</span>
+        <h4>Build the same 3-route API in both Flask and FastAPI</h4>
+        <p>Build a tiny "notes" API (GET all notes, POST a new note, GET one note by id) twice — once in
+        Flask, once in FastAPI — with in-memory storage (a plain list/dict, no real database needed).</p>
+        <ul><li>FastAPI version must use a Pydantic model for the POST body.</li>
+        <li>Flask version must manually validate the POST body and return a 400 on missing fields.</li>
+        <li>Both must return proper status codes (200, 201, 404).</li></ul>
+        <p><strong>Acceptance criteria:</strong> Both APIs behave identically from a client's perspective (same routes, same status codes, same JSON shapes) when tested with curl or the FastAPI /docs UI.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>Keep the in-memory list as a module-level variable in both versions — don't worry about thread-safety or persistence for this exercise, just correctness of the routes.</p></div></details>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Intermediate (2-4 hrs)</span>
+        <h4>Demonstrate the blocking-call-in-async-handler bug yourself</h4>
+        <p>Build a FastAPI service with two endpoints: one that uses <code>time.sleep()</code> inside an
+        <code>async def</code> handler (the bug), and one that uses <code>await asyncio.sleep()</code>
+        correctly. Write a small concurrent client script (using <code>httpx</code> async client or
+        multiple threads) that fires several requests at each endpoint simultaneously and measures total
+        wall-clock time, proving the bad version serializes requests while the good version doesn't.</p>
+        <ul><li>Must measure and print total wall-clock time for N concurrent requests against each endpoint.</li>
+        <li>Written conclusion (3-5 sentences) explaining the measured difference in your own words.</li></ul>
+        <p><strong>Acceptance criteria:</strong> Your measured results clearly show the bad endpoint's total time scaling roughly linearly with request count, while the good endpoint's total time stays roughly flat (close to the single-request latency) regardless of concurrent request count.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>Use <code>asyncio.gather()</code> with an async httpx client to fire requests truly concurrently from the client side — firing them sequentially from the client would hide the server-side behavior you're trying to demonstrate.</p></div></details>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Advanced (1-2 days)</span>
+        <h4>Wrap the Chapter capstone's expense tracker logic in a FastAPI layer</h4>
+        <p>Take the storage/reports modules from this topic's capstone project (or build a minimal
+        equivalent if you haven't done the capstone yet) and expose them through a FastAPI app with
+        <code>POST /expenses</code> (Pydantic-validated body) and <code>GET /expenses/summary</code>
+        (returns category totals), without duplicating any business logic between the original CLI and the
+        new API layer — both must call the exact same underlying functions.</p>
+        <ul><li>The FastAPI layer must import and call the existing storage/reports functions directly — no copy-pasted logic.</li>
+        <li>Must return proper validation errors (422) for malformed POST bodies, and a sensible error for a corrupted/missing data file.</li>
+        <li>Include a pytest suite using FastAPI's <code>TestClient</code> covering at least the happy path and one validation-error path for each endpoint.</li></ul>
+        <p><strong>Acceptance criteria:</strong> The API and the original CLI produce consistent results against the same underlying data file, and the pytest suite passes. No full solution here — the point is proving you can layer a web interface on existing logic without a rewrite.</p>
+      </div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet"><ul>
+        <li>Flask = Python's Express: minimal, WSGI (synchronous) by default, huge mature ecosystem.</li>
+        <li>FastAPI = async-native (ASGI), Pydantic-validated request bodies, automatic OpenAPI docs at /docs and /redoc.</li>
+        <li>FastAPI's type hints ARE enforced at runtime via Pydantic — unlike plain Python type hints elsewhere.</li>
+        <li><code>async def</code> doesn't make blocking calls non-blocking — you must use genuinely non-blocking primitives (await) throughout.</li>
+        <li>Plain <code>def</code> FastAPI handlers run in a thread pool automatically — a safe default for blocking libraries.</li>
+        <li>WSGI (Flask): one worker per request for its full duration. ASGI (FastAPI/Uvicorn): one worker can serve many concurrent I/O-bound requests via the event loop.</li>
+        <li>Never run a dev server (<code>debug=True</code>, <code>--reload</code>) in production — use Gunicorn (Flask) or Gunicorn+Uvicorn workers (FastAPI).</li>
+        <li>Flask: manual JSON body validation. FastAPI: automatic 422 validation errors from Pydantic models.</li>
+        <li>Flask: <code>jsonify(data), status_code</code> tuple. FastAPI: just return the dict/model, set status via decorator argument.</li>
+      </ul></div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://flask.palletsprojects.com/en/latest/quickstart/">Flask docs: Quickstart</a></li>
+        <li><a href="https://fastapi.tiangolo.com/tutorial/first-steps/">FastAPI docs: First Steps</a></li>
+        <li><a href="https://fastapi.tiangolo.com/async/">FastAPI docs: Concurrency and async/await</a></li>
+        <li><a href="https://asgi.readthedocs.io/en/latest/introduction.html">ASGI docs: Introduction</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="05-error-handling-and-debugging.html"><span class="dir">← Previous</span>Error Handling &amp; Debugging</a>
+        <a class="next" href="../15-machine-learning-ai/01-ml-math-and-foundations.html"><span class="dir">Next →</span>Machine Learning &amp; AI</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · Python Fundamentals</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "14-python-fundamentals", chapterKey: "06-intro-to-web-with-flask-fastapi" });</script>
+</body>
+</html>

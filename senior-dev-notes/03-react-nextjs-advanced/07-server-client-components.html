@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Server vs Client Components — React & Next.js Advanced — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">React &amp; Next.js Advanced</a><span class="sep">›</span>Server vs Client Components</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>Server Components vs. Client Components, Server Actions</h1>
+      <p class="meta-line"><span>⏱ 2.5 hrs</span><span>📍 Chapter 7 of 11</span></p>
+      <p><strong>One-line summary:</strong> Server Components run only on the server and never ship their code
+      to the browser — they produce a serialized description of UI (the RSC payload) that the client
+      reconciles into the DOM, while Client Components are the familiar React you already know, now explicitly
+      opted into with <code>"use client"</code> at a module boundary.</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>This is the single biggest mental-model shift in React since hooks, and most "I used Next.js App
+      Router" candidates can't explain the serialization format or why a particular boundary placement is
+      wrong. Nailing this chapter is often the deciding factor in Staff-level React interviews in 2025-26.</p>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>Read <a href="05-concurrent-react.html">Concurrent React</a> and <a href="06-nextjs-app-router.html">Next.js App Router</a> first. Related: <a href="08-rendering-strategies.html">Rendering Strategies</a>.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="rsc-definition">What a Server Component actually is</h3>
+      <p>By default, every component in the App Router is a <strong>Server Component</strong> — it runs
+      exclusively on the server (at request time, or at build time for static routes), can directly
+      <code>await</code> a database call or <code>fetch</code>, and its code (including whatever heavy libraries
+      it imports) never reaches the client bundle at all. It cannot use state, effects, browser APIs, or event
+      handlers — there's no "component instance" living in the browser to hold that state. Its job is to
+      produce output once, server-side.</p>
+
+      <h3 id="client-boundary">"use client" marks a module boundary, not a component</h3>
+      <p>Adding <code>"use client"</code> at the top of a file doesn't just mark that one component — it marks
+      the <em>import boundary</em>: that module and everything it imports becomes part of the client bundle,
+      and every component exported from it becomes a Client Component (interactive, hydrated in the browser,
+      can use hooks). Crucially, Server Components can still be passed as <code>children</code>/props
+      <em>into</em> a Client Component (composition "below" the boundary going back to server-rendered content
+      is fine) — what's disallowed is a Server Component <em>importing</em> a Client Component's internals
+      expecting server-only execution, or a Client Component importing a server-only module (like one that
+      touches a DB client directly) into its own bundle.</p>
+
+      <h3 id="serialization">The RSC payload: what actually gets serialized</h3>
+      <p>When a Server Component renders, React doesn't produce HTML directly for the parts that cross into
+      Client Components — it produces a stream of serialized instructions: resolved Server Component output as
+      plain-value React elements, plus, at each Client Component boundary, a <em>reference</em> (module ID +
+      export name) rather than the component's code, along with its serialized props. The client's React runtime
+      already has that Client Component's actual JS (shipped separately as a normal bundle chunk) and uses the
+      reference to look it up and render/hydrate it with the given props. This is why props passed from a
+      Server Component into a Client Component must be <strong>serializable</strong> — plain objects, arrays,
+      strings, numbers, and a few special cases (Promises for <code>use()</code>, Server Action references) —
+      not functions, class instances, Dates-as-objects-with-methods, or Symbols.</p>
+
+      <h3 id="server-actions">Server Actions: RPC calls disguised as function references</h3>
+      <p>A function marked <code>"use server"</code> (either at the top of its own file, or inline inside a
+      Server Component) can be passed down to a Client Component and called like a normal async function —
+      under the hood, Next.js generates a stable reference ID for it, and calling it from the client actually
+      performs a POST request to the server, serializing the arguments, running the real function server-side,
+      and streaming back the (serializable) return value. This is what lets a <code>&lt;form action={myServerAction}&gt;</code>
+      or a button's <code>onClick</code> handler trigger real server-side mutations without you hand-writing a
+      Route Handler and a fetch call.</p>
+
+      <h3 id="composition-patterns">The correct composition pattern: push Client Components to the leaves</h3>
+      <p>The idiomatic App Router architecture fetches data and renders as much static/structural markup as
+      possible in Server Components, pushing <code>"use client"</code> down to the smallest possible leaf
+      components that actually need interactivity (a like button, a dropdown, a form). This minimizes client
+      JS bundle size and maximizes streamable, cacheable server-rendered content — the opposite of the
+      pre-RSC instinct to make the whole page a client-rendered tree.</p>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>Concretely, the RSC payload is a line-delimited stream of JSON-like entries, each tagged with an ID.
+      A Server Component's rendered element tree gets serialized as nested arrays/objects referencing those
+      IDs; when the tree reaches a Client Component, instead of inlining its rendered output, the stream emits
+      a special entry like <code>["$", "@1", null, {"prop": "value"}]</code> where <code>@1</code> resolves (via
+      a manifest also sent to the client) to the actual client bundle chunk and export to mount. The browser's
+      React runtime parses this stream incrementally (enabling the streaming behavior from Ch. 5 — chunks can
+      arrive and be processed before the whole payload finishes), reconstructs the element tree, and performs
+      normal client-side hydration/reconciliation for the Client Component portions while treating the
+      Server Component portions as already-resolved, static content.</p>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+flowchart TD
+  A[Server Component tree renders on server] --> B{Hits a 'use client' boundary?}
+  B -->|No| C[Resolved element serialized inline in RSC payload]
+  B -->|Yes| D[Emit module reference + serialized props]
+  C --> E[Stream sent to client]
+  D --> E
+  E --> F[Client React runtime parses stream]
+  F --> G[Server Component output: rendered as-is, no hydration needed]
+  F --> H[Client Component: load bundle chunk by reference, hydrate with given props]
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-tsx">// app/products/page.tsx -- Server Component: fetches directly, no client JS shipped
+import { db } from "@/lib/db";          // never reaches the client bundle
+import LikeButton from "./LikeButton";   // a Client Component, composed in
+
+export default async function ProductsPage() {
+  const products = await db.product.findMany(); // direct DB access, server-only
+
+  return (
+    <ul>
+      {products.map(p => (
+        <li key={p.id}>
+          {p.name}
+          {/* Only serializable props cross this boundary */}
+          <LikeButton productId={p.id} initialLikes={p.likes} />
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+// app/products/LikeButton.tsx -- Client Component: the interactive leaf
+"use client";
+import { useState } from "react";
+import { likeProduct } from "./actions";
+
+export default function LikeButton({ productId, initialLikes }: { productId: string; initialLikes: number }) {
+  const [likes, setLikes] = useState(initialLikes);
+  return (
+    <button onClick={async () => {
+      setLikes(l => l + 1); // optimistic
+      await likeProduct(productId); // calls the Server Action over the wire
+    }}>
+      ❤️ {likes}
+    </button>
+  );
+}
+
+// app/products/actions.ts -- Server Action: runs on the server when called from the client
+"use server";
+import { db } from "@/lib/db";
+import { revalidatePath } from "next/cache";
+
+export async function likeProduct(productId: string) {
+  await db.product.update({ where: { id: productId }, data: { likes: { increment: 1 } } });
+  revalidatePath("/products"); // tells Next.js to refresh cached data for this route
+}</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4>
+      <p>A team migrating a dashboard to App Router marked the entire page tree <code>"use client"</code>
+      (the fastest way to "make it compile") and kept their old client-side <code>fetch</code>+<code>useEffect</code>
+      data loading. Result: zero actual benefit from RSC — full client bundle size, no server-side data
+      fetching, no streaming, functionally a Pages Router app wearing App Router's file conventions. The fix
+      was a deliberate refactor: Server Components fetch and render the page shell and static sections;
+      "use client" was pushed down to just the interactive leaf components (filters, the data-editing form),
+      cutting the client JS bundle for that route by roughly 45% and letting the slow aggregate-query section
+      stream in behind a Suspense boundary instead of blocking the whole page.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4>
+      <p>"use client" at the top of a file does not mean "only this component runs on the client" — it taints
+      the whole module graph reachable from that import. Importing a large utility library into a Client
+      Component file ships that whole library to the browser even if only one tiny function from it is used;
+      importing it instead from a Server Component (or isolating client-only usage into its own small module)
+      avoids the bundle bloat.</p></div>
+      <ul>
+        <li>Trying to pass a function (other than a Server Action) or a class instance as a prop from Server to Client Component — fails serialization.</li>
+        <li>Importing server-only secrets/DB clients into a file that's part of a Client Component's module graph — leaks server code into the client bundle (Next.js's `server-only` package guards against this with a build error).</li>
+        <li>Marking a component "use client" just to use an onClick, when the actual interactive bit could be isolated into a small leaf component, keeping the rest server-rendered.</li>
+        <li>Forgetting that Server Actions are real network-exposed endpoints — they need the same input validation/authorization checks as any public API, since any client can call the generated endpoint directly.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>Server Component</td><td>Fetching data, rendering static/structural markup, anything not needing interactivity/browser APIs</td><td>Needs state, effects, event handlers, or browser-only APIs</td><td>Client Component</td></tr>
+        <tr><td>Client Component</td><td>Interactivity, local state, effects, browser APIs, third-party libraries requiring a DOM</td><td>Could be server-rendered with no interactivity</td><td>Server Component, or push "use client" down further</td></tr>
+        <tr><td>Server Action</td><td>Form submissions / mutations triggered from Client Components without hand-building an API route</td><td>Public API needed by non-Next.js clients too</td><td>Route Handler (route.js)</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic"><h4>Basic</h4>
+      <details class="qa"><summary>What's the default component type in the App Router?</summary><div class="answer"><p>Server Component — every component is one by default unless the file (or an ancestor module boundary) is marked "use client".</p></div><div class="followup">Follow-up: Can a Server Component use useState?</div></details>
+      <details class="qa"><summary>What does "use client" actually mark?</summary><div class="answer"><p>A module boundary — that file and its import graph becomes part of the client bundle, and its exported components become Client Components, hydrated and interactive in the browser.</p></div><div class="followup">Follow-up: Can a Server Component still render a Client Component as a child?</div></details>
+      <details class="qa"><summary>What is a Server Action?</summary><div class="answer"><p>An async function marked "use server" that can be called from a Client Component (e.g., a form action or click handler); calling it performs a request to the server where the real function executes, with results streamed back.</p></div><div class="followup">Follow-up: Does calling a Server Action require manually writing a fetch call?</div></details>
+      <details class="qa"><summary>Why can't you pass a plain function as a prop from a Server Component to a Client Component?</summary><div class="answer"><p>Props crossing that boundary must be serializable for the RSC payload; a plain JS function has no serializable representation (unless it's specifically a Server Action reference, which Next.js serializes specially).</p></div><div class="followup">Follow-up: What error would you actually see if you tried this?</div></details>
+      <details class="qa"><summary>Why would you want to push "use client" as far down the tree as possible?</summary><div class="answer"><p>To minimize the client JS bundle size and maximize the amount of the page that's server-rendered/streamed/cacheable — only the genuinely interactive leaves need client-side code and hydration.</p></div><div class="followup">Follow-up: What's the cost of over-using Server Components instead?</div></details>
+      </div>
+      <div class="qa-level medium"><h4>Medium</h4>
+      <details class="qa"><summary>Explain what the RSC payload contains at a Client Component boundary, concretely.</summary><div class="answer"><p>Not the Client Component's rendered HTML/output — a reference (module ID + export name, resolved via a client manifest) telling the browser's React runtime which already-shipped bundle chunk and export to mount, plus the serialized props to pass it. The actual component code is never part of the Server Component's own render output.</p></div><div class="followup">Follow-up: Why does this mean Server Components never need "hydration" themselves?</div></details>
+      <details class="qa"><summary>Why must Server Actions independently validate authorization, given that they're called like normal functions from the client?</summary><div class="answer"><p>The "calling it like a function" is a build-time ergonomic illusion — at runtime it's an HTTP endpoint with a stable, guessable-ish reference ID that any client (not just your legitimate UI) can invoke directly with arbitrary arguments, so it needs the same session/permission checks a hand-written API route would need; there's no implicit trust just because it "looks like" a direct function call in your source.</p></div><div class="followup">Follow-up: How would you rate-limit a Server Action the same way you would a public API route?</div></details>
+      <details class="qa"><summary>A Client Component needs a value only available via a server-only environment variable. How do you get it there correctly?</summary><div class="answer"><p>Read it in a Server Component (or Server Action) and pass the resolved value down as a serializable prop to the Client Component — never reference the env var directly inside client-bundled code, since bundlers would need to inline it at build time (leaking it into the public bundle) or it simply wouldn't exist at runtime in the browser.</p></div><div class="followup">Follow-up: What does Next.js's NEXT_PUBLIC_ prefix convention have to do with this?</div></details>
+      <details class="qa"><summary>Why does composing a Server Component as `children` passed into a Client Component work, but a Client Component importing a Server Component directly does not?</summary><div class="answer"><p>When a Server Component is passed as `children`/a prop from further up the tree (still rendered/resolved on the server, in the original Server Component's render pass), the Client Component just receives already-resolved serialized output slotted into where `children` is referenced — no new server execution needed at that point. A Client Component "importing" a Server Component module directly would require running server-only code (direct DB calls, server-only secrets) inside client-bundled, browser-executed code, which is impossible/disallowed since that code was never meant to run in the browser.</p></div><div class="followup">Follow-up: What build-time mechanism actually prevents the disallowed import from compiling?</div></details>
+      </div>
+      <div class="qa-level advanced"><h4>Advanced</h4>
+      <details class="qa"><summary>Walk through, in full detail, what happens end-to-end when a Client Component calls a Server Action on form submission, including what's serialized in each direction.</summary><div class="answer"><p>At build time, Next.js's compiler extracts the "use server" function into its own server-only module and replaces its usage in client code with a reference object (an opaque ID) plus a client-side proxy function. On submit, the proxy serializes the form's arguments (FormData or plain serializable args) and POSTs them to a special Next.js-handled endpoint carrying the action's ID; the server looks up and invokes the real function with the deserialized arguments, and its return value (if any, and if serializable) is streamed back as part of an RSC response, which can include not just the return value but updated Server Component output for any revalidated segments reached via `revalidatePath`/`revalidateTag`, letting the client patch the UI with fresh server-rendered content in the same round trip.</p></div><div class="followup">Follow-up: What happens differently if the Server Action is used as a `<form action={...}>` versus called imperatively inside an onClick?</div></details>
+      <details class="qa"><summary>Why can Server Components be async functions directly (`async function Page()`), while Client Components cannot?</summary><div class="answer"><p>React's server renderer can natively await a Server Component's returned promise as part of producing the RSC stream — there's no "instance" that needs to exist synchronously before data resolves, since nothing is interactive/stateful yet. Client Components must return synchronously from render because React's client reconciler calls component functions as part of a synchronous (or concurrently-interruptible, but still call-and-return) render pass tied to the Fiber model from Ch.1 — an async component returning a Promise instead of elements doesn't fit that contract (this is exactly the gap Suspense + `use()` exists to bridge, by throwing a promise rather than the component function itself being async).</p></div><div class="followup">Follow-up: How does `use(promise)` let a Client Component achieve a similar effect without being an async function itself?</div></details>
+      <details class="qa"><summary>Explain why "use client" boundary placement affects caching granularity in Next.js's data cache, with a concrete example.</summary><div class="answer"><p>Data fetched inside a Server Component benefits from Next.js's fetch cache / React's request-level dedup (`cache()`); once you cross into a Client Component, any further data needs (e.g., live user interaction triggering new data) falls to client-side fetching (React Query etc.) with none of the server-side cache/revalidation semantics. Concretely: if a slow aggregate query is fetched inside a Server Component above a `"use client"` boundary and passed down as props, it's covered by Next.js's caching layer and can be revalidated via `revalidateTag`; if instead a Client Component fetches that same data itself via `useEffect`, you've opted out of that caching layer entirely and must build your own (e.g., React Query).</p></div><div class="followup">Follow-up: How would you decide whether a given fetch belongs server-side (cached via Next.js) vs. client-side (via React Query) in a specific feature?</div></details>
+      <details class="qa"><summary>A Server Component passes a large array of objects (10,000 rows) as props into a Client Component for client-side virtualization. What's the actual performance cost of this boundary crossing, and how would you mitigate it?</summary><div class="answer"><p>The entire array must be serialized into the RSC payload and deserialized client-side before the Client Component can render anything — for 10,000 rows this is a real, measurable cost (payload size, parse time) paid upfront even though the virtualized table only ever displays ~20 rows at once. Mitigations: paginate server-side and fetch additional pages via a Server Action or API route as the user scrolls/paginates (rather than shipping the full dataset at once), or fetch a reduced/projected shape (fewer fields per row) specifically for the initial payload, deferring full row detail to on-demand client fetches.</p></div><div class="followup">Follow-up: Would moving this data-fetch to a Client Component with React Query instead actually help, or just relocate the same cost?</div></details>
+      <details class="qa"><summary>Critique: "Server Components eliminate the need for client-side data-fetching libraries like React Query." Where is this right, and where does it break down?</summary><div class="answer"><p>Right for the initial render / anything that's known at request time and doesn't change due to client-side interaction — Server Components genuinely replace a lot of what useEffect+fetch used to do. It breaks down for anything requiring client-driven revalidation without a full navigation/Server Action round trip (live polling, optimistic mutations with fine-grained rollback, infinite-scroll pagination driven by scroll position, cross-tab cache sharing) — those still need a client-side cache layer, and the realistic 2025-26 architecture is Server Components for the initial/structural data plus React Query (or Server Actions + `useOptimistic`) for client-driven interaction loops on top.</p></div><div class="followup">Follow-up: Where would `useOptimistic` fit versus React Query's optimistic mutation API for the same feature?</div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment"><span class="level-tag">Beginner (30-60 min)</span><h4>Convert an over-cliented page to the correct boundary split</h4>
+      <p>Start from a page where the entire tree is marked "use client" and does its data fetching in useEffect. Refactor it so data fetching happens in a Server Component and only the truly interactive leaf (a button, a form) is a Client Component.</p>
+      <p><strong>Acceptance criteria:</strong> Compare the client JS bundle size for the route before and after (via `next build` output).</p>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>Start by removing "use client" from the top-level page and see what compiler errors point you to the real interactive boundary.</p></div></details>
+      <p><strong>Bonus:</strong> Add a loading.js and confirm the page streams instead of blocking on the data fetch.</p></div>
+
+      <div class="assignment"><span class="level-tag">Intermediate (2-4 hrs)</span><h4>Build a form with a Server Action, validation, and optimistic UI</h4>
+      <p>Build a "rename item" feature: a Server Action that validates input server-side (reject empty/too-long names) and persists the change, called from a Client Component using `useOptimistic` to show the new name immediately, rolling back visually on validation failure.</p>
+      <ul><li>Simulate a validation failure and confirm the UI rolls back correctly with an error message.</li></ul>
+      <p><strong>Acceptance criteria:</strong> Optimistic update shows instantly; failed validation reverts the displayed name and shows the server's error.</p>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>`useOptimistic`'s second argument is a reducer-like function describing how to merge a pending action into current state for display.</p></div></details>
+      <p><strong>Bonus:</strong> Add server-side rate limiting to the Server Action and surface that error distinctly from validation errors.</p></div>
+
+      <div class="assignment"><span class="level-tag">Advanced (1-2 days)</span><h4>Design and build a boundary-minimal data table page</h4>
+      <p>Build a product listing page where the table shell, headers, and pagination controls are server-rendered, but row-level inline editing is an isolated Client Component leaf per editable cell. Measure and document the client bundle size and confirm no server-only code (DB client, secrets) leaks into the client bundle.</p>
+      <ul><li>Use the `server-only` package to enforce the server/client boundary at build time.</li></ul>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>Importing `server-only` at the top of a module causes a build error if that module is ever reachable from client-bundled code — use it to catch accidental boundary violations early.</p></div></details>
+      </div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet"><ul>
+        <li>Every component is a Server Component by default in the App Router.</li>
+        <li>"use client" marks an import/module boundary, not just one component — it taints the whole import graph.</li>
+        <li>Server Component output is serialized into an RSC payload; Client Components appear as module references + props, not inlined output.</li>
+        <li>Props crossing the Server→Client boundary must be serializable (no functions, class instances — except Server Action references).</li>
+        <li>Server Actions ("use server") are real network-exposed endpoints — validate/authorize them like a public API.</li>
+        <li>Compose Server Components as children/props into Client Components freely; the reverse (Client importing Server) is disallowed.</li>
+        <li>Push "use client" down to the smallest interactive leaf to minimize client bundle size.</li>
+        <li>Server Components can be async functions directly; Client Components cannot — use Suspense + use() instead.</li>
+      </ul></div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://react.dev/reference/rsc/server-components">react.dev — Server Components</a></li>
+        <li><a href="https://nextjs.org/docs/app/building-your-application/data-fetching/server-actions-and-mutations">Next.js — Server Actions and Mutations</a></li>
+        <li><a href="https://react.dev/reference/react/useOptimistic">react.dev — useOptimistic</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="06-nextjs-app-router.html"><span class="dir">← Previous</span>Next.js App Router</a>
+        <a class="next" href="08-rendering-strategies.html"><span class="dir">Next →</span>Rendering Strategies</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · React &amp; Next.js Advanced</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-jsx.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-typescript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-tsx.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "03-react-nextjs-advanced", chapterKey: "07-server-client-components" });</script>
+</body>
+</html>

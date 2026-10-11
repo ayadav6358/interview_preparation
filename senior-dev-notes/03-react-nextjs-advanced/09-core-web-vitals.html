@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Core Web Vitals and Frontend Performance — React & Next.js Advanced — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">React &amp; Next.js Advanced</a><span class="sep">›</span>Core Web Vitals</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>Core Web Vitals and Frontend Performance Optimization</h1>
+      <p class="meta-line"><span>⏱ 2.5 hrs</span><span>📍 Chapter 9 of 11</span></p>
+      <p><strong>One-line summary:</strong> LCP, INP, and CLS are each measured by a specific, well-defined
+      browser API — not a vague "feels fast" — and a senior engineer should be able to name the exact API,
+      diagnose which subsystem is causing a bad score, and apply the matching fix rather than guessing.</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>Core Web Vitals are a Google ranking signal and a direct proxy for real user-perceived performance,
+      which makes them a business metric, not just an engineering one — a regression can measurably hurt
+      conversion and search ranking. In interviews, this is where candidates who've only used Lighthouse
+      scores superficially get exposed: a Staff-level answer explains the measurement mechanics (what exactly
+      triggers an LCP candidate, what INP replaced and why), not just "optimize images and lazy load stuff."</p>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>Read <a href="08-rendering-strategies.html">Rendering Strategies</a> first — rendering strategy is the
+      single biggest lever on LCP/TTFB, so you need that mental model before tuning Web Vitals. Related:
+      <a href="05-concurrent-react.html">Concurrent React</a> (scheduling directly affects INP).</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="the-three-metrics">The three Core Web Vitals and what each one actually measures</h3>
+      <p><strong>LCP (Largest Contentful Paint):</strong> the render time of the largest image or text block
+      visible within the viewport, measured from navigation start. It's a proxy for "when did the main content
+      the user came for actually become visible." <strong>INP (Interaction to Next Paint):</strong> replaced
+      FID in March 2024 — it measures the latency of the <em>worst</em> (or near-worst, 98th percentile)
+      interaction across the entire page lifecycle, from input (click, tap, key press) to the next frame the
+      browser paints reflecting that interaction's visual result. Unlike FID (which only measured input delay
+      for the *first* input), INP captures the full cost including event handler execution and any resulting
+      re-render, across every interaction on the page. <strong>CLS (Cumulative Layout Shift):</strong> sums the
+      impact of every unexpected layout shift (an element moving without user-initiated interaction) during
+      the page's life — each shift's score is its impact fraction (how much of the viewport moved) times its
+      distance fraction (how far it moved).</p>
+
+      <h3 id="measurement-apis">The actual browser APIs behind each metric</h3>
+      <p>LCP is observed via <code>PerformanceObserver</code> with <code>entryTypes: ['largest-contentful-paint']</code>
+      — the browser emits a new "LCP candidate" entry every time a larger qualifying element paints, and the
+      last one emitted before the page's first user interaction (or tab hidden/unload) is the final LCP value;
+      this is why a late-loading hero image can keep "updating" LCP candidates and why interaction effectively
+      freezes further LCP candidates (the spec assumes once a user interacts, they've already seen the main
+      content). INP is derived from <code>PerformanceObserver</code> with <code>entryTypes: ['event']</code>,
+      specifically each entry's <code>processingStart</code>/<code>processingEnd</code>/<code>duration</code>
+      — giving input delay (time before the handler starts), processing time (handler execution), and
+      presentation delay (time until the next paint reflects the result); the full page's INP is the
+      high-percentile duration across all recorded interactions, not an average. CLS is observed via
+      <code>entryTypes: ['layout-shift']</code> entries, each exposing a <code>value</code> (the impact×distance
+      fraction) and a <code>hadRecentInput</code> flag — shifts within 500ms of a user input are excluded from
+      the score since they're expected, user-caused movement (e.g., an accordion expanding on click).</p>
+
+      <h3 id="field-vs-lab">Field data vs. lab data, and why they disagree</h3>
+      <p>Lighthouse/local DevTools audits produce <strong>lab data</strong> — a single run, on a fixed device
+      profile and network throttle, with no real user interaction (so INP can't even be measured in a pure lab
+      run — Lighthouse approximates it via Total Blocking Time instead). The Chrome User Experience Report
+      (CrUX) and <code>web-vitals</code> JS library collecting real visits produce <strong>field data</strong> —
+      the actual distribution across real users' devices, networks, and interaction patterns, which is what
+      Google Search actually uses for ranking. A page can score perfectly in Lighthouse (fast dev machine,
+      cached assets) while failing field CWV thresholds because real users are on mid-tier mobile devices over
+      variable networks — senior engineers optimize against field data (CrUX / RUM), treating lab data as a
+      fast local proxy, not the ground truth.</p>
+
+      <h3 id="fixing-each-metric">Concrete levers for each metric</h3>
+      <p>For LCP: eliminate render-blocking resources before the LCP element, use <code>next/image</code>'s
+      automatic responsive sizing + priority preloading (<code>priority</code> prop skips lazy-loading for an
+      above-the-fold hero image), and reduce server response time (TTFB) via the rendering strategy chosen in
+      Ch. 8 — PPR's instant static shell directly improves LCP since the main content doesn't wait on dynamic
+      data. For INP: break up long tasks (anything over 50ms blocks the main thread from responding to input),
+      defer non-critical JS execution via <code>scheduler.yield()</code> or chunking work across
+      <code>requestIdleCallback</code>/transitions, and use <code>useTransition</code> (Ch. 1/5) to mark
+      expensive state updates as non-blocking so the browser can paint the immediate visual feedback (e.g., a
+      pressed button state) before running the heavy re-render. For CLS: always set explicit
+      <code>width</code>/<code>height</code> (or <code>aspect-ratio</code>) on images and embeds so layout
+      space is reserved before the asset loads, avoid injecting content above existing content without
+      reserved space (banner ads, late-loading cookie banners), and use <code>font-display: optional</code> or
+      preloaded fonts with matched fallback metrics to avoid font-swap layout shift (FOUT/FOIT).</p>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>The browser's rendering pipeline runs: JS execution → style recalculation → layout → paint →
+      composite. A "long task" (over 50ms of continuous main-thread JS execution) blocks all of these for any
+      pending user input, which is exactly what INP's "processing time" component measures — the main thread
+      is single-threaded for JS, layout, and paint, so a React re-render triggered synchronously inside an
+      event handler competes directly with the browser's ability to paint the next frame. Concurrent React's
+      scheduler (Ch. 5) exists specifically to let you opt non-urgent work out of this blocking path:
+      <code>startTransition</code>-wrapped updates are interruptible, letting the browser slip in a paint (and
+      process further input) between chunks of React's work, which is why heavy list re-renders wrapped in a
+      transition measurably improve INP even though the total JS work done is the same — it's rescheduled, not
+      reduced.</p>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+flowchart TD
+  A[Navigation starts] --> B[Server responds: TTFB]
+  B --> C[HTML parsed, resources requested]
+  C --> D[Largest element candidates paint over time]
+  D --> E{User interacts or tab hidden?}
+  E -->|Not yet| D
+  E -->|Yes| F[Final LCP = last candidate before this point]
+      </div>
+      <div class="mermaid">
+flowchart TD
+  A[User clicks/taps] --> B[Input delay: main thread busy?]
+  B --> C[Event handler executes: processing time]
+  C --> D{Triggers React re-render?}
+  D -->|Synchronous/urgent| E[Blocks next paint until done]
+  D -->|Wrapped in startTransition| F[Interruptible, browser can paint sooner]
+  E --> G[Presentation delay until next paint]
+  F --> G
+  G --> H[INP = input delay + processing + presentation]
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-tsx">// Measuring real field metrics with the web-vitals library
+import { onLCP, onINP, onCLS } from "web-vitals";
+
+function sendToAnalytics(metric: { name: string; value: number; id: string }) {
+  // batch/send to your RUM endpoint -- this is FIELD data, from real users
+  fetch("/api/vitals", { method: "POST", body: JSON.stringify(metric) });
+}
+
+onLCP(sendToAnalytics);
+onINP(sendToAnalytics);
+onCLS(sendToAnalytics);
+
+// -- LCP fix: prioritize the hero image, skip lazy-loading for above-the-fold content
+import Image from "next/image";
+
+function Hero() {
+  return (
+    <Image
+      src="/hero.jpg"
+      alt="Product hero"
+      width={1200}
+      height={600}
+      priority // disables lazy-loading + adds a preload hint for this LCP candidate
+    />
+  );
+}
+
+// -- INP fix: keep the click handler's visual feedback synchronous,
+// defer the expensive re-render via a transition so input stays responsive
+"use client";
+import { useState, useTransition } from "react";
+
+function FilterPanel({ items }: { items: Item[] }) {
+  const [pending, setPending] = useState(false);
+  const [isPending, startTransition] = useTransition();
+  const [filtered, setFiltered] = useState(items);
+
+  function handleFilterClick(query: string) {
+    setPending(true); // urgent: immediate visual feedback, not blocked
+    startTransition(() => {
+      // non-urgent: expensive filter over thousands of items, interruptible
+      setFiltered(items.filter(i => i.name.includes(query)));
+      setPending(false);
+    });
+  }
+
+  return <FilterUI onFilter={handleFilterClick} loading={isPending} results={filtered} />;
+}
+
+/* -- CLS fix: reserve layout space before content loads */
+.ad-slot {
+  aspect-ratio: 300 / 250; /* space reserved before the ad script injects content */
+  min-height: 250px;
+}</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4>
+      <p>A media site's article pages scored well in Lighthouse (LCP ~1.8s) but failed field CWV thresholds
+      for roughly 40% of real mobile traffic, hurting Search ranking. Investigation via CrUX and RUM data
+      showed the gap was almost entirely INP: a third-party ad-tech script ran a synchronous ~300ms task on
+      every scroll-triggered ad-slot render, blocking the main thread exactly when users were tapping to open
+      an article from the feed. Lighthouse's lab run never triggered this path (no real scrolling/tapping
+      simulated during the audit), so the problem was invisible until field data was examined. The fix
+      wrapped the ad-slot mount logic behind <code>requestIdleCallback</code> with a timeout fallback, and
+      the team added a budget to their CI (via a Lighthouse CI run with a Total Blocking Time threshold) to
+      catch future regressions of this shape before deploy. Field INP for mobile traffic improved from the
+      "needs improvement" bucket to "good" within two weeks of real-user data collecting post-fix.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4>
+      <p>Optimizing purely against Lighthouse/lab scores and declaring victory. Lab runs use a fixed, often
+      generous CPU/network throttle profile and never simulate real interaction patterns, so INP in particular
+      is frequently invisible in lab data (Lighthouse approximates it with Total Blocking Time, a different,
+      looser metric) — a page can look perfect locally while scoring poorly in the field for real users on
+      mid-tier devices. Always validate against CrUX field data or your own RUM collection before trusting a
+      lab score as "done."</p></div>
+      <ul>
+        <li>Setting a fixed pixel <code>height</code> on a responsive image container without matching <code>aspect-ratio</code>, so the image still shifts layout when the container's actual rendered width differs from what the fixed height assumed.</li>
+        <li>Wrapping *everything* in <code>startTransition</code> indiscriminately, including state updates that drive the immediate visual feedback the user expects from their click — this makes the UI feel unresponsive instead of improving it, since the urgent part needs to stay synchronous.</li>
+        <li>Using an unoptimized `<img>` tag for a hero image instead of `next/image`, losing automatic responsive `srcset` generation, modern format negotiation (AVIF/WebP), and the `priority` preload hint — all of which directly affect LCP.</li>
+        <li>Measuring "Time to Interactive" or synthetic bundle-size budgets as a proxy for responsiveness instead of directly measuring INP — bundle size correlates with but doesn't equal actual input responsiveness, especially once code-splitting is in place.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>Lab data (Lighthouse/DevTools)</td><td>Fast local iteration, catching obvious regressions pre-merge, CI budgets</td><td>Validating real-world INP or confirming a fix actually helped users</td><td>Field data (CrUX/RUM)</td></tr>
+        <tr><td>Field data (CrUX, web-vitals RUM)</td><td>Ground-truth validation, SEO-relevant reporting, diagnosing device/network-specific issues</td><td>Needing instant feedback during development (field data is delayed/aggregated)</td><td>Lab data for fast iteration</td></tr>
+        <tr><td>startTransition for a state update</td><td>Expensive re-renders that aren't the user's immediate visual feedback</td><td>The update IS the expected immediate feedback (e.g., button pressed state)</td><td>Keep that specific update synchronous, transition only the expensive part</td></tr>
+        <tr><td>next/image with priority</td><td>Above-the-fold, LCP-candidate images</td><td>Every image on the page (wastes preload budget, can hurt other resources' loading)</td><td>Default lazy-loading for below-the-fold images</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic"><h4>Basic</h4>
+      <details class="qa"><summary>What do LCP, INP, and CLS each measure, in one sentence each?</summary><div class="answer"><p>LCP: time until the largest visible content element renders. INP: latency of the worst user interaction from input to the next reflecting paint. CLS: cumulative score of unexpected layout shifts during the page's life.</p></div><div class="followup">Follow-up: Which of these three did INP replace, and when?</div></details>
+      <details class="qa"><summary>What metric did INP replace, and what was that metric's main limitation?</summary><div class="answer"><p>INP replaced FID (First Input Delay), which only measured the delay before the *first* interaction's handler started running — it ignored handler execution time and every interaction after the first one, missing a lot of real jank.</p></div><div class="followup">Follow-up: Why does measuring only the first interaction undersell real-world responsiveness problems?</div></details>
+      <details class="qa"><summary>What's the difference between lab data and field data?</summary><div class="answer"><p>Lab data is a single synthetic run on a fixed device/network profile (e.g., Lighthouse); field data is the aggregated real-user measurement collected from actual visits across real devices and networks (e.g., CrUX).</p></div><div class="followup">Follow-up: Which one does Google Search actually use for ranking?</div></details>
+      <details class="qa"><summary>Why does setting explicit width/height on an image help CLS?</summary><div class="answer"><p>It reserves the correct layout space before the image loads, so surrounding content doesn't shift once the image actually renders into that space.</p></div><div class="followup">Follow-up: What does the `aspect-ratio` CSS property add on top of fixed dimensions for responsive images?</div></details>
+      <details class="qa"><summary>What counts as a "long task" and why does it matter for INP?</summary><div class="answer"><p>A continuous block of main-thread JS execution over 50ms; since JS, layout, and paint share the single main thread, a long task blocks the browser from responding to input or painting the next frame until it finishes.</p></div><div class="followup">Follow-up: What's one way to break up a long task in a React app?</div></details>
+      <details class="qa"><summary>Why would a page with a small JS bundle still have a poor INP?</summary><div class="answer"><p>INP measures actual interaction responsiveness, not bundle size — a small bundle can still contain or trigger a single expensive synchronous operation (a big re-render, a heavy computation, a blocking third-party script) that creates a long task exactly when the user interacts.</p></div><div class="followup">Follow-up: What tool would you use to find which specific interaction is causing a poor INP in production?</div></details>
+      </div>
+      <div class="qa-level medium"><h4>Medium</h4>
+      <details class="qa"><summary>Explain, mechanically, how the browser decides a page's final LCP value.</summary><div class="answer"><p>Via a `PerformanceObserver` on `largest-contentful-paint` entries: the browser emits a new candidate entry each time a larger qualifying element (image or text block) paints within the viewport. The final LCP value is the last candidate emitted before the first user interaction or the tab being hidden/unloaded — once the user interacts, the spec assumes they've already seen the main content, so no further candidates count.</p></div><div class="followup">Follow-up: Why would a page with a slow-loading background video never update LCP candidates the way a slow-loading hero image would?</div></details>
+      <details class="qa"><summary>How does `useTransition` improve INP without reducing the actual amount of JS work done?</summary><div class="answer"><p>It doesn't reduce total work — it reschedules it. The expensive state update becomes interruptible, letting React's concurrent scheduler yield back to the browser between chunks of rendering work, so the browser can paint an already-ready frame (e.g., immediate visual feedback) and process further input before continuing the expensive re-render. INP measures the time to the *next paint* reflecting the interaction, and a quick "pending" visual update satisfies that sooner even while the heavy work continues in the background.</p></div><div class="followup">Follow-up: If the expensive update itself is what the user is waiting to see, does wrapping it in a transition actually improve perceived performance, or just the raw INP number?</div></details>
+      <details class="qa"><summary>Why can a page score well on Lighthouse's Total Blocking Time but still have a poor field INP?</summary><div class="answer"><p>Total Blocking Time is computed from a single scripted lab run with no real user interaction simulated — it measures main-thread blocking during load, not the latency of actual click/tap/keypress handlers. A page can have minimal blocking during initial load yet contain a specific interaction handler (triggered only on a real user action Lighthouse never performs, like opening a particular modal) that causes a long task — invisible to TBT, but directly measured by real-user INP in the field.</p></div><div class="followup">Follow-up: How would you reproduce a field-reported INP problem locally if Lighthouse doesn't surface it?</div></details>
+      <details class="qa"><summary>Why does `hadRecentInput` exist in the layout-shift entry, and what would be wrong with CLS without it?</summary><div class="answer"><p>Without it, any layout change caused by expected, user-initiated interaction (an accordion expanding on click, a tab switching content) would incorrectly count against CLS, penalizing normal, intentional UI behavior exactly the same as an unexpected ad injecting itself above existing content. `hadRecentInput` (true if a user input happened within 500ms before the shift) lets the metric exclude expected, interaction-caused shifts and only penalize genuinely unexpected ones.</p></div><div class="followup">Follow-up: Could a malicious/careless pattern exploit the 500ms window to hide a real unexpected shift as "caused by input"?</div></details>
+      </div>
+      <div class="qa-level advanced"><h4>Advanced</h4>
+      <details class="qa"><summary>Walk through diagnosing a field INP regression from scratch, given only a CrUX dashboard showing the regression started on a specific deploy date.</summary><div class="answer"><p>Correlate the deploy date with the actual diff shipped (bundle analysis for new/changed third-party scripts or heavy client components), then reproduce locally using Chrome DevTools' Performance panel with real interaction recording (not just a Lighthouse audit) on the affected page, looking for long tasks aligned with interaction event entries. If local reproduction is hard, add `PerformanceObserver` instrumentation for `event` entries in production RUM to capture `target` (which element) and `duration` breakdown (input delay vs. processing vs. presentation) for real user sessions, narrowing down which specific interaction and code path is responsible before attempting a fix.</p></div><div class="followup">Follow-up: How would you distinguish a regression caused by your own code versus a newly-updated third-party script (ads, analytics, chat widget)?</div></details>
+      <details class="qa"><summary>Explain why PPR (from Ch.8) directly improves LCP, with the specific mechanism.</summary><div class="answer"><p>LCP's clock starts at navigation and the final value is the last qualifying paint before interaction — so anything delaying the main content's first paint (slow TTFB waiting on a dynamic data fetch, render-blocking resources) directly inflates LCP. PPR's static shell is prerendered and served instantly from the edge with no per-request server round-trip, so the LCP-candidate content (assuming it's in the static shell, which it usually is for e.g. a product image/title) paints as fast as a pure SSG page would, even though the route also contains genuinely dynamic sections elsewhere. Without PPR, the same route under full SSR would have to wait on whatever server-side data fetch gates the dynamic parts, even if that data has nothing to do with the LCP element itself.</p></div><div class="followup">Follow-up: Would PPR help LCP if the LCP element itself happened to be inside a dynamic Suspense-wrapped hole rather than the static shell?</div></details>
+      <details class="qa"><summary>Critique: "We added `startTransition` around our state updates and INP got worse, not better — the metric must be wrong." What's actually happening?</summary><div class="answer"><p>More likely explanation: the update wrapped in the transition was itself the expected immediate visual feedback for that interaction (e.g., a toggle's own visual state), so deferring it means the *next paint* reflecting the interaction now waits on the transition's own scheduling rather than happening immediately — INP got worse because the wrong update was deferred. The fix is splitting the update: keep the lightweight, expected-immediate visual change synchronous (e.g., a pending/pressed state), and defer only the genuinely expensive, non-essential-for-immediate-feedback computation into the transition.</p></div><div class="followup">Follow-up: How would you instrument the code to confirm which specific state update is driving the paint INP is measuring?</div></details>
+      <details class="qa"><summary>A third-party analytics script, loaded via a standard `&lt;script&gt;` tag, is identified as the top contributor to both a slow LCP and poor INP. You cannot remove it (contractual requirement). What are your realistic mitigation options?</summary><div class="answer"><p>For LCP: load it with `strategy="afterInteractive"` or `"lazyOnload"` via `next/script` so it doesn't block the critical rendering path for the main content, and ensure it isn't render-blocking in the `&lt;head&gt;`. For INP: if the script registers its own event listeners that run expensive synchronous work, you likely can't fix its internals, but you can isolate its DOM/mount point so its reflows don't force synchronous layout recalculation across unrelated parts of the page, and consider loading it inside a `requestIdleCallback`-gated wrapper so its initialization doesn't compete with early user interactions. Ultimately, a genuinely poorly-built third-party script has a hard ceiling on how much you can mitigate without its vendor fixing it — documenting the measured impact is often necessary to drive a vendor conversation or a facade-pattern lazy-load (loading a lightweight placeholder that only initializes the real script on user intent, e.g. a "Load chat" click).</p></div><div class="followup">Follow-up: What is the "facade pattern" for third-party widgets, and when is it worth the added complexity?</div></details>
+      <details class="qa"><summary>Why is CLS's score formula (impact fraction × distance fraction) specifically designed that way, rather than just counting the number of shifted pixels?</summary><div class="answer"><p>A shift that moves a small element a huge distance off-screen is visually jarring but might move few actual pixels of visible content meaningfully; a shift affecting a large portion of the viewport by even a small distance can be equally or more disruptive to reading flow. Impact fraction (how much of the viewport's area was affected across the shift) times distance fraction (how far, relative to viewport, the affected content moved) together approximate perceived disruption better than either alone — pure pixel count would under-penalize large-area, small-distance shifts (e.g., a banner pushing an entire article down by a modest amount) that are still very noticeable to a reading user.</p></div><div class="followup">Follow-up: Can a single large shift early in the page lifecycle score worse than many tiny shifts spread across the session, under this formula?</div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment"><span class="level-tag">Beginner (30-60 min)</span><h4>Instrument a page with real field Web Vitals reporting</h4>
+      <p>Add the `web-vitals` library to a Next.js page, report LCP/INP/CLS to the console (or a simple logging endpoint), and manually trigger each metric (load the page for LCP, click something for INP, resize/inject content for CLS) to confirm you see real values.</p>
+      <p><strong>Acceptance criteria:</strong> All three metrics log a real numeric value in response to real interaction, not just page load.</p>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>INP in particular won't report until an actual interaction occurs — reloading the page alone won't produce a value.</p></div></details>
+      <p><strong>Bonus:</strong> Compare the values you get locally versus what Lighthouse reports for the same page, and explain any discrepancy.</p></div>
+
+      <div class="assignment"><span class="level-tag">Intermediate (2-4 hrs)</span><h4>Diagnose and fix an induced INP regression</h4>
+      <p>Deliberately add a synchronous, expensive computation (e.g., a tight loop over 50,000 items) inside a click handler that also updates visible UI state. Measure INP via DevTools Performance recording, then fix it using `startTransition` to defer the expensive part while keeping immediate visual feedback synchronous. Measure again.</p>
+      <ul><li>Document the before/after INP values and which specific update you kept synchronous versus deferred.</li></ul>
+      <p><strong>Acceptance criteria:</strong> Measurable INP improvement with the fix, and a clear explanation of why the specific split you chose works.</p>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>Use Chrome DevTools' Performance panel, record while clicking, and look at the "Interactions" track to see the breakdown of input delay/processing/presentation directly.</p></div></details>
+      <p><strong>Bonus:</strong> Try wrapping the *wrong* part (the immediate feedback) in the transition instead and observe how INP or perceived responsiveness gets worse.</p></div>
+
+      <div class="assignment"><span class="level-tag">Advanced (1-2 days)</span><h4>Set up a CI performance budget pipeline with lab + field correlation</h4>
+      <p>Set up Lighthouse CI (or an equivalent) in a pipeline with budgets for LCP and Total Blocking Time that fail the build on regression. Separately, wire up real-user `web-vitals` reporting to a logging/analytics endpoint, and write a short runbook describing how you'd use CrUX/field data to validate that a CI-passing change didn't regress real users, including what to do if lab and field data disagree.</p>
+      <ul><li>Simulate at least one regression that the lab budget catches and one scenario where lab data alone would have missed a real field regression.</li></ul>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>A regression lab data would miss is almost always INP-shaped — something that only manifests on a specific real user interaction pattern the lab run never performs.</p></div></details>
+      </div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet"><ul>
+        <li>LCP = time to the last largest-content paint before user interaction; measured via `PerformanceObserver` on `largest-contentful-paint`.</li>
+        <li>INP = high-percentile interaction latency (input delay + processing + presentation) across the whole session; replaced FID in March 2024.</li>
+        <li>CLS = sum of impact×distance for every unexpected shift; `hadRecentInput` excludes user-caused, expected shifts.</li>
+        <li>Lab data (Lighthouse) is a fast local proxy; field data (CrUX/RUM) is ground truth and what Search ranking actually uses.</li>
+        <li>INP is frequently invisible in lab runs since no real interaction is simulated — always validate against field data.</li>
+        <li>Fix LCP via rendering strategy (PPR/SSR TTFB), image priority hints, removing render-blocking resources.</li>
+        <li>Fix INP via breaking up long tasks, `startTransition` for non-essential-immediate updates, deferring third-party script init.</li>
+        <li>Fix CLS via reserved layout space (width/height/aspect-ratio) and avoiding late content injection above existing content.</li>
+        <li>A long task is any continuous main-thread JS execution over 50ms — it blocks input response and paint equally, since JS/layout/paint share one thread.</li>
+      </ul></div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://web.dev/articles/vitals">web.dev — Web Vitals</a></li>
+        <li><a href="https://web.dev/articles/inp">web.dev — Interaction to Next Paint (INP)</a></li>
+        <li><a href="https://web.dev/articles/optimize-lcp">web.dev — Optimize LCP</a></li>
+        <li><a href="https://nextjs.org/docs/app/building-your-application/optimizing">Next.js — Optimizing (Images, Scripts, Fonts)</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="08-rendering-strategies.html"><span class="dir">← Previous</span>Rendering Strategies</a>
+        <a class="next" href="10-frontend-architecture.html"><span class="dir">Next →</span>Frontend Architecture</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · React &amp; Next.js Advanced</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-jsx.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-typescript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-tsx.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "03-react-nextjs-advanced", chapterKey: "09-core-web-vitals" });</script>
+</body>
+</html>

@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Agents from First Principles — Machine Learning & AI — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">Machine Learning & AI</a><span class="sep">›</span>AI Agents from First Principles</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>AI Agents from First Principles</h1>
+      <p class="meta-line"><span>⏱ ~3.5 hrs</span><span>📍 Chapter 11 of 14</span></p>
+      <p><strong>One-line summary:</strong> an "agent" is not a magic word for "LLM with tools" — it's an LLM
+      put inside a loop that repeatedly plans, acts, and observes the result, and before you reach for any
+      agent framework you should be able to write that loop yourself in plain Python, because the loop's
+      mechanics are exactly where agents' real failure modes live.</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>"Agent" has become one of the most overloaded words in the industry — marketing uses it for anything
+      that calls an LLM twice. For an interview and for real system design, you need the first-principles
+      version: what structurally makes something an agent rather than a chain, why that structure introduces
+      genuinely new failure modes that don't exist in a single LLM call, and what the loop looks like with
+      zero framework abstraction in the way. This chapter is the conceptual foundation underneath
+      <a href="../09-ai-integration/05-ai-agents.html">AI Integration: AI Agents</a>, which covers the production
+      architecture (frameworks, tool design, guardrails, deployment); here the goal is to understand the
+      mechanics well enough that when a framework's agent loop misbehaves, you can reason about what's actually
+      happening inside it rather than treating the framework itself as another black box.</p>
+      <div class="box why"><h4>Why</h4><p>An LLM call is a pure function from context to output — call it once
+      and the "intelligence" on display is entirely within that single generation. An agent's intelligence,
+      by contrast, emerges from the <em>loop</em> — repeated calls where each one's context includes the
+      observed results of the previous action. This is a structurally different system: errors compound across
+      steps instead of being a single bounded risk, and the system must track its own progress through a task
+      rather than finishing in one shot. Understanding this distinction is the difference between debugging an
+      agent and just restarting it and hoping.</p></div>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>Builds on <a href="10-context-engineering.html">Context Engineering</a> (how an agent's growing history
+      is managed across loop iterations) and <a href="06-attention-and-transformers.html">Attention &
+      Transformers</a> (the underlying model being called in the loop). Directly complements
+      <a href="../09-ai-integration/05-ai-agents.html">AI Integration: AI Agents</a> — read that chapter for
+      production architecture, frameworks, and guardrails; this chapter stays at the conceptual/from-scratch
+      level. Next: <a href="12-agent-frameworks-memory-mcp.html">Agent Frameworks, Memory & MCP</a>.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="what-is-agency">What "agency" actually means for an LLM system</h3>
+      <p>Agency, in this context, means a system makes its own decisions about <em>what to do next</em> based on
+      the results of what it already did — as opposed to following a fixed, predetermined sequence of steps
+      decided in advance by a human programmer. A fixed pipeline ("call the search API, then always summarize
+      the results, then always format as bullet points") has zero agency: the sequence of steps is hardcoded
+      regardless of what any step returns. An agentic system instead asks the model, at each step, "given what's
+      happened so far, what should happen next" — the model itself decides whether to search again, ask a
+      clarifying question, call a different tool, or conclude the task is done. This is a spectrum, not a binary:
+      a system with a fixed structure but one LLM-decided branch point has a little agency; a system where every
+      next-action decision is made dynamically by the model, including whether to continue at all, has a lot.
+      Being able to place a given system correctly on this spectrum — rather than calling everything with an LLM
+      in it "an agent" — is itself a useful interview-level skill.</p>
+
+      <h3 id="plan-act-observe">The plan-act-observe loop, derived from first principles</h3>
+      <p>Strip away any framework and the irreducible structure of an agent is three repeating phases:</p>
+      <ul>
+        <li><strong>Plan</strong> — given the task and everything observed so far, the model decides what to do
+        next: which tool to call, with what arguments, or whether the task is actually complete and it's time
+        to produce a final answer instead of another action.</li>
+        <li><strong>Act</strong> — the chosen action is actually executed — a tool/function call, an API request,
+        a code execution — outside the model itself, by the surrounding program, not by the model "pretending"
+        to do it.</li>
+        <li><strong>Observe</strong> — the real result of that action (success, failure, returned data, an
+        error message) is captured and fed back into the model's context for the next planning step.</li>
+      </ul>
+      <p>This loop repeats until the model's planning step decides the task is done (or a safety limit — a
+      max-iteration count, a timeout, a cost budget — forcibly stops it). The entire concept of "ReAct"
+      (Reason+Act, the common academic framing) is exactly this loop with an explicit instruction for the model
+      to externalize its reasoning ("Thought: ...") before each action, which both improves the model's own
+      decision quality (reasoning out loud tends to produce better next-step choices) and gives you, the
+      engineer, an inspectable trace of why each action was chosen — invaluable for debugging.</p>
+
+      <h3 id="agents-vs-chains">How agents differ from simple chains</h3>
+      <p>A chain (as in, a fixed sequence of LLM calls — "classify, then summarize, then translate") has a
+      control flow graph that's fully determined at design time: step 2 always follows step 1 regardless of
+      step 1's output content (though step 1's output content still feeds into step 2 as data). An agent's
+      control flow is determined at <em>run time</em>, by the model itself, based on what's actually been
+      observed — the same agent given the same task can take a different number of steps, call different tools
+      in a different order, or even take a completely different strategy, depending on what intermediate results
+      turn out to be. This has a direct practical consequence: a chain's behavior is comparatively easy to test
+      exhaustively (fixed number of paths), while an agent's behavior space is combinatorially large and much
+      harder to fully specify test coverage for — you're testing a policy, not a fixed program path. This is
+      also precisely why agents introduce new failure modes that chains don't have: an agent can decide to retry
+      indefinitely, loop between two unproductive actions, or pursue a plausible-but-wrong strategy with full
+      confidence, none of which can happen in a system with no run-time decision-making at all.</p>
+
+      <h3 id="theoretical-failure-modes">Theoretical failure modes: compounding errors and credit assignment</h3>
+      <p>Two failure modes are structural to agentic loops specifically, not incidental implementation bugs:</p>
+      <ul>
+        <li><strong>Compounding errors across steps</strong> — if each step has even a modest probability of a
+        small mistake, and the agent's context at step N includes (possibly erroneous) results from steps
+        1...N-1, errors don't stay isolated — they propagate and compound. A model that's 95% reliable per step
+        sounds great in isolation, but across 20 sequential steps where later decisions depend on earlier ones
+        being correct, the probability that the whole chain stayed error-free is <code>0.95^20 ≈ 36%</code> —
+        a dramatically different reliability profile than any single step suggested. This is the single most
+        important mathematical fact to internalize about agent reliability: per-step accuracy numbers that look
+        good can produce bad end-to-end task completion rates purely from compounding, with no single step being
+        unusually unreliable.</li>
+        <li><strong>The credit-assignment problem</strong> — when a multi-step task fails, which step actually
+        caused the failure? A wrong final answer might trace back to a bad tool call at step 3, a
+        misinterpreted observation at step 7, or a reasonable step 3 decision that only turned out wrong because
+        of unlucky/ambiguous information available at the time. Unlike a single LLM call (where the entire
+        output is the thing you evaluate), an agent's failure requires tracing backward through a sequence of
+        decisions to find the actual point of divergence from a correct trajectory — and that point is often not
+        where the final wrong output appeared, but several steps earlier, in a decision that looked locally
+        reasonable and only became wrong in hindsight given what happened next. This is structurally the same
+        problem reinforcement learning calls credit assignment, and it's why debugging agents requires
+        inspecting the full step-by-step trace, not just the final output.</li>
+      </ul>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>A single plan-act-observe loop iteration, mechanically:</p>
+      <ol>
+        <li>The model receives context containing: the original task/goal, the available tools (as schemas it
+        can choose to invoke), and the full history of prior (action, observation) pairs from this run.</li>
+        <li>The model generates a response that is either (a) a tool call with specific arguments, or (b) a
+        final answer signaling the task is complete. This is a single forward pass through the model — the
+        "decision" is just next-token prediction constrained to look like a valid tool call or final answer,
+        nothing more exotic than that at the mechanical level.</li>
+        <li>If it's a tool call, the surrounding program (not the model) actually executes it — runs the
+        function, hits the API, executes the code — and captures the real result or error.</li>
+        <li>That result is formatted and appended to the context as an "observation," and the loop returns to
+        step 1 with this new, larger context.</li>
+        <li>This repeats until a final answer is produced or a hard stop condition (max iterations, timeout,
+        cost ceiling) is triggered — and that hard stop condition is not optional in any serious implementation,
+        since nothing structurally guarantees the model will decide to stop on its own.</li>
+      </ol>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+flowchart TD
+  START[Task / goal] --> PLAN[Plan: model decides next action given full history]
+  PLAN -->|Tool call chosen| ACT[Act: program executes the real action]
+  ACT --> OBS[Observe: capture real result/error]
+  OBS --> HIST[Append to history/context]
+  HIST --> PLAN
+  PLAN -->|Final answer chosen| DONE[Task complete]
+  HIST -.exceeds limit.-> STOP[Forced stop: max iterations / timeout / cost cap]
+      </div>
+      <div class="mermaid">
+flowchart LR
+  S1[Step 1: 95% correct] --> S2[Step 2: 95% correct]
+  S2 --> S3[Step 3: 95% correct]
+  S3 --> SN[... step N]
+  SN --> P["P(all correct) = 0.95^N -- compounds down fast"]
+  F[Final wrong output] -.trace backward.-> C3[Was it step 3's decision?]
+  F -.trace backward.-> C7[Or step 7's decision?]
+  F -.trace backward.-> CN[Credit assignment: find the real divergence point]
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-python">"""
+The simplest possible agent loop, in plain Python, no framework. Uses a generic
+`llm_call(messages) -> dict` stand-in that would be a real API call in practice.
+The point is the LOOP STRUCTURE, not a specific provider's SDK syntax.
+"""
+import json
+
+def calculator_tool(expression: str) -> str:
+    try:
+        # NOTE: eval() is for illustration only -- never eval untrusted model output
+        # in a real system. Use a safe expression parser in production.
+        return str(eval(expression, {"__builtins__": {}}))
+    except Exception as e:
+        return f"error: {e}"
+
+TOOLS = {"calculator": calculator_tool}
+
+SYSTEM_PROMPT = """You are an agent that solves math word problems.
+At each step, respond with EXACTLY ONE of:
+  ACTION: calculator("<expression>")
+  FINAL_ANSWER: <answer>
+Think step by step, but only output one action or final answer per turn."""
+
+def run_agent(task: str, llm_call, max_iterations: int = 8) -> str:
+    history = [f"Task: {task}"]
+
+    for iteration in range(max_iterations):
+        # --- PLAN: ask the model what to do next, given everything observed so far ---
+        prompt = SYSTEM_PROMPT + "\n\n" + "\n".join(history)
+        response = llm_call(prompt)  # a real system: an actual LLM API call here
+
+        if response.startswith("FINAL_ANSWER:"):
+            return response.removeprefix("FINAL_ANSWER:").strip()
+
+        if response.startswith("ACTION:"):
+            # Parse: ACTION: calculator("2 + 2 * 3")
+            tool_name = "calculator"
+            expr_start = response.index('"') + 1
+            expr_end = response.rindex('"')
+            expression = response[expr_start:expr_end]
+
+            # --- ACT: the PROGRAM executes this, not the model ---
+            result = TOOLS[tool_name](expression)
+
+            # --- OBSERVE: feed the real result back into history for the next loop turn ---
+            history.append(response)
+            history.append(f"Observation: {result}")
+            continue
+
+        # Model produced something that doesn't match either expected format.
+        history.append(response)
+        history.append("Observation: invalid response format, please use ACTION: or FINAL_ANSWER:")
+
+    return "FAILED: max iterations reached without a final answer"
+
+
+# --- A fake llm_call for demonstration, simulating a 3-step reasoning trace ---
+def fake_llm_call(prompt: str) -> str:
+    if "Observation: 10" not in prompt and "ACTION" not in prompt:
+        return 'ACTION: calculator("4 + 6")'
+    if "Observation: 10" in prompt and "20" not in prompt:
+        return 'ACTION: calculator("10 * 2")'
+    return "FINAL_ANSWER: 20"
+
+print(run_agent("What is (4 + 6) * 2?", fake_llm_call))
+
+
+# --- Illustrating compounding error probability directly ---
+def probability_all_correct(per_step_accuracy: float, num_steps: int) -> float:
+    return per_step_accuracy ** num_steps
+
+for n in [1, 5, 10, 20, 50]:
+    print(f"{n} steps at 95% per-step accuracy: {probability_all_correct(0.95, n):.1%} overall success")
+
+# BAD: an "agent" with no stop condition at all -- if the model never emits
+# FINAL_ANSWER (e.g. it gets stuck re-trying a failing action), this loops forever,
+# burning cost and latency with no safety net.
+def bad_unbounded_agent(task: str, llm_call) -> str:
+    history = [f"Task: {task}"]
+    while True:  # NO max_iterations -- this is the bug
+        response = llm_call(SYSTEM_PROMPT + "\n" + "\n".join(history))
+        if response.startswith("FINAL_ANSWER:"):
+            return response
+        history.append(response)
+</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4><p>A team ships a research agent that searches the web, reads
+      pages, and synthesizes an answer, tested successfully on a few dozen demo queries. In production, cost
+      monitoring flags a small but persistent tail of sessions burning 10-20x the typical token cost. Tracing
+      individual runs (full step-by-step plan-act-observe logs, not just final outputs) reveals the cause: on
+      certain ambiguous queries, the agent gets into an unproductive loop — it searches, gets a mediocre result,
+      decides to "search again with different terms" which was a reasonable individual decision at step 2, gets
+      another mediocre result, and repeats this same reasonable-looking decision 15 times without ever
+      recognizing it's stuck, because each individual step's reasoning looks locally sound (the credit-assignment
+      point is actually "the agent never developed a strategy to detect its own lack of progress," not any
+      single bad step). The fix wasn't a smarter model — it was adding explicit progress-tracking state ("have
+      the last 3 search results overlapped significantly with previous ones?") and a hard stop combined with a
+      "summarize what you found and admit uncertainty" fallback path once stuck-loop detection triggers, rather
+      than relying on the model to organically notice it was looping. This is a direct, production instance of
+      the first-principles point: agentic loops need engineered safety structure around them, because nothing
+      about the loop itself guarantees graceful termination.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Calling any system with an LLM and a tool call "an agent"
+      without checking where it actually sits on the agency spectrum. A system that always calls the same tool
+      in the same order regardless of results has essentially zero run-time decision-making and should be
+      designed, tested, and reasoned about as a chain/pipeline — forcing agent-style flexibility (and accepting
+      agent-style unpredictability and cost) onto a task that's actually a fixed sequence is needless complexity
+      and needless risk, not a feature.</p></div>
+      <ul>
+        <li>Building an agent loop with no hard iteration/cost/timeout limit — nothing in the loop's structure
+        guarantees the model decides to stop, and an unbounded loop is a real production incident waiting to
+        happen, not a theoretical edge case.</li>
+        <li>Evaluating agent quality only by final-answer correctness, never by inspecting the full step trace —
+        this makes the credit-assignment problem impossible to solve when something goes wrong, since you have
+        no visibility into where the trajectory actually diverged.</li>
+        <li>Assuming a high per-step accuracy number translates directly to high task-level reliability — it
+        doesn't, because of compounding; always reason about end-to-end task success rate separately from
+        per-step accuracy.</li>
+        <li>Giving an agent loop no mechanism to detect its own lack of progress (repeating similar
+        unproductive actions) — this is the single most common cause of runaway cost/latency in production
+        agent systems.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>Fixed chain (no agency)</td><td>Task has a known, fixed sequence of steps regardless of intermediate results</td><td>Steps/strategy genuinely need to vary based on results</td><td>Agent loop with bounded decision points</td></tr>
+        <tr><td>Full agentic loop</td><td>Task requires dynamic strategy, unknown number of steps</td><td>Simple, well-understood fixed workflows; latency/cost-sensitive paths</td><td>Fixed chain, or a chain with one or two LLM-decided branch points</td></tr>
+        <tr><td>No explicit reasoning trace (direct action output)</td><td>Very simple, low-stakes single-tool tasks</td><td>Anything needing debuggability or credit-assignment later</td><td>ReAct-style explicit "Thought:" reasoning before each action</td></tr>
+        <tr><td>Unbounded loop (no stop condition)</td><td>Never</td><td>Always</td><td>Max iterations + timeout + cost ceiling + stuck-loop detection</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+
+      <div class="qa-level basic">
+        <h4>Basic</h4>
+        <details class="qa"><summary>What structurally distinguishes an "agent" from a single LLM call or a fixed chain of calls?</summary><div class="answer"><p>An agent's control flow is decided at run time by the model itself, based on observed results of its own prior actions, repeated in a loop — rather than following a predetermined fixed sequence of steps decided at design time. The model decides what to do next, not just what content to produce.</p></div><div class="followup">Follow-up: can a system have "a little" agency rather than being strictly one or the other?</div></details>
+        <details class="qa"><summary>Name and describe the three phases of the plan-act-observe loop.</summary><div class="answer"><p>Plan: the model decides the next action (or that the task is done) given everything observed so far. Act: the surrounding program actually executes the chosen action (a tool call, API request, code execution) — not the model itself. Observe: the real result is captured and fed back into context for the next planning step.</p></div><div class="followup">Follow-up: why must the "act" step be executed by the program and not the model?</div></details>
+        <details class="qa"><summary>What is ReAct, and what does it add on top of the basic plan-act-observe loop?</summary><div class="answer"><p>ReAct (Reason+Act) is the plan-act-observe loop with an explicit instruction for the model to externalize its reasoning ("Thought: ...") before choosing each action, which tends to improve the model's own decision quality and gives engineers an inspectable trace of why each action was chosen.</p></div><div class="followup">Follow-up: why is an inspectable trace specifically useful for debugging agent failures?</div></details>
+        <details class="qa"><summary>Why does an agent's behavior space make testing harder than testing a fixed chain?</summary><div class="answer"><p>A chain has a fixed, fully determined control-flow graph at design time, so its paths are enumerable and testable exhaustively. An agent's control flow is decided dynamically at run time based on actual observations, so the same task can produce different step sequences depending on intermediate results — you're testing a policy over a combinatorially large space, not a fixed set of paths.</p></div><div class="followup">Follow-up: what testing strategies are better suited to a policy than exhaustive path coverage?</div></details>
+        <details class="qa"><summary>If a model is 95% accurate per step, what's the rough probability that a 10-step agent task completes with zero errors across all steps, and why is this surprising?</summary><div class="answer"><p>Roughly 0.95^10 ≈ 60%. It's surprising because a 95% per-step accuracy sounds very reliable in isolation, but compounding across sequential dependent steps drops overall task success well below what the per-step number would naively suggest.</p></div><div class="followup">Follow-up: how does this number change at 20 and 50 steps?</div></details>
+        <details class="qa"><summary>Why is a hard iteration/timeout/cost limit non-optional in any real agent loop implementation?</summary><div class="answer"><p>Nothing in the loop's structure guarantees the model will ever decide to emit a final answer — it can get stuck repeating similar unproductive actions indefinitely. Without an explicit forced stop, this is an unbounded cost/latency risk in production, not a theoretical edge case.</p></div><div class="followup">Follow-up: besides a hard iteration cap, what other mechanism could detect a stuck, unproductive loop earlier?</div></details>
+      </div>
+
+      <div class="qa-level medium">
+        <h4>Medium</h4>
+        <details class="qa"><summary>Explain the credit-assignment problem for multi-step agent tasks and why it's harder than debugging a single LLM call.</summary><div class="answer"><p>When a multi-step task fails, the wrong final output might trace back to any step in the sequence — including a step several turns earlier whose decision looked locally reasonable at the time and only became wrong given what happened afterward. Unlike a single LLM call, where the entire output is directly the thing to evaluate, diagnosing an agent failure requires tracing backward through the full step sequence to find the actual divergence point, which is often not the step where the wrong output visibly appeared.</p></div><div class="followup">Follow-up: what kind of logging/tracing infrastructure makes this tractable in practice?</div></details>
+        <details class="qa"><summary>Give an example of a system that uses an LLM but has essentially zero agency, and explain why calling it "an agent" would be a meaningful misnomer.</summary><div class="answer"><p>A pipeline that always calls a classification LLM call, then always calls a fixed summarization LLM call on the result, regardless of what the classification returned, has a fully predetermined control-flow graph — the LLM's output is used as data for the next fixed step, but the LLM never decides what step happens next. Calling it an agent would wrongly imply the system has run-time decision-making flexibility (and the associated unpredictability/testing burden) it doesn't actually have.</p></div><div class="followup">Follow-up: what's the minimal change that would introduce "a little" agency into this pipeline?</div></details>
+        <details class="qa"><summary>Why does compounding error make per-step accuracy a misleading metric for evaluating an agent's production readiness, and what metric should be used instead?</summary><div class="answer"><p>Per-step accuracy describes reliability of an isolated decision, but task-level success depends on the joint probability of every dependent step in the trajectory being correct, which drops multiplicatively as task length grows — a model that looks excellent per-step can still produce poor end-to-end task completion on long tasks. The right metric is end-to-end task success rate measured directly on realistic multi-step tasks of representative length, not inferred from per-step numbers.</p></div><div class="followup">Follow-up: how would you decide how many steps is "too many" for a given per-step accuracy and acceptable task failure rate?</div></details>
+        <details class="qa"><summary>Design a minimal "stuck-loop detection" mechanism for an agent and explain what signal it should watch for.</summary><div class="answer"><p>Track a similarity/overlap measure between consecutive actions and their observations (e.g. is this search query and result substantially similar to the last 2-3 search queries and results?) and trigger a forced strategy change or graceful fallback (summarize findings, admit uncertainty) once a repetition threshold is crossed, rather than waiting for the hard iteration cap to simply cut the task off mid-progress. The key signal is lack of forward progress, not just repeated tool names — the same tool can be called productively many times (e.g. reading different files), so detection needs to look at whether results are actually advancing the task, not just which tool was invoked.</p></div><div class="followup">Follow-up: how would you distinguish "legitimately needs to call the same tool many times" from "stuck in an unproductive loop" programmatically?</div></details>
+        <details class="qa"><summary>Why does an agent's reasoning trace (the "Thought:" step in ReAct) sometimes look locally correct at every individual step even though the overall trajectory is wrong?</summary><div class="answer"><p>Each planning step only has access to the information observed so far, and a locally reasonable decision given that limited information can turn out wrong once later information reveals the earlier assumption was mistaken — this is the credit-assignment problem in practice. It's structurally similar to how a chess move can look sound given the position at the time and only prove to be the losing move several moves later; evaluating any individual step's "correctness" in isolation, without the benefit of later information, is inherently limited.</p></div><div class="followup">Follow-up: does this mean individual-step reasoning quality is a useless signal for evaluating an agent? Why or why not?</div></details>
+      </div>
+
+      <div class="qa-level advanced">
+        <h4>Advanced</h4>
+        <details class="qa"><summary>Design an evaluation methodology for agent reliability that accounts for compounding error, suitable for deciding whether an agent is production-ready for a task requiring N sequential steps.</summary><div class="answer"><p>Measure task-level success rate directly on a representative sample of full N-step tasks (not inferred from per-step accuracy), stratified by task length if length varies, since compounding means short and long tasks have meaningfully different reliability profiles even with identical per-step quality. Separately instrument per-step accuracy and per-step failure-mode categorization (wrong tool choice, wrong arguments, misinterpreted observation, premature stop, failure-to-stop) so a regression can be attributed to a specific failure category rather than only a vague overall success-rate change. Combine both: use the measured per-step accuracy and failure taxonomy to model expected success rate as task length grows beyond what's been directly tested, and validate that model's predictions against held-out longer tasks before trusting it to extrapolate for tasks you haven't explicitly measured.</p></div><div class="followup">Follow-up: how would you detect that per-step errors are NOT independent (e.g. one early mistake makes subsequent mistakes more likely), which would make the simple exponential compounding model wrong?</div></details>
+        <details class="qa"><summary>Is the plan-act-observe loop, as described, actually sufficient to produce "agency," or is something else required? Argue both sides.</summary><div class="answer"><p>Argument for sufficiency: the loop's core structural requirement for agency — run-time decisions based on observed results, not a predetermined sequence — is fully present; nothing more is structurally necessary. Argument against: a loop with no mechanism for the model to revise or abandon a failing strategy (e.g. no explicit self-critique, no ability to recognize its own plan was wrong rather than just reacting to the latest observation) arguably exhibits reactive behavior rather than true planning/agency in a fuller sense — some researchers distinguish "reactive" agents (pure stimulus-response per step) from "deliberative" agents (maintaining and revising an explicit plan across steps) as a meaningfully different capability tier. In practice, most production "agents" are closer to reactive, and whether that's "real" agency is more a definitional/philosophical question than one with a settled answer — the practically important point is understanding which tier a given system actually achieves.</p></div><div class="followup">Follow-up: what would you add to the basic loop to move it from "reactive" toward "deliberative"?</div></details>
+        <details class="qa"><summary>How would the credit-assignment problem be approached differently in an agent trained via reinforcement learning (where the policy itself is updated based on trajectory outcomes) versus a prompted LLM agent (where the base model's weights never change between runs)?</summary><div class="answer"><p>In an RL-trained agent, credit assignment is a training-time problem solved algorithmically (e.g. via value functions, advantage estimation, or reward shaping across the trajectory) that directly updates the policy's weights to make better-credited actions more likely in the future — the system literally learns from the attribution. In a prompted LLM agent, the base model's weights are fixed at inference time; credit assignment is instead a debugging/engineering problem solved by a human (or a separate analysis LLM call) inspecting the trace to improve the surrounding system — better tool descriptions, better prompting, added guardrails — since there's no training signal flowing back into the model from any individual deployed run. This is a fundamental difference in where "learning" from mistakes actually happens.</p></div><div class="followup">Follow-up: could you combine both — using trace-based human/analysis insights to generate training data that's then used to fine-tune the model via RL? What would that pipeline look like?</div></details>
+        <details class="qa"><summary>Argue for and against giving an agent the ability to spawn sub-agents (delegate a sub-task to another instance of itself or a different agent) from a first-principles reliability standpoint.</summary><div class="answer"><p>For: delegation can reduce effective task length per agent (each sub-agent handles a shorter trajectory, reducing its own compounding-error exposure) and can isolate failure domains (a failing sub-agent's error doesn't necessarily propagate into the parent's context if only a summarized result is returned). Against: it introduces a new credit-assignment layer — a bad outcome might now trace to a bad delegation decision (wrong sub-task scoping, wrong agent chosen) rather than a bad action within any single agent's trajectory, and the hand-off itself (see Context Engineering) can lose information, introducing a new failure mode (an incomplete or ambiguous sub-task description) that didn't exist in a flat loop. Net assessment: delegation trades one kind of compounding risk (long flat trajectories) for another kind (lossy, hard-to-debug hand-offs and multiplied credit-assignment surfaces) — it's not a strict reliability win, and should be justified by task decomposability, not adopted by default as "more agentic is better."</p></div><div class="followup">Follow-up: how would you measure, empirically, whether a delegation-based architecture actually improved end-to-end task success versus a flat single-agent loop for a specific task?</div></details>
+        <details class="qa"><summary>From first principles, why can't an agent loop's own self-reported confidence ("I'm confident this is correct") be trusted as a reliable stop/continue signal?</summary><div class="answer"><p>Self-reported confidence is generated by the same model, under the same potential failure modes, as the action it's reporting confidence about — if the model's reasoning at a given step is subject to a plausible-but-wrong conclusion (the same failure mode that produces wrong actions in the first place), there's no structural reason its confidence assessment of that same reasoning would be exempt from the identical failure mode. Empirically, LLM confidence is known to correlate imperfectly with actual correctness and can be systematically miscalibrated (overconfident on exactly the cases where it's wrong due to a plausible-sounding but incorrect chain of reasoning). Reliable stop/continue signals need to come from something external to the model's own self-assessment — actual verification against ground truth, cross-checking with an independent process, or explicit success criteria checked programmatically — not from asking the same model "are you sure."</p></div><div class="followup">Follow-up: how would you design an external verification step for a task where there's no simple programmatic ground-truth check available (e.g. an open-ended research/writing task)?</div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment">
+        <span class="level-tag">Beginner (30-60 min)</span>
+        <h4>Build the simplest possible agent loop</h4>
+        <p>Implement the plan-act-observe loop in plain Python (no framework), extending this chapter's
+        calculator example to handle at least 3 different tool types (e.g. calculator, a simple string-reverse
+        tool, and a word-count tool) for multi-step word problems that need more than one tool.</p>
+        <ul>
+          <li>Use a real LLM API call (not the fake stand-in) for the planning step.</li>
+          <li>Include a hard max-iterations limit and demonstrate it triggering on a deliberately impossible
+          task.</li>
+        </ul>
+        <p><strong>Acceptance criteria:</strong> the agent correctly solves at least 3 multi-step test tasks
+        requiring 2+ tool calls each, plus a demonstrated graceful stop on an impossible task.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>Keep the action-format parsing strict and simple (e.g. a fixed "ACTION: tool_name(args)" format) so you're not debugging prompt-parsing ambiguity on top of the loop logic itself.</p></div></details>
+        <p><strong>Bonus:</strong> add the explicit "Thought:" reasoning step (ReAct-style) and log it separately, then inspect whether it actually changed the model's tool choices versus omitting it.</p>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Intermediate (2-4 hrs)</span>
+        <h4>Measure compounding error empirically</h4>
+        <p>Design a multi-step task family (e.g. a chain of arithmetic operations, or a chain of simple
+        information-lookup steps) where you can programmatically verify correctness at each step and at the
+        end, and run your agent loop on tasks of varying length (3, 6, 10, 15 steps), 20+ trials per length.</p>
+        <ul>
+          <li>Measure per-step accuracy and end-to-end task success rate separately, for each task length.</li>
+          <li>Compare your measured end-to-end success rate against the naive exponential prediction
+          (per-step accuracy ^ number of steps) and report how close they are.</li>
+        </ul>
+        <p><strong>Acceptance criteria:</strong> a table of task length vs. measured success rate vs. predicted
+        (exponential) success rate, with a written explanation of any significant divergence between measured
+        and predicted.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>If measured success is notably worse than the naive exponential prediction, that's a sign errors aren't independent across steps (an early mistake makes later mistakes more likely) — worth investigating and reporting.</p></div></details>
+        <p><strong>Bonus:</strong> implement a stuck-loop detector and show it reducing wasted iterations on the longest task length without hurting success rate.</p>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Advanced (1-2 days)</span>
+        <h4>Full tracing and credit-assignment tooling for a from-scratch agent</h4>
+        <p>Build a more capable from-scratch agent (5+ tools, including at least one that can fail/return
+        errors realistically) tackling a non-trivial multi-step task of your choosing, with a full tracing
+        system that records every plan/act/observe cycle with timestamps, token costs, and the model's stated
+        reasoning.</p>
+        <ul>
+          <li>Build a simple trace-inspection tool (CLI or a basic rendered view) that lets you step through a
+          run's full trajectory after the fact.</li>
+          <li>Deliberately construct at least 2 failing runs, use your trace tool to identify the actual
+          credit-assignment point (the specific step where the trajectory diverged from a correct path), and
+          document your reasoning for why that step, specifically, was the divergence point rather than the
+          step where the wrong output visibly appeared.</li>
+        </ul>
+        <p><strong>Acceptance criteria:</strong> a working traced agent, the inspection tool, and a written
+        credit-assignment analysis for 2 failing runs identifying the true divergence point with supporting
+        evidence from the trace.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>Pick a task where failure is genuinely ambiguous between "an early step committed to a bad strategy" versus "a late step mishandled otherwise-fine information" — this makes the credit-assignment exercise meaningfully hard rather than trivially obvious.</p></div></details>
+        <p><strong>Bonus:</strong> use your trace data to automatically flag "stuck loop" patterns (repetitive low-progress action sequences) across all your test runs without manual inspection.</p>
+      </div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet">
+        <ul>
+          <li>Agency = run-time decisions based on observed results, not a predetermined fixed sequence. It's a spectrum, not binary.</li>
+          <li>Plan-act-observe: model decides next action; program executes it; real result feeds back into context; repeat.</li>
+          <li>ReAct = the loop + explicit "Thought:" reasoning before each action — improves decisions and gives a debuggable trace.</li>
+          <li>Chains have design-time-fixed control flow (testable exhaustively); agents have run-time-decided control flow (a policy, not a fixed path).</li>
+          <li>Compounding error: 0.95 per-step accuracy over 20 steps ≈ 36% end-to-end success — per-step accuracy is a misleading reliability signal alone.</li>
+          <li>Credit assignment: a failure's true cause is often several steps before where the wrong output visibly appeared — requires full-trace inspection, not just final-output review.</li>
+          <li>Never ship an agent loop without a hard iteration/timeout/cost limit — nothing guarantees the model stops on its own.</li>
+          <li>Stuck-loop detection (lack of forward progress, not just "same tool called repeatedly") is the most common production fix needed.</li>
+          <li>Model self-reported confidence is not a trustworthy stop/continue signal — it's subject to the same failure modes as the action it's judging.</li>
+        </ul>
+      </div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://arxiv.org/abs/2210.03629">ReAct: Synergizing Reasoning and Acting in Language Models (Yao et al., 2022)</a></li>
+        <li><a href="https://arxiv.org/abs/2305.10601">Tree of Thoughts: Deliberate Problem Solving with LLMs</a></li>
+        <li><a href="https://www.anthropic.com/engineering/building-effective-agents">Anthropic: Building Effective Agents</a></li>
+        <li><a href="https://lilianweng.github.io/posts/2023-06-23-agent/">Lilian Weng: LLM Powered Autonomous Agents</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="10-context-engineering.html"><span class="dir">← Previous</span>Context Engineering</a>
+        <a class="next" href="12-agent-frameworks-memory-mcp.html"><span class="dir">Next →</span>Agent Frameworks, Memory & MCP</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · Machine Learning & AI</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-typescript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "15-machine-learning-ai", chapterKey: "11-ai-agents-from-first-principles" });</script>
+</body>
+</html>

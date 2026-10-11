@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Microservices vs Monolith — System Design — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">System Design</a><span class="sep">›</span>Microservices vs Monolith</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>Microservices vs Monolith: An Honest Tradeoff Analysis</h1>
+      <p class="meta-line"><span>⏱ 2 hrs</span><span>📍 Chapter 9 of 14</span></p>
+      <p><strong>One-line summary:</strong> Microservices trade a simple deployment and debugging model for independent team and service scalability — the senior-level skill isn't knowing microservices exist, it's knowing exactly when that trade is worth making and when a modular monolith is the more defensible answer.</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>This is the question where interviewers separate engineers who've read blog posts from engineers who've actually run a service in production under an incident. Anyone can draw boxes labeled "User Service," "Order Service," "Payment Service" and connect them with arrows. What's much rarer — and what a Staff/Tech Lead interview is specifically probing for — is whether you can say "no, we should not split this yet" and back it with a real cost analysis: the network calls that replace function calls, the distributed tracing you now need just to debug a single user request, the deploy coordination across teams, and the fact that most companies that "need microservices" actually need better module boundaries inside one deployable. If you default to microservices because it's the modern-sounding answer, you will get pushed hard on the costs — know them cold.</p>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>Read <a href="08-message-queues.html">Message Queues & Event-Driven</a> first — async service communication patterns here depend on it. <a href="03-load-balancing.html">Load Balancing</a> is useful background for service discovery and API gateway routing.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="honest-tradeoffs">The honest tradeoffs — not pro-microservices propaganda</h3>
+      <p><strong>Team scaling cost:</strong> microservices let independent teams own, deploy, and scale their services without blocking on each other — this is the one real, durable benefit, and it's an organizational benefit, not a technical one. If you have 8 engineers, you don't have an organizational scaling problem yet, and splitting services mainly adds coordination overhead without the payoff.</p>
+      <p><strong>Operational complexity:</strong> every service you add is another thing to deploy, monitor, alert on, version, and secure. Ten services means ten CI/CD pipelines (or one complex shared one), ten sets of logs to correlate, ten potential points of version-skew incompatibility. This is not free and does not scale linearly with team size — it scales with the number of services, which grows independently.</p>
+      <p><strong>Distributed debugging:</strong> in a monolith, a bug is a stack trace. In microservices, a bug is "request 7f3a hit service A, which called B, which timed out calling C" — and reconstructing that requires distributed tracing (OpenTelemetry, Jaeger), correlation IDs propagated through every hop, and dashboards built before the incident, not during it. A junior engineer's "it works on my machine" becomes a senior engineer's "it works when all 6 services are the right version, which they weren't in staging."</p>
+      <p><strong>Network calls replacing function calls:</strong> a function call that used to take microseconds and never fails now takes milliseconds, can time out, can return a 503, and needs retry logic, circuit breakers, and timeout budgets. This isn't a minor detail — it changes the complexity class of your code. Every cross-service call needs to answer: what do I do if this fails, how long do I wait, and what's the fallback behavior.</p>
+
+      <h3 id="when-monolith">When the monolith is the right senior-level call</h3>
+      <p>For most startups and even many mid-size companies, a well-structured monolith is the correct architecture, not a stepping stone to be ashamed of. Signals that favor a monolith: a small team (under ~15-20 engineers) that doesn't have genuine cross-team deployment contention, a product still finding its domain boundaries (premature service splits bake in the <em>wrong</em> boundaries, which are far more expensive to undo across network APIs than inside one codebase), and a workload that doesn't have wildly different scaling profiles across its parts. Shopify, GitHub, and Stack Overflow all ran (and largely still run core logic) as monoliths at massive scale — the myth that "scale requires microservices" is not supported by how some of the biggest systems actually operate.</p>
+
+      <h3 id="modular-monolith">The modular monolith as a middle ground</h3>
+      <p>A modular monolith enforces the same domain boundaries you'd eventually want in microservices — separate modules with explicit interfaces, no reaching into another module's internal tables or private functions, each module owning its own data access layer — but deploys as a single process. This gets you the design discipline (clear ownership, testable boundaries, the ability to reason about one module at a time) without the network/ops tax. Critically, it's also the ideal staging ground for a <em>real</em> future split: when you do need to extract a service, you extract a module whose boundaries are already clean, instead of discovering mid-extraction that "the order module" and "the inventory module" share a database table and three levels of implicit coupling.</p>
+
+      <h3 id="comm-patterns">Service communication patterns: sync vs async</h3>
+      <p><strong>Synchronous (REST/gRPC):</strong> the caller blocks waiting for a response. Simple to reason about, but couples the caller's availability to the callee's — if service B is down or slow, every synchronous caller of B degrades too. Use for request/response flows where the caller genuinely needs the answer before proceeding (e.g., "is this user authorized").</p>
+      <p><strong>Asynchronous (events via a queue):</strong> the caller publishes an event and moves on; interested services react independently (see <a href="08-message-queues.html">Chapter 8</a>). Decouples availability — service B being down doesn't block the caller, it just delays B's eventual reaction. Use for side effects that don't need to happen before the caller's response ("send a welcome email," "update analytics," "notify the warehouse").</p>
+      <p>The senior mistake to avoid in both directions: making everything synchronous (fragile availability-coupled chains, see Chapter 1's availability math) or making everything async (losing the ability to give the user an immediate, correct answer when they need one, and introducing eventual-consistency bugs where none were needed).</p>
+
+      <h3 id="api-gateway">API gateway responsibilities and the BFF pattern</h3>
+      <p>An API gateway sits in front of your microservices and handles cross-cutting concerns once instead of in every service: <strong>routing</strong> (map external paths to internal services), <strong>authentication/authorization</strong> (validate tokens once at the edge), <strong>rate limiting</strong> (protect backend services from abuse or runaway clients), and <strong>aggregation</strong> (combine responses from multiple services into one client-facing response, avoiding chatty multi-round-trip clients).</p>
+      <p>The <strong>Backend-for-Frontend (BFF)</strong> pattern takes aggregation further: instead of one generic gateway serving mobile, web, and third-party API clients identically, each client type gets its own thin backend tailored to its needs — the mobile BFF returns a smaller payload optimized for cellular networks, the web BFF can return a richer response because bandwidth is less constrained. This avoids the common failure mode of a single gateway API that's over-fetching for mobile and under-fetching for web because it's trying to be one-size-fits-all.</p>
+
+      <h3 id="service-discovery">Service discovery and the strangler fig pattern</h3>
+      <p><strong>Service discovery</strong> solves "how does service A find a healthy instance of service B" when instances come and go due to autoscaling, deploys, or failures. Client-side discovery (the caller queries a registry like Consul/etcd and picks an instance) pushes load-balancing logic into every client; server-side discovery (calls go through a load balancer or service mesh sidecar that handles lookup transparently) centralizes it — most modern setups (Kubernetes Services, Istio) use the latter because it keeps application code free of discovery logic.</p>
+      <p>The <strong>strangler fig pattern</strong> is the standard safe way to migrate a monolith to microservices incrementally: put a routing layer (often the API gateway itself) in front of the monolith, then peel off one capability at a time into a new service, redirecting just that slice of traffic to the new service while everything else still hits the monolith. Over time, the new service "strangles" that piece of the monolith until it can be deleted. This avoids the high-risk, high-blast-radius "big bang rewrite," which has killed more companies than slow monoliths ever did.</p>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>Concretely, trace a checkout request through a gateway + BFF + microservices setup: the mobile app calls the mobile BFF, which authenticates the request (validates the JWT, possibly against an auth service or via local JWKS verification), then fans out to the pricing service and inventory service in parallel (not serially — this is where senior engineers save real latency by recognizing independent calls that don't need to block each other), aggregates both responses into one mobile-optimized payload, and returns. If the inventory service times out, the BFF applies a fallback (assume in-stock, flag for reconciliation) rather than failing the whole checkout screen — this is the same availability-composition math from Chapter 1 applied at the service-mesh level: don't let one optional dependency's failure sink an otherwise-successful response.</p>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+flowchart TD
+    A["Starting a new product<br/>or evaluating current architecture"] --> B{"Team size &gt; ~20 engineers<br/>with real cross-team<br/>deployment contention?"}
+    B -->|No| C["Monolith<br/>(fast iteration, simple ops)"]
+    C --> D{"Codebase getting tangled,<br/>module boundaries unclear?"}
+    D -->|Yes| E["Modular Monolith<br/>(enforce boundaries, single deploy)"]
+    D -->|No| C
+    B -->|Yes| F{"Specific capability has<br/>distinct scaling profile<br/>or team ownership need?"}
+    F -->|Yes, and boundary is proven stable| G["Extract that capability<br/>via Strangler Fig"]
+    F -->|No, boundaries still unclear| E
+    G --> H["Microservices<br/>(incrementally, not big-bang)"]
+      </div>
+      <div class="mermaid">
+flowchart LR
+    Mobile["Mobile Client"] --> MBFF["Mobile BFF"]
+    Web["Web Client"] --> WBFF["Web BFF"]
+    ThirdParty["3rd-Party API Client"] --> GW["Public API Gateway"]
+    MBFF --> Gateway["API Gateway<br/>(auth, rate limit, routing)"]
+    WBFF --> Gateway
+    GW --> Gateway
+    Gateway --> Pricing["Pricing Service"]
+    Gateway --> Inventory["Inventory Service"]
+    Gateway --> Orders["Order Service"]
+    Gateway --> Auth["Auth Service"]
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-typescript">// A thin BFF aggregation layer — fans out in parallel and applies a fallback
+// so one slow/failing optional dependency doesn't sink the whole response.
+interface CheckoutView {
+  price: number;
+  inStock: boolean;
+  inStockConfidence: "confirmed" | "assumed";
+}
+
+async function getCheckoutView(productId: string): Promise<CheckoutView> {
+  const pricingPromise = fetchPricing(productId);
+  const inventoryPromise = fetchInventory(productId).catch(() => null); // optional dependency
+
+  const [price, inventory] = await Promise.all([pricingPromise, inventoryPromise]);
+
+  return {
+    price,
+    inStock: inventory?.inStock ?? true, // fail open: assume in-stock, reconcile async
+    inStockConfidence: inventory ? "confirmed" : "assumed",
+  };
+}
+
+async function fetchPricing(productId: string): Promise<number> {
+  const res = await fetch(`http://pricing-service/price/${productId}`, { signal: timeoutSignal(300) });
+  if (!res.ok) throw new Error("pricing service failed"); // pricing is NOT optional — propagate
+  return (await res.json()).price;
+}
+
+async function fetchInventory(productId: string): Promise<{ inStock: boolean }> {
+  const res = await fetch(`http://inventory-service/stock/${productId}`, { signal: timeoutSignal(150) });
+  if (!res.ok) throw new Error("inventory service failed");
+  return res.json();
+}
+
+function timeoutSignal(ms: number): AbortSignal {
+  const controller = new AbortController();
+  setTimeout(() => controller.abort(), ms);
+  return controller.signal;
+}
+</code></pre>
+      <pre><code class="language-typescript">// Modular monolith: explicit module boundary enforced via interface, not direct DB access.
+// Even inside one process, "orders" module never reaches into inventory's tables.
+interface InventoryModule {
+  reserveStock(sku: string, qty: number): Promise<boolean>;
+}
+
+class OrdersModule {
+  constructor(private inventory: InventoryModule) {} // injected, swappable with a real HTTP client later
+
+  async placeOrder(sku: string, qty: number) {
+    const reserved = await this.inventory.reserveStock(sku, qty);
+    if (!reserved) throw new Error("Out of stock");
+    // ... write order row, emit order.created event, etc.
+  }
+}
+
+// When it's time to extract inventory into its own service (strangler fig),
+// only this class needs to change — swap InMemoryInventory for an HTTP-backed implementation.
+class InMemoryInventory implements InventoryModule {
+  private stock = new Map<string, number>([["sku-1", 100]]);
+  async reserveStock(sku: string, qty: number) {
+    const current = this.stock.get(sku) ?? 0;
+    if (current < qty) return false;
+    this.stock.set(sku, current - qty);
+    return true;
+  }
+}
+</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4><p>A retailer starts as a Rails monolith with 6 engineers. By year 3, they're at 40 engineers across 5 feature teams, and deploys are blocked behind a shared staging environment where one team's broken migration blocks everyone else's release — a genuine team-scaling problem, not a technical one. Rather than a big-bang rewrite, they apply the strangler fig: the monolith stays the system of record, but a gateway is placed in front, and the highest-contention capability — inventory management, which has its own team and a genuinely different scaling profile (read-heavy, needs sub-50ms responses for the storefront) — is extracted first. Traffic for inventory endpoints is routed to the new service; everything else still hits the monolith. Eighteen months later, 4 of 12 capabilities have been extracted — the ones with clear boundaries and real scaling or ownership needs — while the remaining 8 stay in a now-cleaner modular monolith, because splitting them further would add operational cost without a corresponding benefit. This mixed end-state, not "100% microservices," is what mature engineering orgs actually converge on.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Splitting services along technical layers (a "database service," a "business logic service") instead of business domain boundaries. This creates a distributed monolith — all the network overhead of microservices with none of the independent-deployability benefit, since every feature still touches both services together.</p></div>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Extracting a service before its boundary has stabilized. If the "right" boundary between order and inventory logic is still being discovered through iteration, splitting them into separate deployables turns every boundary-redrawing refactor into a cross-service API migration — vastly more expensive than renaming a function in one codebase.</p></div>
+      <ul>
+        <li>Default to a monolith (ideally modular) until you have a concrete, named reason to split — team contention, proven divergent scaling needs, or regulatory/ownership isolation requirements.</li>
+        <li>When you do split, use the strangler fig pattern — incremental extraction behind a stable routing layer, never a big-bang rewrite.</li>
+        <li>Budget for distributed tracing and correlation IDs from the first service split, not after the first unreproducible production incident.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs: When to Use vs When NOT To</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>Monolith</td><td>Small team, early-stage product, unclear domain boundaries</td><td>Genuine cross-team deploy contention at scale</td><td>Modular monolith</td></tr>
+        <tr><td>Modular monolith</td><td>Want clean boundaries without ops overhead; pre-extraction staging ground</td><td>Need independent scaling/deployment per module right now</td><td>Extract via strangler fig</td></tr>
+        <tr><td>Microservices</td><td>Proven boundaries, real team/scaling divergence, mature ops/observability</td><td>Small team, early product, no observability investment yet</td><td>Modular monolith</td></tr>
+        <tr><td>Synchronous calls</td><td>Caller needs the answer before responding to the user</td><td>Side effects that can happen after responding</td><td>Async via queue</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic"><h4>Basic</h4>
+        <details class="qa"><summary>What's the main organizational benefit of microservices?</summary><div class="answer"><p>Independent teams can deploy, scale, and own their services without blocking on each other's release cycles — it's primarily an organizational scaling benefit, not a purely technical one.</p></div></details>
+        <details class="qa"><summary>Name three costs of microservices that a monolith doesn't have.</summary><div class="answer"><p>Network calls replacing function calls (latency, failure modes), distributed debugging requiring tracing across services, and operational overhead of deploying/monitoring many services instead of one.</p></div></details>
+        <details class="qa"><summary>What is a modular monolith?</summary><div class="answer"><p>A single-deployable application internally structured into modules with explicit interfaces and no cross-module database access — giving design discipline without network/ops overhead.</p></div></details>
+        <details class="qa"><summary>What does an API gateway typically handle?</summary><div class="answer"><p>Routing to backend services, authentication/authorization at the edge, rate limiting, and response aggregation for clients.</p></div></details>
+        <details class="qa"><summary>What is the strangler fig pattern?</summary><div class="answer"><p>An incremental migration strategy where a routing layer sits in front of a monolith, and capabilities are extracted into new services one at a time, redirecting only that traffic slice, until the monolith is fully replaced or reduced.</p></div></details>
+        <details class="qa"><summary>What's the difference between synchronous and asynchronous service communication?</summary><div class="answer"><p>Synchronous calls block the caller waiting for a response, coupling the caller's effective availability to the callee's. Asynchronous communication via events lets the caller continue without waiting, decoupling availability at the cost of immediate consistency.</p></div></details>
+        <details class="qa"><summary>Why is a "big bang rewrite" from monolith to microservices considered risky?</summary><div class="answer"><p>It delays all value delivery until the full rewrite ships, carries a large blast radius if anything is wrong, and tends to re-implement boundaries that were never validated incrementally — the strangler fig avoids this by shipping and validating one extracted capability at a time.</p></div></details>
+      </div>
+      <div class="qa-level medium"><h4>Medium</h4>
+        <details class="qa"><summary>What is a "distributed monolith" and how does it happen?</summary><div class="answer"><p>It's a microservices architecture that still behaves like a monolith because services were split along technical layers rather than business domains — features require coordinated changes and deploys across multiple services, giving you network overhead with none of the independent-deployability benefit.</p></div></details>
+        <details class="qa"><summary>Explain the BFF pattern and the problem it solves that a single generic API gateway doesn't.</summary><div class="answer"><p>A single gateway API serving mobile, web, and third-party clients identically tends to over-fetch for constrained clients and under-fetch for richer ones. A BFF gives each client type its own tailored aggregation layer, optimizing payload shape and size per client's actual needs.</p></div></details>
+        <details class="qa"><summary>How do you decide whether a given failure mode (a dependency timing out) should fail the whole request or degrade gracefully?</summary><div class="answer"><p>Ask whether the dependency is on the critical correctness path (e.g., payment authorization) or an optional enhancement (e.g., "is this exact item in stock" on a product page) — critical paths propagate the failure, optional ones apply a fallback (fail open) and flag for reconciliation.</p></div></details>
+        <details class="qa"><summary>Why might extracting a service before its domain boundary is stable be more expensive than waiting?</summary><div class="answer"><p>Once a boundary is a network API, redrawing it (moving logic or data from one service to another) requires coordinated API changes, data migrations, and often dual-running old and new paths — vastly more expensive than a function-level refactor inside one codebase where the compiler/tests catch mistakes immediately.</p></div></details>
+        <details class="qa"><summary>Compare client-side and server-side service discovery.</summary><div class="answer"><p>Client-side discovery has each caller query a registry and choose an instance, pushing load-balancing logic into every client. Server-side discovery routes through a load balancer or mesh sidecar that handles lookup transparently, centralizing the logic — most modern platforms (Kubernetes, Istio) favor server-side for this reason.</p></div></details>
+        <details class="qa"><summary>Your team wants to split the monolith "because microservices are the industry standard." What questions would you ask before agreeing?</summary><div class="answer"><p>What specific team-scaling or deployment-contention problem exists today? Are domain boundaries stable enough to survive becoming network APIs? Do we have the observability (tracing, correlation IDs) and on-call maturity to debug distributed failures? What's the smallest capability we could extract first to validate the approach?</p></div></details>
+      </div>
+      <div class="qa-level advanced"><h4>Advanced</h4>
+        <details class="qa"><summary>Design a strangler-fig migration plan for extracting a "notifications" capability from a monolith with zero downtime.</summary><div class="answer"><p>Stand up the new notifications service behind the API gateway's routing layer. Have the monolith dual-write (or publish an event) to both the old internal notification code path and the new service during a transition window, verify output parity via shadow comparison/logging, then cut gateway routing for notification endpoints to the new service, and finally remove the old code path from the monolith once confidence is established over a monitored period.</p></div></details>
+        <details class="qa"><summary>How would you design timeout and fallback budgets across a 4-hop synchronous call chain (gateway → BFF → service A → service B) to keep p99 latency bounded?</summary><div class="answer"><p>Set an overall request budget (e.g., 500ms) at the gateway, then allocate sub-budgets per hop with margin for network overhead — e.g., BFF gets 400ms, service A gets 250ms of that, service B (called by A) gets 150ms — and every hop enforces its own timeout strictly rather than relying on the caller to give up, propagating a deadline header downstream so inner services know how much time is actually left rather than using fixed independent timeouts that can overrun the outer budget.</p></div></details>
+        <details class="qa"><summary>A company has split into 30 microservices but velocity has gotten worse, not better. Diagnose likely causes.</summary><div class="answer"><p>Likely a distributed monolith (services split along technical rather than business lines, so most features still require coordinated multi-service changes), insufficient investment in shared tooling/observability (every cross-service bug is a multi-hour trace-reconstruction exercise), or premature extraction that baked in boundaries that keep needing to be redrawn across network APIs instead of in one codebase.</p></div></details>
+        <details class="qa"><summary>How does a service mesh (e.g., Istio/Linkerd) change the API gateway's role and the service discovery story?</summary><div class="answer"><p>A service mesh pushes cross-cutting concerns (mTLS, retries, circuit breaking, fine-grained service discovery) into sidecar proxies at the infrastructure layer, so the API gateway can focus on edge concerns (external auth, public routing, rate limiting for external clients) while internal service-to-service traffic is handled transparently by the mesh — reducing how much of this logic needs to live in application code or the gateway itself.</p></div></details>
+        <details class="qa"><summary>When would you argue against adopting a BFF pattern even if you have multiple client types?</summary><div class="answer"><p>If client payload needs are nearly identical and the team is small, maintaining separate BFFs per client multiplies deployment and maintenance surface for marginal benefit — a single well-designed gateway with optional field selection (sparse fieldsets, GraphQL-style) can serve the same purpose with less operational overhead until client divergence becomes real and costly.</p></div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment"><span class="level-tag">Beginner (30-60 min)</span><h4>Argue both sides</h4><p>Pick a product you've worked on or know well. Write a one-paragraph argument for why it should be a monolith, and a one-paragraph argument for why it should be microservices, each grounded in specific facts about that product (team size, scaling profile, domain clarity) rather than generic statements.</p><ul><li>Each argument must cite at least 2 specific tradeoffs from this chapter.</li><li>End with your actual recommendation and why one argument wins.</li></ul><p><strong>Acceptance criteria:</strong> Both arguments are substantive and specific (not generic pros/cons lists), and the final recommendation logically follows from the stronger argument.</p><details class="qa"><summary>Hints</summary><div class="answer"><p>Focus on team size and deployment contention for the microservices case; focus on boundary stability and operational overhead for the monolith case.</p></div></details><p><strong>Bonus:</strong> Identify one capability in that product that would be a good strangler-fig extraction candidate, and why.</p></div>
+      <div class="assignment"><span class="level-tag">Intermediate (2-4 hrs)</span><h4>Build a mini BFF aggregation layer</h4><p>Implement two mock backend services (pricing and inventory, as simple Express/Fastify endpoints with artificial latency and a configurable failure rate) and a BFF layer that fans out to both in parallel, applies a fail-open fallback for inventory (treat as "assumed in stock" on failure/timeout), and returns one aggregated response.</p><ul><li>Use Promise.all with a per-call timeout as shown in the Code Examples section.</li><li>Demonstrate the fallback actually triggers when you set inventory's failure rate to 100%.</li></ul><p><strong>Acceptance criteria:</strong> The BFF never fails the overall request due to inventory failures, and correctly propagates failure when pricing (the non-optional dependency) fails.</p><details class="qa"><summary>Hints</summary><div class="answer"><p>Use .catch(() => null) on the inventory promise specifically, not on pricing, to encode which dependency is optional.</p></div></details><p><strong>Bonus:</strong> Add a circuit breaker so that after 5 consecutive inventory failures, the BFF stops calling it entirely for 30 seconds and always uses the fallback.</p></div>
+      <div class="assignment"><span class="level-tag">Advanced (1-2 days)</span><h4>Design a full strangler-fig migration for a real system</h4><p>Take a monolithic system (real or realistic — e.g., an e-commerce platform) and design a complete, ordered strangler-fig migration plan to extract 3 capabilities into services over roughly a year, without downtime.</p><ul><li>Justify the extraction order (which capability first, and why).</li><li>For each extraction, describe the routing cutover mechanism and how you'd validate correctness before fully cutting over (e.g., shadow traffic, dual writes).</li><li>Describe what the end-state architecture looks like — is it 100% microservices, or a mix with a modular monolith remaining?</li></ul><p><strong>Acceptance criteria:</strong> A written, ordered migration plan with explicit cutover and validation mechanics per capability, and a justified end-state that isn't automatically "everything becomes a microservice."</p><details class="qa"><summary>Hints</summary><div class="answer"><p>Order by: highest deployment-contention capability first, or the one with the clearest/most stable domain boundary first — these are usually the same capability. Consider shadow-comparing old vs new service outputs before cutting live traffic.</p></div></details><p><strong>Bonus:</strong> What's your rollback plan if the newly extracted service has a subtle correctness bug discovered two weeks after full cutover?</p></div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet"><ul>
+        <li>Microservices' real benefit is organizational (independent team deploys), not raw technical performance.</li>
+        <li>Costs: network calls replace function calls, distributed debugging needs tracing, operational overhead multiplies per service.</li>
+        <li>Default to a monolith (ideally modular) until you have a named, concrete reason to split.</li>
+        <li>Modular monolith = domain boundaries + single deploy; the ideal staging ground before any real extraction.</li>
+        <li>Split along business domain boundaries, never technical layers — the latter creates a distributed monolith.</li>
+        <li>Use the strangler fig pattern for migration — incremental extraction behind a stable routing layer, never big-bang.</li>
+        <li>API gateway handles routing/auth/rate-limiting/aggregation once at the edge instead of in every service.</li>
+        <li>BFF pattern tailors backend aggregation per client type (mobile vs web vs third-party) instead of one-size-fits-all.</li>
+        <li>Sync calls couple availability; async events decouple it at the cost of immediate consistency — choose per use case.</li>
+      </ul></div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://martinfowler.com/bliki/StranglerFigApplication.html">Martin Fowler — Strangler Fig Application</a></li>
+        <li><a href="https://martinfowler.com/articles/microservices.html">Martin Fowler — Microservices</a></li>
+        <li><a href="https://samnewman.io/books/building_microservices_2nd_edition/">Sam Newman — Building Microservices (2nd ed.)</a></li>
+        <li><a href="https://learn.microsoft.com/en-us/azure/architecture/patterns/backends-for-frontends">Microsoft — Backends for Frontends Pattern</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="08-message-queues.html"><span class="dir">← Previous</span>Message Queues & Event-Driven</a>
+        <a class="next" href="10-api-design.html"><span class="dir">Next →</span>API Design</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · System Design</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-typescript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-sql.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-yaml.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "01-system-design", chapterKey: "09-microservices" });</script>
+</body>
+</html>

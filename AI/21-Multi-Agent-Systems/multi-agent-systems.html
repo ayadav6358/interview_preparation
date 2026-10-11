@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Multi-Agent Systems</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <input class="searchbox" placeholder="Search topics..." />
+    <a href="../index.html">← Home</a>
+    <h3>21-Multi-Agent-Systems</h3>
+    <a href="multi-agent-systems.html">Multi-Agent Systems</a>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumbs"><a href="../index.html">Home</a> / 21-Multi-Agent-Systems</div>
+      <button class="theme-toggle" onclick="toggleTheme()">🌓 Theme</button>
+    </div>
+    <h1>Multi-Agent Systems</h1>
+    <span class="tag good">Stable</span><span class="tag">Last verified: 2026-10-06</span>
+
+    <div class="toc">
+      <b>On this page</b>
+      <a href="#what">1. What is this?</a>
+      <a href="#whyexist">2. Why does it exist?</a>
+      <a href="#whyimportant">3. Why is it important?</a>
+      <a href="#whereused">4. Where is it used?</a>
+      <a href="#prereq">5. Prerequisites</a>
+      <a href="#core">6. Core concepts</a>
+      <a href="#terms">7. Terminology</a>
+      <a href="#arch">8. Architecture</a>
+      <a href="#internal">9. How it works internally</a>
+      <a href="#steps">10. Step-by-step: designing a multi-agent system</a>
+      <a href="#simple">11. Simple example</a>
+      <a href="#real">12. Real-world example</a>
+      <a href="#code">13. Code example</a>
+      <a href="#advanced">14. Advanced example (debate pattern)</a>
+      <a href="#mistakes">15. Common mistakes</a>
+      <a href="#best">16. Best practices</a>
+      <a href="#production">17. Production considerations</a>
+      <a href="#security">18. Security considerations</a>
+      <a href="#performance">19. Performance considerations</a>
+      <a href="#cost">20. Cost considerations</a>
+      <a href="#debug">21. Debugging/troubleshooting</a>
+      <a href="#related">22. Related concepts</a>
+      <a href="#comparison">23. Single Agent vs Multi-Agent</a>
+      <a href="#exercise">24. Mini practical exercise</a>
+      <a href="#project">25. Practical project</a>
+      <a href="#projectarch">26. Project architecture</a>
+      <a href="#interview-b">27. Interview Questions — Beginner</a>
+      <a href="#interview-i">28. Interview Questions — Intermediate</a>
+      <a href="#interview-a">29. Interview Questions — Advanced</a>
+      <a href="#interview-s">30. Interview Questions — Senior/Architect</a>
+      <a href="#interview-sc">31. Scenario-Based Questions</a>
+      <a href="#revision">32. Quick revision notes</a>
+      <a href="#cheat">33. Cheat sheet</a>
+      <a href="#further">34. Further topics to learn</a>
+    </div>
+
+    <h2 id="what">1. What is this?</h2>
+    <p>A multi-agent system coordinates multiple specialized agents — each with its own role, prompt, tools, and sometimes model — to accomplish a task that benefits from decomposition, parallelism, or diverse perspectives, via patterns like hierarchical supervision, debate, or peer-to-peer delegation.</p>
+
+    <h2 id="whyexist">2. Why does it exist?</h2>
+    <p>A single agent juggling many different responsibilities/tools in one context can become unreliable and hard to maintain (similar to why monolithic prompts underperform decomposed ones); multi-agent systems exist to apply the software-engineering principle of separation of concerns to agentic AI.</p>
+
+    <h2 id="whyimportant">3. Why is it important?</h2>
+    <p>Multi-agent architecture is one of the most actively evolving and most interview-relevant areas of 2026 agentic AI — understanding communication patterns, coordination overhead, and failure modes is essential for designing production-grade multi-agent platforms.</p>
+
+    <h2 id="whereused">4. Where is it used?</h2>
+    <p>Complex research platforms, multi-domain customer support, software engineering agent teams (e.g., a planning agent + coding agent + testing agent), content pipelines (writer + editor + fact-checker agents).</p>
+
+    <h2 id="prereq">5. Prerequisites</h2>
+    <p><a href="../19-Agentic-AI/agentic-ai-architectures.html">Agentic AI Architectures</a>, <a href="../18-LangGraph/langgraph-fundamentals.html">LangGraph</a>.</p>
+
+    <h2 id="core">6. Core concepts</h2>
+    <ul>
+      <li><b>Agent-to-agent communication:</b> how agents exchange information/results — typically via shared state, message passing, or structured handoffs.</li>
+      <li><b>Hierarchical agents:</b> a supervisor delegates to sub-agents, which may themselves delegate further down.</li>
+      <li><b>Task delegation:</b> assigning a sub-task to the agent best suited for it.</li>
+      <li><b>Debate:</b> multiple agents argue different positions/approaches, with a final synthesis or vote improving robustness over a single perspective.</li>
+      <li><b>Critic/reviewer:</b> a dedicated agent checking other agents' outputs for quality/correctness.</li>
+    </ul>
+
+    <h2 id="terms">7. Terminology</h2>
+    <table>
+      <tr><th>Term</th><th>Meaning</th></tr>
+      <tr><td>Specialist agent</td><td>An agent scoped to a specific domain/task type.</td></tr>
+      <tr><td>Handoff</td><td>Transferring control/context from one agent to another.</td></tr>
+      <tr><td>Shared state</td><td>A common data structure multiple agents read/write (e.g., LangGraph's State).</td></tr>
+      <tr><td>Message passing</td><td>Agents communicating via discrete messages rather than shared mutable state.</td></tr>
+      <tr><td>Coordination overhead</td><td>The extra latency/cost/complexity introduced by managing multiple agents vs. one.</td></tr>
+    </table>
+
+    <h2 id="arch">8. Architecture</h2>
+    <pre><code>Hierarchical:
+ Supervisor → [Specialist A, Specialist B, Specialist C] → Supervisor integrates results
+
+Debate:
+ Agent A (position 1) ↘
+                        → Judge/Synthesizer → Final answer
+ Agent B (position 2) ↗
+
+Pipeline (sequential):
+ Writer Agent → Editor Agent → Fact-Checker Agent → Final output</code></pre>
+
+    <h2 id="internal">9. How it works internally</h2>
+    <p>Most practical multi-agent systems are implemented as a single orchestrating graph (e.g., LangGraph StateGraph) where each "agent" is a node (or sub-graph) with its own prompt/tools, and shared state carries information between them — true independent agent processes communicating over a network are less common in typical production systems than this orchestrated, single-process pattern, though distributed multi-agent systems (via A2A) are an emerging alternative for cross-organizational agent collaboration.</p>
+
+    <h2 id="steps">10. Step-by-step: designing a multi-agent system</h2>
+    <ol>
+      <li>Decompose the task into distinct, non-overlapping responsibility areas.</li>
+      <li>Decide the coordination pattern: hierarchical, pipeline, debate, or peer-to-peer.</li>
+      <li>Design the shared state/communication contract between agents.</li>
+      <li>Implement each specialist with its own scoped prompt and tools.</li>
+      <li>Add a final integration/synthesis step combining specialist outputs.</li>
+      <li>Evaluate against a single-agent baseline to confirm the added complexity is justified.</li>
+    </ol>
+
+    <h2 id="simple">11. Simple example</h2>
+    <p>A content pipeline: a Writer agent drafts an article, an Editor agent revises for clarity/style, and a Fact-Checker agent verifies claims against sources — each agent has a narrow, well-defined job, run sequentially.</p>
+
+    <h2 id="real">12. Real-world example</h2>
+    <p>A software-engineering multi-agent system might have a Planning agent breaking a feature request into tasks, a Coding agent implementing each task, and a Testing agent verifying the implementation — each specialized, communicating via a shared task-state structure, similar in spirit to how a human engineering team divides labor.</p>
+
+    <h2 id="code">13. Code example</h2>
+    <pre><code class="language-python">from langgraph.graph import StateGraph, START, END
+
+def writer(state):
+    return {"draft": generate_draft(state["topic"])}
+
+def editor(state):
+    return {"draft": edit_draft(state["draft"])}
+
+def fact_checker(state):
+    issues = check_facts(state["draft"])
+    return {"issues": issues}
+
+graph = StateGraph(ContentState)
+graph.add_node("writer", writer)
+graph.add_node("editor", editor)
+graph.add_node("fact_checker", fact_checker)
+graph.add_edge(START, "writer")
+graph.add_edge("writer", "editor")
+graph.add_edge("editor", "fact_checker")
+graph.add_edge("fact_checker", END)
+app = graph.compile()
+</code></pre>
+
+    <h2 id="advanced">14. Advanced example (debate pattern)</h2>
+    <pre><code class="language-python">def agent_for(position):
+    def fn(state):
+        return {f"argument_{position}": generate_argument(state["question"], position)}
+    return fn
+
+def judge(state):
+    return {"verdict": synthesize_verdict(state["argument_pro"], state["argument_con"])}
+
+graph.add_node("pro", agent_for("pro"))
+graph.add_node("con", agent_for("con"))
+graph.add_node("judge", judge)
+graph.add_edge(START, "pro")
+graph.add_edge(START, "con")  # parallel
+graph.add_edge("pro", "judge")
+graph.add_edge("con", "judge")
+graph.add_edge("judge", END)
+</code></pre>
+
+    <h2 id="mistakes">15. Common mistakes</h2>
+    <ul>
+      <li>Splitting a task into multiple agents when a single agent would handle it just as well at lower cost/complexity.</li>
+      <li>Poorly designed handoffs where context is lost between agents (the next agent doesn't have information the previous one had).</li>
+      <li>No clear ownership of the final decision/synthesis step, leading to inconsistent outputs.</li>
+      <li>Unbounded agent-to-agent back-and-forth without a termination/convergence condition.</li>
+    </ul>
+
+    <h2 id="best">16. Best practices</h2>
+    <ul>
+      <li>Only decompose into multiple agents when specialization/parallelism provides a measured benefit.</li>
+      <li>Design explicit, complete state/context handoffs — don't assume implicit knowledge transfer between agents.</li>
+      <li>Designate a clear final synthesis/integration responsibility.</li>
+      <li>Evaluate multi-agent systems against a single-agent baseline on cost, latency, and quality.</li>
+    </ul>
+
+    <h2 id="production">17. Production considerations</h2>
+    <p>Multi-agent systems multiply failure surface area — each agent can fail independently; design for partial failure (one specialist failing shouldn't necessarily crash the whole system) and instrument per-agent observability.</p>
+
+    <h2 id="security">18. Security considerations</h2>
+    <p>Different agents may need different tool permissions — enforce least-privilege scoping per agent role, and ensure a lower-privilege agent's output can't be used to manipulate a higher-privilege agent into taking unauthorized actions (a cross-agent injection risk).</p>
+
+    <h2 id="performance">19. Performance considerations</h2>
+    <p>Sequential multi-agent pipelines accumulate latency across every agent's LLM calls; use parallel execution (debate pattern, independent specialists) wherever sub-tasks don't have dependencies to reduce wall-clock time.</p>
+
+    <h2 id="cost">20. Cost considerations</h2>
+    <p>Cost multiplies with the number of agents invoked per task — carefully evaluate whether the quality/capability gain from each additional agent justifies its cost contribution.</p>
+
+    <h2 id="debug">21. Debugging/troubleshooting</h2>
+    <ul>
+      <li><b>Final output ignores a specialist's contribution:</b> check the synthesis step's prompt — it may not be properly incorporating all upstream state.</li>
+      <li><b>Agents produce inconsistent/contradictory outputs:</b> check for information loss in handoffs, or ambiguous role boundaries between agents.</li>
+      <li><b>High variance in multi-agent system latency:</b> profile each agent's individual latency contribution to find the bottleneck.</li>
+    </ul>
+
+    <h2 id="related">22. Related concepts</h2>
+    <p><a href="../19-Agentic-AI/agentic-ai-architectures.html">Agentic AI Architectures</a> · <a href="../18-LangGraph/langgraph-fundamentals.html">LangGraph</a> · <a href="../24-A2A/">A2A</a></p>
+
+    <h2 id="comparison">23. Single Agent vs Multi-Agent</h2>
+    <table>
+      <tr><th>Aspect</th><th>Single Agent</th><th>Multi-Agent</th></tr>
+      <tr><td>Complexity</td><td>Lower</td><td>Higher (coordination overhead)</td></tr>
+      <tr><td>Cost/latency</td><td>Lower</td><td>Higher (multiple LLM calls)</td></tr>
+      <tr><td>Best for</td><td>Tasks a single well-scoped prompt handles well</td><td>Tasks needing genuine specialization, parallelism, or diverse perspectives</td></tr>
+      <tr><td>Failure mode</td><td>Single point of failure, but simpler to debug</td><td>More failure surface, but can isolate/recover per-agent</td></tr>
+    </table>
+
+    <h2 id="exercise">24. Mini practical exercise</h2>
+    <p>Build the Writer → Editor → Fact-Checker pipeline above and compare its output quality against a single agent asked to "write, edit, and fact-check" in one prompt.</p>
+
+    <h2 id="project">25. Practical project</h2>
+    <p><b>Realistic Multi-Agent Project:</b> build a research-report system with a Research agent (gathers information via search tool), a Writer agent (drafts the report), and a Critic agent (reviews for gaps/inconsistencies, triggering revision if needed).</p>
+
+    <h2 id="projectarch">26. Project architecture</h2>
+    <pre><code>topic → research_agent (search tool, loop until sufficient info)
+ → writer_agent (draft report from research)
+ → critic_agent (review draft)
+ → conditional edge: issues found? → back to writer_agent : END
+eval: compare final report quality vs single-agent baseline</code></pre>
+
+    <h2 id="interview-b">27. Interview Questions — Beginner</h2>
+    <div class="qa"><b>Q1.</b> What is a multi-agent system?<br><b>A.</b> A system coordinating multiple specialized agents, each with its own role/tools, to accomplish a task that benefits from decomposition or diverse perspectives.</div>
+    <div class="qa"><b>Q2.</b> What is the debate pattern?<br><b>A.</b> Multiple agents argue different positions/approaches, with a final synthesis or judge combining or deciding between them.</div>
+    <div class="qa"><b>Q3.</b> What is hierarchical agent coordination?<br><b>A.</b> A supervisor agent delegates sub-tasks to specialist agents, which may themselves delegate further.</div>
+    <div class="qa"><b>Q4.</b> What is task delegation?<br><b>A.</b> Assigning a sub-task to the agent best suited to handle it.</div>
+    <div class="qa"><b>Q5.</b> Why would you use multiple agents instead of one?<br><b>A.</b> When specialization, parallelism, or diverse perspectives provide a measurable benefit over a single agent handling everything.</div>
+    <div class="qa"><b>Q6.</b> What's a risk of poorly designed agent handoffs?<br><b>A.</b> Context/information getting lost between agents, causing the next agent to lack information the previous one had.</div>
+    <div class="qa"><b>Q7.</b> What is shared state in a multi-agent system?<br><b>A.</b> A common data structure multiple agents read from and write to, used to pass information between them.</div>
+    <div class="qa"><b>Q8.</b> Does adding more agents always improve quality?<br><b>A.</b> No — it adds cost/latency/complexity; it should only be done when evaluation shows a measurable quality benefit.</div>
+    <div class="qa"><b>Q9.</b> What's a critic/reviewer agent's role?<br><b>A.</b> Checking other agents' outputs for quality/correctness, providing feedback for revision.</div>
+    <div class="qa"><b>Q10.</b> Is a multi-agent system usually more or less expensive than a single agent?<br><b>A.</b> More expensive — cost multiplies with the number of agents/LLM calls invoked per task.</div>
+
+    <h2 id="interview-i">28. Interview Questions — Intermediate</h2>
+    <div class="qa"><b>Q1.</b> How are most practical multi-agent systems actually implemented under the hood?<br><b>A.</b> As a single orchestrating graph (e.g., a LangGraph StateGraph) where each "agent" is a node or sub-graph with its own prompt/tools, communicating via shared state — rather than truly independent networked processes.</div>
+    <div class="qa"><b>Q2.</b> Why might the debate pattern produce more robust answers than a single agent for ambiguous/contested questions?<br><b>A.</b> Having agents explicitly argue different positions surfaces considerations a single agent's unified reasoning might converge past too quickly, and a final synthesis/judge step can weigh multiple perspectives rather than relying on one potentially biased or incomplete chain of reasoning.</div>
+    <div class="qa"><b>Q3.</b> What's a practical way to evaluate whether a multi-agent architecture is worth its added cost for a given task?<br><b>A.</b> Run both a single-agent baseline and the multi-agent system against the same evaluation set, comparing success rate, cost, and latency — if the baseline matches quality at lower cost, the decomposition isn't earning its complexity.</div>
+    <div class="qa"><b>Q4.</b> Why does cross-agent tool-permission scoping matter even within a single trusted application?<br><b>A.</b> A lower-privilege specialist agent's output (which could be influenced by injected or adversarial content) shouldn't be able to indirectly trigger a higher-privilege agent's sensitive actions — permission boundaries should be enforced structurally, not just assumed safe because it's "all one application."</div>
+    <div class="qa"><b>Q5.</b> How would you design the hand-off contract between a Research agent and a Writer agent to avoid information loss?<br><b>A.</b> Define an explicit structured schema (not just free text) for what the Research agent must output — e.g., a list of structured findings with sources — ensuring the Writer agent receives complete, well-organized information rather than relying on an ambiguous summary that might omit key details.</div>
+
+    <h2 id="interview-a">29. Interview Questions — Advanced</h2>
+    <div class="qa"><b>Q1.</b> How would you design a multi-agent system to degrade gracefully when one specialist agent fails or times out?<br><b>A.</b> Wrap each specialist's execution with error handling that captures failure into shared state rather than crashing the whole graph, define a fallback behavior per specialist (skip with a noted gap, retry, or substitute a simpler heuristic), and ensure the final synthesis step can still produce a reasonable (if degraded) output acknowledging the missing specialist's contribution rather than failing entirely.</div>
+    <div class="qa"><b>Q2.</b> What's a subtle coordination failure mode in a hierarchical multi-agent system where the Supervisor doesn't have full visibility into specialist agents' internal reasoning?<br><b>A.</b> The Supervisor might integrate specialist outputs without recognizing that a specialist's confident-sounding result was actually based on incomplete or low-confidence internal reasoning — mitigated by having specialists explicitly report confidence/caveats in their structured output, which the Supervisor's integration step is designed to weigh accordingly, rather than treating all specialist outputs as equally authoritative.</div>
+
+    <h2 id="interview-s">30. Interview Questions — Senior/Architect</h2>
+    <div class="qa"><b>Q1.</b> Design a realistic multi-agent software-engineering platform (planning, coding, testing agents) and address how you'd prevent it from being over-engineered relative to simpler alternatives.<br><b>A.</b> Start by prototyping the task with a single well-scoped coding agent and measure its failure modes; only introduce a separate Planning agent if evaluation shows the single agent struggles with task decomposition, and only introduce a separate Testing agent if a dedicated test-focused prompt/tool-set measurably improves bug-catch rate over the coding agent self-testing — justify each additional agent with a specific observed failure mode it addresses, and maintain the single-agent baseline as an ongoing cost/quality comparison point rather than assuming the multi-agent system is automatically superior.</div>
+
+    <h2 id="interview-sc">31. Scenario-Based Questions</h2>
+    <div class="qa"><b>Scenario 1.</b> Your multi-agent research pipeline produces lower-quality reports than when one agent did the whole job, despite more total LLM calls. What do you investigate?<br><b>A.</b> Check the hand-off contracts between agents for information loss (e.g., the Research agent's findings losing important nuance when summarized before reaching the Writer agent), and verify each specialist's prompt is actually well-scoped rather than each one trying to do too much or too little.</div>
+    <div class="qa"><b>Scenario 2.</b> A critic agent in your pipeline occasionally approves clearly flawed output from the primary agent. How do you improve reliability?<br><b>A.</b> Evaluate the critic's own accuracy against a labeled set of known-good and known-flawed outputs to check for miscalibration, consider using a different model or more specific evaluation criteria for the critic (rather than a vague "check for issues" prompt), and potentially add a rule-based/deterministic check for specific, verifiable failure modes alongside the LLM-based critique.</div>
+
+    <h2 id="revision">32. Quick revision notes</h2>
+    <ul>
+      <li>Multi-agent = specialized agents + coordination pattern (hierarchical, pipeline, debate).</li>
+      <li>Usually implemented as one orchestrating graph with shared state, not independent networked processes.</li>
+      <li>Only justified when specialization/parallelism provides measured benefit over single-agent baseline.</li>
+      <li>Design explicit handoff contracts; scope tool permissions per agent.</li>
+    </ul>
+
+    <h2 id="cheat">33. Cheat sheet</h2>
+    <div class="callout">Multi-agent patterns: hierarchical (supervisor + specialists), pipeline (sequential), debate (parallel + judge). Usually one orchestrating graph with shared state. Only adopt when measurably better than a single-agent baseline. Design explicit hand-off contracts; scope permissions per agent.</div>
+
+    <h2 id="further">34. Further topics to learn</h2>
+    <p><a href="../24-A2A/">A2A</a> → <a href="../22-MCP/">MCP</a> → <a href="../47-AI-Design-Patterns/">AI Design Patterns</a></p>
+
+    <div class="prevnext">
+      <a href="../20-Agent-Memory/agent-memory-fundamentals.html">← Agent Memory</a>
+      <a href="../22-MCP/mcp-fundamentals.html">Next: MCP →</a>
+    </div>
+  </main>
+</div>
+<script src="../assets/app.js"></script>
+</body>
+</html>

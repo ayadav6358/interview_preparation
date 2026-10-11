@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>The DOM & Browser Environment — Web Fundamentals — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">Web Fundamentals</a><span class="sep">›</span>The DOM & Browser Environment</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>The DOM &amp; Browser Environment: DOM Tree, Events &amp; Delegation, Rendering Pipeline</h1>
+      <p class="meta-line"><span>⏱ 2 hrs</span><span>📍 Chapter 3 of 6</span></p>
+      <p><strong>One-line summary:</strong> React, Vue, and every other framework are just elaborate ways of generating DOM operations and event listeners under the hood — understanding the real DOM, event delegation, and the browser's rendering pipeline is what lets you reason about performance and bugs that leak through the abstraction.</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>Every framework you use daily compiles down to DOM mutations and event listeners. When something is slow or behaves strangely — a click handler firing twice, a re-render causing jank, an event not bubbling the way you expect through a portal — the framework's abstraction leaks and you're debugging the real DOM and the real event system. Interviewers test this directly because "how would you implement event delegation from scratch" or "explain reflow vs repaint" reveals whether you understand what's underneath React, not just how to call its APIs. This chapter is the direct bridge into <a href="../12-react-fundamentals/index.html">React Fundamentals</a>, where the synthetic event system, the virtual DOM diffing, and `useEffect` timing all map directly onto the concepts here.</p>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>Builds directly on <a href="01-html-css-fundamentals.html">Chapter 1 (HTML/CSS, rendering pipeline basics)</a> and <a href="02-javascript-fundamentals.html">Chapter 2 (JS fundamentals, closures, this)</a>. Assumed knowledge for <a href="../12-react-fundamentals/index.html">React Fundamentals</a> and <a href="../03-react-nextjs-advanced/index.html">React/Next.js Advanced</a> (virtual DOM reconciliation, synthetic events, effect timing).</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="dom-tree">The DOM tree: nodes, not just elements</h3>
+      <p>The DOM is a tree of <strong>Node</strong> objects, not just element nodes — text nodes, comment nodes, and the document itself are all nodes. `element.childNodes` includes text/comment nodes; `element.children` includes only element nodes — a frequent source of off-by-one bugs when iterating. The DOM is <strong>live</strong>: a reference obtained via `getElementsByClassName`/`getElementsByTagName` returns a live `HTMLCollection` that automatically updates as the DOM changes, whereas `querySelectorAll` returns a <strong>static</strong> `NodeList` snapshot taken at call time — iterating and mutating the DOM mid-loop behaves very differently depending on which API you used, a classic gotcha.</p>
+
+      <h3 id="selecting-manipulating">Selecting and manipulating efficiently</h3>
+      <p>`innerHTML` re-parses the entire subtree as HTML every time it's set — expensive, and it destroys any event listeners/state attached to existing child nodes (and is an XSS vector if the content includes unsanitized user input). `textContent` is the safe, fast choice for plain text. For building up multiple nodes before insertion, use a `DocumentFragment` — it batches insertions into a single reflow instead of triggering layout on every `appendChild` call in a loop, which matters when inserting hundreds of rows.</p>
+      <p>`classList` (`add`/`remove`/`toggle`/`contains`) is preferred over manually concatenating `className` strings — it avoids duplicate-class bugs and reads clearly. `dataset` gives typed-ish access to `data-*` attributes (`el.dataset.userId` reads `data-user-id`, auto-converting kebab-case to camelCase).</p>
+
+      <h3 id="events-delegation">Events, bubbling/capturing, and delegation</h3>
+      <p>DOM events propagate in three phases: <strong>capturing</strong> (root → target, listeners added with `{capture: true}` fire here), <strong>target</strong> (the element itself), and <strong>bubbling</strong> (target → root, the default phase for most listeners). `event.stopPropagation()` halts further propagation; `event.stopImmediatePropagation()` additionally stops other listeners on the <em>same</em> element from firing; `event.preventDefault()` is unrelated to propagation — it cancels the browser's default action (e.g., link navigation, form submit) without affecting bubbling at all. A very common interview trip-up: candidates conflate `stopPropagation` with `preventDefault` — they solve different problems and are often both needed together but for different reasons.</p>
+      <p><strong>Event delegation</strong> exploits bubbling: instead of attaching a listener to every row in a 10,000-row table, attach one listener to the table's container and inspect `event.target` (or `event.target.closest('.row')`) to determine what was actually clicked. This scales to dynamically added rows with zero extra listener wiring (no "remember to attach a listener to new elements" bugs) and uses dramatically less memory than thousands of individual listeners.</p>
+
+      <h3 id="rendering-pipeline">The rendering pipeline: reflow vs repaint vs composite</h3>
+      <p>Building on Chapter 1's pipeline (DOM+CSSOM → Render Tree → Layout → Paint → Composite): reading layout-dependent properties (`offsetHeight`, `getBoundingClientRect()`, `scrollTop`, computed styles) forces the browser to synchronously flush any pending layout work immediately rather than batching it — this is called a <strong>forced synchronous layout</strong> (a.k.a. "layout thrashing" when done repeatedly in a loop). The classic anti-pattern: reading `el.offsetHeight` and then writing a style, repeated across 100 elements in a loop — each iteration forces a fresh synchronous layout because the write invalidates the layout the next read needs to recompute. The fix is to batch all reads first, then all writes ("read-write-read-write" → "read-read...-write-write...").</p>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>When you click a button, the browser creates an `Event` object and walks the DOM tree from `window`/`document` down to the target element (capturing phase), invoking any capture-phase listeners along the way; at the target, it fires target-phase listeners in attachment order; then it walks back up (bubbling phase), invoking bubble-phase listeners on each ancestor, unless `stopPropagation()` was called. Browsers batch multiple DOM mutations within the same synchronous task into a single layout/paint pass at the end of the task (or before the next frame) — this is why mutating the DOM 50 times in a `for` loop within one function call usually costs one reflow, not 50, <em>unless</em> you interleave a layout-forcing read between each write, which defeats the batching entirely.</p>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+flowchart TD
+    A["Click occurs on a nested button"] --> B["Capturing phase:<br/>window → document → ... → button's parent"]
+    B --> C["Target phase:<br/>listeners on the button itself fire"]
+    C --> D["Bubbling phase:<br/>button → parent → ... → document → window"]
+    D --> E{"stopPropagation() called?"}
+    E -->|Yes| F["Propagation halts,<br/>ancestor listeners never fire"]
+    E -->|No| G["All ancestor bubble listeners fire in order"]
+      </div>
+      <div class="mermaid">
+sequenceDiagram
+    participant JS as JS (loop)
+    participant Layout as Layout Engine
+    JS->>JS: el.style.width = '100px' (write 1)
+    JS->>Layout: el.offsetHeight (read, forces sync layout!)
+    Layout-->>JS: current height
+    JS->>JS: el2.style.width = '100px' (write 2)
+    JS->>Layout: el2.offsetHeight (read, forces sync layout AGAIN)
+    Note over JS,Layout: Interleaved read/write = layout thrashing.<br/>Batching all writes then all reads = 1 layout, not N.
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-javascript">// BAD: a listener per row — doesn't scale, misses dynamically added rows
+document.querySelectorAll('.row').forEach(row => {
+  row.addEventListener('click', () => handleRowClick(row));
+});
+
+// GOOD: event delegation — one listener, handles any current or future row
+document.querySelector('.table-body').addEventListener('click', (event) => {
+  const row = event.target.closest('.row');
+  if (!row) return; // click was on padding/whitespace, not an actual row
+  handleRowClick(row);
+});
+</code></pre>
+      <pre><code class="language-javascript">// BAD: layout thrashing — interleaved reads and writes force N synchronous layouts
+const boxes = document.querySelectorAll('.box');
+boxes.forEach(box => {
+  const height = box.offsetHeight;      // READ — forces layout flush
+  box.style.height = height + 10 + 'px'; // WRITE — invalidates layout for the next read
+});
+
+// GOOD: batch reads, then batch writes — one layout for the whole loop
+const heights = Array.from(boxes).map(box => box.offsetHeight); // all reads first
+boxes.forEach((box, i) => { box.style.height = heights[i] + 10 + 'px'; }); // all writes after
+</code></pre>
+      <pre><code class="language-javascript">// DocumentFragment batches 1000 insertions into a single reflow
+const fragment = document.createDocumentFragment();
+for (let i = 0; i < 1000; i++) {
+  const li = document.createElement('li');
+  li.textContent = `Item ${i}`;
+  fragment.appendChild(li); // no reflow yet — fragment isn't in the live DOM
+}
+document.querySelector('ul').appendChild(fragment); // single reflow for all 1000 items
+</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4><p>A legacy admin panel renders a 5,000-row data table where each row gets its own click listener for row-selection, attached via `row.addEventListener` at render time. On page load, attaching 5,000 listeners measurably delays interactivity (visible as input lag right after load), and whenever a filter re-renders a subset of rows, the old listeners on removed nodes leak until garbage collected, while new rows need fresh listeners wired up correctly — a frequent source of "I added a row and it's not clickable" bugs. Replacing it with a single delegated listener on the table body container eliminates both problems: one listener total regardless of row count, and newly rendered rows work immediately with zero additional wiring since the listener lives on the stable parent, not the row nodes that come and go. This is also exactly the mental model behind how React's synthetic event system works internally — it attaches listeners near the root and dispatches synthetically, for the same performance reasons.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Confusing `stopPropagation()` with `preventDefault()`. They are unrelated: `preventDefault()` stops the browser's default action (navigation, form submit, checkbox toggle) and has zero effect on whether the event continues bubbling; `stopPropagation()` stops further propagation but has zero effect on default actions. Many bugs need both, called explicitly, for different reasons.</p></div>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Iterating over a live `HTMLCollection` (from `getElementsByClassName`) while removing matched elements inside the loop — the collection shrinks as you go, silently skipping elements. Convert to a static array first (`Array.from(collection)`) before mutating, or iterate backwards.</p></div>
+      <ul>
+        <li>Prefer event delegation for any list that's long, dynamic, or both — one listener, no leak risk, works for future elements automatically.</li>
+        <li>Batch DOM reads and writes separately to avoid forced synchronous layout thrashing in loops.</li>
+        <li>Use `textContent` over `innerHTML` whenever you're not intentionally inserting markup — faster and immune to that particular XSS vector.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs: When to Use vs When NOT To</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>Event delegation</td><td>Long or dynamic lists, unknown future elements</td><td>Very few, static, rarely-interacted elements</td><td>Direct per-element listeners</td></tr>
+        <tr><td>`innerHTML`</td><td>Inserting trusted, pre-sanitized markup in bulk</td><td>Plain text content, user-generated content</td><td>`textContent`, `DocumentFragment` + `createElement`</td></tr>
+        <tr><td>`querySelectorAll`</td><td>Need a stable snapshot to iterate/mutate safely</td><td>Need the collection to auto-update as DOM changes</td><td>`getElementsByClassName`/`TagName` (live collection)</td></tr>
+        <tr><td>Capture-phase listeners</td><td>Need to intercept before a child can stop propagation</td><td>Normal UI interaction handling</td><td>Default bubble-phase listeners</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic"><h4>Basic</h4>
+        <details class="qa"><summary>What's the difference between `childNodes` and `children`?</summary><div class="answer"><p>`childNodes` includes all node types (text, comment, element); `children` includes only element nodes.</p></div></details>
+        <details class="qa"><summary>What are the three phases of DOM event propagation?</summary><div class="answer"><p>Capturing (root to target), target (the element itself), and bubbling (target back up to root) — most listeners run in the bubbling phase by default.</p></div></details>
+        <details class="qa"><summary>What's the difference between `stopPropagation()` and `preventDefault()`?</summary><div class="answer"><p>`stopPropagation()` stops the event from continuing to bubble/capture to other elements. `preventDefault()` cancels the browser's default action for that event (e.g., link navigation). They're independent — neither implies the other.</p></div></details>
+        <details class="qa"><summary>Why is event delegation more efficient than attaching a listener per element?</summary><div class="answer"><p>One listener on a stable ancestor uses far less memory than thousands of individual listeners, and it automatically covers elements added later without needing to wire up new listeners.</p></div></details>
+        <details class="qa"><summary>What's the difference between `textContent` and `innerHTML`?</summary><div class="answer"><p>`textContent` sets/reads plain text with no HTML parsing (fast, safe). `innerHTML` parses the string as HTML, creating real nodes, which is slower and an XSS risk if the content includes unsanitized user input.</p></div></details>
+        <details class="qa"><summary>What's a `DocumentFragment` and why use one?</summary><div class="answer"><p>A lightweight, not-yet-attached container for building up multiple DOM nodes; appending many children to it triggers no reflow, since it's outside the live DOM. Appending the whole fragment to the document afterward triggers only a single reflow instead of one per node.</p></div></details>
+      </div>
+      <div class="qa-level medium"><h4>Medium</h4>
+        <details class="qa"><summary>Implement event delegation for a list where clicking a "delete" button inside any row should remove that row, without attaching a listener to each button.</summary><div class="answer"><p>Attach one click listener to the list container; inside, check `event.target.closest('.delete-btn')` — if found, find the enclosing row via `.closest('.row')` and remove it. This works for rows added after the listener was attached with zero extra wiring.</p></div></details>
+        <details class="qa"><summary>Why does reading `element.offsetHeight` immediately after writing a style in a loop cause performance problems?</summary><div class="answer"><p>The read forces the browser to synchronously flush any pending layout work to return an accurate value ("forced synchronous layout" / layout thrashing), since the preceding write invalidated the cached layout. Doing this in a loop (write, read, write, read...) forces one full layout computation per iteration instead of one for the whole batch.</p></div></details>
+        <details class="qa"><summary>What's the difference between a live `HTMLCollection` and a static `NodeList`, and why does it matter when mutating the DOM mid-iteration?</summary><div class="answer"><p>`getElementsByClassName`/`TagName` return a live collection that updates automatically as matching elements are added/removed — iterating and removing matched elements mid-loop causes the collection to shrink under you, skipping elements. `querySelectorAll` returns a static snapshot unaffected by subsequent DOM changes, safe to iterate while mutating.</p></div></details>
+        <details class="qa"><summary>How would you detect which specific child was clicked inside a deeply nested delegated handler, when the click might land on an icon or span inside the actual target element?</summary><div class="answer"><p>Use `event.target.closest(selector)` to walk up from the actual click target to the nearest ancestor matching your intended interactive element (e.g., `.row` or `button`), rather than relying on `event.target` directly, which may be a deeply nested decorative child.</p></div></details>
+        <details class="qa"><summary>Why might `stopImmediatePropagation()` be needed even when `stopPropagation()` already stops bubbling to ancestors?</summary><div class="answer"><p>`stopPropagation()` prevents the event from reaching other elements, but other listeners already attached to the *same* element still run. `stopImmediatePropagation()` additionally prevents any remaining listeners on that same element from firing, useful when multiple independent listeners are attached to one node and an earlier one needs to fully short-circuit the rest.</p></div></details>
+      </div>
+      <div class="qa-level advanced"><h4>Advanced</h4>
+        <details class="qa"><summary>Explain how React's synthetic event system relates to native DOM event delegation, and why React historically attached listeners at the root rather than per-element.</summary><div class="answer"><p>React (pre-18, at the document root; React 17+, at the root DOM container) attaches a small number of native listeners near the top of the tree and internally dispatches a normalized "synthetic event" to the appropriate component handlers by walking its own virtual tree — this is the exact same delegation principle as attaching one listener to a table body, applied application-wide, which is why React apps don't pay a per-element native-listener cost even though every component appears to have its own `onClick`.</p></div></details>
+        <details class="qa"><summary>Design a strategy to render a 50,000-row table without freezing the main thread, using only vanilla DOM APIs.</summary><div class="answer"><p>Use virtualization: render only the ~30-50 rows currently visible in the viewport (plus a small buffer), recycling/repositioning DOM nodes as the user scrolls, driven by `scroll` events (throttled or via `IntersectionObserver`) and absolute positioning based on row height × index. Combine with event delegation on the scroll container so row interaction listeners don't scale with total row count. Insert/update visible rows via a `DocumentFragment` to batch the reflow.</p></div></details>
+        <details class="qa"><summary>Why does a forced synchronous layout happen specifically on reads like `offsetHeight` but not on most writes like `el.style.color = 'red'`?</summary><div class="answer"><p>A write just schedules an invalidation — the browser can defer recomputation until it actually needs accurate values, batching many writes into one pass before the next paint. A read of a layout-dependent property needs a currently-correct value to return synchronously, so if there's a pending invalidation, the browser has no choice but to run layout immediately rather than return a stale number — the engine can't lazily defer answering a direct question.</p></div></details>
+        <details class="qa"><summary>How would you detect and fix layout thrashing in a production app without a profiler, using only code review heuristics?</summary><div class="answer"><p>Grep for layout-triggering reads (`offsetHeight/Width/Top/Left`, `getBoundingClientRect`, `scrollTop/Height`, `getComputedStyle`) that appear inside loops or interleaved with style writes to the same or sibling elements. The fix pattern is always the same: separate the code into a read pass (collect all needed measurements into plain variables/arrays first) followed by a write pass, so only one layout recomputation is needed for the whole batch instead of one per interleaved read.</p></div></details>
+        <details class="qa"><summary>Explain capture-phase listeners with a real use case where they're necessary instead of the default bubble phase.</summary><div class="answer"><p>A capture-phase listener fires before any descendant's listeners, which matters when you need to intercept or log an interaction regardless of whether a child's handler later calls `stopPropagation()` to prevent bubbling — e.g., a global analytics/click-tracking listener registered with `{capture: true}` on `document` will still see every click even if individual components stop the event from bubbling back up for their own purposes.</p></div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment"><span class="level-tag">Beginner (30-60 min)</span><h4>Convert per-element listeners to delegation</h4><p>Take (or write) a small list of 20 buttons each with their own click listener doing something like toggling a CSS class, and refactor it to a single delegated listener on the parent container that achieves the same behavior.</p><ul><li>Verify a button added dynamically after page load still works with zero extra code.</li><li>Use `closest()` correctly to identify the clicked button even if it contains a nested `&lt;span&gt;` icon.</li></ul><p><strong>Acceptance criteria:</strong> One listener total handles all current and future buttons correctly.</p><details class="qa"><summary>Hints</summary><div class="answer"><p>Attach the listener to the common parent; inside, use `event.target.closest('button')` to find the actual button regardless of what inner element was clicked.</p></div></details><p><strong>Bonus:</strong> Add a capture-phase logging listener on `document` that logs every click before the delegated handler runs, even if the delegated handler calls `stopPropagation()`.</p></div>
+      <div class="assignment"><span class="level-tag">Intermediate (2-4 hrs)</span><h4>Fix a layout-thrashing function</h4><p>Write (or find) a function that resizes 200 elements based on their current height in a naive read-write-interleaved loop, measure its execution time, then refactor it to batch reads and writes separately and measure the improvement.</p><ul><li>Use `performance.now()` to measure before/after execution time.</li><li>Explain in writing why the batched version avoids forced synchronous layout.</li></ul><p><strong>Acceptance criteria:</strong> Demonstrable, measured performance improvement with a correct explanation of the mechanism, not just "it's faster."</p><details class="qa"><summary>Hints</summary><div class="answer"><p>Collect all `offsetHeight` reads into an array first, then apply all style writes in a second pass over the same array of elements.</p></div></details><p><strong>Bonus:</strong> Use the browser's Performance panel to visually confirm the number of "Layout" (purple) events drops from ~200 to 1.</p></div>
+      <div class="assignment"><span class="level-tag">Advanced (1-2 days)</span><h4>Build a virtualized list component in vanilla JS</h4><p>Implement a scrollable list that renders 50,000 items but only ever keeps ~30-60 real DOM nodes alive at once, repositioning/recycling them as the user scrolls, using a single delegated click listener for row interactions.</p><ul><li>Must remain smooth (no visible jank) scrolling through all 50,000 rows on a mid-range device/throttled CPU.</li><li>Row click handling must work correctly for any row, including ones that have been recycled (reused DOM node, different underlying data) multiple times.</li></ul><p><strong>Acceptance criteria:</strong> Scroll performance stays smooth throughout the full list, and clicking any visible row correctly identifies the right underlying data item despite DOM node recycling.</p><details class="qa"><summary>Hints</summary><div class="answer"><p>Track each visible row's data index via a `data-index` attribute kept in sync with whatever data it currently displays; compute which indices should be visible from `scrollTop` and row height, and only touch nodes whose assigned data index needs to change on scroll.</p></div></details><p><strong>Bonus:</strong> Compare your implementation's complexity and behavior to how React virtualization libraries (e.g., react-window) solve the same problem, and note what they handle that you didn't.</p></div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet"><ul>
+        <li>`childNodes` = all node types; `children` = element nodes only.</li>
+        <li>Events propagate: capturing (root→target) → target → bubbling (target→root). Most listeners are bubble-phase by default.</li>
+        <li>`stopPropagation()` ≠ `preventDefault()` — one stops propagation, the other cancels default browser action; independent of each other.</li>
+        <li>Event delegation: one listener on a stable ancestor + `event.target.closest(selector)`, scales to dynamic/huge lists.</li>
+        <li>`textContent` is fast and XSS-safe; `innerHTML` re-parses HTML and is an injection risk with untrusted input.</li>
+        <li>`getElementsByClassName`/`TagName` return live collections; `querySelectorAll` returns a static snapshot.</li>
+        <li>Reading `offsetHeight`/`getBoundingClientRect`/etc. forces a synchronous layout flush if layout is pending — batch reads before writes to avoid thrashing.</li>
+        <li>`DocumentFragment` batches many node insertions into a single reflow.</li>
+        <li>React's synthetic event system is application-scale event delegation, not a new concept.</li>
+      </ul></div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://developer.mozilla.org/en-US/docs/Web/API/Document_Object_Model/Events">MDN — Introduction to events</a></li>
+        <li><a href="https://developer.mozilla.org/en-US/docs/Web/API/Event/stopPropagation">MDN — Event.stopPropagation()</a></li>
+        <li><a href="https://web.dev/articles/avoid-large-complex-layouts-and-layout-thrashing">web.dev — Avoid large, complex layouts and layout thrashing</a></li>
+        <li><a href="https://developer.mozilla.org/en-US/docs/Web/API/Document_Object_Model">MDN — Document Object Model (DOM)</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="02-javascript-fundamentals.html"><span class="dir">← Previous</span>JavaScript Fundamentals</a>
+        <a class="next" href="04-http-and-networking-basics.html"><span class="dir">Next →</span>HTTP & Networking Basics</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · Web Fundamentals</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-javascript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "11-web-fundamentals", chapterKey: "03-dom-and-browser" });</script>
+</body>
+</html>

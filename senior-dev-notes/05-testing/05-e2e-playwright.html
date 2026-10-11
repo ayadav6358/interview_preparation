@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>E2E Testing with Playwright — Testing — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">Testing</a><span class="sep">›</span>E2E Testing with Playwright</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>E2E Testing with Playwright</h1>
+      <p class="meta-line"><span>⏱ 3 hrs</span><span>📍 Chapter 5 of 6</span></p>
+      <p><strong>One-line summary:</strong> Playwright's auto-waiting and retrying actionability checks eliminate
+      almost all of the manual-sleep flakiness that plagued older E2E tools — but only if you understand exactly
+      what it waits for and stop fighting it with your own timeouts and sleeps.</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>E2E suites have a reputation for being the flakiest, most-hated part of a test pyramid, and that
+      reputation is usually earned by misuse, not by the tool. A senior engineer should know precisely why
+      Playwright is structurally less flaky than Selenium-era tools (auto-waiting built into every action, not
+      bolted on), should be able to design a suite that stays in the "dozens of tests, minutes not hours" tier the
+      pyramid calls for, and should be able to diagnose a flaky E2E test by reading a trace instead of guessing and
+      adding a sleep. This is one of the highest-leverage skills to demonstrate in an interview, because it
+      signals you can be trusted to own CI health, not just add more tests.</p>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>Read <a href="01-testing-strategy.html">Testing Strategy</a> first. Related:
+      <a href="04-api-integration-testing.html">API & Integration Testing</a>.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="architecture">How Playwright is architected — why it's less flaky by design</h3>
+      <p>Playwright drives real browser engines (Chromium, Firefox, WebKit) over each browser's native automation
+      protocol (e.g., the Chrome DevTools Protocol for Chromium), communicating over a persistent WebSocket
+      connection rather than the older WebDriver HTTP-per-command model Selenium uses. This gives Playwright direct,
+      low-latency access to real browser-internal events — it can know precisely when a frame has navigated, when
+      a network request has settled, when an element has actually been painted and is stable — instead of
+      Selenium's model of issuing a command and polling for an externally-observable DOM state.</p>
+
+      <h3 id="auto-waiting">Auto-waiting and actionability checks — the actual mechanism</h3>
+      <p>Before performing any action (click, fill, check), Playwright runs a sequence of <strong>actionability
+      checks</strong> on the target element and retries the whole check sequence until they all pass or a timeout
+      is hit (default 30s, configurable): the element must be <strong>attached</strong> to the DOM,
+      <strong>visible</strong> (has non-empty bounding box, not <code>display:none</code>/<code>visibility:hidden</code>),
+      <strong>stable</strong> (not mid-animation — its bounding box hasn't changed across two consecutive animation
+      frames), able to <strong>receive events</strong> (not obscured by another element on top of it at that point),
+      and <strong>enabled</strong> (not <code>disabled</code>). This is why <code>await page.click('button')</code>
+      with zero extra code correctly waits out a fade-in animation, a loading spinner being replaced, or a modal
+      finishing its entrance transition — the manual <code>sleep(500)</code> calls common in older Selenium suites
+      exist specifically to work around the absence of this mechanism, and are almost always unnecessary (and
+      actively harmful — both slower than needed, and still occasionally too short) in Playwright.</p>
+
+      <h3 id="locators-vs-elementhandles">Locators vs ElementHandles — a critical distinction</h3>
+      <p>A <code>Locator</code> (<code>page.locator('button')</code>, or the role-based
+      <code>page.getByRole('button')</code>) is a <em>description</em> of how to find an element, re-resolved
+      against the live DOM every time you act on it. An <code>ElementHandle</code> is a direct, static reference
+      to one specific DOM node at the moment it was captured — if that node gets removed and a new one with the
+      same content is re-rendered (very common in React, which frequently unmounts/remounts nodes on state
+      changes), the handle goes stale and the next action on it fails outright, with no retry possible, because
+      there's no "re-finding" mechanism for a handle. Locators are Playwright's modern recommended default
+      specifically because they tolerate this churn — every action re-queries the DOM fresh and re-runs
+      actionability checks against whatever matches right now.</p>
+
+      <h3 id="retry-mechanics">Retries and flake triage: test-level retries vs assertion-level retries</h3>
+      <ul>
+        <li><strong>Web-first assertions</strong> (<code>expect(locator).toBeVisible()</code>,
+        <code>.toHaveText()</code>) are themselves retrying — they poll the condition until it's true or the
+        timeout elapses, exactly like locator actions. This is different from a plain
+        <code>expect(await locator.textContent()).toBe(...)</code>, which captures the text content once,
+        synchronously, with no retry — a very common source of flakiness when someone "simplifies" a web-first
+        assertion into a plain one.</li>
+        <li><strong>Test-level retries</strong> (configured via <code>retries: N</code> in the config, typically
+        only enabled in CI) re-run an entire failed test from scratch up to N times. This is a blunt instrument —
+        appropriate as a safety net for genuinely external nondeterminism (a flaky third-party widget), but
+        dangerous as a substitute for fixing a real race condition, since it silently hides the underlying flake
+        rate instead of surfacing it.</li>
+      </ul>
+
+      <h3 id="test-isolation-browser">Test isolation: browser contexts, not full browser restarts</h3>
+      <p>Playwright gives each test a fresh <strong>BrowserContext</strong> (think: an incognito-style isolated
+      session — its own cookies, localStorage, cache) by default, without paying the cost of launching a whole new
+      browser process per test — the underlying browser binary stays running and is reused across many contexts.
+      This is what makes Playwright's isolation both strong (no cross-test cookie/storage leakage) and fast
+      (context creation is cheap compared to full browser startup), unlike older tools that often had to restart
+      the whole browser to get comparable isolation.</p>
+
+      <h3 id="network-interception">Network interception and mocking at the E2E layer</h3>
+      <p><code>page.route()</code> intercepts real network requests the page makes and lets you fulfill them with
+      custom responses, block them, or let them continue to the real network — useful for deterministically
+      testing error states (simulate a 500 from a third-party API) or speeding up a test by stubbing a slow
+      non-critical third-party script, without resorting to a full "mocked backend" that would defeat the purpose
+      of an E2E test for the parts that matter.</p>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>When a test fails, Playwright can capture a <strong>trace</strong> — a full timeline of every action,
+      network request, console message, and DOM snapshot at each step, viewable in the Trace Viewer as an
+      interactive timeline you can scrub through frame by frame, including a live DOM snapshot you can inspect as
+      if you had the browser's devtools open at that exact moment. This is architecturally possible because
+      Playwright's CDP-based connection already has access to this level of browser-internal detail as part of
+      normal operation — it's not bolted on after the fact like video recording alone would be. In CI,
+      configuring <code>trace: 'on-first-retry'</code> captures a trace only when a test actually fails and gets
+      retried, avoiding the overhead of tracing every passing run while still guaranteeing you have the richest
+      possible debugging artifact for every real failure.</p>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+sequenceDiagram
+  participant T as Test
+  participant PW as Playwright
+  participant B as Real browser (CDP)
+  T->>PW: await page.getByRole('button', {name:'Submit'}).click()
+  loop until timeout or all checks pass
+    PW->>B: resolve locator against live DOM
+    PW->>B: check: attached? visible? stable? receives events? enabled?
+  end
+  PW->>B: dispatch real click
+  B-->>PW: navigation / network activity begins
+  PW->>B: auto-wait for next action's target similarly
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-typescript">import { test, expect } from '@playwright/test';
+
+test.describe('checkout flow', () => {
+  test('user can complete checkout end to end', async ({ page }) => {
+    await page.goto('/cart');
+
+    // Locator-based, role-first query — matches RTL's priority philosophy for the same accessibility reason
+    await page.getByRole('button', { name: 'Proceed to checkout' }).click();
+    // No sleep needed: Playwright auto-waits for the next page's content to be attached+visible+stable
+
+    await page.getByLabel('Card number').fill('4242 4242 4242 4242');
+    await page.getByLabel('Expiry').fill('12/30');
+    await page.getByRole('button', { name: 'Pay now' }).click();
+
+    // Web-first assertion: POLLS until true or timeout — correct way to wait for async UI
+    await expect(page.getByRole('heading', { name: 'Order confirmed' })).toBeVisible();
+
+    // BAD (anti-pattern) — plain assertion with no retry, captures content once synchronously:
+    // const text = await page.getByRole('heading').textContent();
+    // expect(text).toBe('Order confirmed'); // flaky if the heading hasn't updated yet at this exact instant
+  });
+
+  test('shows a clean error when payment provider returns 500', async ({ page }) => {
+    await page.goto('/cart');
+    // Network interception: deterministically simulate a third-party failure
+    await page.route('**/api/payments', route =>
+      route.fulfill({ status: 500, body: JSON.stringify({ error: 'provider_down' }) })
+    );
+
+    await page.getByRole('button', { name: 'Proceed to checkout' }).click();
+    await page.getByLabel('Card number').fill('4242 4242 4242 4242');
+    await page.getByRole('button', { name: 'Pay now' }).click();
+
+    await expect(page.getByRole('alert')).toHaveText(/payment failed/i);
+  });
+});
+
+// ANTI-PATTERN: manual sleep instead of trusting auto-wait / web-first assertions
+// test('BAD', async ({ page }) => {
+//   await page.goto('/cart');
+//   await page.click('button#checkout');
+//   await page.waitForTimeout(2000); // arbitrary guess — too short sometimes, wastes time always
+//   await expect(page.locator('h1')).toHaveText('Order confirmed');
+// });
+
+// ElementHandle staleness pitfall — avoid capturing handles across a re-render
+// const handle = await page.$('button#submit'); // snapshot reference
+// await someActionThatCausesReactToRemount();
+// await handle.click(); // throws: "element is not attached to the DOM" — the handle is stale
+// GOOD: use a Locator instead, which re-resolves fresh every time:
+// await page.locator('button#submit').click(); // works even after a remount</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4><p>A travel-booking company's E2E suite had grown to 400 Playwright
+      tests over two years, taking 50 minutes in CI with a roughly 5% flake rate that engineers had started
+      "fixing" by bumping <code>test.setTimeout()</code> globally and adding <code>retries: 3</code> in CI — which
+      masked the real failures without reducing their frequency, just hiding them behind automatic re-runs. A
+      focused audit using Trace Viewer on a sample of retried-but-passed tests found the actual root cause: several
+      tests asserted on `textContent()` captured once immediately after a click, racing a React state update that
+      hadn't committed yet — exactly the "plain assertion with no retry" anti-pattern. Converting those assertions
+      to web-first `expect(locator).toHaveText()` form eliminated the race without changing any waiting logic by
+      hand, dropped the flake rate to under 0.5%, and let the team safely remove the blanket retries (keeping a
+      single retry only as a genuine safety net, not a crutch) — while the real lesson for the org was that the 400-test
+      suite itself was oversized: a follow-up audit found 60 of those tests were re-verifying business logic
+      already covered by unit/component tests and were migrated down the pyramid, cutting CI time by another 40%.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4><p><code>page.waitForTimeout(ms)</code> is a hard-coded sleep with no
+      actual condition to wait for — it exists in the API mainly for debugging, not for test logic. Every use of it
+      in a real test is either masking a race condition that should be fixed properly (via a web-first assertion or
+      an explicit wait for a specific condition like a network response or a locator state) or wasting CI time
+      waiting longer than necessary "to be safe." Treat any `waitForTimeout` in a PR as a code-review red flag.</p></div>
+      <ul>
+        <li><strong>Mistake:</strong> capturing an <code>ElementHandle</code> and reusing it across an action that
+        causes a React re-render/remount — it goes stale with no automatic recovery, unlike a Locator which
+        re-resolves fresh on every use.</li>
+        <li><strong>Mistake:</strong> using CSS selectors tied to styling/structure (<code>.css-1a2b3c</code>,
+        <code>div > div:nth-child(3)</code>) instead of role/text/label-based locators — brittle against any
+        markup or styling refactor, and invisible to what a real user actually perceives, same lesson as RTL's
+        query priority.</li>
+        <li><strong>Mistake:</strong> reaching for test-level <code>retries</code> as the default fix for any
+        flaky test, instead of using it only as a last-resort safety net after investigating with Trace Viewer —
+        retries hide the true flake rate from everyone, including future engineers who'll trust a green CI run
+        that silently needed two attempts.</li>
+        <li><strong>Best practice:</strong> keep the E2E suite scoped to true critical user journeys (the pyramid's
+        top layer should stay small) — if a test is really verifying business logic rather than wiring/UX, push it
+        down to a unit or component test instead.</li>
+        <li><strong>Best practice:</strong> enable <code>trace: 'on-first-retry'</code> and screenshot/video
+        capture on failure in CI by default — the cost is near-zero for passing runs and it turns every real
+        failure into a debuggable artifact instead of a mystery.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>Locator-based queries</td><td>Almost always — the modern Playwright default</td><td>Rare low-level cases needing a direct node reference for a specific API not exposed on Locator</td><td>ElementHandle (sparingly)</td></tr>
+        <tr><td>Web-first assertions (`expect(locator).toHaveText()`)</td><td>Any assertion on async/changing UI state</td><td>Truly synchronous, already-settled state (rare in E2E) where the extra polling adds no value</td><td>Plain assertion on a captured value</td></tr>
+        <tr><td>Test-level retries in CI</td><td>Safety net for rare, understood, truly external nondeterminism</td><td>Default fix for any flaky test without investigation — hides the real flake rate</td><td>Fix the race via proper waiting; investigate with Trace Viewer first</td></tr>
+        <tr><td>Network interception (`page.route`)</td><td>Deterministically testing error paths, or stubbing slow non-critical third parties</td><td>Mocking the core system under test itself — defeats the point of an E2E test</td><td>Let the real backend run; use a real test environment</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic">
+        <h4>Basic</h4>
+        <details class="qa"><summary>What does "auto-waiting" mean in Playwright?</summary><div class="answer"><p>Before performing an action, Playwright automatically retries a sequence of actionability checks (attached, visible, stable, receives events, enabled) on the target element until they all pass or a timeout is reached, instead of requiring the test author to manually wait or sleep.</p></div><div class="followup">Follow-up: name one of the actionability checks.</div></details>
+        <details class="qa"><summary>What's the difference between a Locator and an ElementHandle?</summary><div class="answer"><p>A Locator is a description re-resolved against the live DOM every time you act on it; an ElementHandle is a static reference to one specific DOM node at capture time, which goes stale (and fails with no retry) if that node is removed/replaced.</p></div><div class="followup">Follow-up: why are React apps especially prone to ElementHandle staleness?</div></details>
+        <details class="qa"><summary>Why is `page.waitForTimeout()` generally discouraged in real tests?</summary><div class="answer"><p>It's a hard-coded sleep with no actual condition — either too short (still flaky) or too long (wastes CI time), and it masks whatever real race condition made someone reach for it instead of fixing the underlying wait properly.</p></div><div class="followup">Follow-up: what should you use instead when waiting for an element to appear?</div></details>
+        <details class="qa"><summary>What's a web-first assertion, and how is it different from a plain assertion?</summary><div class="answer"><p>A web-first assertion like `expect(locator).toHaveText()` polls the condition until it's true or times out. A plain assertion captures a value once synchronously (e.g., `await locator.textContent()` then `expect(...).toBe()`) with no retry, which can race an async UI update.</p></div><div class="followup">Follow-up: give an example of converting a flaky plain assertion to a web-first one.</div></details>
+        <details class="qa"><summary>What isolation does Playwright give each test by default?</summary><div class="answer"><p>A fresh BrowserContext per test — an isolated session with its own cookies/localStorage/cache — without needing to restart the whole browser process, since the underlying browser binary is reused across contexts.</p></div><div class="followup">Follow-up: why is this both fast and strongly isolated?</div></details>
+        <details class="qa"><summary>What's the risk of enabling `retries: 3` in CI as a blanket default?</summary><div class="answer"><p>It hides the real flake rate — a test that "passes" after 2 retries is still flaky, but the green checkmark gives false confidence, and it can mask real race conditions that should be fixed rather than retried away.</p></div><div class="followup">Follow-up: when is a retry policy actually appropriate?</div></details>
+      </div>
+      <div class="qa-level medium">
+        <h4>Medium</h4>
+        <details class="qa"><summary>Explain mechanically why Playwright is structurally less flaky than older Selenium-based E2E tools.</summary><div class="answer"><p>Playwright communicates with the real browser over a persistent low-latency protocol (e.g., CDP for Chromium) with direct access to browser-internal events, and every action/assertion is built on retrying actionability checks or condition polling by default. Selenium's WebDriver HTTP-per-command model has no built-in actionability retry — each command either succeeds or fails against the DOM state at that instant, which is why Selenium suites historically needed manual explicit waits/sleeps that Playwright makes largely unnecessary.</p></div><div class="followup">Follow-up: does this mean Playwright tests can never be flaky — why or why not?</div></details>
+        <details class="qa"><summary>A test clicks a button, then immediately asserts on a heading's text using `textContent()` captured into a variable, and it's flaky about 2% of the time. Diagnose and fix.</summary><div class="answer"><p>`textContent()` is a one-time, non-retrying read — if the click triggers an async state update (e.g., a fetch-then-setState), there's a race between when the DOM actually updates and when the synchronous `textContent()` call executes. Fix: replace with a web-first assertion, `await expect(locator).toHaveText(...)`, which polls until the text matches or times out, removing the race entirely without adding any explicit wait.</p></div><div class="followup">Follow-up: why might this bug have a low (not 100%) flake rate rather than failing every time?</div></details>
+        <details class="qa"><summary>How would you use Playwright's trace viewer to diagnose a test that fails only in CI, never locally?</summary><div class="answer"><p>Enable `trace: 'on-first-retry'` (or 'on' temporarily) in the CI config so a trace is captured for the actual CI failure, download the trace artifact, and open it in Trace Viewer to scrub through the exact timeline of actions, network requests, and DOM snapshots at the moment of failure — looking specifically for things that differ between CI and local (slower CPU causing a timing-dependent race, different viewport/font rendering, a network call that's slower under CI's resource constraints).</p></div><div class="followup">Follow-up: what CI-specific environmental factors commonly explain "only fails in CI"?</div></details>
+        <details class="qa"><summary>When would you reach for `page.route()` network interception in an E2E test, and when would that cross the line into "this isn't really an E2E test anymore"?</summary><div class="answer"><p>Legitimate uses: deterministically testing an error path that's hard to trigger from the real backend (simulating a third-party payment provider's 500), or stubbing a genuinely slow/irrelevant third-party script to speed up the test. It crosses the line when you start mocking the core system under test itself (your own backend API) — at that point you've built an integration test wearing an E2E test's clothing, losing the main value E2E provides (verifying the real wiring end to end) while still paying E2E's cost (real browser, slower test).</p></div><div class="followup">Follow-up: how would you decide which backend calls are safe to intercept versus which must stay real?</div></details>
+        <details class="qa"><summary>Why does Playwright recommend role/text/label-based locators over CSS selectors tied to class names or DOM structure?</summary><div class="answer"><p>Class-name/structure-based selectors couple the test to implementation details that change on any styling or markup refactor, causing brittle test failures unrelated to real behavior regressions — the same lesson as RTL's query priority. Role/text/label-based locators match how a real user (or assistive technology) perceives the page, survive refactors that don't change user-facing behavior, and double as an implicit accessibility check.</p></div><div class="followup">Follow-up: what would you do if a critical element genuinely has no good role, text, or label to query by?</div></details>
+        <details class="qa"><summary>How would you keep an E2E suite from growing unboundedly as a codebase adds features, given E2E's cost at the top of the pyramid?</summary><div class="answer"><p>Set an explicit policy: a new E2E test requires justification that the thing being verified (critical journey, real cross-system wiring) genuinely can't be covered by a cheaper layer; periodically audit the existing suite for tests that have drifted into re-verifying business logic or UI details already covered elsewhere, and migrate them down; track CI time and flake rate as the health metrics that trigger a deliberate re-balancing pass rather than letting the suite grow by accretion.</p></div><div class="followup">Follow-up: who should own this review — the feature team adding the test, or a dedicated QA/platform team?</div></details>
+      </div>
+      <div class="qa-level advanced">
+        <h4>Advanced</h4>
+        <details class="qa"><summary>Design a Playwright CI strategy for a monorepo with a React frontend and multiple backend services, where E2E tests must run against a full, realistic environment without being prohibitively slow.</summary><div class="answer"><p>Build and spin up all services (or use Testcontainers/Docker Compose) as part of CI, ideally per-PR using an ephemeral environment rather than a shared staging environment to avoid cross-PR contention and flakiness; run the frontend build in production mode (not dev server) since dev-mode behavior can differ meaningfully; shard the E2E suite across parallel CI workers (Playwright's built-in sharding) to keep wall-clock time bounded even as the suite grows modestly; keep the suite itself intentionally small (dozens, covering only true critical journeys) per pyramid principles, with heavier logic coverage pushed to unit/integration layers that run faster and in parallel earlier in the pipeline so E2E only runs after cheaper checks have already passed (fail-fast ordering).</p></div><div class="followup">Follow-up: how would you handle test data setup/teardown across multiple services' databases for each ephemeral environment?</div></details>
+        <details class="qa"><summary>How would you test a feature that depends on real-time updates via WebSockets (e.g., a live notification appearing without a page refresh)?</summary><div class="answer"><p>Drive the real flow end to end: perform the action in one browser context/tab that should trigger the server to push the WebSocket message, and assert in a second context/tab (or the same page, depending on the feature) using a web-first assertion (`expect(locator).toBeVisible()`) that polls until the pushed update actually renders — avoiding any manual sleep by trusting the assertion's own retry loop to absorb the real (variable) network/push latency. For multi-client scenarios, Playwright supports multiple browser contexts within one test specifically to simulate two independent users/sessions interacting through the real backend.</p></div><div class="followup">Follow-up: how would you keep this test from being flaky if the WebSocket push has highly variable latency under load?</div></details>
+        <details class="qa"><summary>Your team wants to add Playwright-based visual regression testing (screenshot diffing) to the same suite as functional E2E tests. What architectural concerns would you raise?</summary><div class="answer"><p>Visual diffing is sensitive to non-deterministic rendering factors (font rendering/anti-aliasing differences across OS/CI runners, animation timing, dynamic content like timestamps or ads) that functional tests don't care about, so naively mixing them in the same suite/run risks a high false-positive rate degrading trust in the whole suite. Recommend a separate job/pipeline for visual tests, pinned to a consistent rendering environment (same OS/browser version, ideally the same actual CI runner image every time), with dynamic content masked/frozen (fixed test data, disabled animations, mocked clock) before each screenshot, and a deliberately curated, reviewed baseline set rather than screenshotting every page.</p></div><div class="followup">Follow-up: how would you handle an intentional design change that should update dozens of baselines at once?</div></details>
+        <details class="qa"><summary>A Playwright test occasionally fails with "element is not attached to the DOM" despite using Locators (not ElementHandles), which should auto-retry. How is this possible, and how would you debug it?</summary><div class="answer"><p>This can happen when an action resolves the locator, actionability checks pass, but between the check and the actual low-level action dispatch, a re-render replaces the node (a narrow race Playwright's retry loop usually absorbs on the next retry, but can occasionally surface as a transient dispatch-level error depending on the specific action and timing) — or, more commonly in practice, the locator's selector is ambiguous/non-specific enough to match a *different* transient node on each resolution (e.g., a list item locator that matches a loading skeleton briefly before the real item renders in the same DOM position). Debug via Trace Viewer's DOM snapshots across the failure window to see exactly what was present at each retry attempt, and tighten the locator (more specific role/text/parent scoping) if it's matching the wrong transient element.</p></div><div class="followup">Follow-up: how would you write a Playwright locator that's robust to a loading-skeleton-then-real-content swap pattern?</div></details>
+        <details class="qa"><summary>How would you decide whether a specific flaky E2E test should be fixed, quarantined, or deleted, given limited team bandwidth?</summary><div class="answer"><p>First classify the root cause via trace analysis: a genuine, fixable race (missing web-first assertion, wrong wait) should always be fixed — it's usually cheap. A test whose flakiness comes from a real, hard-to-control external dependency (a third-party widget with no sandbox) is a candidate for quarantine (tagged, excluded from the required/blocking CI gate, tracked separately) while a longer-term fix (mocking that dependency at the network layer) is planned. A test that, on reflection, is re-verifying something already covered at a cheaper layer and whose flakiness cost now exceeds its marginal confidence value should simply be deleted — deleting a low-value flaky test is often the correct call and shouldn't be treated as giving up.</p></div><div class="followup">Follow-up: how would you present the "just delete it" recommendation to a team that's emotionally attached to high test counts as a proxy for quality?</div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment">
+        <span class="level-tag">Beginner (30-60 min)</span>
+        <h4>First Playwright test with role-based locators</h4>
+        <p>Write a Playwright test against any simple public page (or a small local app) that performs a search or
+        navigation action and verifies the result, using only role/label/text-based locators.</p>
+        <ul>
+          <li>No CSS class selectors or `waitForTimeout` calls allowed.</li>
+          <li>Use a web-first assertion for the final check.</li>
+        </ul>
+        <p><strong>Acceptance criteria:</strong> the test passes reliably across 10 repeated runs with no sleeps.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>Use Playwright's codegen tool (`npx playwright codegen <url>`) to see what locators it suggests, then critique whether they match role-priority best practice.</p></div></details>
+        <p><strong>Bonus:</strong> add a screenshot assertion for the final state and discuss when that would and wouldn't be a good idea.</p>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Intermediate (2-4 hrs)</span>
+        <h4>Build and deliberately debug a flaky test</h4>
+        <p>Build a small React app with an async action (button triggers a fetch-then-setState). Write a Playwright
+        test using the anti-pattern (`textContent()` captured immediately after click, no await on a web-first
+        assertion) and confirm it's flaky over 20 runs.</p>
+        <ul>
+          <li>Record the flake rate.</li>
+          <li>Fix it using a proper web-first assertion.</li>
+          <li>Re-run 20 times and confirm 0% flake rate.</li>
+          <li>Capture a trace from one of the original flaky failures and write up what it shows.</li>
+        </ul>
+        <p><strong>Acceptance criteria:</strong> measurable before/after flake rate; trace-based writeup correctly
+        identifies the race.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>Artificially add a small random delay to the fetch to make the race reliably reproducible rather than rare.</p></div></details>
+        <p><strong>Bonus:</strong> intentionally introduce an ElementHandle-staleness bug and diagnose it the same way.</p>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Advanced (1-2 days)</span>
+        <h4>Design a tiered E2E + CI pipeline for a small full-stack app</h4>
+        <p>Take any small full-stack app (yours, or a simple one you build for this exercise) and design a complete
+        CI pipeline around its E2E layer.</p>
+        <ul>
+          <li>Pick 2-3 genuinely critical user journeys only — justify in writing why each belongs at the E2E layer and not lower.</li>
+          <li>Set up sharding across at least 2 parallel workers.</li>
+          <li>Configure trace/screenshot/video capture on failure only.</li>
+          <li>Add one network-interception test for an error path that would be hard to trigger against the real backend.</li>
+          <li>Wire a fail-fast ordering: unit/integration run first, E2E only runs if those pass.</li>
+        </ul>
+        <p><strong>Acceptance criteria:</strong> pipeline runs green on a clean checkout; a deliberately introduced
+        regression in one of the 2-3 critical journeys is caught; CI time is measured and documented.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>This assignment is intentionally open on app choice — the evaluated skill is pipeline design and justification, not the app itself.</p></div></details>
+        <p><strong>Bonus:</strong> add a quarantine mechanism (a tag + a separate non-blocking CI job) for a test you deliberately make flaky, and justify the quarantine decision in writing.</p>
+      </div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet"><ul>
+        <li>Playwright uses a persistent low-latency protocol (CDP etc.) for direct browser-internal visibility — structurally less flaky than WebDriver-per-command tools.</li>
+        <li>Auto-waiting checks before every action: attached, visible, stable, receives events, enabled — retried until timeout.</li>
+        <li>Locators re-resolve against the live DOM every use; ElementHandles are static snapshots that go stale with no retry.</li>
+        <li>Web-first assertions (`expect(locator).toHaveText()`) poll until true; plain assertions on captured values don't retry — convert flaky plain assertions to web-first ones.</li>
+        <li>`waitForTimeout` is a red flag in review — it masks a race rather than fixing it.</li>
+        <li>Each test gets a fresh BrowserContext (isolated cookies/storage) without restarting the browser process — fast + isolated.</li>
+        <li>`page.route()` for deterministic error-path testing or stubbing slow third parties — never for mocking the core system under test.</li>
+        <li>Prefer role/text/label locators over CSS class/structure selectors — same accessibility-aligned reasoning as RTL.</li>
+        <li>Trace Viewer gives a full scrubbable timeline (actions, network, DOM snapshots) for every captured failure — use `trace: 'on-first-retry'`.</li>
+        <li>Test-level retries are a safety net, not a fix — investigate with traces before reaching for them; keep the E2E layer small (critical journeys only).</li>
+      </ul></div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://playwright.dev/docs/actionability">Playwright — Actionability</a></li>
+        <li><a href="https://playwright.dev/docs/best-practices">Playwright — Best Practices</a></li>
+        <li><a href="https://playwright.dev/docs/trace-viewer">Playwright — Trace Viewer</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="04-api-integration-testing.html"><span class="dir">← Previous</span>API & Integration Testing</a>
+        <a class="next" href="06-tdd-coverage-ci.html"><span class="dir">Next →</span>TDD, Coverage, CI</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · Testing</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-typescript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-jsx.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "05-testing", chapterKey: "05-e2e-playwright" });</script>
+</body>
+</html>

@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Git & Version Control — Web Fundamentals — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">Web Fundamentals</a><span class="sep">›</span>Git & Version Control</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>Git &amp; Version Control: Commits, Branches, Merge vs Rebase, Conflict Resolution</h1>
+      <p class="meta-line"><span>⏱ 2 hrs</span><span>📍 Chapter 5 of 6</span></p>
+      <p><strong>One-line summary:</strong> Git is a content-addressed graph of immutable snapshots, not a list of diffs — once you hold that model precisely, rebase, merge, reflog, and conflict resolution stop being magic incantations and become predictable graph surgery.</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>You use `git commit`/`push`/`pull` dozens of times a day. What separates a senior from someone who's memorized a few commands is being able to explain precisely what `rebase` does to the commit graph, confidently recover from a bad `reset --hard` via `reflog`, and resolve a gnarly three-way conflict without panicking or nuking someone's work. Interviewers ask "explain rebase vs merge" not to test trivia but because the answer reveals whether you understand Git's actual data model or are just pattern-matching command sequences — and in real teams, the person who understands the graph is the one who gets called when someone's history is a mess.</p>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p><a href="06-bash-and-terminal-basics.html">Chapter 6 (Bash basics)</a> is helpful alongside this chapter since Git is used from the shell, though no strict ordering is required. Relevant to daily work in every other topic on this site, especially the capstones in <a href="../03-react-nextjs-advanced/index.html">React/Next.js Advanced</a> and <a href="../04-nodejs-advanced/index.html">Node.js Advanced</a>, which expect a clean commit history as part of evaluation.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="data-model">Git's actual data model: snapshots, not diffs</h3>
+      <p>The most important mental-model correction for "experienced but imprecise" Git users: <strong>a commit is a full snapshot of the entire tracked tree, not a diff</strong>. Git computes diffs on the fly for display, but what's stored is a tree object (a snapshot of directory structure) pointed to by the commit, plus pointers to parent commit(s). Every object (blob = file content, tree = directory listing, commit = snapshot + metadata + parent pointer(s)) is addressed by the SHA-1/SHA-256 hash of its own content — this is why Git can deduplicate identical file content across the entire history for free (two unrelated commits with an identical file literally point to the same blob object) and why changing a commit's content changes its hash, which cascades to change every descendant commit's hash too (since each commit's hash includes its parent's hash).</p>
+      <p>A branch is nothing more than a movable pointer (a 41-byte file containing a commit SHA) to a commit — `git branch feature` doesn't copy anything, it just writes a new pointer. `HEAD` is a pointer to "the branch you're currently on" (or directly to a commit, in "detached HEAD" state). This is why branching in Git is instant and cheap regardless of repo size — it's just writing one small file, not copying a tree.</p>
+
+      <h3 id="merge-vs-rebase">Merge vs rebase — what each actually does to the graph</h3>
+      <p><strong>Merge</strong> creates a new commit with <em>two parents</em>, joining two divergent histories without altering any existing commit — history is preserved exactly as it happened, including the fact that work diverged and was later joined. <strong>Rebase</strong> does not create a merge commit; instead it replays your branch's commits one at a time onto a new base, creating entirely new commits (new hashes, since the parent changed) with the same content/diff but a different history — the result looks as if you'd branched off the new base from the start, i.e., it <em>rewrites history</em> to be linear.</p>
+      <p>The critical, precise rule: <strong>never rebase commits that have been pushed and that others may have already based work on</strong> — because rebase creates new commits with new hashes, anyone who pulled the old commits now has a diverged, incompatible history from the rewritten ones, and reconciling the two requires either a forced push (destructive for collaborators) or a painful manual reconciliation. Rebase is safe and preferred for <em>local, not-yet-shared</em> work, specifically to clean up a messy sequence of WIP commits into a readable linear history before sharing it via a pull request.</p>
+
+      <h3 id="conflicts">Resolving conflicts, precisely</h3>
+      <p>A conflict happens when a merge/rebase can't automatically reconcile overlapping changes to the same lines. Git inserts conflict markers (`&lt;&lt;&lt;&lt;&lt;&lt;&lt; HEAD`, `=======`, `&gt;&gt;&gt;&gt;&gt;&gt;&gt; branch-name`) directly into the affected file(s) and pauses the operation, leaving the working directory in a special conflicted state (visible via `git status`). Resolving means manually editing the file to the desired final content (removing the markers), then `git add` to mark that specific conflict resolved, and finally `git commit` (for a merge) or `git rebase --continue` (for a rebase) to proceed. Critically: during a rebase conflict, you resolve-and-continue <em>per replayed commit</em> — if commit 3 of 5 conflicts, you fix it, continue, and may hit another conflict at commit 4, because each commit is being individually replayed onto a shifting base.</p>
+
+      <h3 id="daily-workflow">A sane daily workflow</h3>
+      <p>Feature branches off an up-to-date main/trunk; small, focused commits with meaningful messages (a commit should represent one logical change, reviewable independently); `git pull --rebase` (or fetch+rebase explicitly) to incorporate upstream changes into your branch without creating noisy merge commits for simple "catch up with main" syncs; interactive rebase (`git rebase -i`) to squash/reorder/edit local WIP commits into a clean story before opening a PR; merge (not rebase) when integrating a finished, reviewed feature branch back into main, to preserve the record that it was a discrete unit of work. `git reflog` is the safety net — it records every position `HEAD` has pointed to, even after a `reset --hard` or an abandoned rebase, letting you recover "lost" commits that are still technically reachable for a grace period before garbage collection.</p>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>Concretely, a `git rebase feature onto main`: Git finds the common ancestor of `feature` and `main`, identifies every commit unique to `feature` since that ancestor, then replays each one — in order — as a brand-new commit applied on top of `main`'s current tip. "Replaying" literally means computing that commit's diff and attempting to apply it to the new base; if the lines it touches have also changed on the new base, that's a conflict, which pauses the whole operation at that specific commit until you resolve and `git rebase --continue`. Once all commits have replayed successfully, the branch pointer `feature` moves to point at the final new commit — the old commits still technically exist in the object database (reachable via reflog) until garbage collected, but nothing points to them anymore in the normal graph.</p>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+gitGraph
+    commit id: "A"
+    commit id: "B"
+    branch feature
+    checkout feature
+    commit id: "C"
+    commit id: "D"
+    checkout main
+    commit id: "E"
+    merge feature id: "Merge commit (2 parents)"
+      </div>
+      <div class="mermaid">
+flowchart TD
+    A["Before rebase:<br/>main: A-B-E<br/>feature: A-B-C-D (branched at B)"] --> B["git rebase main (while on feature)"]
+    B --> C["Git replays C as C' on top of E"]
+    C --> D["Git replays D as D' on top of C'"]
+    D --> E["After: main: A-B-E<br/>feature: A-B-E-C'-D' (linear, new hashes)"]
+    E --> F["Original C, D still exist in object DB,<br/>recoverable via git reflog until GC'd"]
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-bash"># Clean up messy local WIP commits before opening a PR (safe — not yet pushed/shared)
+git log --oneline            # see: a1b2c3 wip, d4e5f6 wip2, g7h8i9 fix typo
+git rebase -i HEAD~3          # opens editor with 3 commits to squash/reorder/edit
+# In the editor: change "pick" to "squash" (or "s") for commits to merge into the previous one
+
+# Catching your feature branch up with main WITHOUT a merge commit (local/unshared work)
+git fetch origin
+git rebase origin/main
+
+# Resolving a conflict step by step
+git status                    # shows "both modified: src/app.js"
+# Open src/app.js, find the <<<<<<< ======= >>>>>>> markers, edit to final desired content
+git add src/app.js            # mark THIS conflict resolved
+git rebase --continue         # or `git merge --continue` / just `git commit` if mid-merge
+
+# Recovering "lost" work after an accidental reset --hard
+git reflog                    # shows every HEAD position, including the one before the reset
+git checkout &lt;sha-from-reflog&gt;      # inspect it
+git branch recovered-work &lt;sha-from-reflog&gt;  # create a branch pointing at the recovered commit
+</code></pre>
+      <pre><code class="language-bash"># Merge vs rebase, same starting point, different resulting graph
+# MERGE (preserves history exactly, adds a 2-parent merge commit):
+git checkout main
+git merge feature
+# Result: main now has a new commit with parents [old-main-tip, feature-tip]
+
+# REBASE (linearizes history, rewrites feature's commits):
+git checkout feature
+git rebase main
+# Result: feature's commits are replayed with NEW hashes on top of main's tip
+# main itself is untouched until you later fast-forward merge feature into it
+</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4><p>A 15-engineer team shares a `feature/checkout-redesign` branch for a two-week effort, with multiple people pushing to it daily. One engineer, trying to "clean up" the shared branch, runs `git rebase -i` on it and force-pushes. Every other engineer's local clone of that branch is now based on commits that no longer exist upstream (the rewritten ones have new hashes) — their next `git pull` either creates a confusing merge of old-and-new-but-identical-content commits, or fails outright, and several people's unpushed local work ends up orphaned or duplicated when they try to reconcile. The incident is resolved by treating the force-pushed rebase as the authority, having everyone hard-reset their local branch to the new upstream tip, and manually re-applying (via `git cherry-pick` or just re-committing) any genuinely unpushed local work salvaged from `git reflog` before the reset. The lasting lesson that gets written into the team's Git policy: rebase is for commits only you have ever pushed; once a branch is shared and others have pulled it, only merge (or, if rebase is truly necessary, with explicit team-wide coordination and a hard cutover) is safe.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Rebasing a branch that others have already pulled/based work on, then force-pushing. This rewrites history out from under every collaborator who already has the old commits, producing duplicate or orphaned commits on their end. Rule of thumb: rebase freely before you push/share; after sharing, prefer merge, or coordinate a hard cutover explicitly if a shared rebase is unavoidable.</p></div>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Believing a `git reset --hard` permanently destroys commits. It only moves the branch pointer and discards working-directory changes — the commits themselves remain in the object database, reachable via `git reflog`, until Git's garbage collector eventually prunes genuinely unreachable objects (typically after 30+ days by default). Panic-free recovery is almost always possible shortly after the mistake.</p></div>
+      <ul>
+        <li>Write commit messages that explain <em>why</em>, not just <em>what</em> — the diff already shows what changed; the message is the only place "why" survives.</li>
+        <li>Keep commits small and focused — each one should be independently reviewable and, ideally, independently revertable without unrelated collateral changes.</li>
+        <li>Learn `git reflog` before you need it — it's the single highest-leverage Git safety command and most engineers only discover it after their first real scare.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs: When to Use vs When NOT To</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>Rebase</td><td>Cleaning up local, not-yet-shared commits before a PR</td><td>Branch already pushed and others have pulled it</td><td>Merge, or coordinated shared rebase</td></tr>
+        <tr><td>Merge</td><td>Integrating a finished, reviewed feature back into main; shared branches</td><td>You want a perfectly linear history for bisecting</td><td>Rebase (pre-share only), squash merge</td></tr>
+        <tr><td>Squash merge</td><td>Feature branch had many noisy WIP commits but you want one clean commit on main</td><td>You want to preserve granular commit-by-commit history for review/bisect later</td><td>Rebase+merge (keeps individual commits, still linear)</td></tr>
+        <tr><td>`git reset --hard`</td><td>Deliberately discarding local uncommitted changes you're certain about</td><td>Any uncertainty about losing unpushed commits</td><td>`git stash`, `git reset --soft`, check `reflog` first</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic"><h4>Basic</h4>
+        <details class="qa"><summary>Is a Git commit a diff or a snapshot?</summary><div class="answer"><p>A full snapshot of the tracked tree at that point, referenced via a tree object. Git computes diffs on the fly for display/comparison purposes, but what's stored is the complete snapshot plus a pointer to the parent commit(s).</p></div></details>
+        <details class="qa"><summary>What is a Git branch, technically?</summary><div class="answer"><p>A small movable pointer (a file containing a commit SHA) referencing a specific commit — not a copy of any files. Creating a branch is instant because it's just writing one pointer.</p></div></details>
+        <details class="qa"><summary>What's the core structural difference between what `merge` and `rebase` produce?</summary><div class="answer"><p>Merge creates a new commit with two parents, preserving both histories exactly as they happened. Rebase replays commits onto a new base as entirely new commits (new hashes), producing a linear history with no merge commit.</p></div></details>
+        <details class="qa"><summary>What do the `&lt;&lt;&lt;&lt;&lt;&lt;&lt;`, `=======`, `&gt;&gt;&gt;&gt;&gt;&gt;&gt;` markers mean in a conflicted file?</summary><div class="answer"><p>They delimit the two conflicting versions of the same lines: your current branch's version above `=======`, the incoming branch's version below it, down to the `&gt;&gt;&gt;&gt;&gt;&gt;&gt;` marker. You manually edit to the desired final content and remove all the markers before continuing.</p></div></details>
+        <details class="qa"><summary>What does `git reflog` show, and why is it useful after a mistake?</summary><div class="answer"><p>It shows a chronological log of every position HEAD has pointed to in this local repo, including commits that are no longer reachable from any branch after an operation like `reset --hard`. It lets you find and recover the SHA of "lost" work before it's garbage collected.</p></div></details>
+        <details class="qa"><summary>Why is creating a Git branch nearly instantaneous regardless of repository size?</summary><div class="answer"><p>Because it only writes a small pointer file containing a commit SHA — it doesn't copy any file content or history; the underlying objects are already shared and addressed by content hash.</p></div></details>
+      </div>
+      <div class="qa-level medium"><h4>Medium</h4>
+        <details class="qa"><summary>Why does rebasing a commit change its hash even if the diff it introduces is identical?</summary><div class="answer"><p>A commit's hash is computed from its full content, which includes a pointer to its parent commit. Rebase changes the parent (replaying onto a new base), so even an identical diff produces a different commit object and therefore a different hash — this is also why rebase "rewrites history" rather than just reordering existing commits.</p></div></details>
+        <details class="qa"><summary>You rebase a feature branch onto main and hit a conflict on the 3rd of 5 replayed commits. Explain exactly what's happening and what "continue" does.</summary><div class="answer"><p>Git is replaying your branch's commits one at a time onto the new base; commit 3's diff can't be cleanly applied because the lines it touches also changed on the new base. After you manually resolve and `git add` the files, `git rebase --continue` applies that resolved state as the new commit 3, then proceeds to attempt replaying commit 4 onto that result — which may itself conflict independently.</p></div></details>
+        <details class="qa"><summary>What's the practical difference between `git reset --soft`, `--mixed`, and `--hard`?</summary><div class="answer"><p>`--soft` moves the branch pointer but leaves the index (staging area) and working directory untouched — changes from "undone" commits appear as staged changes. `--mixed` (default) also resets the index, so those changes appear as unstaged. `--hard` additionally overwrites the working directory, discarding those changes entirely from the visible filesystem (though the commits remain recoverable via reflog for a time).</p></div></details>
+        <details class="qa"><summary>Why would a team specifically choose squash-merge for feature branches instead of a regular merge or a full rebase?</summary><div class="answer"><p>Squash-merge collapses an entire feature branch's often-noisy commit history (WIP commits, fix typo, actually fix it) into a single clean commit on main, giving a readable top-level history, without needing every contributor to manually clean up their own commits via interactive rebase first — at the cost of losing granular commit-by-commit history for that feature on main (though it's often still preserved on the original branch/PR).</p></div></details>
+        <details class="qa"><summary>Two engineers both modify the same function in overlapping but non-identical ways on different branches. Walk through how Git's three-way merge algorithm decides whether this is an auto-mergeable change or a conflict.</summary><div class="answer"><p>Git compares both branches against their common ancestor (the "base") line by line. If only one side changed a given line relative to the base, Git takes that side's version automatically. If both sides changed the exact same line(s) differently relative to the base, Git cannot determine which is correct and marks it a conflict for manual resolution — this is why two people editing genuinely different lines of the same function usually merge cleanly, while both editing the same line triggers a conflict.</p></div></details>
+      </div>
+      <div class="qa-level advanced"><h4>Advanced</h4>
+        <details class="qa"><summary>Explain precisely why "never rebase shared history" is the rule, in terms of what happens to collaborators' local repositories.</summary><div class="answer"><p>Once commits are pushed and pulled by others, those others' local branches point at the original commit objects by hash. A rebase-and-force-push replaces those commits with new ones (different hashes, same content) on the remote. A collaborator's next `pull` sees the remote branch has diverged from what they expect — Git cannot tell the new commits are "the same work," so it either attempts a confusing merge that duplicates every rebased commit's content, or, with a tracking mismatch, refuses to fast-forward at all, forcing the collaborator to manually reconcile or discard their local view and re-base/reset onto the new remote tip, with real risk of losing any of their own unpushed local commits layered on top of the old version.</p></div></details>
+        <details class="qa"><summary>Design a branching and release strategy for a team of 15 engineers shipping continuously to production multiple times a day, addressing how hotfixes, feature branches, and release tagging interact.</summary><div class="answer"><p>Trunk-based development: short-lived feature branches (hours to a couple days) off `main`, merged via squash-merge after review and passing CI, with `main` always deployable. Feature flags gate incomplete work that must merge before it's "done" to avoid long-lived branches accumulating conflict risk. Hotfixes branch directly off the current production tag, get merged back both to that tag's cherry-picked hotfix AND to `main` (or cherry-picked forward) to avoid the fix being silently lost on the next regular release. Release tags are immutable pointers created at deploy time, never force-moved, giving an exact audit trail of what shipped when.</p></div></details>
+        <details class="qa"><summary>A `git bisect` session to find a regression keeps landing on commits that don't build (broken intermediate states from a messy history). How does this connect to the earlier rebase/squash discussion, and how would you prevent it going forward?</summary><div class="answer"><p>`git bisect` works by checking out individual historical commits and testing them, which only works reliably if every commit in history is independently buildable/testable — a history full of "wip," "fix build," "actually fix build" commits (typical of unrebased, unsquashed feature work) routinely breaks bisection on the broken intermediate commits. The prevention is exactly the earlier discipline: squash or interactively rebase messy local commits into logically complete, independently-buildable units before merging to main, ensuring every commit on the main line represents a coherent, working state.</p></div></details>
+        <details class="qa"><summary>Explain what `git cherry-pick` does at the object level and why cherry-picking a commit that was already merged elsewhere can produce a "duplicate" that Git doesn't recognize as redundant.</summary><div class="answer"><p>Cherry-pick takes the diff introduced by a specific commit and applies it as a brand-new commit on the current branch, with a new parent and therefore a new hash — functionally and content-wise similar to the original but a distinct object. If that same diff later needs to be merged via its original branch too, Git has no inherent way to know "this content already arrived via a different path" since it tracks ancestry by commit graph, not by diff content — this can produce either a clean no-op merge (if the trees end up identical) or, if intervening changes touched the same area, a conflict that looks confusing because the "conflicting" change is actually identical in intent.</p></div></details>
+        <details class="qa"><summary>Why does Git's content-addressing (SHA hashing of objects) make it resistant to history tampering, and what's the actual security limitation of SHA-1 that led Git toward SHA-256 support?</summary><div class="answer"><p>Because every commit's hash depends on its content and its parent's hash, altering any historical commit changes its hash and cascades to change every descendant commit's hash — any tampering is immediately detectable by hash mismatch against what collaborators already have. The limitation: SHA-1 has known theoretical (and some demonstrated, with heavy compute) collision weaknesses, meaning in principle two different contents could be engineered to hash identically; Git mitigates this with collision-detection hardening in its SHA-1 implementation and has added opt-in SHA-256 object format support for repositories wanting a stronger guarantee going forward, though migrating an existing SHA-1 repo is a nontrivial, mostly still-emerging operation across tooling.</p></div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment"><span class="level-tag">Beginner (30-60 min)</span><h4>Deliberately break and recover with reflog</h4><p>In a scratch repo, make 3 commits, then run `git reset --hard HEAD~2` to "lose" the last two. Use `git reflog` to find and recover them onto a new branch.</p><ul><li>Verify the recovered branch contains the exact same content as before the reset.</li><li>Explain in writing why the commits weren't actually deleted by the reset.</li></ul><p><strong>Acceptance criteria:</strong> Successfully recovered both "lost" commits onto a new branch using only `reflog`, with a correct explanation of the underlying mechanism.</p><details class="qa"><summary>Hints</summary><div class="answer"><p>`git reflog` lists HEAD's history with each entry's SHA; `git branch recovered &lt;sha&gt;` creates a branch pointing at a specific recovered commit.</p></div></details><p><strong>Bonus:</strong> Repeat the exercise but this time lose the commits via an abandoned interactive rebase instead of `reset --hard`.</p></div>
+      <div class="assignment"><span class="level-tag">Intermediate (2-4 hrs)</span><h4>Simulate and resolve a real merge conflict, twice (merge and rebase)</h4><p>Create two branches from the same base that both modify the same lines of the same file differently. Resolve the resulting conflict once via `git merge`, then reset and resolve the equivalent conflict via `git rebase`, comparing the resulting commit graphs.</p><ul><li>Use `git log --graph --oneline --all` to visually compare the two resulting histories.</li><li>Write a short explanation of which approach you'd pick for this scenario and why.</li></ul><p><strong>Acceptance criteria:</strong> Both conflicts correctly resolved with no leftover markers, and a correct graph-level explanation of how the two resulting histories differ.</p><details class="qa"><summary>Hints</summary><div class="answer"><p>Remember a rebase conflict pauses mid-replay; resolve, `git add`, then `git rebase --continue`, and be ready to resolve again if a later commit in the sequence also conflicts.</p></div></details><p><strong>Bonus:</strong> Intentionally create a 3-commit conflict chain where commits 1 and 3 conflict but commit 2 doesn't, and observe `rebase --continue` skipping straight through commit 2.</p></div>
+      <div class="assignment"><span class="level-tag">Advanced (1-2 days)</span><h4>Write a team Git workflow policy and stress-test it</h4><p>Draft a concrete Git workflow policy document for a hypothetical 10-person team (branch naming, when to rebase vs merge, squash policy, hotfix process) and then simulate at least 3 realistic multi-person scenarios against it using separate local clones of the same bare repo (to genuinely simulate "another person's" perspective), including one where someone force-pushes a rebased shared branch and the team must recover.</p><ul><li>Each simulated scenario must use at least two distinct local clones acting as different "engineers."</li><li>Document exactly which commands each simulated engineer ran and why, including the recovery steps after the deliberate force-push incident.</li></ul><p><strong>Acceptance criteria:</strong> A written policy plus a reproducible log of commands across clones demonstrating the policy holding up (or being deliberately violated and recovered from) for all 3 scenarios.</p><details class="qa"><summary>Hints</summary><div class="answer"><p>`git init --bare` a central repo, then `git clone` it twice into separate directories to act as two engineers pushing/pulling against the same remote, exactly like a real shared repo.</p></div></details><p><strong>Bonus:</strong> Add a 4th scenario simulating a `git bisect` session across a history that includes both clean squashed commits and deliberately messy unsquashed ones, and compare how much harder bisection is in the messy section.</p></div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet"><ul>
+        <li>A commit is a full snapshot (via a tree object) plus a parent pointer — not a diff. Diffs are computed on display.</li>
+        <li>A branch is just a movable pointer to a commit — creating one is instant regardless of repo size.</li>
+        <li>Merge creates a 2-parent commit, preserving divergent history exactly. Rebase replays commits as new objects onto a new base, linearizing history.</li>
+        <li>Never rebase + force-push commits others have already pulled — it rewrites hashes out from under their local history.</li>
+        <li>Rebase is for local cleanup before sharing; merge (or squash-merge) is for integrating shared/reviewed work.</li>
+        <li>Conflict markers `&lt;&lt;&lt;&lt;&lt;&lt;&lt; / ======= / &gt;&gt;&gt;&gt;&gt;&gt;&gt;` — edit to final content, remove markers, `git add`, then continue the operation.</li>
+        <li>A rebase replays commits one at a time — each can independently conflict, resolved via repeated `rebase --continue`.</li>
+        <li>`git reflog` is the safety net — commits aren't gone after `reset --hard` until actually garbage collected.</li>
+        <li>`reset --soft` keeps changes staged, `--mixed` keeps them unstaged, `--hard` discards them from the working directory.</li>
+      </ul></div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://git-scm.com/book/en/v2/Git-Internals-Git-Objects">Pro Git — Git Internals: Git Objects</a></li>
+        <li><a href="https://git-scm.com/book/en/v2/Git-Branching-Rebasing">Pro Git — Rebasing</a></li>
+        <li><a href="https://git-scm.com/docs/git-reflog">git-scm.com — git-reflog documentation</a></li>
+        <li><a href="https://git-scm.com/book/en/v2/Git-Tools-Advanced-Merging">Pro Git — Advanced Merging</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="04-http-and-networking-basics.html"><span class="dir">← Previous</span>HTTP & Networking Basics</a>
+        <a class="next" href="06-bash-and-terminal-basics.html"><span class="dir">Next →</span>Bash & Terminal Basics</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · Web Fundamentals</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "11-web-fundamentals", chapterKey: "05-git-and-version-control" });</script>
+</body>
+</html>

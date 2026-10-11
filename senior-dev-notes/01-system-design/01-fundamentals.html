@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fundamentals — System Design — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">System Design</a><span class="sep">›</span>Fundamentals</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>Fundamentals: Scalability, Latency vs Throughput, Availability, CAP/PACELC</h1>
+      <p class="meta-line"><span>⏱ 2 hrs</span><span>📍 Chapter 1 of 14</span></p>
+      <p><strong>One-line summary:</strong> Every system design decision is a tradeoff between latency, throughput, consistency and availability under failure — this chapter gives you the vocabulary and math to reason about those tradeoffs precisely instead of waving your hands.</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>At 10 years of experience you've shipped features. At Staff/Tech Lead level, interviewers want to see that you can make <em>defensible</em> architectural tradeoffs under constraints — not just name "microservices" or "Redis." Every HLD question (chapter 13) and every production incident boils down to a handful of fundamental tensions: how fast is "fast enough," what happens when a node dies, and how much inconsistency can the business tolerate. If you can't articulate CAP/PACELC precisely, an interviewer will catch it the moment they ask "what happens to writes during a network partition?"</p>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>None — this is the starting chapter. It feeds directly into <a href="02-networking.html">Networking Basics</a>, <a href="06-database-scaling.html">Database Scaling</a>, and <a href="14-interview-framework.html">Interview Framework</a>.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="scalability">Scalability: vertical vs horizontal</h3>
+      <p><strong>Vertical scaling (scale up):</strong> bigger machine — more CPU, RAM, faster disk. Simple, no distributed-systems complexity, but hits a hard ceiling (biggest AWS instance today is ~448 vCPUs / 24TB RAM, and you pay a non-linear price premium) and is a single point of failure.</p>
+      <p><strong>Horizontal scaling (scale out):</strong> more machines behind a load balancer. Near-unlimited ceiling, better fault tolerance, but you now pay the "distributed systems tax": network latency between nodes, data consistency problems, more complex deployment, and partial failure (part of the system is down, part is up — much harder to reason about than "it's all down").</p>
+      <p>Senior-level framing: you almost always want horizontal scaling for the stateless tier (API servers), but the stateful tier (database) is where horizontal scaling gets hard — that's the entire subject of <a href="06-database-scaling.html">Chapter 6</a>.</p>
+      <p><strong>Load vs capacity vs elasticity:</strong> load is current demand, capacity is what you can handle, elasticity is how fast you can add capacity in response to load (autoscaling). A system can have huge capacity but poor elasticity (slow to provision) — that's why pre-warming and predictive autoscaling matter for flash-sale type traffic.</p>
+
+      <h3 id="latency-throughput">Latency vs throughput — and why they aren't just "speed"</h3>
+      <p><strong>Latency</strong> is the time for one unit of work to complete (e.g., one request's round trip, p50/p95/p99 in ms). <strong>Throughput</strong> is units of work completed per unit time (requests/sec, messages/sec). They are related but not inverses — you can have high throughput and high latency simultaneously (think batch processing: each job takes 5 minutes, but you run 10,000 in parallel).</p>
+      <p>Little's Law ties them together: <code>L = λ × W</code> — the average number of requests in the system (L) equals arrival rate (λ) times average time in system (W). If your API does 1,000 req/s and each takes 200ms on average, you have ~200 requests "in flight" at any instant — that number tells you how many concurrent connections/threads/DB connections you actually need to provision.</p>
+      <p>Why p99 matters more than average: if 1% of your requests hit a GC pause or a cold cache and take 2 seconds, and a page issues 50 backend calls fanned out, the probability that at least one of those 50 hits the slow p99 path approaches <code>1 - 0.99^50 ≈ 39%</code>. This is why high-fan-out systems (search results pages, feed aggregation) obsess over tail latency, not averages — it's called the <strong>tail-at-scale</strong> problem (Google's famous paper).</p>
+      <p>Mitigations for tail latency: hedged requests (fire a duplicate request after a timeout and take whichever returns first), request-level timeouts tied to p99 budgets, and limiting fan-out depth.</p>
+
+      <h3 id="availability">Availability: the nines, SLA vs SLO vs SLI</h3>
+      <table>
+        <tr><th>Availability</th><th>Downtime/year</th><th>Downtime/month</th></tr>
+        <tr><td>99% ("two nines")</td><td>3.65 days</td><td>7.3 hours</td></tr>
+        <tr><td>99.9% ("three nines")</td><td>8.76 hours</td><td>43.8 min</td></tr>
+        <tr><td>99.99% ("four nines")</td><td>52.6 min</td><td>4.38 min</td></tr>
+        <tr><td>99.999% ("five nines")</td><td>5.26 min</td><td>26.3 sec</td></tr>
+      </table>
+      <p><strong>SLI</strong> (Indicator) is the actual measured metric (e.g., "% of requests under 300ms"). <strong>SLO</strong> (Objective) is your internal target (e.g., "99.9% of requests under 300ms, measured over 28 days"). <strong>SLA</strong> (Agreement) is the external, often contractual, promise to customers — usually looser than your SLO, with a penalty/credit attached, to give you a safety buffer (your error budget). If a dependency's SLA is 99.9% and you call it synchronously on your critical path, your own system cannot exceed 99.9% availability for that path unless you add fallback/caching — availability of a serial chain is the <em>product</em> of each link's availability, not the minimum.</p>
+      <p>Composing availability: for two components in series (both must be up): <code>A_total = A1 × A2</code>. For redundant components in parallel (either can serve): <code>A_total = 1 - (1-A1)(1-A2)</code>. This is why putting a cache or a fallback in front of a flaky dependency can raise effective availability above the dependency's own SLA.</p>
+
+      <h3 id="cap">CAP theorem — precisely, not the oversimplified version</h3>
+      <p>CAP says: in the presence of a network <strong>P</strong>artition, a distributed system must choose between <strong>C</strong>onsistency (every read sees the latest write) and <strong>A</strong>vailability (every request gets a non-error response). You do NOT get to choose "CA" in a real distributed system — partitions will happen (NICs fail, switches drop packets, cross-AZ links degrade), so the real choice is CP vs AP, and only during a partition. Outside of a partition, you can have both C and A — CAP is a statement about partition behavior specifically, not a permanent 2-of-3 pick.</p>
+      <p>Common mistake senior candidates make: saying "MongoDB is CP, Cassandra is AP" as if it's a fixed property of the database. Reality: most databases let you tune this per-operation (e.g., Cassandra's consistency level per query: ONE, QUORUM, ALL; MongoDB's read/write concern). The database gives you the knob — the architect decides where to set it per use case.</p>
+
+      <h3 id="pacelc">PACELC — the more useful extension</h3>
+      <p>PACELC extends CAP: <strong>if Partitioned</strong>, choose <strong>A</strong>vailability or <strong>C</strong>onsistency (that's CAP) — <strong>Else</strong> (normal operation, no partition), choose <strong>L</strong>atency or <strong>C</strong>onsistency. This second half is what CAP leaves out and what actually governs day-to-day database design: even with no partition, replicating data to multiple nodes for durability means you must choose between waiting for all replicas to ack (consistent, higher latency) or returning after one write succeeds (lower latency, risk of reading stale data from a lagging replica).</p>
+      <p>Examples: DynamoDB is PA/EL (available + low latency, eventually consistent by default). MongoDB with default read preference is PA/EC-ish depending on write concern. Spanner/CockroachDB aim for PC/EC by paying real latency cost (synchronous consensus, e.g. Spanner's TrueTime) to stay strongly consistent even without partitions.</p>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>Concretely, consider a 3-node replicated key-value store with a leader and two followers. A write request flow with different consistency settings:</p>
+      <ul>
+        <li><strong>Strong consistency (sync replication):</strong> leader writes locally, blocks until both followers ack, then returns success to client. Latency = max(follower round trips). If a follower is down, this either blocks forever (bad for availability) or the leader must detect failure and proceed with fewer replicas (which is the CP-vs-AP decision in miniature).</li>
+        <li><strong>Eventual consistency (async replication):</strong> leader writes locally, returns success immediately, replicates to followers in the background. Low latency, but a read hitting a follower right after can return stale data — and if the leader dies before replicating, that write is lost.</li>
+      </ul>
+      <p>This single diagram generalizes to nearly every "how does X handle a network partition" interview question — ground every CAP discussion in: what does the leader do when it can't reach a quorum of followers?</p>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+sequenceDiagram
+    participant C as Client
+    participant L as Leader
+    participant F1 as Follower 1
+    participant F2 as Follower 2
+    C->>L: WRITE key=x val=1
+    L->>L: append to local log
+    par Synchronous replication (CP choice)
+        L->>F1: replicate
+        L->>F2: replicate
+        F1-->>L: ack
+        F2-->>L: ack
+    end
+    L-->>C: 200 OK (after quorum ack)
+    Note over L,F2: If partition isolates F2,<br/>leader can still ack with quorum of 2/3 (CP+available)<br/>or must wait for all (CP+blocked)
+      </div>
+      <div class="mermaid">
+flowchart TD
+    A["Network Partition Occurs"] --> B{Choose on this path}
+    B -->|Prioritize Consistency| C["Reject writes / reads<br/>on minority side (CP)"]
+    B -->|Prioritize Availability| D["Serve reads/writes from<br/>both sides, reconcile later (AP)"]
+    C --> E["Example: etcd, Zookeeper,<br/>Spanner — banking ledgers"]
+    D --> F["Example: DynamoDB, Cassandra,<br/>shopping carts, social feeds"]
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <p>Back-of-envelope capacity math as you'd actually type it while whiteboarding (Node/TS used just to make the math executable and checkable):</p>
+      <pre><code class="language-typescript">// Capacity estimation helper — the kind of quick math you do live in an interview
+interface Estimate {
+  dailyActiveUsers: number;
+  actionsPerUserPerDay: number;
+  avgPayloadBytes: number;
+  peakMultiplier: number; // peak traffic is rarely uniform across 24h
+}
+
+function estimateLoad(e: Estimate) {
+  const totalActionsPerDay = e.dailyActiveUsers * e.actionsPerUserPerDay;
+  const avgQps = totalActionsPerDay / 86_400; // seconds in a day
+  const peakQps = avgQps * e.peakMultiplier;
+  const dailyStorageBytes = totalActionsPerDay * e.avgPayloadBytes;
+  const yearlyStorageTB = (dailyStorageBytes * 365) / 1024 ** 4;
+
+  return { avgQps: avgQps.toFixed(1), peakQps: peakQps.toFixed(1), yearlyStorageTB: yearlyStorageTB.toFixed(2) };
+}
+
+// Example: a notification platform, 10M DAU, 5 notifications/user/day, 1KB each payload
+console.log(estimateLoad({
+  dailyActiveUsers: 10_000_000,
+  actionsPerUserPerDay: 5,
+  avgPayloadBytes: 1024,
+  peakMultiplier: 3, // typical peak:avg ratio for consumer apps
+}));
+// => { avgQps: '578.7', peakQps: '1736.1', yearlyStorageTB: '16.64' }
+// Takeaway: ~1,740 QPS at peak is "a few beefy app servers behind a load balancer,"
+// not a planet-scale problem — this number should drive every subsequent design choice.
+</code></pre>
+      <pre><code class="language-typescript">// Modeling availability composition for a request path
+function serialAvailability(components: number[]): number {
+  return components.reduce((acc, a) => acc * a, 1);
+}
+function parallelAvailability(components: number[]): number {
+  return 1 - components.reduce((acc, a) => acc * (1 - a), 1);
+}
+
+// API gateway (99.95%) -> auth service (99.9%) -> primary DB (99.95%), all required (serial)
+const path = serialAvailability([0.9995, 0.999, 0.9995]); // ~0.9980 => worse than any single link
+console.log(path); // 0.99800...
+
+// Add a read-through cache as a fallback for the DB call (parallel w.r.t. DB failure)
+const dbWithCache = parallelAvailability([0.9995, 0.99]); // cache itself 99% available, independent failure mode
+console.log(dbWithCache); // 0.999995 — a cheap cache meaningfully raises effective availability
+</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4><p>A payments company runs checkout on a synchronous call chain: API gateway → inventory service → pricing service → payment-provider API → order DB write. Each hop is 99.9% available in isolation, but five hops in series multiply to roughly 99.5% — about 3.6 hours of checkout downtime per month, dominated by whichever dependency is weakest (usually the third-party payment provider). The fix isn't "make every service 99.99%" (expensive and often impossible for a third party you don't control) — it's to break the serial chain: queue the order write asynchronously after payment authorization succeeds, add a circuit breaker + cached pricing fallback so a pricing-service blip doesn't fail the whole checkout, and treat inventory check as best-effort with reconciliation rather than blocking. This moves the system from "CP-style, fails closed on any hop" to "AP-style on non-critical hops, CP only where money correctness truly requires it (payment authorization and order ledger write)."</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Treating CAP as a permanent label on a database ("Mongo is CP") instead of a per-operation, per-partition-event choice. Interviewers probe exactly here — be ready to say "it depends on write/read concern" and give the knob's name.</p></div>
+      <div class="box gotcha"><h4>Gotcha</h4>Optimizing for average latency instead of p99, then being surprised when a high-fan-out page is slow for a meaningful fraction of users even though "the average looks fine."</div>
+      <ul>
+        <li>Always ask "what's the read:write ratio" and "what's peak:average traffic ratio" before designing — these two numbers drive almost every subsequent decision (caching, read replicas, queue sizing).</li>
+        <li>Define your SLO before you build, not after an incident — it tells you how much engineering effort (and money) is justified.</li>
+        <li>Prefer async decoupling (queues) over synchronous chains wherever the business tolerates slight delay — it converts a multiplicative availability problem into an additive one.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs: When to Use vs When NOT To</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>Vertical scaling</td><td>Early stage, simple ops, DB that's hard to shard</td><td>You need fault tolerance or are near max instance size</td><td>Horizontal scaling + read replicas</td></tr>
+        <tr><td>Strong consistency (CP)</td><td>Money, inventory counts, auth tokens</td><td>Social feeds, view counts, presence indicators</td><td>Eventual consistency (AP)</td></tr>
+        <tr><td>Eventual consistency (AP)</td><td>High availability needed, staleness tolerable</td><td>Correctness-critical financial state</td><td>Strong consistency with quorum reads/writes</td></tr>
+        <tr><td>Synchronous call chains</td><td>Need the result before responding to user</td><td>Side-effects that can happen later (emails, analytics)</td><td>Async via message queue</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic"><h4>Basic</h4>
+        <details class="qa"><summary>What's the difference between latency and throughput?</summary><div class="answer"><p>Latency is time for one request to complete; throughput is requests completed per unit time. You can increase throughput via parallelism without reducing latency, and a system can have low throughput with low latency (e.g., single-threaded, fast for one request but can't handle many at once).</p></div><div class="followup">Follow-up: Give an example where increasing throughput would increase latency.</div></details>
+        <details class="qa"><summary>Explain horizontal vs vertical scaling with a tradeoff each.</summary><div class="answer"><p>Vertical: simpler, no distributed complexity, but hard ceiling and single point of failure. Horizontal: near-unlimited scale and fault tolerance, but introduces network latency, partial failure, and data consistency challenges.</p></div></details>
+        <details class="qa"><summary>What does the C in CAP actually mean?</summary><div class="answer"><p>Linearizable/strong consistency: every read reflects the most recent completed write, as if there were only one copy of the data.</p></div></details>
+        <details class="qa"><summary>What's an SLO and how does it differ from an SLA?</summary><div class="answer"><p>SLO is an internal target on a measured SLI (e.g., 99.9% of requests &lt;300ms). SLA is the external contractual promise, usually looser than the SLO to leave an error budget buffer, often with financial penalties attached.</p></div></details>
+        <details class="qa"><summary>Why do we care about p99 latency instead of just the average?</summary><div class="answer"><p>Averages hide tail behavior that disproportionately affects users on high-fan-out pages — a small percentage of slow requests can affect a large percentage of page loads when many backend calls are aggregated.</p></div></details>
+        <details class="qa"><summary>What is Little's Law and what is it useful for?</summary><div class="answer"><p>L = λW: average concurrent requests equals arrival rate times average time in system. Useful for sizing connection pools, thread pools, and concurrency limits from throughput and latency targets.</p></div></details>
+      </div>
+      <div class="qa-level medium"><h4>Medium</h4>
+        <details class="qa"><summary>A partition splits your 5-node cluster into a 3-node majority and a 2-node minority. Walk through CP vs AP behavior on each side.</summary><div class="answer"><p>CP: majority side can still achieve quorum and continues serving reads/writes; minority side rejects requests (unavailable) to avoid serving stale/conflicting data. AP: both sides continue serving requests independently, risking divergent state that must be reconciled (e.g., via vector clocks, CRDTs, or last-write-wins) once the partition heals.</p></div><div class="followup">Follow-up: How would you reconcile conflicting writes after the partition heals in the AP case?</div></details>
+        <details class="qa"><summary>Explain PACELC's second half and why it matters even without a partition.</summary><div class="answer"><p>Even with no partition, replicating writes to multiple nodes for durability forces a choice between waiting for replica acknowledgment (consistent, higher latency) or returning early (lower latency, risk of stale reads from lagging replicas). This governs everyday database tuning, not just rare partition events.</p></div></details>
+        <details class="qa"><summary>You have 5 services in series each at 99.9% availability. What's the end-to-end availability, and how would you improve it without touching any individual service's SLA?</summary><div class="answer"><p>0.999^5 ≈ 99.5%. Improve by breaking the serial dependency: move non-critical hops off the synchronous path (async queues), add caching/fallbacks for read paths, and use circuit breakers so one slow dependency doesn't cascade-fail the whole chain.</p></div></details>
+        <details class="qa"><summary>How would you decide whether a new feature's data store should be CP or AP?</summary><div class="answer"><p>Ask: what's the cost of showing stale data vs the cost of being unavailable? Money/inventory/auth lean CP. Social/engagement features (likes, view counts, presence) lean AP since staleness is cheap and downtime is visible/annoying to users.</p></div></details>
+        <details class="qa"><summary>What's the relationship between peak:average traffic ratio and infrastructure cost?</summary><div class="answer"><p>If you provision for peak but run at average most of the time, you're paying for idle capacity; a high peak:average ratio (e.g., flash sales) pushes you toward autoscaling, queueing to smooth bursts, or over-provisioning with cost tradeoffs — this ratio should be an explicit number in any capacity plan.</p></div></details>
+        <details class="qa"><summary>Why might two engineers legitimately disagree on whether a given service should favor latency or consistency?</summary><div class="answer"><p>It depends on the business cost function which isn't purely technical — one might weigh user-perceived speed higher, another might weigh correctness/compliance higher. Senior engineers resolve this by quantifying both costs rather than arguing preference.</p></div></details>
+      </div>
+      <div class="qa-level advanced"><h4>Advanced</h4>
+        <details class="qa"><summary>Design the consistency model for a collaborative document editor (like Google Docs) — what CAP/PACELC choice would you make and why?</summary><div class="answer"><p>Favor availability and low latency (AP/EL) for the editing path using operational transforms or CRDTs so edits merge without blocking, since users expect instant local feedback; use strong consistency only for less frequent operations like permission changes or final save-to-storage, where correctness matters more than latency.</p></div></details>
+        <details class="qa"><summary>How do hedged requests reduce tail latency, and what's the cost?</summary><div class="answer"><p>After waiting some percentile of expected latency (e.g., p95) without a response, fire a duplicate request to a different replica and take whichever returns first, canceling the other. Reduces p99 significantly but increases load (and cost) on backends — must be used selectively and capped to avoid amplifying overload during real outages.</p></div></details>
+        <details class="qa"><summary>Your team wants "five nines" for a new service. What would you push back on?</summary><div class="answer"><p>Five nines (~5 min/year downtime) is extraordinarily expensive and often unnecessary — it demands redundancy across regions, zero-downtime deploys, extensive chaos testing, and usually isn't achievable if you depend on any third-party API with a lower SLA. Push back by asking what business cost justifies that investment versus, say, 99.95%, and by pointing out the dependency-chain math makes it mathematically impossible if any required dependency is weaker.</p></div></details>
+        <details class="qa"><summary>Explain how Spanner achieves PC/EC-like behavior despite CAP's warning that you can't have C and A during a partition.</summary><div class="answer"><p>Spanner uses TrueTime (GPS+atomic clocks) to bound clock uncertainty and Paxos-based synchronous replication across zones, effectively minimizing partition frequency within a region and paying real latency cost for cross-region consensus. During an actual partition it still sacrifices availability on the minority side — it doesn't violate CAP, it just engineers partitions to be rare and pays latency (the L in PACELC) to keep consistency the rest of the time.</p></div></details>
+        <details class="qa"><summary>How would you set an error budget from an SLO, and how does it affect release velocity?</summary><div class="answer"><p>Error budget = 1 - SLO over the measurement window (e.g., 99.9% SLO over 30 days = ~43 min of allowed badness). If the budget is being consumed quickly (incidents, bad deploys), the team should slow down releases and focus on reliability; if budget remains, the team can ship more aggressively — this ties reliability directly to a quantifiable release policy instead of a vague "be careful."</p></div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment"><span class="level-tag">Beginner (30-60 min)</span><h4>Capacity estimation drill</h4><p>Given a hypothetical food-delivery app with 2M daily active users, each placing an average of 0.3 orders/day, and each order generating roughly 5KB of event data (order placed, accepted, picked up, delivered), compute: average QPS, peak QPS assuming a 4x peak multiplier at dinner time, and yearly storage growth.</p><ul><li>Show your formula, not just the final number.</li><li>State one architectural implication of the peak QPS number (e.g., does it need a load balancer with autoscaling, or is one server enough?).</li></ul><p><strong>Acceptance criteria:</strong> Correct arithmetic, and a one-sentence architectural takeaway tied to the number.</p><details class="qa"><summary>Hints</summary><div class="answer"><p>Total orders/day = users × orders/user. QPS = orders/day ÷ 86,400. Peak QPS = avg × multiplier. Storage/year = orders/day × bytes × 365.</p></div></details><p><strong>Bonus:</strong> Recompute assuming 10x user growth and discuss at what point a single-region deployment becomes risky.</p></div>
+      <div class="assignment"><span class="level-tag">Intermediate (2-4 hrs)</span><h4>Availability composition audit</h4><p>Take a real (or realistic) multi-service call chain you've worked with (e.g., checkout, login, search). Write down each hop's known or assumed availability, compute serial availability, then redesign the chain to break at least one hop out of the synchronous path (cache, async queue, or fallback) and recompute. </p><ul><li>Document the "before" and "after" availability numbers.</li><li>Identify which hop is the weakest link and justify why fixing that one matters more than the others.</li></ul><p><strong>Acceptance criteria:</strong> A before/after availability calculation with a clear explanation of the architectural change that drove the improvement.</p><details class="qa"><summary>Hints</summary><div class="answer"><p>Use the serialAvailability/parallelAvailability functions from the Code Examples section as a starting point.</p></div></details><p><strong>Bonus:</strong> Model what happens if the "weakest link" dependency itself exposes a tunable consistency level — how would you choose a setting?</p></div>
+      <div class="assignment"><span class="level-tag">Advanced (1-2 days)</span><h4>Design the consistency model for a multi-region inventory system</h4><p>A retailer sells a limited-stock item simultaneously across 3 regions. Design how inventory counts should be tracked to avoid overselling while keeping checkout latency low for users in all 3 regions.</p><ul><li>Decide: is this CP or AP, and does the answer change for "is item in stock" (read) vs "decrement on purchase" (write)?</li><li>Consider using a central authoritative counter vs regional reservations with periodic reconciliation.</li><li>Discuss what happens during a cross-region network partition.</li></ul><p><strong>Acceptance criteria:</strong> A written design (no code required) that explicitly states the CAP/PACELC choice for reads and for writes separately, with justification tied to business cost of overselling vs business cost of rejected purchases.</p><details class="qa"><summary>Hints</summary><div class="answer"><p>Think about reserving a small regional "buffer" of stock per region (AP-ish, fast local decrement) combined with a periodic strongly-consistent reconciliation against a global counter — similar to how airline seat inventory or ticketing systems are often modeled.</p></div></details><p><strong>Bonus:</strong> What's the business tradeoff of occasionally overselling by a small margin and handling it with compensating actions (refund + apology) versus never overselling but sometimes rejecting valid purchases?</p></div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet"><ul>
+        <li>Latency = time per request; throughput = requests per time. Little's Law: L = λW.</li>
+        <li>p99 matters more than average for high-fan-out pages — tail-at-scale problem.</li>
+        <li>Vertical scaling = simpler but ceiling + SPOF. Horizontal = elastic but distributed-systems tax.</li>
+        <li>Availability of serial components multiplies down; parallel/redundant components raise it.</li>
+        <li>SLI = measured metric, SLO = internal target, SLA = external contractual promise (usually looser than SLO).</li>
+        <li>CAP applies only during a partition: choose C or A, not a permanent database label.</li>
+        <li>PACELC's second half (Else: Latency vs Consistency) governs normal-operation replication tradeoffs.</li>
+        <li>Most databases expose consistency as a per-operation knob (read/write concern, consistency level), not a fixed property.</li>
+        <li>Break synchronous chains with async queues/caches to convert multiplicative availability loss into additive.</li>
+      </ul></div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://static.googleusercontent.com/media/research.google.com/en//pubs/archive/40801.pdf">The Tail at Scale (Google, Dean & Barroso)</a></li>
+        <li><a href="https://www.cs.cornell.edu/fbs/publications/CAP.pdf">Brewer's CAP Theorem clarification</a></li>
+        <li><a href="https://neilbrown.net/papers/pacelc.pdf">PACELC (Abadi)</a></li>
+        <li><a href="https://sre.google/sre-book/service-level-objectives/">Google SRE Book — SLOs</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="index.html"><span class="dir">← Previous</span>Topic Overview</a>
+        <a class="next" href="02-networking.html"><span class="dir">Next →</span>Networking Basics</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · System Design</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-typescript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-sql.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-yaml.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "01-system-design", chapterKey: "01-fundamentals" });</script>
+</body>
+</html>

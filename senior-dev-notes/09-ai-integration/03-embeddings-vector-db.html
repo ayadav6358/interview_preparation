@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Embeddings & Vector Databases — AI Integration — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">AI Integration</a><span class="sep">›</span>Embeddings & Vector Databases</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>Embeddings and Vector Databases</h1>
+      <p class="meta-line"><span>⏱ ~2.5 hrs</span><span>📍 Chapter 3 of 7</span></p>
+      <p><strong>One-line summary:</strong> An embedding turns text into a fixed-length vector such that
+      semantically similar text ends up geometrically close, and a vector database is just a specialized index
+      (HNSW, IVF, or brute force) for finding "nearest" vectors fast at scale — understanding both is what makes
+      RAG an engineering decision instead of a magic black box.</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>Every RAG system, semantic search feature, and recommendation-by-similarity feature you'll be asked
+      about in an interview rests on this layer. The questions that separate someone who read a vector-DB
+      product's marketing page from someone who understands it are precise: what does cosine similarity actually
+      measure versus Euclidean distance; why does an approximate nearest-neighbor index trade recall for speed,
+      and by how much; why do embedding dimensions and model choice matter for both cost and quality; why does
+      "semantic search returned irrelevant results" usually trace back to a chunking or embedding-model mismatch
+      rather than a vector-DB bug. You should be able to design this layer with the same rigor you'd apply to
+      picking a database index strategy, because that's exactly what it is.</p>
+      <div class="box why"><h4>Why</h4><p>Vector search is "just" nearest-neighbor search over high-dimensional
+      points — a well-understood CS problem with real algorithmic tradeoffs, not a mysterious AI capability.
+      Treating it that way is what lets you debug a bad-retrieval incident systematically instead of randomly
+      swapping libraries.</p></div>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>Basic vector/linear algebra intuition (dot product, distance) and familiarity with database indexing
+      concepts help. Related: <a href="01-how-llms-work.html">How LLMs Work</a>, <a href="04-rag.html">RAG</a>.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="what-is-embedding">What an embedding actually is</h3>
+      <p>An embedding model is a neural network (often a smaller transformer encoder, sometimes derived from the
+      same family as chat LLMs) trained so that its output vector — typically 384 to 3072 floating-point numbers,
+      depending on the model — captures the <em>meaning</em> of the input text, such that texts with similar
+      meaning produce vectors that are close together in that high-dimensional space, and dissimilar texts
+      produce vectors that are far apart. Training typically uses contrastive objectives: pairs of texts known to
+      be related (a question and its correct answer passage, two paraphrases) are pulled together in vector
+      space, while unrelated pairs are pushed apart, across massive amounts of data. The vector itself has no
+      human-readable meaning per dimension — you cannot point to dimension 47 and say what it represents — the
+      meaning only exists in the geometric relationships between many vectors.</p>
+
+      <h3 id="similarity-metrics">Cosine similarity vs. Euclidean distance vs. dot product</h3>
+      <p><strong>Cosine similarity</strong> measures the angle between two vectors, ignoring their magnitude:
+      <code>cos(θ) = (A · B) / (‖A‖ ‖B‖)</code>, ranging from -1 (opposite direction) to 1 (identical direction).
+      Most text embedding models are trained and intended to be compared this way, because what matters is the
+      <em>direction</em> of meaning, not the vector's length (which can vary with text length or model
+      idiosyncrasies and carries no semantic signal). <strong>Euclidean distance</strong> measures straight-line
+      distance between the two points, which is sensitive to magnitude — two vectors pointing the same direction
+      but different lengths register as "far apart" even though cosine similarity would call them nearly
+      identical. <strong>Dot product</strong> (unnormalized) combines both angle and magnitude; if embeddings are
+      pre-normalized to unit length (many models' outputs are, or you normalize them yourself), dot product and
+      cosine similarity become mathematically equivalent and dot product is cheaper to compute (no division),
+      which is why many vector DBs default to dot product under the hood for "cosine" similarity once you've
+      confirmed normalization. Picking the wrong metric for a model not trained/intended for it is a real,
+      silent cause of degraded retrieval quality.</p>
+
+      <h3 id="ann-vs-exact">Exact vs. approximate nearest neighbor (ANN) search</h3>
+      <p><strong>Exact</strong> nearest-neighbor search (brute-force) compares the query vector against every
+      stored vector and returns the true top-k closest — perfectly accurate (100% recall) but O(n) per query,
+      which becomes too slow once you have more than roughly tens of thousands to a few hundred thousand vectors
+      depending on dimensionality and latency budget. <strong>Approximate</strong> nearest-neighbor (ANN)
+      algorithms trade a small amount of recall (the fraction of true nearest neighbors actually found) for
+      dramatically better speed and scalability, by building an index structure that avoids comparing against
+      every single vector.</p>
+
+      <h3 id="hnsw">HNSW: Hierarchical Navigable Small World graphs</h3>
+      <p>HNSW is the dominant ANN algorithm in modern vector databases (pgvector, Qdrant, Weaviate, Pinecone all
+      support it). It builds a multi-layer graph: the top layer has very few nodes with long-range connections
+      (for fast coarse navigation across the whole space), and each layer below has progressively more nodes
+      with shorter-range, denser connections, down to the bottom layer containing every vector. A search starts
+      at an entry point in the top layer, greedily moves to the neighbor closest to the query at that layer,
+      and once no closer neighbor exists at that layer, drops down to the next layer and repeats — like using a
+      highway system to get near your destination fast, then dropping to local streets to find the exact
+      address. This gives logarithmic-ish search time instead of linear, at the cost of: build time (inserting a
+      vector requires finding its place in this graph structure, which is more expensive than just appending to
+      a list), and tunable recall via parameters like <code>ef_search</code> (how many candidates to explore per
+      layer during query — higher means better recall but slower queries) and <code>M</code> (how many
+      connections each node keeps — higher means better recall and more memory, built once at index-construction
+      time). HNSW has no inherent support for deleting vectors cheaply — deletions are typically handled with
+      tombstone marking or periodic rebuilds, a real operational consideration for data that changes often.</p>
+
+      <h3 id="ivf">IVF: Inverted File Index</h3>
+      <p>IVF clusters the vector space into <code>n_list</code> partitions (via k-means, typically), assigning
+      each stored vector to its nearest cluster centroid. A query first finds the <code>n_probe</code> closest
+      centroids to itself, then only searches the vectors within those clusters, rather than the whole dataset —
+      conceptually similar to a database's coarse partition pruning. IVF generally has faster build/insert time
+      than HNSW and lower memory overhead, but is typically less accurate at a given speed than HNSW
+      (recall/speed tradeoff curve is worse) and is sensitive to cluster quality — if the data distribution
+      shifts significantly after clusters are built, recall degrades until the index is rebuilt. IVF is often
+      combined with product quantization (IVF-PQ) to compress vectors and support billion-scale datasets with
+      bounded memory, at a further, deliberate accuracy cost.</p>
+
+      <h3 id="choosing-index">Choosing between brute force, HNSW, and IVF</h3>
+      <p>Rule of thumb: under roughly 50k-100k vectors, brute-force (exact) search is often fast enough and
+      removes an entire class of recall-tuning complexity — don't reach for ANN prematurely. Beyond that, HNSW
+      is the default choice for most RAG/search workloads needing good recall at low query latency and able to
+      afford its memory/build-time cost. IVF (or IVF-PQ) becomes attractive at very large scale (tens of
+      millions+ vectors) where HNSW's memory footprint becomes prohibitive and some recall can be traded for
+      dramatically lower memory and faster rebuilds. Pre-filtering (restricting the candidate set by metadata
+      before or during vector search, e.g. "only this tenant's documents") is a feature that differs
+      significantly in implementation quality across vector DBs and is worth explicitly testing, not assuming.</p>
+
+      <h3 id="embedding-model-choice">Choosing an embedding model</h3>
+      <p>Trade-offs to weigh: dimensionality (higher dimensions generally capture more nuance but cost more
+      storage and slightly more compute per comparison — many modern models offer configurable/truncatable
+      dimensions, e.g. via Matryoshka representation learning, letting you shrink vectors with graceful quality
+      degradation instead of a cliff); context length the embedding model accepts (embedding a whole long
+      document at once loses granularity versus embedding chunks, covered in <a href="04-rag.html">RAG</a>);
+      domain fit (a general-purpose embedding model may underperform a domain-tuned one for, e.g., legal or
+      code search — code-specific embedding models exist and matter for codebase search); and whether you need
+      multilingual support. Critically: <strong>you cannot mix embeddings from different models in the same
+      index</strong> — vectors from different models live in unrelated geometric spaces, so comparing a
+      query embedded with model A against documents embedded with model B produces meaningless similarity
+      scores. Changing embedding models requires re-embedding your entire corpus, not just new documents.</p>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>End-to-end path for a semantic search / RAG retrieval query:</p>
+      <ol>
+        <li><strong>Ingestion time:</strong> source documents are chunked (see <a href="04-rag.html">RAG</a>),
+        each chunk is sent to an embedding API/model, producing a fixed-length vector per chunk, stored alongside
+        metadata (source, position, timestamps) in the vector database, which builds/updates its ANN index
+        incrementally or in batches.</li>
+        <li><strong>Query time:</strong> the user's query text is embedded with the <em>same</em> embedding
+        model used at ingestion time, producing a query vector in the same space.</li>
+        <li>The vector DB's ANN index (HNSW/IVF) is searched for the top-k vectors closest to the query vector
+        by the chosen similarity metric, optionally pre-filtered by metadata (tenant, date range, document
+        type).</li>
+        <li>The matching chunks' original text (and metadata) are fetched and returned — the vector DB usually
+        stores or references the raw text alongside the vector for this purpose.</li>
+        <li>(In RAG) these chunks are optionally re-ranked by a more expensive, more accurate model before being
+        inserted into the LLM prompt as grounding context.</li>
+      </ol>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+flowchart TB
+  subgraph Ingestion
+    A[Document] --> B[Chunking]
+    B --> C[Embedding model]
+    C --> D[(Vector DB: vectors + metadata)]
+    D --> E[Build/update HNSW or IVF index]
+  end
+  subgraph Query
+    Q[User query] --> QE[Embed with same model]
+    QE --> S[ANN search top-k]
+    E --> S
+    S --> R[Return matching chunks]
+  end
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-typescript">// Computing cosine similarity manually — useful for debugging a vector DB's results
+// against ground truth, or for small-scale brute-force search without a dedicated DB.
+function dot(a: number[], b: number[]): number {
+  let s = 0;
+  for (let i = 0; i < a.length; i++) s += a[i] * b[i];
+  return s;
+}
+function norm(a: number[]): number {
+  return Math.sqrt(dot(a, a));
+}
+function cosineSimilarity(a: number[], b: number[]): number {
+  return dot(a, b) / (norm(a) * norm(b));
+}
+
+// Brute-force top-k search — correct baseline to validate an ANN index's recall against.
+function bruteForceTopK(query: number[], corpus: { id: string; vector: number[] }[], k: number) {
+  return corpus
+    .map((item) => ({ id: item.id, score: cosineSimilarity(query, item.vector) }))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, k);
+}
+
+// pgvector example: HNSW index + cosine distance query (Postgres + pgvector extension).
+// Note: pgvector's "<=>" operator is cosine DISTANCE (1 - cosine similarity), so ORDER BY ASC.
+/*
+CREATE EXTENSION IF NOT EXISTS vector;
+
+CREATE TABLE chunks (
+  id SERIAL PRIMARY KEY,
+  content TEXT NOT NULL,
+  source TEXT NOT NULL,
+  embedding VECTOR(1536) NOT NULL
+);
+
+CREATE INDEX ON chunks USING hnsw (embedding vector_cosine_ops)
+  WITH (m = 16, ef_construction = 64);
+
+-- Query: find the 8 closest chunks to a query embedding.
+SELECT id, content, source, 1 - (embedding <=> $1) AS similarity
+FROM chunks
+ORDER BY embedding <=> $1
+LIMIT 8;
+*/
+
+// Embedding + upsert pipeline in Node, using an embeddings API.
+import OpenAI from "openai";
+const openai = new OpenAI();
+
+async function embedAndStore(chunks: { id: string; text: string; source: string }[], db: any) {
+  const resp = await openai.embeddings.create({
+    model: "text-embedding-3-small", // 1536 dims; keep this model pinned across your whole corpus
+    input: chunks.map((c) => c.text),
+  });
+  for (let i = 0; i < chunks.length; i++) {
+    await db.query(
+      `INSERT INTO chunks (id, content, source, embedding) VALUES ($1, $2, $3, $4)
+       ON CONFLICT (id) DO UPDATE SET embedding = $4, content = $2`,
+      [chunks[i].id, chunks[i].text, chunks[i].source, resp.data[i].embedding]
+    );
+  }
+}
+
+// BAD: mixing embedding models across ingestion and query (or old vs new corpus data)
+// produces meaningless similarity scores — this is a common, hard-to-notice bug after
+// a "model upgrade" that only touched the query path.
+async function badSearch(query: string) {
+  const qVec = await embedWith("text-embedding-3-large", query); // different model/dims!
+  return bruteForceTopK(qVec, corpusEmbeddedWithOldModel, 5);     // silently wrong results
+}
+</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4><p>A docs-search team upgrades their embedding model for "better
+      quality" and only re-embeds <em>new</em> documents going forward to save cost, leaving the existing
+      500k-document corpus on the old model. Search quality doesn't improve — it gets quietly worse, because
+      queries (embedded with the new model) are now being compared against a corpus that's a mix of two
+      incompatible vector spaces, and cosine similarity between vectors from different models is meaningless
+      noise, not a graceful degradation. The fix required a full re-embedding of the entire corpus (a real cost
+      and multi-hour batch job at that scale) and, going forward, a versioned embedding pipeline where the
+      vector DB schema records which model+version produced each vector, so a future migration can be staged
+      and validated (dual-write old+new, compare recall, cut over) instead of silently mixed.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Assuming ANN index recall is "basically 100% in practice" without
+      measuring it. HNSW with poorly tuned <code>ef_search</code>/<code>M</code>, or IVF with too few probed
+      clusters, can silently miss genuinely relevant results — and because the search still returns <em>some</em>
+      plausible-looking results, this failure is invisible unless you measure recall against a known-correct
+      brute-force baseline on a sample.</p></div>
+      <ul>
+        <li>Never compare vectors from different embedding models/versions — re-embed the whole corpus on any
+        model change, and track model+version as metadata per vector.</li>
+        <li>Confirm which similarity metric a vector DB actually computes for "cosine" (true cosine vs.
+        dot-product-assuming-normalization) — results differ if your vectors aren't normalized and the DB
+        assumes they are.</li>
+        <li>Measure ANN recall periodically against a brute-force baseline on a representative sample —
+        don't just trust default index parameters.</li>
+        <li>Be deliberate about metadata pre-filtering performance — some vector DBs apply filters after ANN
+        search (can return too few/irrelevant results if the filter is restrictive) rather than during it.</li>
+        <li>Don't embed enormous documents as a single vector "for simplicity" — a single embedding for a
+        50-page document smears together many distinct topics, diluting retrieval precision (see chunking in
+        <a href="04-rag.html">RAG</a>).</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>Brute-force exact search</td><td>Small corpora (&lt;~100k vectors), need guaranteed recall, simplicity matters</td><td>Large corpora or tight query-latency budgets</td><td>HNSW</td></tr>
+        <tr><td>HNSW</td><td>Most RAG/search workloads needing good recall at low latency</td><td>Extremely memory-constrained, billion-scale, or write-heavy (frequent delete) workloads</td><td>IVF / IVF-PQ</td></tr>
+        <tr><td>IVF / IVF-PQ</td><td>Very large scale, memory-constrained, some recall loss acceptable</td><td>Small-to-medium datasets where HNSW's better recall/speed curve is affordable</td><td>HNSW</td></tr>
+        <tr><td>Cosine similarity</td><td>Most text embedding models (trained/intended for direction comparison)</td><td>Models explicitly trained for Euclidean/other metrics</td><td>Euclidean distance or model-specific metric</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+
+      <div class="qa-level basic">
+        <h4>Basic</h4>
+        <details class="qa"><summary>What is a text embedding, in one sentence?</summary><div class="answer"><p>A fixed-length vector of numbers produced by a model such that texts with similar meaning produce vectors that are close together in that vector space, and dissimilar texts produce vectors that are far apart.</p></div><div class="followup">Follow-up: can you interpret what any single dimension of the vector "means"?</div></details>
+        <details class="qa"><summary>What does cosine similarity measure, and why is it preferred over Euclidean distance for most text embeddings?</summary><div class="answer"><p>It measures the angle between two vectors, ignoring magnitude. Most text embedding models are trained to encode meaning in direction rather than length, so comparing by angle (cosine) matches how the model was trained and intended to be used, whereas Euclidean distance would be sensitive to magnitude differences that carry no semantic signal.</p></div><div class="followup">Follow-up: under what condition does dot product become equivalent to cosine similarity?</div></details>
+        <details class="qa"><summary>What is the difference between exact and approximate nearest-neighbor (ANN) search?</summary><div class="answer"><p>Exact search compares the query against every stored vector and returns the true closest ones (100% recall, but O(n), slow at scale). ANN search uses an index structure (like HNSW or IVF) to avoid comparing against everything, trading a small amount of recall for much better speed and scalability.</p></div><div class="followup">Follow-up: at roughly what corpus size does it usually make sense to move from exact to approximate search?</div></details>
+        <details class="qa"><summary>Can you mix vectors from two different embedding models in the same similarity search?</summary><div class="answer"><p>No — different models produce vectors in unrelated geometric spaces, so comparing them produces meaningless similarity scores. The same model and version must be used for both the corpus and the query, and changing models requires re-embedding the whole corpus.</p></div><div class="followup">Follow-up: how would you stage a safe migration to a new embedding model without downtime or a quality regression?</div></details>
+        <details class="qa"><summary>What role does a vector database play beyond "storing vectors"?</summary><div class="answer"><p>It builds and maintains an index (often HNSW or IVF) over the stored vectors to make nearest-neighbor queries fast at scale, typically also storing associated metadata and supporting filtered search, and handles the operational concerns (updates, deletes, persistence) around that index.</p></div><div class="followup">Follow-up: why might a plain Postgres table with pgvector be a reasonable choice instead of a dedicated vector DB product?</div></details>
+      </div>
+
+      <div class="qa-level medium">
+        <h4>Medium</h4>
+        <details class="qa"><summary>Explain HNSW's search mechanism at a level you could whiteboard.</summary><div class="answer"><p>HNSW builds a multi-layer graph: sparse, long-range connections at the top layer for fast coarse navigation, denser short-range connections at lower layers, with every vector present at the bottom layer. A query starts at an entry point in the top layer, greedily walks to the closest neighbor at that layer until no closer neighbor exists, then drops to the next layer down and repeats, refining toward the true nearest neighbors layer by layer — like using highways to get close, then local streets for the exact destination.</p></div><div class="followup">Follow-up: what do the M and ef_search parameters control, and which one affects index build versus query time?</div></details>
+        <details class="qa"><summary>How does IVF differ from HNSW, and in what scenario would you actually prefer it?</summary><div class="answer"><p>IVF clusters vectors into partitions via k-means and only searches the clusters nearest the query (n_probe of them), rather than traversing a graph. It generally has cheaper build/insert cost and lower memory than HNSW but a worse recall/speed tradeoff curve at moderate scale. It becomes attractive at very large (tens of millions+) scale, especially combined with product quantization (IVF-PQ) for memory-bounded billion-scale datasets, where HNSW's memory footprint would be prohibitive.</p></div><div class="followup">Follow-up: why does IVF's recall degrade if the underlying data distribution shifts significantly after the clusters are built?</div></details>
+        <details class="qa"><summary>How would you measure whether your ANN index's recall is actually good enough for your product, rather than assuming it?</summary><div class="answer"><p>Take a representative sample of queries, run brute-force exact search on the same corpus to get ground-truth top-k results, run the same queries through the ANN index, and compute recall@k (fraction of the true top-k that the ANN index actually returned). Track this over time and after any index parameter or embedding model change, rather than treating default settings as sufficient.</p></div><div class="followup">Follow-up: what tradeoff would you adjust (and in which direction) if measured recall is too low for your product's needs?</div></details>
+        <details class="qa"><summary>Why can embedding a single, very long document as one vector hurt retrieval quality even though it's technically searchable?</summary><div class="answer"><p>A single embedding has to represent the entire document's content in one fixed-length vector, averaging together potentially many distinct topics/sections — this dilutes the vector's ability to score highly against a query about any one specific topic within the document, since the vector is a blend, not a sharp representation of any single part. Chunking into smaller, topically coherent pieces, each separately embedded, produces vectors that can match specific queries much more precisely.</p></div><div class="followup">Follow-up: what's a failure mode in the opposite direction — chunks that are too small?</div></details>
+        <details class="qa"><summary>What operational challenge does HNSW have with deletions, and how is it typically handled?</summary><div class="answer"><p>HNSW's graph structure doesn't support cheap, direct removal of a node without potentially breaking the navigability of connections through it. Common approaches: mark deleted vectors with a tombstone and filter them out of results without restructuring the graph (search cost creeps up over time as tombstones accumulate), or periodically rebuild the index from the current live data set.</p></div><div class="followup">Follow-up: how would this affect your design for a vector DB backing content that changes or gets deleted frequently (e.g. a live chat history)?</div></details>
+      </div>
+
+      <div class="qa-level advanced">
+        <h4>Advanced</h4>
+        <details class="qa"><summary>Design a zero-downtime migration from embedding model A to model B for a 10M-document production vector index.</summary><div class="answer"><p>Key points: add a model/version field to vector metadata; dual-write new/updated documents under both A and B embeddings (or at minimum start fully embedding new content under B while A continues serving); run a backfill job re-embedding the historical corpus under B in batches, rate-limited against the embeddings API's cost/limits, tracking progress so it's resumable; once backfill completes, validate B's retrieval quality against a held-out eval set (compare to A's baseline quality, not just "it runs"); cut query traffic over to the B-only index behind a feature flag, with the ability to roll back to A if quality regresses; only then decommission A's vectors. Never serve a mixed A/B index to the same query.</p></div><div class="followup">Follow-up: how would you validate retrieval quality objectively before cutting over, rather than relying on spot-checking?</div></details>
+        <details class="qa"><summary>A production vector search feature returns plausible but subtly wrong results under load, and brute-force validation on the same queries returns different (better) results. Walk through your debugging process.</summary><div class="answer"><p>First confirm it's a recall issue, not a data issue: verify the "better" brute-force results and the ANN results are searching the identical, consistently up-to-date dataset (rule out index lag/staleness first — a surprisingly common false lead). If data is confirmed consistent, measure recall@k systematically across a larger sample, not just the anecdotal failing cases, to see if this is pervasive or query-specific. If pervasive, inspect and likely increase ef_search (query-time recall/speed knob, cheap to tune without rebuilding) and separately M/ef_construction (build-time, requires reindex) based on where the recall/speed curve actually sits versus your latency budget. If query-specific, check whether those queries' true nearest neighbors are unusually close together in the vector space (a known harder case for ANN graphs) or whether metadata pre-filtering is interacting badly with the ANN search (filtering after retrieval can starve results if the filter is restrictive).</p></div><div class="followup">Follow-up: why would increasing ef_search fix this without requiring an index rebuild, while increasing M would not?</div></details>
+        <details class="qa"><summary>Explain product quantization (PQ) at a level sufficient to justify when its accuracy cost is worth it.</summary><div class="answer"><p>PQ compresses each vector by splitting it into sub-vectors (segments of the original dimensions) and replacing each sub-vector with the index of its nearest centroid from a small, pre-trained codebook for that segment — storing a handful of small integer codes instead of the full floating-point vector, massively reducing memory (often 8-32x). Distance calculations become approximate (comparing codebook-centroid distances rather than true vector distances), costing additional recall on top of whatever ANN index wraps it (e.g. IVF-PQ). It's worth the cost specifically when memory is the binding constraint at very large scale (hundreds of millions to billions of vectors) where keeping full-precision vectors in memory/on fast storage is infeasible or prohibitively expensive, and the product's accuracy bar tolerates the additional loss.</p></div><div class="followup">Follow-up: how would you validate that PQ's accuracy loss is acceptable for your specific product before committing to it at scale?</div></details>
+        <details class="qa"><summary>How would you design metadata pre-filtering (e.g. multi-tenant isolation: "only search this tenant's documents") so it doesn't silently degrade recall or leak data across tenants?</summary><div class="answer"><p>First, treat tenant isolation as a correctness/security requirement, not a recall optimization — verify explicitly whether your vector DB applies the filter during the ANN graph/cluster traversal (pre-filtering, generally better both for security guarantees and recall) versus after retrieving an unfiltered top-k and then filtering (post-filtering, which can return fewer than k results, or zero, if the tenant's documents are a small fraction of the corpus and didn't make the unfiltered top-k). For strict isolation guarantees independent of the ANN implementation's filtering quality, consider a per-tenant index/namespace instead of a single shared index with a filter, trading some operational complexity for a hard guarantee that cross-tenant leakage is structurally impossible rather than dependent on filter correctness.</p></div><div class="followup">Follow-up: what's the operational cost of per-tenant indexes at scale (e.g. 100,000 tenants), and how would you mitigate it?</div></details>
+        <details class="qa"><summary>Why might two cosine-similarity scores of 0.85 and 0.82 from two different embedding models NOT be directly comparable as "0.85 is more relevant than 0.82"?</summary><div class="answer"><p>Different embedding models have different score distributions/calibration — one model's typical "good match" range might cluster around 0.7-0.9 while another's clusters around 0.4-0.6 for equivalent semantic relevance, due to differences in training objective, normalization, and the geometry the model learned. Raw similarity scores are only meaningfully comparable within the same model, same version, same normalization — never across models, and often not even perfectly comparable across very different query/document length distributions within the same model without calibration.</p></div><div class="followup">Follow-up: how does this affect using a fixed similarity-score threshold (e.g. "only use chunks with score &gt; 0.75") as a RAG relevance filter?</div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment">
+        <span class="level-tag">Beginner (30-60 min)</span>
+        <h4>Brute-force semantic search from scratch</h4>
+        <p>Given a small set of ~30 short text snippets, embed them with an embeddings API, store the vectors in
+        memory, and implement brute-force cosine-similarity search to find the top-3 most relevant snippets for
+        a free-text query.</p>
+        <ul>
+          <li>No vector DB — plain arrays and a manual cosine similarity function.</li>
+          <li>Print the top-3 results with their scores for at least 5 different test queries.</li>
+        </ul>
+        <p><strong>Acceptance criteria:</strong> results are subjectively sensible (a query about "refunds"
+        returns refund-related snippets ahead of unrelated ones) for all 5 test queries.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>Normalize vectors once after embedding if you want to use dot product as a cheaper stand-in for cosine similarity — verify both give the same ranking on a couple of examples first.</p></div></details>
+        <p><strong>Bonus:</strong> add one deliberately out-of-domain snippet and confirm it consistently scores low across all test queries.</p>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Intermediate (2-4 hrs)</span>
+        <h4>pgvector-backed search with HNSW and recall measurement</h4>
+        <p>Set up Postgres with the pgvector extension, embed a larger corpus (~2,000 short documents — e.g.
+        Wikipedia summaries or your own notes), store them with an HNSW index, and measure the index's recall
+        against brute-force ground truth.</p>
+        <ul>
+          <li>Build the schema and HNSW index as shown in this chapter's code example.</li>
+          <li>For a sample of 20 queries, compute true top-10 via a brute-force SQL query (or in application
+          code) and compare against the HNSW-indexed query's top-10, computing recall@10 for each.</li>
+          <li>Vary <code>ef_search</code> and report how recall and query latency change.</li>
+        </ul>
+        <p><strong>Acceptance criteria:</strong> a table showing recall@10 and average query latency at least 3
+        different <code>ef_search</code> values, demonstrating the tradeoff explicitly.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>pgvector lets you set <code>ef_search</code> per-session via <code>SET hnsw.ef_search = N;</code> before running a query, so you can sweep it without rebuilding the index.</p></div></details>
+        <p><strong>Bonus:</strong> repeat the experiment with an IVF-style approach (e.g. pgvector's own IVFFlat index type) and compare recall/latency tradeoffs against HNSW on the same data.</p>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Advanced (1-2 days)</span>
+        <h4>Embedding-model migration simulator</h4>
+        <p>Simulate the "upgrade embedding models without downtime" problem end to end on a corpus of your own
+        documents, proving your migration strategy preserves or improves retrieval quality and never serves a
+        mixed-model index to a single query.</p>
+        <ul>
+          <li>Embed a corpus (~1,000 chunks) with model A; build a working search endpoint against it.</li>
+          <li>Build a labeled eval set (~20 queries with manually judged "good" results from the corpus).</li>
+          <li>Implement a migration path to model B: dual-track metadata, a resumable backfill job re-embedding
+          the corpus under B, and a cutover mechanism (feature flag or versioned index) that only ever queries
+          a single, consistent model's vectors per request.</li>
+          <li>Run your eval set against both A and B after migration and report quality (e.g. precision@5
+          against your labels) for each, plus confirm zero cross-model query/corpus mismatches occurred during
+          the migration window.</li>
+        </ul>
+        <p><strong>Acceptance criteria:</strong> a working before/after eval comparison, and a demonstrated
+        (tested, not just argued) guarantee that no query during the migration ever compared vectors from
+        different models.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>The simplest safe cutover is two fully separate indexes/tables (one per model) with a single flag deciding which one is "live" for queries — resist the temptation to put both models' vectors in one table distinguished only by a metadata filter, since a filter bug there is exactly the failure mode you're trying to prevent.</p></div></details>
+        <p><strong>Bonus:</strong> add a canary step that routes 5% of query traffic to model B and compares its eval-set performance against the A baseline before a full cutover.</p>
+      </div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet">
+        <ul>
+          <li>Embeddings encode meaning as direction in high-dimensional space; individual dimensions have no human-readable meaning.</li>
+          <li>Cosine similarity = angle only (ignores magnitude); use it for most text embedding models unless told otherwise.</li>
+          <li>Dot product ≡ cosine similarity only when vectors are normalized to unit length.</li>
+          <li>Exact (brute-force) search is fine under ~100k vectors; beyond that, reach for an ANN index.</li>
+          <li>HNSW: multi-layer graph, logarithmic-ish search, tunable via M (build) and ef_search (query) — default choice for most RAG workloads.</li>
+          <li>IVF/IVF-PQ: cluster-based, cheaper memory/build cost, worse recall curve than HNSW, used at very large scale.</li>
+          <li>Never mix embeddings from different models/versions in one comparison — re-embed the whole corpus on any model change.</li>
+          <li>Measure ANN recall@k against brute-force ground truth periodically — don't trust default parameters blindly.</li>
+          <li>Chunk before embedding — a single vector for a long document dilutes topical precision.</li>
+        </ul>
+      </div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://arxiv.org/abs/1603.09320">HNSW original paper (Malkov & Yashunin)</a></li>
+        <li><a href="https://github.com/pgvector/pgvector">pgvector documentation</a></li>
+        <li><a href="https://platform.openai.com/docs/guides/embeddings">OpenAI: Embeddings guide</a></li>
+        <li><a href="https://qdrant.tech/documentation/">Qdrant documentation</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="02-llm-apis.html"><span class="dir">← Previous</span>Using LLM APIs</a>
+        <a class="next" href="04-rag.html"><span class="dir">Next →</span>RAG: Architecture & Evaluation</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · AI Integration</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-typescript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "09-ai-integration", chapterKey: "03-embeddings-vector-db" });</script>
+</body>
+</html>

@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CNNs, RNNs & Sequence Models — Machine Learning & AI — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">Machine Learning & AI</a><span class="sep">›</span>CNNs, RNNs & Sequence Models</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>CNNs, RNNs & Sequence Models</h1>
+      <p class="meta-line"><span>⏱ ~2.5 hrs</span><span>📍 Chapter 5 of 14</span></p>
+      <p><strong>One-line summary:</strong> CNNs exploit spatial locality to process images efficiently, RNNs/LSTMs
+      exploit sequential order to process text and time series — and understanding exactly why the latter
+      struggled (vanishing gradients, no parallelism) is what makes the transformer's design choices, covered
+      next chapter, make sense instead of feeling arbitrary.</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>You will not be asked to implement a CNN from scratch in a senior interview for a web/backend-leaning
+      role. You will absolutely be asked "why did transformers replace RNNs for NLP?" or "why do CNNs work well
+      for images?" — and a hand-wavy answer ("transformers are just better") reads as someone who learned
+      vocabulary without learning mechanism. These architectures also still matter directly: CNNs underpin most
+      production computer-vision systems (not every vision problem needs a vision transformer), and understanding
+      recurrence and its failure mode is the fastest route to understanding why attention was invented in the
+      first place — it's the direct motivating problem the next chapter solves.</p>
+      <div class="box why"><h4>Why</h4><p>Both architectures encode an assumption about structure directly into
+      the computation: CNNs assume nearby pixels are related (locality) and that the same pattern can appear
+      anywhere in the image (translation invariance), so they reuse the same small filter across the whole image
+      instead of learning a separate weight per pixel position. RNNs assume order matters and process one token
+      at a time, carrying a hidden state forward — a direct computational model of "reading left to right." Both
+      assumptions are reasonable for their domains, but both also limit what the architecture can do, and those
+      limits are exactly what later architectures were built to escape.</p></div>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>Requires <a href="03-neural-networks-from-scratch.html">Neural Networks from Scratch</a> (forward pass,
+      backprop, gradients) and <a href="04-pytorch-and-tensors.html">PyTorch & Tensors</a> (tensor shapes,
+      building modules). Leads directly into <a href="06-attention-and-transformers.html">Attention &
+      Transformers</a>, which replaces the recurrence described here.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="conv-basics">Convolutional layers: kernels, stride, padding, pooling</h3>
+      <p>A <strong>convolution</strong> slides a small learned matrix (the <strong>kernel</strong> or
+      <strong>filter</strong>, e.g. 3×3) across the input image, computing a dot product between the kernel and
+      every local patch it covers. The result is a <strong>feature map</strong> — one value per position,
+      indicating how strongly that pattern (whatever the kernel learned to detect) is present at that location. A
+      conv layer typically has many filters (e.g. 64), each producing its own feature map, each potentially
+      learning to detect a different pattern (an edge at some orientation, a color blob, later layers: textures,
+      then whole object parts).</p>
+      <ul>
+        <li><strong>Stride</strong> — how many pixels the kernel moves between applications. Stride 1 produces
+        a feature map close to the input resolution; stride 2 skips every other position, halving the output
+        resolution and reducing compute — a cheap way to downsample while still extracting features.</li>
+        <li><strong>Padding</strong> — without padding, a kernel can't be centered on border pixels, so the
+        output shrinks slightly every layer and border information is used less. "Same" padding adds zeros
+        around the border so the output resolution matches the input; "valid" padding uses none and accepts the
+        shrink.</li>
+        <li><strong>Pooling</strong> (e.g. max-pool 2×2) — a non-learned downsampling step that takes the max (or
+        average) over small local regions, reducing resolution and adding a small amount of translation
+        tolerance (a feature shifted by a pixel or two still produces the same pooled output). Modern
+        architectures increasingly use strided convolutions instead of separate pooling layers, but the intuition
+        (controlled downsampling) is the same.</li>
+      </ul>
+      <p><strong>Why convolution works for images specifically:</strong> a fully-connected layer treats every
+      pixel as an independent input with its own weight — it has no notion that pixel (10,10) and pixel (10,11)
+      are neighbors, and it would need to separately learn "a vertical edge" for every possible position in the
+      image. A convolution shares one small set of weights across every position, encoding directly that (a)
+      local pixels matter more to each other than distant ones (locality) and (b) a pattern useful in one part of
+      the image is just as useful anywhere else (translation invariance/weight sharing) — this collapses the
+      parameter count by orders of magnitude versus a fully-connected layer on raw pixels, and it's precisely
+      because this assumption is true for natural images that CNNs generalize so well from relatively modest
+      data.</p>
+
+      <h3 id="edge-detection">A concrete example: edge detection intuition</h3>
+      <p>A classic hand-designed kernel for detecting vertical edges is <code>[[-1,0,1],[-1,0,1],[-1,0,1]]</code>:
+      at a patch where the left column is dark and the right column is bright, the dot product is large and
+      positive; on a flat, uniform region it's near zero. A trained CNN's first-layer filters, when visualized,
+      consistently converge on very similar edge/gradient detectors on their own, without ever being told "detect
+      edges" — the network discovers that edges are the most useful low-level building block for almost any
+      downstream visual task, the same way a human-engineered computer vision pipeline (pre-deep-learning) used
+      hand-crafted edge detectors (Sobel, Canny) as a first processing step. Later conv layers combine these
+      edges into corners and textures, then into object parts, then whole objects — a hierarchy of increasingly
+      abstract features built from the same simple convolution operation stacked repeatedly.</p>
+
+      <h3 id="rnn-lstm">RNNs, the vanishing gradient problem, and why LSTMs fix it</h3>
+      <p>A vanilla <strong>RNN</strong> processes a sequence one token at a time, maintaining a hidden state
+      <code>h_t = tanh(W_h h_{t-1} + W_x x_t)</code> that's meant to summarize everything seen so far. This is a
+      direct computational model of sequential reading, and it naturally handles variable-length input. The
+      problem surfaces during training: backpropagating the loss gradient back through many time steps requires
+      repeatedly multiplying by the same weight matrix (and the derivative of tanh, which is ≤1 almost
+      everywhere). Multiplying many numbers each less than 1 together shrinks the product toward zero
+      exponentially fast — this is the <strong>vanishing gradient problem</strong>. In practice it means an RNN
+      can barely learn dependencies spanning more than a few dozen tokens: an error at token 200 provides almost
+      no learning signal about what happened at token 5, even if token 5 was the actually relevant one (e.g. the
+      subject of a long sentence that a verb far later needs to agree with).</p>
+      <p><strong>LSTMs</strong> (Long Short-Term Memory) fix this with an explicit <strong>gating
+      mechanism</strong>: alongside the hidden state, an LSTM maintains a separate <strong>cell state</strong>
+      that gates (via learned sigmoid "forget," "input," and "output" gates) how much old information to keep,
+      how much new information to write, and how much to expose as output — critically, the cell state update is
+      close to additive (<code>C_t = forget_gate * C_{t-1} + input_gate * candidate</code>) rather than being
+      repeatedly multiplied through a saturating nonlinearity at every step. An additive path lets gradients flow
+      backward through many time steps largely unattenuated when the forget gate learns to stay open, giving
+      LSTMs a dramatically longer effective memory than vanilla RNNs — though still not unlimited, and still
+      fundamentally sequential.</p>
+
+      <h3 id="why-transformers-won">Why transformers replaced RNNs/LSTMs for most NLP work</h3>
+      <p>Two independent reasons, and it's worth being able to name both in an interview: (1) <strong>no
+      parallelism</strong> — computing <code>h_t</code> requires <code>h_{t-1}</code>, so processing a sequence
+      of length N takes N sequential steps that cannot be parallelized across the sequence dimension during
+      training, which is brutally slow on GPUs built for massive parallel matrix multiplication; attention
+      computes relationships between all token pairs in one parallelizable matrix operation instead. (2)
+      <strong>limited long-range dependency modeling</strong> — even LSTMs' improved gradient flow degrades over
+      very long sequences, and the "distance" between two related tokens is still, roughly, their distance in the
+      sequence; self-attention (next chapter) connects any two tokens with a direct, constant-length path
+      regardless of how far apart they are in the sequence. Both reasons compound: the parallelism advantage is
+      what made training on internet-scale text corpora computationally feasible at all, and the long-range
+      modeling advantage is what made the resulting models actually good.</p>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>A CNN forward pass, concretely: input image (e.g. 224×224×3) → conv layer (e.g. 64 filters of 3×3,
+      stride 1, same padding) produces a 224×224×64 feature map → activation (ReLU) → pooling (e.g. 2×2 max-pool)
+      halves spatial resolution to 112×112×64 → repeat with more filters and further downsampling through several
+      stages → eventually flatten (or global-average-pool) the final small spatial feature map into a vector →
+      feed through fully-connected layers to a classification/regression output. Each stage trades spatial
+      resolution for a greater number of feature channels, building progressively more abstract representations.</p>
+      <p>An LSTM forward pass through one time step: concatenate the previous hidden state and the new input
+      token's embedding → compute three gate activations (forget, input, output — each a sigmoid over a learned
+      linear combination of the concatenated input) and one candidate cell-state update (tanh) → update the cell
+      state as <code>forget_gate ⊙ previous_cell + input_gate ⊙ candidate</code> → compute the new hidden state
+      as <code>output_gate ⊙ tanh(new_cell_state)</code>. This repeats once per token, strictly sequentially.</p>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+flowchart LR
+  I[Input image 224x224x3] --> C1[Conv 3x3 x64 filters]
+  C1 --> A1[ReLU]
+  A1 --> P1[MaxPool 2x2 -> 112x112x64]
+  P1 --> C2[Conv 3x3 x128 filters]
+  C2 --> A2[ReLU]
+  A2 --> P2[MaxPool 2x2 -> 56x56x128]
+  P2 --> GAP[Global Avg Pool]
+  GAP --> FC[Fully Connected]
+  FC --> OUT[Class scores]
+      </div>
+      <div class="mermaid">
+flowchart LR
+  X[Input x_t] --> CAT[Concat with h_t-1]
+  H[Hidden state h_t-1] --> CAT
+  CS[Cell state C_t-1] --> FG[Forget gate]
+  CAT --> FG
+  CAT --> IG[Input gate]
+  CAT --> CAND[Candidate tanh]
+  CAT --> OG[Output gate]
+  FG --> MUL1[forget_gate x C_t-1]
+  IG --> MUL2[input_gate x candidate]
+  MUL1 --> ADD[Add -> C_t new cell state]
+  MUL2 --> ADD
+  ADD --> TANH[tanh C_t]
+  OG --> MUL3[output_gate x tanh C_t]
+  TANH --> MUL3
+  MUL3 --> HOUT[h_t new hidden state]
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-python">import torch
+import torch.nn as nn
+
+# A small CNN for image classification, showing the conv -> pool -> conv -> pool
+# -> flatten -> FC pattern explicitly.
+class SmallCNN(nn.Module):
+    def __init__(self, num_classes=10):
+        super().__init__()
+        self.features = nn.Sequential(
+            nn.Conv2d(3, 32, kernel_size=3, stride=1, padding=1),  # same padding
+            nn.ReLU(),
+            nn.MaxPool2d(2),                                        # 224 -> 112
+            nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.MaxPool2d(2),                                        # 112 -> 56
+        )
+        self.classifier = nn.Sequential(
+            nn.AdaptiveAvgPool2d(1),   # global average pool -> 64x1x1, resolution-independent
+            nn.Flatten(),
+            nn.Linear(64, num_classes),
+        )
+
+    def forward(self, x):
+        x = self.features(x)
+        return self.classifier(x)
+
+# LSTM for sequence classification (e.g. sentiment) — note the strictly sequential
+# unrolling inside nn.LSTM; this is the computational cost attention avoids.
+class LSTMClassifier(nn.Module):
+    def __init__(self, vocab_size, embed_dim=128, hidden_dim=256, num_classes=2):
+        super().__init__()
+        self.embedding = nn.Embedding(vocab_size, embed_dim)
+        self.lstm = nn.LSTM(embed_dim, hidden_dim, batch_first=True)
+        self.fc = nn.Linear(hidden_dim, num_classes)
+
+    def forward(self, token_ids):
+        # token_ids: (batch, seq_len)
+        embedded = self.embedding(token_ids)                 # (batch, seq_len, embed_dim)
+        _, (h_n, c_n) = self.lstm(embedded)                  # h_n: (1, batch, hidden_dim)
+        final_hidden = h_n.squeeze(0)                         # (batch, hidden_dim)
+        return self.fc(final_hidden)
+
+# Demonstrating the vanishing-gradient intuition directly: repeated multiplication
+# by a value < 1 shrinks exponentially with sequence length.
+def vanishing_gradient_demo(factor=0.9, steps=200):
+    grad = 1.0
+    for _ in range(steps):
+        grad *= factor           # analogous to one backprop step through time
+    return grad                  # ~1.8e-9 after 200 steps even with a gentle 0.9 factor
+</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4><p>A logistics company builds a document-classification pipeline
+      that originally used a bidirectional LSTM to classify scanned shipping manifests by type, trained on
+      sequences of OCR'd tokens up to 2,000 tokens long. Training was slow (the sequential recurrence couldn't
+      parallelize across the sequence dimension on GPU) and accuracy plateaued because the model struggled to
+      connect a document-type-indicating phrase near the top of a long manifest with disambiguating detail near
+      the bottom — exactly the long-range dependency weakness. Migrating to a pretrained transformer encoder
+      (fine-tuned via <a href="07-huggingface-ecosystem.html">HuggingFace</a>) cut training time by roughly 4x
+      (full sequence processed in parallel per batch) and lifted classification accuracy by several points,
+      specifically on the longer documents where the LSTM had struggled most — the gain wasn't uniform, it was
+      concentrated exactly where the theoretical weakness predicted it would be.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Assuming "LSTM" automatically means "handles long sequences well."
+      LSTMs mitigate vanishing gradients, they don't eliminate the sequential-processing ceiling or guarantee
+      long-range learning — in practice, LSTMs trained on sequences much beyond a few hundred tokens still
+      degrade noticeably, which is exactly why attention-based architectures became the default the moment
+      compute made them affordable to train at scale.</p></div>
+      <ul>
+        <li>Don't forget padding/stride math when stacking conv layers — an off-by-one in expected feature map
+        size is one of the most common CNN debugging sessions, always print <code>.shape</code> after each
+        layer when building a new architecture.</li>
+        <li>Global average pooling (rather than flattening a fixed spatial size into a huge FC layer) makes a CNN
+        resolution-independent and drastically cuts parameter count — prefer it unless you have a specific reason
+        not to.</li>
+        <li>Don't use a plain RNN in new production code in 2025-26 — if you need recurrence at all (rare now),
+        at minimum use an LSTM/GRU; for most sequence tasks, reach for a pretrained transformer first.</li>
+        <li>Bidirectional RNNs/LSTMs (reading both forward and backward) help for tasks where the full sequence
+        is available upfront (classification) but are meaningless for autoregressive generation, where future
+        tokens don't exist yet at generation time.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>CNN</td><td>Images, grid-structured data, latency-sensitive vision at edge</td><td>Need global context across the whole image from layer 1</td><td>Vision Transformer (ViT)</td></tr>
+        <tr><td>Vanilla RNN</td><td>Essentially never in new production systems</td><td>Any sequence task in 2025-26</td><td>LSTM/GRU, or better, a transformer</td></tr>
+        <tr><td>LSTM/GRU</td><td>Streaming/online inference with strict memory constraints, short sequences</td><td>Long sequences, need parallel training throughput</td><td>Transformer encoder/decoder</td></tr>
+        <tr><td>Transformer</td><td>Most NLP, long-range dependencies, need training parallelism</td><td>Extremely resource-constrained edge inference</td><td>Distilled/quantized transformer, or CNN/LSTM for the specific constrained case</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+
+      <div class="qa-level basic">
+        <h4>Basic</h4>
+        <details class="qa"><summary>What does a convolution kernel actually compute as it slides across an image?</summary><div class="answer"><p>At each position, it computes a dot product between the kernel's learned weights and the local patch of the input it currently covers, producing one value in the output feature map indicating how strongly that kernel's pattern is present at that location.</p></div><div class="followup">Follow-up: what happens to that value if the patch closely matches the kernel's pattern versus if it doesn't?</div></details>
+        <details class="qa"><summary>What is stride, and what's the effect of increasing it?</summary><div class="answer"><p>Stride is how many pixels the kernel moves between applications. Increasing stride (e.g. from 1 to 2) skips positions, producing a smaller, lower-resolution output feature map and reducing compute.</p></div><div class="followup">Follow-up: what's the relationship between stride-2 convolutions and pooling layers?</div></details>
+        <details class="qa"><summary>Why does a CNN use far fewer parameters than a fully-connected layer on the same image?</summary><div class="answer"><p>A conv layer shares the same small set of filter weights across every spatial position (weight sharing), rather than learning an independent weight for every pixel, exploiting the assumption that useful local patterns can appear anywhere in the image.</p></div><div class="followup">Follow-up: name the two assumptions about images this design encodes.</div></details>
+        <details class="qa"><summary>What is the vanishing gradient problem in RNNs?</summary><div class="answer"><p>Backpropagating the loss through many time steps requires repeatedly multiplying by the same weight matrix and activation derivative; when these are consistently less than 1, the gradient shrinks exponentially with sequence length, so early time steps receive almost no learning signal.</p></div><div class="followup">Follow-up: why does this specifically hurt learning long-range dependencies rather than just slowing training generally?</div></details>
+        <details class="qa"><summary>At a high level, what does an LSTM add to a vanilla RNN?</summary><div class="answer"><p>A separate cell state plus learned gates (forget, input, output) that control how much old information to retain, how much new information to write, and how much to expose — with a close-to-additive cell state update that lets gradients flow backward across many steps without vanishing as fast.</p></div><div class="followup">Follow-up: which gate specifically is most responsible for "remembering" over long distances?</div></details>
+        <details class="qa"><summary>Name one task where CNNs are still a better default than vision transformers.</summary><div class="answer"><p>Latency- or resource-constrained edge/mobile vision inference, or tasks with limited training data, where CNNs' built-in locality/translation-invariance assumptions give them a stronger inductive bias and better data efficiency than a vision transformer, which generally needs more data or pretraining to reach comparable accuracy.</p></div><div class="followup">Follow-up: why do vision transformers need more data to match CNN performance from scratch?</div></details>
+      </div>
+
+      <div class="qa-level medium">
+        <h4>Medium</h4>
+        <details class="qa"><summary>Why can't RNN training be parallelized across the sequence dimension the way transformer training can?</summary><div class="answer"><p>Computing the hidden state at time t requires the hidden state at time t-1 as an input — it's an inherently sequential recurrence. A transformer's self-attention computes relationships between all token pairs as one set of parallelizable matrix multiplications, with no step depending on the output of a previous step within the same layer.</p></div><div class="followup">Follow-up: does this parallelism advantage apply equally to training and to autoregressive inference? Why or why not?</div></details>
+        <details class="qa"><summary>Walk through why an LSTM's cell-state update being "close to additive" specifically helps with vanishing gradients.</summary><div class="answer"><p>The core recurrence is <code>C_t = forget_gate ⊙ C_{t-1} + input_gate ⊙ candidate</code> — an addition, not a repeated multiplication through a saturating nonlinearity. When the forget gate learns to stay near 1 for information that should persist, the gradient with respect to C_{t-1} is close to 1 as well, letting gradients propagate backward through many steps largely unattenuated instead of shrinking multiplicatively at every step the way a vanilla RNN's tanh-based recurrence does.</p></div><div class="followup">Follow-up: can an LSTM still suffer vanishing gradients? Under what circumstance?</div></details>
+        <details class="qa"><summary>Explain translation invariance in CNNs and why pooling contributes a small amount of it.</summary><div class="answer"><p>Translation invariance means a learned pattern is detected regardless of its position in the image, which weight sharing across spatial positions mostly provides. Pooling adds a small additional tolerance: taking the max over a local region means a feature shifted by a pixel or two within that region still produces the same pooled output, making the overall representation somewhat robust to small positional shifts.</p></div><div class="followup">Follow-up: why is full translation invariance not actually desirable for every vision task (e.g. object localization)?</div></details>
+        <details class="qa"><summary>What's the difference in effective "path length" between two related tokens in an RNN versus in self-attention, and why does this matter?</summary><div class="answer"><p>In an RNN, information from token i reaching token j must flow through every intermediate hidden state, so the effective path length grows with the distance |i-j|, and gradient/information degradation compounds with that distance. In self-attention, every token attends directly to every other token in a single operation, so the path length between any two tokens is constant (effectively 1) regardless of their distance in the sequence — this is the core structural reason attention handles long-range dependencies better.</p></div><div class="followup">Follow-up: does this mean self-attention has literally no notion of sequence order? What has to be added to fix that?</div></details>
+        <details class="qa"><summary>Why does a CNN build a hierarchy of increasingly abstract features (edges -> textures -> parts -> objects) rather than learning object detectors directly in the first layer?</summary><div class="answer"><p>Each conv layer's receptive field (the region of the original input it's influenced by) is small, limited by kernel size; stacking layers increases the effective receptive field while composing simple patterns from earlier layers into more complex ones. Early layers with small receptive fields can only usefully detect small, simple patterns (edges, gradients); only after several layers does the effective receptive field grow large enough to represent whole object parts or objects.</p></div><div class="followup">Follow-up: how does increasing stride or adding pooling affect the growth rate of the effective receptive field?</div></details>
+      </div>
+
+      <div class="qa-level advanced">
+        <h4>Advanced</h4>
+        <details class="qa"><summary>You're deciding between a CNN and a transformer-based vision model for a new production image-classification system with a modest labeled dataset (~20k images). Walk through the tradeoff.</summary><div class="answer"><p>CNNs have a strong built-in inductive bias (locality, translation invariance) that lets them learn useful representations from relatively modest data; vision transformers lack this built-in bias and generally need either a much larger labeled dataset or strong pretraining (e.g. on ImageNet-scale or larger data) plus fine-tuning to match CNN performance from a similar data budget. With 20k images and no budget for large-scale pretraining from scratch, a CNN (or a pretrained ViT fine-tuned via transfer learning, which borrows the needed inductive-bias-equivalent from its pretraining) is the pragmatic choice over training a ViT from scratch.</p></div><div class="followup">Follow-up: how does fine-tuning a pretrained ViT change this calculus compared to training one from random initialization?</div></details>
+        <details class="qa"><summary>Derive, at a high level, why the vanishing gradient problem is specifically about the product of many terms each less than 1, and why this is fundamentally different from just "training taking a long time."</summary><div class="answer"><p>Backprop through time applies the chain rule across every time step, multiplying the gradient by the recurrent weight matrix's relevant eigenvalues and by the local derivative of the activation function (tanh's derivative is in [0,1] and often much less than 1 away from zero) at each step. The gradient at time step t with respect to an input at step t-k scales roughly with the product of k such terms; if that product's typical magnitude is below 1, the result shrinks exponentially with k, not linearly — meaning past a fairly small k, the gradient is numerically indistinguishable from zero and no amount of additional training time recovers a learning signal that has been multiplicatively annihilated, which is why it's a qualitatively different problem from merely slow convergence.</p></div><div class="followup">Follow-up: why can the opposite problem (exploding gradients) also occur, and what's the standard practical fix for it?</div></details>
+        <details class="qa"><summary>Design a hybrid CNN+sequence-model architecture for a video classification task (sequence of frames) and justify each component's role.</summary><div class="answer"><p>Use a CNN (or a pretrained CNN backbone) to extract a per-frame feature vector independently for each frame — this exploits spatial locality within each frame efficiently and is far cheaper than feeding raw pixels into a sequence model. Then feed the resulting sequence of per-frame feature vectors (far shorter and lower-dimensional than raw pixel sequences) into a temporal model — an LSTM for a lightweight/streaming setting, or a transformer encoder (treating frame-feature-vectors as "tokens") if the budget allows, to model how the scene changes over time. This decomposition matches each component to the structure it's suited for: CNN for spatial locality within a frame, sequence model for temporal relationships across frames.</p></div><div class="followup">Follow-up: what's lost by extracting per-frame features independently before the temporal model, versus a fully joint spatio-temporal architecture (e.g. 3D convolutions or video transformers)?</div></details>
+        <details class="qa"><summary>A team claims their new transformer-based model is strictly better than their old LSTM model because it has higher benchmark accuracy. What follow-up questions would you ask before accepting that conclusion for a latency-sensitive real-time inference use case?</summary><div class="answer"><p>Ask about inference latency and cost per request specifically, not just offline accuracy — transformers' quadratic self-attention cost in sequence length (addressed via KV-caching for autoregressive generation, covered next chapter) can make them slower or more expensive per inference than a comparably-sized LSTM for certain workloads, especially long sequences or very tight latency budgets. Also ask whether the accuracy gain holds at the actual production sequence lengths and data distribution (benchmark gains on curated datasets don't always transfer), and whether the LSTM baseline was fairly tuned (a common mistake is comparing a well-tuned new architecture against an under-tuned old one).</p></div><div class="followup">Follow-up: under what specific latency/throughput constraints would you still choose an LSTM over a transformer today?</div></details>
+        <details class="qa"><summary>Explain why bidirectional RNNs cannot be directly used for autoregressive text generation, and what architectural choice transformers make instead to support both understanding and generation.</summary><div class="answer"><p>A bidirectional RNN's backward pass requires the full sequence to already exist (it processes right-to-left as well as left-to-right), which is incompatible with generation, where future tokens don't exist yet at the time each token is produced. Transformers handle this with architectural variants rather than a single universal model: encoder-only models (e.g. BERT) use full bidirectional self-attention for understanding tasks where the whole input is available upfront, while decoder-only models (e.g. GPT-style, covered next chapter) use causal/masked self-attention that only attends to earlier positions, making them naturally compatible with autoregressive generation.</p></div><div class="followup">Follow-up: why does an encoder-decoder architecture (like the original Transformer) need both patterns simultaneously?</div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment">
+        <span class="level-tag">Beginner (30-60 min)</span>
+        <h4>Visualize feature map shapes through a small CNN</h4>
+        <p>Build the <code>SmallCNN</code> from the code examples (or your own small variant) in PyTorch, feed it
+        a batch of random tensors shaped like images, and print the tensor shape after every layer.</p>
+        <ul>
+          <li>Manually compute, on paper first, what each shape should be given the kernel size, stride, and
+          padding, then verify your PyTorch output matches.</li>
+        </ul>
+        <p><strong>Acceptance criteria:</strong> a shape trace through every layer with your manual calculation
+        shown alongside the actual printed shape, matching exactly.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>The output spatial size formula for a conv layer is <code>floor((input_size + 2*padding - kernel_size) / stride) + 1</code> — use it directly rather than guessing.</p></div></details>
+        <p><strong>Bonus:</strong> change padding from "same" to "valid" and show how the shapes diverge after several stacked layers.</p>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Intermediate (2-4 hrs)</span>
+        <h4>Demonstrate the vanishing gradient problem empirically</h4>
+        <p>Train a vanilla RNN (<code>nn.RNN</code>, not LSTM) and an LSTM on a synthetic task specifically
+        designed to require long-range memory (e.g. "output the token that appeared at position 0" for sequences
+        of length 100+), and compare their training curves.</p>
+        <ul>
+          <li>Plot training loss over epochs for both models on the same task/data.</li>
+          <li>Instrument and log the gradient norm at the earliest time step during backprop for both models,
+          and plot how it compares to the gradient norm at the final time step.</li>
+        </ul>
+        <p><strong>Acceptance criteria:</strong> a clear, measurable difference showing the LSTM both converging
+        better and having a measurably larger early-timestep gradient norm relative to the RNN.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>You can hook gradients directly via <code>register_hook</code> on the relevant hidden-state tensor at each time step during the backward pass, rather than trying to compute it analytically.</p></div></details>
+        <p><strong>Bonus:</strong> repeat the experiment with sequence length as a sweep (20, 50, 100, 200) and plot how the RNN's performance degrades with length while the LSTM's degrades more slowly.</p>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Advanced (1-2 days)</span>
+        <h4>Hybrid CNN+LSTM video/sequence-of-images classifier</h4>
+        <p>Build a small video (or image-sequence, e.g. a sequence of MNIST digit images forming a simple pattern)
+        classifier using a CNN to extract per-frame features and an LSTM over the resulting feature sequence to
+        classify the whole sequence, per the architecture discussed in the advanced interview question above.</p>
+        <ul>
+          <li>Use a small pretrained CNN backbone (or your own small CNN) for per-frame feature extraction.</li>
+          <li>Feed the resulting per-frame feature sequence into an LSTM, taking the final hidden state for
+          classification.</li>
+          <li>Compare against a baseline that just averages per-frame CNN features (no temporal model) to show
+          the LSTM is actually adding value when order/temporal structure matters.</li>
+        </ul>
+        <p><strong>Acceptance criteria:</strong> the CNN+LSTM model measurably outperforms the average-pooling
+        baseline on a task where temporal order genuinely matters (construct or pick a task where it does).</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>A clean synthetic task: generate sequences of MNIST digit images where the label depends on the <em>order</em> of two specific digits appearing (e.g. "label 1 if a 7 appears before a 3, else label 0") — this guarantees order matters and an order-blind baseline will provably fail.</p></div></details>
+        <p><strong>Bonus:</strong> swap the LSTM for a small transformer encoder over the same per-frame feature sequence and compare training time and accuracy.</p>
+      </div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet">
+        <ul>
+          <li>Convolution = shared small filter slid across the image, exploiting locality + translation invariance to cut parameters drastically vs. fully-connected.</li>
+          <li>Stride controls output resolution/compute; padding controls border handling; pooling adds controlled downsampling + mild shift tolerance.</li>
+          <li>CNNs build a hierarchy: edges -> textures -> parts -> objects, driven by growing effective receptive field across stacked layers.</li>
+          <li>RNN hidden state = sequential summary of everything seen so far; inherently can't parallelize across the sequence dimension.</li>
+          <li>Vanishing gradients = repeated multiplication by values &lt;1 during backprop-through-time shrinks gradient exponentially with distance.</li>
+          <li>LSTM gates (forget/input/output) + near-additive cell-state update give much better, not unlimited, long-range gradient flow.</li>
+          <li>Transformers won for NLP for two reasons: full parallelism during training, and constant-length path between any two tokens regardless of distance.</li>
+          <li>CNNs are still the right default for many vision tasks, especially with modest data or tight latency budgets — not every vision problem needs a ViT.</li>
+        </ul>
+      </div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://cs231n.github.io/convolutional-networks/">CS231n: Convolutional Neural Networks</a></li>
+        <li><a href="https://colah.github.io/posts/2015-08-Understanding-LSTMs/">Christopher Olah: Understanding LSTM Networks</a></li>
+        <li><a href="https://pytorch.org/docs/stable/generated/torch.nn.LSTM.html">PyTorch nn.LSTM documentation</a></li>
+        <li><a href="https://arxiv.org/abs/1211.5063">On the difficulty of training RNNs (Pascanu et al.) — vanishing/exploding gradients</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="04-pytorch-and-tensors.html"><span class="dir">← Previous</span>PyTorch & Tensors</a>
+        <a class="next" href="06-attention-and-transformers.html"><span class="dir">Next →</span>Attention & Transformers</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · Machine Learning & AI</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "15-machine-learning-ai", chapterKey: "05-cnns-rnns-sequence-models" });</script>
+</body>
+</html>

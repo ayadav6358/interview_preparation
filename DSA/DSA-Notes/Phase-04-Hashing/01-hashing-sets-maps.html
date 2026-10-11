@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hashing — Sets and Maps — DSA Trail</title>
+<style>
+  :root{
+    --ink:#12181B; --ink2:#1A2226; --ink3:#232C31;
+    --amber:#E8A33D; --amber-soft:#3A2E19;
+    --teal:#4FB3A9; --teal-soft:#12312D;
+    --rust:#D9695F; --rust-soft:#3A1F1C;
+    --slate:#8B9199;
+    --text:#E8E6E1; --text-dim:#A9AFAE;
+    --border: rgba(255,255,255,0.08);
+    --radius: 10px;
+    --mono: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{background:var(--ink); color:var(--text); font-family:var(--sans); line-height:1.65; font-size:16px;}
+  a{color:var(--amber); text-decoration:none;}
+  a:hover{text-decoration:underline;}
+  code, pre{font-family:var(--mono);}
+  #main{max-width:900px; margin:0 auto; padding:30px 24px 100px;}
+  h1{font-size:2rem; letter-spacing:-.01em; margin:14px 0 6px;}
+  h2{font-size:1.5rem; margin-top:52px; padding-top:14px; border-top:1px solid var(--border); letter-spacing:-.01em;}
+  h2:first-of-type{border-top:none; margin-top:20px;}
+  h3{font-size:1.15rem; margin-top:30px; color:var(--amber);}
+  .eyebrow{font-size:11px; text-transform:uppercase; letter-spacing:.12em; color:var(--teal); font-weight:700; margin-bottom:4px;}
+  .subtitle{color:var(--text-dim); font-size:15px; margin-bottom:28px;}
+  .callout{border-radius:var(--radius); padding:14px 16px; margin:18px 0; border:1px solid var(--border); font-size:14.5px;}
+  .callout .ctitle{font-weight:700; margin-bottom:4px; display:flex; gap:8px; align-items:center;}
+  .callout.concept{background:var(--teal-soft); border-color:var(--teal);}
+  .callout.concept .ctitle{color:var(--teal);}
+  .callout.example{background:var(--ink3);}
+  .callout.mistake{background:var(--rust-soft); border-color:var(--rust);}
+  .callout.mistake .ctitle{color:var(--rust);}
+  .callout.tip{background:var(--amber-soft); border-color:var(--amber);}
+  .callout.tip .ctitle{color:var(--amber);}
+  .codewrap{position:relative; margin:14px 0;}
+  pre{background:var(--ink3); border:1px solid var(--border); border-radius:var(--radius); padding:16px 18px; overflow-x:auto; font-size:13.5px; line-height:1.6;}
+  .lang-tag{font-size:10px; text-transform:uppercase; letter-spacing:.08em; color:var(--slate); margin-bottom:-4px; display:block;}
+  :not(pre) > code{background:var(--ink3); padding:2px 6px; border-radius:4px; font-size:.88em;}
+  table{width:100%; border-collapse:collapse; margin:16px 0; font-size:14px;}
+  th,td{border:1px solid var(--border); padding:9px 12px; text-align:left;}
+  th{background:var(--ink3); font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:var(--slate);}
+  .badge{display:inline-block; font-size:11px; font-weight:700; padding:3px 9px; border-radius:20px; text-transform:uppercase; letter-spacing:.03em;}
+  .badge.easy{background:var(--teal-soft); color:var(--teal);}
+  .badge.medium{background:var(--amber-soft); color:var(--amber);}
+  .badge.hard{background:var(--rust-soft); color:var(--rust);}
+  .qcard{border:1px solid var(--border); border-radius:var(--radius); padding:16px 18px; margin:14px 0; background:var(--ink2);}
+  .qcard .qhead{display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; gap:10px;}
+  .qcard .qhead b{font-size:14.5px;}
+  .qcard .ex{background:var(--ink3); border-radius:8px; padding:8px 12px; margin:8px 0; font-size:13.5px;}
+  .qcard .hint{color:var(--amber); font-size:13.5px; margin-top:8px;}
+  hr.div{border:none; border-top:1px solid var(--border); margin:40px 0;}
+  .navlinks{display:flex; justify-content:space-between; gap:12px; font-size:14px; margin:18px 0; flex-wrap:wrap;}
+  .navlinks a{background:var(--ink2); border:1px solid var(--border); padding:8px 14px; border-radius:8px;}
+  .navlinks a:hover{border-color:var(--amber);}
+  .index-link{font-size:13px; color:var(--text-dim);}
+</style>
+</head>
+<body>
+<div id="main">
+
+  <p class="index-link"><a href="../index.html">&larr; Back to Index</a></p>
+  <div class="eyebrow">Phase 4 · Hashing</div>
+  <h1>Hashing — Sets and Maps</h1>
+  <p class="subtitle">O(1) average lookup ka jaadu — Set aur Map ka use, aur unse judi common interview patterns.</p>
+
+  <div class="navlinks">
+    <a href="../Phase-03-Strings/01-strings.html">&larr; Prev: Strings</a>
+    <a href="../index.html">Next: Index &rarr;</a>
+  </div>
+
+  <hr class="div">
+  <h2>1. What is it?</h2>
+  <p><b>Hashing</b> ek technique hai jisme kisi value ko ek "hash function" se guzaar kar ek number (hash) generate kiya jata hai, jo batata hai wo value memory mein kahan store hogi — isse <b>O(1) average lookup</b> milta hai.</p>
+  <ul>
+    <li><b>Set</b> — sirf unique values store karta hai, koi duplicate nahi. (e.g. <code>new Set()</code>)</li>
+    <li><b>Map</b> — key-value pairs store karta hai. (e.g. <code>new Map()</code>)</li>
+  </ul>
+
+  <h2>2. Why do we need it?</h2>
+  <p>Array mein "kya ye value exist karti hai?" check karne mein O(n) lagta hai (poora array scan). HashSet/HashMap mein yehi check O(1) average time mein ho jata hai — bahut bada speedup jab baar-baar lookup karna ho.</p>
+
+  <h2>3. Real-Life Analogy</h2>
+  <div class="callout example">
+    <div class="ctitle">📝 Library Catalog System</div>
+    Bina catalog ke, ek specific kitaab dhundhne ke liye poori library scan karni padegi (O(n)). Lekin agar library mein ek digital catalog hai jo seedha book ka shelf number bata de (jaise hash function), tum turant pahunch jaate ho (O(1)). <b>HashMap = library ka digital catalog.</b>
+  </div>
+
+  <h2>4. How It Works + Diagram</h2>
+  <pre><code>Key "apple"  → hash function → bucket #3 → stored there
+Key "banana" → hash function → bucket #7 → stored there
+
+Lookup "apple":
+  hash("apple") → bucket #3 → check bucket #3 → found! O(1) average
+
+[Bucket 0] []
+[Bucket 1] []
+[Bucket 2] []
+[Bucket 3] [apple → 5]
+[Bucket 4] []
+...
+[Bucket 7] [banana → 3]</code></pre>
+
+  <h2>5. Code Examples</h2>
+
+  <div class="lang-tag">Set — Duplicate Detection</div>
+  <div class="codewrap"><pre><code>function hasDuplicateOptimal(arr) {
+  const seen = new Set();
+  for (const num of arr) {
+    if (seen.has(num)) return true; // O(1) check
+    seen.add(num);
+  }
+  return false;
+}</code></pre></div>
+  <p>Compare karo isse nested-loop brute force se (O(n²)) — yahan har element ek baar dekhte hain aur Set mein O(1) mein check karte hain → O(n) total.</p>
+
+  <div class="lang-tag">Map — Two Sum</div>
+  <div class="codewrap"><pre><code>function twoSum(arr, target) {
+  const map = new Map(); // value -> index
+  for (let i = 0; i < arr.length; i++) {
+    const complement = target - arr[i];
+    if (map.has(complement)) return [map.get(complement), i];
+    map.set(arr[i], i);
+  }
+  return [-1, -1];
+}</code></pre></div>
+
+  <div class="lang-tag">Frequency Map — Most Frequent Element</div>
+  <div class="codewrap"><pre><code>function mostFrequent(arr) {
+  const freq = new Map();
+  let maxCount = 0, result = null;
+  for (const num of arr) {
+    freq.set(num, (freq.get(num) || 0) + 1);
+    if (freq.get(num) > maxCount) {
+      maxCount = freq.get(num);
+      result = num;
+    }
+  }
+  return result;
+}</code></pre></div>
+
+  <h2>6. Dry Run</h2>
+  <div class="callout example">
+    <div class="ctitle">📝 hasDuplicateOptimal([1, 2, 3, 2])</div>
+    <table>
+      <tr><th>num</th><th>seen.has(num)?</th><th>Action</th></tr>
+      <tr><td>1</td><td>No</td><td>seen = {1}</td></tr>
+      <tr><td>2</td><td>No</td><td>seen = {1,2}</td></tr>
+      <tr><td>3</td><td>No</td><td>seen = {1,2,3}</td></tr>
+      <tr><td>2</td><td>Yes!</td><td>return true ✅</td></tr>
+    </table>
+  </div>
+
+  <h2>7. Complexity</h2>
+  <table>
+    <tr><th>Operation</th><th>Set/Map Average</th><th>Set/Map Worst Case</th></tr>
+    <tr><td>Insert</td><td>O(1)</td><td>O(n) rare (hash collisions)</td></tr>
+    <tr><td>Lookup (has/get)</td><td>O(1)</td><td>O(n) rare</td></tr>
+    <tr><td>Delete</td><td>O(1)</td><td>O(n) rare</td></tr>
+  </table>
+  <p>Space: O(n) — har unique element/key ke liye storage lagta hai.</p>
+
+  <h3>Set vs Map — When to Use Which</h3>
+  <table>
+    <tr><th>Use Case</th><th>Use</th></tr>
+    <tr><td>"Kya ye value already exist karti hai?"</td><td>Set</td></tr>
+    <tr><td>"Duplicates remove karo"</td><td>Set</td></tr>
+    <tr><td>"Har element ki frequency/count chahiye"</td><td>Map</td></tr>
+    <tr><td>"Value se kuch aur associate karna hai" (jaise index, count)</td><td>Map</td></tr>
+    <tr><td>"Two Sum jaisa complement lookup"</td><td>Map</td></tr>
+  </table>
+
+  <h3>When Should I Use Hashing? — Checklist</h3>
+  <div class="callout tip">
+    <div class="ctitle">🎯 Use Hashing when:</div>
+    <ul>
+      <li>Question mein "duplicate", "frequency", "count", "seen before" jaise words hain</li>
+      <li>Fast lookup chahiye (O(1)) instead of scanning array baar-baar</li>
+      <li>Grouping needed (anagrams, same-property items)</li>
+    </ul>
+  </div>
+
+  <h3>Common Mistakes</h3>
+  <div class="callout mistake">
+    <ul>
+      <li>Object <code>{}</code> use karna jab keys numbers ho — JS objects keys ko string mein convert kar dete hain, jo subtle bugs de sakta hai. <code>Map</code> use karo jab key types matter karte hon.</li>
+      <li>HashMap ko O(1) "always" samajhna — worst case (bahut saari collisions) O(n) ho sakta hai, though practically bahut rare hai.</li>
+      <li>Iteration order par depend karna (though JS Maps insertion order maintain karte hain, safe assumption nahi honi chahiye har language mein).</li>
+    </ul>
+  </div>
+
+  <h3>Interview Tips</h3>
+  <div class="callout tip">
+    Jab bhi brute force mein tumhe "check karo ki ye value pehle dekhi thi ya nahi" jaisa kuch nested loop mein karna pade, turant socho — "Set/Map se ye O(1) mein ho sakta hai." Ye ek sabse common optimization pattern hai interviews mein.
+  </div>
+
+  <hr class="div">
+  <h2>Interview Questions</h2>
+
+  <h3><span class="badge easy">Easy</span> Section</h3>
+
+  <div class="qcard">
+    <div class="qhead"><b>Q1. Contains Duplicate</b><span class="badge easy">Easy</span></div>
+    <p>Check if an array contains any duplicate values.</p>
+    <div class="ex"><b>Input:</b> [1,2,3,1] &rarr; <b>Output:</b> true</div>
+    <div class="hint">Hint: Use a hashset to store seen values for O(1) lookup as you scan the array.</div>
+  </div>
+
+  <div class="qcard">
+    <div class="qhead"><b>Q2. Two Sum</b><span class="badge easy">Easy</span></div>
+    <p>Find indices of two numbers that add up to target.</p>
+    <div class="ex"><b>Input:</b> arr=[2,7,11,15], target=9 &rarr; <b>Output:</b> [0,1]</div>
+    <div class="hint">Hint: Use a hashmap of value &rarr; index, and check for the complement (target - current) at each step.</div>
+  </div>
+
+  <div class="qcard">
+    <div class="qhead"><b>Q3. Intersection of Two Arrays</b><span class="badge easy">Easy</span></div>
+    <p>Find the unique intersection of two arrays.</p>
+    <div class="ex"><b>Input:</b> [1,2,2,1], [2,2] &rarr; <b>Output:</b> [2]</div>
+    <div class="hint">Hint: Put the first array in a Set, then loop the second and check membership.</div>
+  </div>
+
+  <div class="qcard">
+    <div class="qhead"><b>Q4. Ransom Note</b><span class="badge easy">Easy</span></div>
+    <p>Check if a ransom note can be constructed using letters from a magazine string (each letter used once).</p>
+    <div class="ex"><b>Input:</b> ransomNote="aa", magazine="aab" &rarr; <b>Output:</b> true</div>
+    <div class="hint">Hint: Build a frequency map of the magazine, then decrement counts as you consume letters for the note.</div>
+  </div>
+
+  <div class="qcard">
+    <div class="qhead"><b>Q5. Isomorphic Strings</b><span class="badge easy">Easy</span></div>
+    <p>Check if two strings are isomorphic (characters from one map consistently to another).</p>
+    <div class="ex"><b>Input:</b> s="egg", t="add" &rarr; <b>Output:</b> true</div>
+    <div class="hint">Hint: Use two hashmaps for a bidirectional mapping check (s[i]&rarr;t[i] and t[i]&rarr;s[i]).</div>
+  </div>
+
+  <h3><span class="badge medium">Medium</span> Section</h3>
+
+  <div class="qcard">
+    <div class="qhead"><b>Q6. Group Anagrams</b><span class="badge medium">Medium</span></div>
+    <p>Group a list of strings into sets of anagrams.</p>
+    <div class="ex"><b>Input:</b> ["eat","tea","tan","ate","nat","bat"] &rarr; <b>Output:</b> [["eat","tea","ate"],["tan","nat"],["bat"]]</div>
+    <div class="hint">Hint: Use a computed canonical key (sorted characters) as the map key to group matching strings.</div>
+  </div>
+
+  <div class="qcard">
+    <div class="qhead"><b>Q7. Top K Frequent Elements</b><span class="badge medium">Medium</span></div>
+    <p>Return the k most frequent elements in an array.</p>
+    <div class="ex"><b>Input:</b> [1,1,1,2,2,3], k=2 &rarr; <b>Output:</b> [1,2]</div>
+    <div class="hint">Hint: Build a frequency map, then either sort by frequency or use bucket sort (index = frequency) for O(n).</div>
+  </div>
+
+  <div class="qcard">
+    <div class="qhead"><b>Q8. Longest Consecutive Sequence</b><span class="badge medium">Medium</span></div>
+    <p>Find the length of the longest consecutive elements sequence, in O(n) time.</p>
+    <div class="ex"><b>Input:</b> [100,4,200,1,3,2] &rarr; <b>Output:</b> 4</div>
+    <div class="hint">Hint: Put all numbers in a Set. Only start counting a sequence from a number that has no predecessor (num-1) in the set.</div>
+  </div>
+
+  <div class="qcard">
+    <div class="qhead"><b>Q9. Subarray Sum Equals K</b><span class="badge medium">Medium</span></div>
+    <p>Count the total number of contiguous subarrays whose sum equals k.</p>
+    <div class="ex"><b>Input:</b> [1,1,1], k=2 &rarr; <b>Output:</b> 2</div>
+    <div class="hint">Hint: Track running prefix sum and use a hashmap of prefixSum &rarr; count seen so far; check for (sum - k) at each step.</div>
+  </div>
+
+  <div class="qcard">
+    <div class="qhead"><b>Q10. Subarrays with Equal Number of 0s and 1s</b><span class="badge medium">Medium</span></div>
+    <p>Count subarrays with an equal number of 0s and 1s in a binary array.</p>
+    <div class="ex"><b>Input:</b> [0,1,0,1] &rarr; <b>Output:</b> 4</div>
+    <div class="hint">Hint: Convert 0s to -1s, then it becomes "count subarrays with sum 0" — use prefix sum + hashmap.</div>
+  </div>
+
+  <h3><span class="badge hard">Hard</span> Section</h3>
+
+  <div class="qcard">
+    <div class="qhead"><b>Q11. First Missing Positive</b><span class="badge hard">Hard</span></div>
+    <p>Find the smallest missing positive integer, ideally in O(n) time and O(1) extra space.</p>
+    <div class="ex"><b>Input:</b> [3,4,-1,1] &rarr; <b>Output:</b> 2</div>
+    <div class="hint">Hint: A hashset gives an easy O(n) space solution first; then think about how to reuse the input array itself as the hash structure to cut space to O(1).</div>
+  </div>
+
+  <div class="qcard">
+    <div class="qhead"><b>Q12. LRU Cache</b><span class="badge hard">Hard</span></div>
+    <p>Design a Least Recently Used cache with O(1) get and put operations.</p>
+    <div class="ex"><b>Example:</b> put(1,1), put(2,2), get(1)&rarr;1, put(3,3) evicts key 2 (least recently used).</div>
+    <div class="hint">Hint: Combine a Map for O(1) key lookup with a doubly linked list to track usage order — move accessed nodes to front, evict from the back.</div>
+  </div>
+
+  <div class="qcard">
+    <div class="qhead"><b>Q13. Longest Substring with At Most K Distinct Characters (Hash + Window)</b><span class="badge hard">Hard</span></div>
+    <p>Find the length of the longest substring with at most k distinct characters, and explain the hashmap's role in window shrinking.</p>
+    <div class="ex"><b>Input:</b> "eceba", k=2 &rarr; <b>Output:</b> 3 ("ece")</div>
+    <div class="hint">Hint: Maintain a frequency hashmap of characters in the current window; when the map size exceeds k, shrink from the left, removing entries as counts hit zero.</div>
+  </div>
+
+  <hr class="div">
+  <div class="navlinks">
+    <a href="../Phase-03-Strings/01-strings.html">&larr; Prev: Strings</a>
+    <a href="../index.html">Next: Index &rarr;</a>
+  </div>
+  <p class="index-link"><a href="../index.html">&larr; Back to Index</a></p>
+
+</div>
+</body>
+</html>

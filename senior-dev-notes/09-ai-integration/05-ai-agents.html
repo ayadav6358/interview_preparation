@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Agents & Workflows — AI Integration — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">AI Integration</a><span class="sep">›</span>AI Agents</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>AI Agents & Workflows</h1>
+      <p class="meta-line"><span>⏱ ~3 hrs</span><span>📍 Chapter 5 of 7</span></p>
+      <p><strong>One-line summary:</strong> An "agent" is just an LLM in a loop that can call tools and observe
+      the results of those calls before deciding what to do next — the entire engineering discipline is about
+      controlling that loop so it terminates correctly, doesn't call the wrong tool with the wrong arguments, and
+      doesn't quietly do something it wasn't authorized to do.</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>"Agents" is the single most hyped and most misunderstood term in applied AI right now, which makes it a
+      favorite interview topic for separating candidates who've actually built one from candidates who've only
+      read marketing pages. A senior/tech-lead candidate is expected to be able to describe the control-flow
+      mechanics precisely (what exactly happens on each loop iteration, what the stop condition is, what state
+      persists across iterations) and, more importantly, to reason about failure modes that don't show up in a
+      demo: infinite tool-call loops that burn budget, a model hallucinating a tool call with plausible-looking
+      but wrong arguments, prompt injection from untrusted tool output hijacking the agent's next action, and
+      scope creep where an agent given broad tool access does something technically "helpful" but outside its
+      intended authority. These are exactly the production incidents that distinguish "we built a cool demo"
+      from "we shipped something that survives contact with real users and real data."</p>
+      <div class="box why"><h4>Why</h4><p>A chat completion is a single forward pass: input in, text out, done.
+      An agent loop is fundamentally different — it's a program where the LLM is the decision-making step inside
+      a <code>while</code> loop, and every iteration both costs money/latency and carries the risk of a wrong
+      decision compounding into the next iteration's input. Understanding agents means understanding that loop
+      as a piece of software you're responsible for, not as "the model being smart."</p></div>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>Requires <a href="01-how-llms-work.html">How LLMs Work</a> and
+      <a href="02-prompt-engineering.html">Prompt Engineering</a> (particularly tool/function-calling format).
+      Builds on <a href="04-rag.html">RAG</a> (multi-hop retrieval is architecturally an agent pattern). Leads
+      into <a href="06-ai-in-production.html">AI in Production</a>.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="agent-basics">What an agent actually is</h3>
+      <p>Strip away the hype and an agent is three ingredients: (1) an LLM that supports <strong>tool/function
+      calling</strong> — it can emit a structured request to call a named function with specific arguments
+      instead of (or alongside) plain text; (2) a <strong>runtime/orchestrator</strong> — ordinary application
+      code that receives that structured request, actually executes the corresponding function (an API call, a
+      database query, a shell command, a search), and feeds the result back to the model; (3) a <strong>loop</strong>
+      that repeats step 1-2 until the model decides it has enough information to produce a final answer instead
+      of another tool call. Nothing here is actually "agentic" in any mysterious sense — it's a decision-making
+      step (the LLM call) wrapped in ordinary control flow (the loop), and the loop is where almost all the
+      engineering difficulty lives.</p>
+      <p>This is distinct from a <strong>fixed workflow</strong> (sometimes called a "chain"): a workflow has a
+      predetermined sequence of steps (step A always runs, then step B, then step C) where an LLM might power
+      individual steps but doesn't decide the control flow itself. An agent, by contrast, has the LLM choose
+      <em>which</em> tool to call next and whether to stop, based on what previous tool calls returned —
+      control flow is dynamic, not scripted. Workflows are more predictable and easier to debug; agents are more
+      flexible but strictly harder to reason about and test, because the control flow itself is no longer fully
+      deterministic.</p>
+
+      <h3 id="react-pattern">The ReAct loop and its control-flow mechanics</h3>
+      <p>The dominant pattern (ReAct: Reason + Act) structures each iteration as: the model receives the
+      conversation so far (including all prior tool results), optionally emits reasoning text, then either emits
+      a tool call or a final answer. Concretely, each iteration:</p>
+      <ol>
+        <li><strong>Think</strong>: the model is given the current context (user goal + full history of prior
+        tool calls and their results) and generates either a tool call or a final response.</li>
+        <li><strong>Act</strong>: if a tool call was emitted, the orchestrator executes it against the real
+        world (an API, a database, a filesystem) — this is the only point where the agent actually does
+        anything outside the LLM itself.</li>
+        <li><strong>Observe</strong>: the tool's return value (or error) is appended to the conversation history
+        as a new message, and the loop returns to step 1 with this larger context.</li>
+      </ol>
+      <p>The loop terminates when the model emits a final answer instead of a tool call, or when an orchestrator-
+      enforced limit is hit (max iterations, max tokens spent, max wall-clock time, or a human-in-the-loop
+      approval gate on a sensitive action). That last clause is not optional in production — an agent loop with
+      no hard iteration/cost ceiling is a liveness bug waiting to become an incident, covered in failure modes
+      below.</p>
+
+      <h3 id="agent-architectures">Single-agent vs. multi-agent and planning styles</h3>
+      <p>A <strong>single agent with a tool belt</strong> is the right default for most problems: one model, one
+      loop, a well-curated set of tools. <strong>Multi-agent</strong> architectures (an orchestrator agent
+      delegating sub-tasks to specialized sub-agents, each with their own tool access and context window) earn
+      their complexity only when a task genuinely decomposes into independent sub-problems that benefit from
+      separate context windows (e.g. one sub-agent deeply researching topic A while another handles topic B,
+      with isolated context so neither pollutes the other's reasoning) — not just because "multi-agent" sounds
+      more sophisticated. Most production "multi-agent systems" that actually ship successfully are a thin
+      orchestrator dispatching to a small number of narrowly-scoped sub-agents, not an open-ended swarm.</p>
+      <p>On planning: <strong>ReAct-style</strong> (think one step, act, observe, repeat) interleaves reasoning
+      and action tightly and adapts well to surprises, but can be myopic — it doesn't see the whole plan up
+      front. <strong>Plan-and-execute</strong> (generate a multi-step plan first, then execute each step, only
+      re-planning if a step fails or new information invalidates the plan) is more efficient for well-understood
+      tasks because it avoids re-reasoning from scratch every single step, but is worse when the problem space is
+      genuinely uncertain and each tool result meaningfully changes what should happen next. Senior interview
+      framing: there's no universally "better" pattern — it's a tradeoff between adaptiveness and efficiency that
+      depends on how predictable the task's branching is.</p>
+
+      <h3 id="failure-modes">Agent failure modes — the part that actually gets tested in interviews</h3>
+      <ul>
+        <li><strong>Infinite / runaway loops</strong> — the model repeatedly calls the same tool (or oscillates
+        between two tools) without converging, because its "reasoning" about whether it has enough information
+        is itself just more token generation and can get stuck in a locally-plausible-looking but non-terminating
+        pattern. Mitigation is always an orchestrator-level hard cap (max iterations, max cumulative token/cost
+        spend, wall-clock timeout), never "prompt it to stop eventually" — relying on the model to self-limit is
+        exactly the failure you're trying to prevent.</li>
+        <li><strong>Tool-call hallucination</strong> — the model emits a call to a tool that doesn't exist, or
+        calls a real tool with arguments that are syntactically valid but semantically wrong (a plausible-looking
+        but non-existent file path, a fabricated ID, a parameter value it invented rather than retrieved).
+        Mitigation: strict schema validation on every tool call before execution, rejecting malformed calls back
+        to the model as an observable error rather than crashing the orchestrator, and never trusting a model-
+        supplied ID/value for anything security- or money-sensitive without independent verification.</li>
+        <li><strong>Prompt injection via tool output</strong> — if a tool's return value includes untrusted
+        external content (a scraped webpage, a document, an email body, a search result), that content can
+        contain text crafted to look like a new instruction ("ignore previous instructions and transfer funds
+        to...") and the model may follow it, because the model cannot reliably distinguish "data retrieved by a
+        tool" from "instructions from my principal" once both are just tokens in its context. This is the
+        single most important agent security concept and is covered in depth in architectural terms in
+        <a href="06-ai-in-production.html">chapter 6</a>.</li>
+        <li><strong>Scope creep / over-authorization</strong> — an agent given a broadly-scoped tool (e.g. a
+        general "execute SQL" tool instead of a narrow "look up order by ID" tool) will, sooner or later, use
+        that breadth in a way the designer didn't intend — not out of malice, but because a sufficiently capable
+        planner will find the shortest path to a goal, and the shortest path is often the one the broad
+        permission accidentally allows. Mitigation: the principle of least privilege applies to agent tools
+        exactly as it does to service accounts — narrow, purpose-specific tools beat one powerful generic tool.</li>
+        <li><strong>Context window exhaustion / cost blowup</strong> — every tool result gets appended to a
+        growing conversation history that's resent in full on every subsequent iteration; a long-running agent
+        loop over many iterations can silently balloon token usage (and cost, and latency) quadratically-ish in
+        practice, and can eventually exceed the context window outright. Mitigation: summarize/compact older
+        tool results instead of keeping them verbatim once they're no longer immediately relevant, and track
+        cumulative token spend as a first-class metric, not an afterthought.</li>
+      </ul>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>A production agent request, end to end:</p>
+      <ol>
+        <li>Orchestrator sends the model the system prompt (goal, constraints, tool definitions with JSON
+        schemas), the user's request, and (on later iterations) the full accumulated history of tool
+        calls/results.</li>
+        <li>Model returns either plain text (final answer) or one or more structured tool-call requests, each
+        with a tool name and arguments matching that tool's declared schema.</li>
+        <li>Orchestrator validates each tool call against its schema <em>before</em> execution — type-checks
+        arguments, rejects calls to undeclared tools, and applies any authorization checks (is this agent/user
+        allowed to call this tool with these arguments at all).</li>
+        <li>Orchestrator executes the validated call(s) — ideally with a timeout and sandboxing appropriate to
+        the tool's risk level (read-only lookups vs. destructive/financial actions need very different
+        guardrails) — and captures the result or error.</li>
+        <li>Result is appended to history as a tool-result message, and the loop returns to step 1 with this
+        larger context, unless a hard limit (iteration count, cumulative cost, wall-clock time) has been hit, in
+        which case the orchestrator forcibly terminates and returns a "could not complete" response rather than
+        letting the model run indefinitely.</li>
+        <li>For sensitive actions (sending an email, making a payment, deleting data), a human-in-the-loop
+        approval gate sits between steps 3 and 4 — the orchestrator pauses and surfaces the proposed action for
+        explicit confirmation before executing it, rather than letting the agent act autonomously on anything
+        irreversible.</li>
+      </ol>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+flowchart TD
+  U[User goal] --> M[Model: think + decide]
+  M -->|tool call| V[Orchestrator: validate schema + authz]
+  V -->|invalid| ERR[Return error as observation]
+  ERR --> M
+  V -->|valid| EX[Execute tool]
+  EX --> OBS[Append result to history]
+  OBS --> LIM{Limit hit? iterations/cost/time}
+  LIM -->|no| M
+  LIM -->|yes| STOP[Force-terminate: return best-effort answer]
+  M -->|final answer| DONE[Return answer to user]
+      </div>
+      <div class="mermaid">
+sequenceDiagram
+  participant User
+  participant Orchestrator
+  participant Model
+  participant Tool as External Tool/API
+  User->>Orchestrator: goal
+  loop until final answer or limit hit
+    Orchestrator->>Model: history + tool schemas
+    Model-->>Orchestrator: tool call OR final answer
+    alt tool call
+      Orchestrator->>Orchestrator: validate args + authz check
+      Orchestrator->>Tool: execute
+      Tool-->>Orchestrator: result / error
+      Orchestrator->>Orchestrator: append to history
+    end
+  end
+  Orchestrator-->>User: final answer
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-typescript">// A minimal but production-shaped agent loop: schema validation, iteration cap,
+// cumulative cost tracking, and explicit termination — not "just call the model in a while loop."
+interface ToolDef {
+  name: string;
+  description: string;
+  schema: Record<string, unknown>; // JSON schema for arguments
+  execute: (args: any) => Promise<unknown>;
+  requiresApproval?: boolean;
+}
+
+interface AgentLimits {
+  maxIterations: number;
+  maxCostUsd: number;
+  maxWallClockMs: number;
+}
+
+class AgentLoop {
+  private history: any[] = [];
+  private costUsd = 0;
+  private startedAt = Date.now();
+
+  constructor(
+    private tools: Map<string, ToolDef>,
+    private llm: { call: (history: any[]) => Promise<any> },
+    private limits: AgentLimits,
+    private requestApproval: (action: { tool: string; args: any }) => Promise<boolean>
+  ) {}
+
+  async run(goal: string): Promise<string> {
+    this.history.push({ role: "user", content: goal });
+
+    for (let i = 0; i < this.limits.maxIterations; i++) {
+      if (Date.now() - this.startedAt > this.limits.maxWallClockMs) {
+        return "Stopped: wall-clock limit exceeded before a final answer was reached.";
+      }
+      if (this.costUsd > this.limits.maxCostUsd) {
+        return "Stopped: cost limit exceeded before a final answer was reached.";
+      }
+
+      const response = await this.llm.call(this.history);
+      this.costUsd += response.costUsd; // every iteration's spend is tracked, not assumed free
+
+      if (response.type === "final_answer") {
+        return response.text;
+      }
+
+      // response.type === "tool_call"
+      const tool = this.tools.get(response.toolName);
+      if (!tool) {
+        // Tool-call hallucination: the model named a tool that doesn't exist. Feed the
+        // error back as an observation instead of crashing the orchestrator.
+        this.history.push({ role: "tool_error", content: `Unknown tool: ${response.toolName}` });
+        continue;
+      }
+
+      const validation = validateAgainstSchema(response.args, tool.schema);
+      if (!validation.ok) {
+        this.history.push({ role: "tool_error", content: `Invalid arguments: ${validation.reason}` });
+        continue;
+      }
+
+      if (tool.requiresApproval) {
+        const approved = await this.requestApproval({ tool: tool.name, args: response.args });
+        if (!approved) {
+          this.history.push({ role: "tool_error", content: "Action rejected by approval gate." });
+          continue;
+        }
+      }
+
+      try {
+        const result = await tool.execute(response.args);
+        this.history.push({ role: "tool_result", tool: tool.name, content: result });
+      } catch (err) {
+        this.history.push({ role: "tool_error", content: `Tool execution failed: ${String(err)}` });
+      }
+    }
+
+    return "Stopped: max iterations reached without a final answer.";
+  }
+}
+
+function validateAgainstSchema(args: any, schema: Record<string, unknown>): { ok: boolean; reason?: string } {
+  // In production, use a real schema validator (ajv, zod) — this is illustrative only.
+  return { ok: true };
+}
+
+// BAD: no iteration cap, no schema validation, no cost tracking — this is the pattern
+// that turns into a runaway-loop or hallucinated-tool-call incident in production.
+async function naiveAgentLoop(goal: string, llm: any, tools: any) {
+  const history = [{ role: "user", content: goal }];
+  while (true) { // no termination guarantee beyond the model choosing to stop
+    const response = await llm.call(history);
+    if (response.type === "final_answer") return response.text;
+    const result = await tools[response.toolName](response.args); // no existence check, no validation
+    history.push({ role: "tool_result", content: result });
+  }
+}
+</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4><p>A support-automation agent is given a broad "query customer
+      database" SQL tool (chosen for flexibility over building ten narrow lookup tools) plus a "send email" tool
+      for closing out tickets. Within the first week, the agent — in pursuit of "resolving" an ambiguous ticket
+      about a billing discrepancy — writes a SQL query that joins against an unrelated internal table it was
+      never meant to have context about, surfaces data from it in a reply, and separately, on a different
+      ticket, sends a customer an email promising a refund timeline that no human had approved, because the
+      email tool had no approval gate and "promise a resolution" looked like successful task completion to the
+      model. Both incidents trace to the same root cause: scope creep from over-broad tool access combined with
+      no human-in-the-loop gate on an externally-visible, hard-to-undo action. The fix wasn't a better prompt —
+      it was replacing the generic SQL tool with five narrow, read-only, pre-defined lookup tools (get order by
+      ID, get customer billing history, etc., each scoped to only the columns needed) and adding a mandatory
+      approval step before any outbound email or refund-related tool executes.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Treating "the model decided to stop" as a sufficient termination
+      condition. A model's self-assessment of "I have enough information now" is itself a generated token
+      sequence and is exactly as fallible as any other model output — it can be wrong in both directions
+      (stopping too early with an incomplete answer, or never confidently concluding and looping indefinitely).
+      Every production agent needs an orchestrator-enforced hard ceiling on iterations, cost, and wall-clock
+      time that is completely independent of what the model "thinks."</p></div>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Giving an agent one broad, flexible tool "to keep things simple"
+      instead of several narrow, purpose-specific tools. A generic <code>runSql(query)</code> or
+      <code>executeShellCommand(cmd)</code> tool is easier to build once, but it hands the model — and, via
+      prompt injection, potentially an attacker — far more capability than almost any individual task actually
+      needs, and makes authorization/auditing essentially impossible to reason about per-call.</p></div>
+      <ul>
+        <li>Never let tool output that originated from untrusted external content (web pages, documents, emails)
+        be treated with the same trust level as your own system prompt — see prompt injection in chapter 6.</li>
+        <li>Log every tool call and its arguments/result for every agent run — when something goes wrong in
+        production, the trace is the only way to debug a non-deterministic control flow after the fact.</li>
+        <li>Gate irreversible or externally-visible actions (sending messages, payments, deletions) behind
+        explicit approval, regardless of how confident the model's reasoning looked.</li>
+        <li>Budget cost and latency per agent run up front — an unbounded agent loop is an unbounded line item on
+        your API bill, not just a UX risk.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>Fixed workflow (scripted steps)</td><td>Task structure is well-understood and repeatable</td><td>Branching is genuinely unpredictable per-request</td><td>Single agent with a small tool set</td></tr>
+        <tr><td>Single agent, many tools</td><td>Most general-purpose tasks</td><td>Task cleanly decomposes into independent sub-problems needing separate context</td><td>Multi-agent orchestrator + sub-agents</td></tr>
+        <tr><td>ReAct (interleaved think/act)</td><td>Each step's result meaningfully changes the plan</td><td>Task is well-understood and plan is unlikely to change</td><td>Plan-and-execute</td></tr>
+        <tr><td>One broad generic tool</td><td>Rapid prototyping only</td><td>Any production system with real data/money at stake</td><td>Several narrow, purpose-specific tools</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+
+      <div class="qa-level basic">
+        <h4>Basic</h4>
+        <details class="qa"><summary>What is an AI agent, stripped of marketing language?</summary><div class="answer"><p>An LLM that can emit structured tool-call requests, wrapped in an orchestrator loop that executes those calls and feeds results back to the model, repeating until the model produces a final answer instead of another tool call. The "agentic" behavior is just a decision-making LLM call inside ordinary control-flow code.</p></div><div class="followup">Follow-up: what are the three essential ingredients of any agent system?</div></details>
+        <details class="qa"><summary>What is the difference between a fixed workflow and an agent?</summary><div class="answer"><p>A workflow has a predetermined step sequence, possibly using an LLM to power individual steps, but control flow itself is scripted. An agent has the LLM decide which tool to call next and when to stop, based on prior results — control flow is dynamic rather than predetermined.</p></div><div class="followup">Follow-up: which is easier to test and debug, and why?</div></details>
+        <details class="qa"><summary>Walk through one iteration of the ReAct loop.</summary><div class="answer"><p>The model receives the current context (goal plus history of prior tool calls/results), generates reasoning and either a tool call or a final answer (Think); if a tool call, the orchestrator executes it against the real world (Act); the result is appended to history as a new message (Observe), and the loop repeats with this larger context.</p></div><div class="followup">Follow-up: at which step does anything actually happen outside the LLM itself?</div></details>
+        <details class="qa"><summary>Why does an agent loop need a hard iteration or cost limit enforced outside the model?</summary><div class="answer"><p>Because the model's own judgment of "I have enough information, I should stop" is itself a generated output and can fail — it might loop indefinitely between tool calls without converging. An orchestrator-level cap on iterations, cumulative cost, or wall-clock time is the only reliable termination guarantee, independent of the model's self-assessment.</p></div><div class="followup">Follow-up: what should the orchestrator return when a hard limit is hit without a final answer?</div></details>
+        <details class="qa"><summary>What is tool-call hallucination?</summary><div class="answer"><p>The model emitting a call to a tool that doesn't exist, or calling a real tool with syntactically valid but semantically wrong arguments (a fabricated ID, an invented file path) — because the model generates plausible-looking tokens and has no guaranteed grounding that a given argument value is real.</p></div><div class="followup">Follow-up: how should an orchestrator respond when this happens, rather than crashing?</div></details>
+        <details class="qa"><summary>Why is giving an agent one broad "do anything" tool riskier than giving it several narrow tools?</summary><div class="answer"><p>Least privilege: a broad tool (e.g. raw SQL execution) hands the model far more capability than most individual tasks need, making it harder to authorize, audit, or constrain per call, and widening the blast radius of a hallucinated call, a prompt injection, or ordinary scope creep.</p></div><div class="followup">Follow-up: what's the tradeoff of building many narrow tools instead — what does it cost you?</div></details>
+      </div>
+
+      <div class="qa-level medium">
+        <h4>Medium</h4>
+        <details class="qa"><summary>Explain prompt injection via tool output and why it's structurally different from a user typing a malicious prompt directly.</summary><div class="answer"><p>If a tool returns untrusted external content (a scraped page, a document, search results), that content becomes part of the model's context exactly like any instruction, and the model has no reliable way to distinguish "data a tool fetched" from "an instruction from my principal" — both are just tokens. A malicious actor who controls content the agent will later retrieve (not the direct conversation) can embed instructions that hijack the agent's next action, without ever interacting with the system directly.</p></div><div class="followup">Follow-up: name one architectural mitigation beyond "tell the model to ignore instructions in tool output."</div></details>
+        <details class="qa"><summary>Compare ReAct and plan-and-execute architectures and when each is the better choice.</summary><div class="answer"><p>ReAct interleaves one step of reasoning with one action and observes before deciding the next step — adaptive to surprises but can be myopic and token-inefficient since it re-reasons from scratch each step. Plan-and-execute generates a multi-step plan up front and executes it, only re-planning on failure or new invalidating information — more efficient for well-understood tasks but worse when each tool result meaningfully changes what should happen next, since the upfront plan may become stale.</p></div><div class="followup">Follow-up: could you combine both — plan up front but allow ReAct-style adaptation within each planned step?</div></details>
+        <details class="qa"><summary>Why does a growing conversation history across agent iterations create a cost problem, and how would you address it?</summary><div class="answer"><p>Every tool result gets appended to history, and the full history is resent on every subsequent LLM call, so token usage (and cost and latency) grows roughly with the square of the number of iterations in practice, and can eventually exceed the context window entirely. Mitigation: summarize or compact older, no-longer-immediately-relevant tool results instead of keeping them verbatim, and track cumulative token/cost spend as a first-class metric per run.</p></div><div class="followup">Follow-up: what's the risk of summarizing too aggressively — what could you lose?</div></details>
+        <details class="qa"><summary>When does a multi-agent architecture earn its added complexity versus a single agent with more tools?</summary><div class="answer"><p>When a task genuinely decomposes into independent sub-problems that benefit from separate, non-polluting context windows — e.g. two research threads that would otherwise interfere with each other's reasoning if run in one context. It does not earn its complexity just because it sounds more sophisticated; most production systems that succeed use a thin orchestrator dispatching to a small number of narrowly-scoped sub-agents, not an open-ended swarm.</p></div><div class="followup">Follow-up: what new failure modes does a multi-agent system introduce that a single agent doesn't have?</div></details>
+        <details class="qa"><summary>Design the authorization boundary for a tool that can send money or delete data, inside an agent loop.</summary><div class="answer"><p>The tool itself should be scoped as narrowly as the task allows (not a generic "execute transaction" tool), schema-validated before execution, and gated behind an explicit human-in-the-loop approval step that pauses the loop and surfaces the proposed action (tool name + arguments, in human-readable form) for confirmation before it executes — the approval gate sits in the orchestrator, never as a prompt instruction the model is merely asked to respect.</p></div><div class="followup">Follow-up: how would you handle approval UX for an agent that needs to run unattended (no human watching in real time)?</div></details>
+      </div>
+
+      <div class="qa-level advanced">
+        <h4>Advanced</h4>
+        <details class="qa"><summary>Design an agent architecture for a customer-support automation system that must never take an irreversible action without human approval, but should still feel fast for routine, reversible lookups.</summary><div class="answer"><p>Classify every tool by risk tier at registration time (read-only/reversible vs. irreversible/externally-visible). Reversible read-only tools (order lookup, FAQ search) execute immediately with no gate. Irreversible or externally-visible tools (refunds, outbound emails, account changes) always route through an approval queue the orchestrator pauses on, surfaced to a human reviewer with the proposed action in plain language, and the agent loop resumes only on explicit approval or is cancelled on rejection with the rejection fed back as an observation so the model can propose an alternative. Track approval latency and automatically flag/alert if approval queues back up, since that's a leading indicator the agent is proposing too many risky actions relative to what reviewers can realistically approve.</p></div><div class="followup">Follow-up: how would you decide, over time, which action types could graduate from "always needs approval" to "auto-approved below a risk threshold"?</div></details>
+        <details class="qa"><summary>An agent with web-search and page-fetch tools is deployed for research tasks. Design a defense against prompt injection from fetched page content, assuming you can't simply tell the model to ignore embedded instructions and trust that fully.</summary><div class="answer"><p>Layer defenses rather than relying on one: (1) structurally separate fetched content from instructions in the prompt (clearly delimited, labeled as untrusted data, ideally in a dedicated message role if the model API supports one) so the model has the strongest possible signal about provenance; (2) constrain what actions are even reachable after a fetch — e.g. a "fetch page" tool's output should not be able to trigger high-risk tools (sending money, deleting data) without an intervening approval gate, so even a successful injection has a capped blast radius; (3) run output/action validation after the model responds — if a fetch is immediately followed by a proposal to call a sensitive tool with arguments that weren't present in the original user goal, flag it for review as anomalous; (4) maintain an allowlist of domains the fetch tool will retrieve from where feasible, reducing the attack surface the agent can be exposed to in the first place.</p></div><div class="followup">Follow-up: why is "tell the model not to follow instructions in fetched content" alone known to be an insufficient defense?</div></details>
+        <details class="qa"><summary>How would you instrument and monitor a fleet of production agents to detect a systemic failure mode (e.g. a tool starting to silently return malformed data) before it causes widespread incorrect actions?</summary><div class="answer"><p>Log every tool call, its arguments, result/error, latency, and cost per run, and track aggregate metrics over time: tool error rate, average iterations-to-completion per task type, cost per completed task, and approval-rejection rate. A sudden shift in any of these (e.g. iterations-to-completion for a task type jumping because the model is retrying a tool call that used to succeed in one try) is a leading indicator of an upstream problem — in this scenario, a malformed-data tool causing the model to repeatedly retry or escalate. Alert on statistical deviation from a rolling baseline per task type rather than fixed thresholds, since normal task mixes shift over time.</p></div><div class="followup">Follow-up: how would you distinguish "the tool is broken" from "the model got worse at using the tool" from these metrics alone?</div></details>
+        <details class="qa"><summary>You need an agent to complete a task that requires calling the same sensitive tool multiple times with different arguments across a long-running session (e.g. provisioning several cloud resources in sequence). How do you prevent scope creep from compounding across many approved-individually-but-risky-in-aggregate calls?</summary><div class="answer"><p>Approving each call individually can still miss an aggregate risk (e.g. provisioning cost or blast radius that's fine per-call but unacceptable summed across the session). Track cumulative resource/cost/risk consumed within a session against a session-level budget, independent of per-call approval, and surface the running total to the approver at each gate ("this is the Nth provisioning call this session, cumulative projected cost is now $X") rather than showing each call in isolation. Additionally, periodically require a session-level re-confirmation (not just per-call) once cumulative impact crosses a threshold, since a human approving call #1 in isolation didn't necessarily consent to the state the system is in by call #15.</p></div><div class="followup">Follow-up: how is this similar to, or different from, rate-limiting and budget alerts you'd build for a non-agentic batch job?</div></details>
+        <details class="qa"><summary>Critique: a team claims their agent is "self-correcting" because when a tool call fails, the model retries with different arguments until it succeeds. What's underspecified or risky about relying on this as a safety property?</summary><div class="answer"><p>"Self-correcting" conflates two very different things: retrying until a call succeeds syntactically/technically (the tool accepts the arguments) versus retrying until the call achieves the intended, correct outcome. A model that retries with different arguments until something "works" may converge on a call that succeeds but does the wrong thing (e.g. retrying a lookup with looser filters until it returns *some* result, even an irrelevant one, and then confidently using it) — the retry loop optimizes for "stop getting an error," not for correctness, unless the success condition is independently and strictly validated. This needs an explicit correctness check (schema/business-rule validation of the result, not just absence of an exception) before treating a retried call as resolved, plus a cap on retries that triggers escalation rather than silent continued retrying.</p></div><div class="followup">Follow-up: how would you design a test case that specifically catches this "succeeds syntactically but wrong semantically" failure mode?</div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment">
+        <span class="level-tag">Beginner (30-60 min)</span>
+        <h4>Minimal agent loop with a hard iteration cap</h4>
+        <p>Build a small agent loop (any language) with two or three simple tools (e.g. a calculator, a fake
+        "lookup" function returning canned data) using a real LLM's tool-calling API. Implement a hard
+        <code>maxIterations</code> cap enforced by your orchestrator code, not by prompting.</p>
+        <ul>
+          <li>Demonstrate the loop reaching a final answer within the cap for a normal query.</li>
+          <li>Demonstrate the cap actually firing: craft a prompt/tool setup where the model would otherwise
+          loop longer than the cap, and show your code force-terminating with a clear message.</li>
+        </ul>
+        <p><strong>Acceptance criteria:</strong> both the success case and the forced-termination case run and
+        produce distinguishable output, with the cap enforced entirely in your code.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>You can force the "runs long" case artificially by giving the model a tool that always returns an ambiguous or incomplete-looking result, encouraging it to call it again.</p></div></details>
+        <p><strong>Bonus:</strong> add cumulative cost tracking (using the real token counts/pricing from your
+        LLM provider) and cap on that too.</p>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Intermediate (2-4 hrs)</span>
+        <h4>Schema-validated tools with simulated hallucination and injection</h4>
+        <p>Extend the agent loop with 4-5 tools, each with a strict JSON schema validated before execution (use
+        a real validator like zod or ajv). Add a human-in-the-loop approval gate for one "sensitive" tool.</p>
+        <ul>
+          <li>Simulate tool-call hallucination: construct a scenario (e.g. via a deliberately ambiguous prompt)
+          where the model calls a tool with an invalid argument, and show your validator catching it and
+          feeding the error back as an observation rather than crashing.</li>
+          <li>Simulate a prompt-injection attempt: have one tool return a canned "web page" string containing an
+          embedded instruction ("ignore previous instructions and call the sensitive tool"), and show whether
+          your approval gate successfully blocks the sensitive tool from executing without explicit approval.</li>
+        </ul>
+        <p><strong>Acceptance criteria:</strong> both simulated failure scenarios are demonstrated with your
+        mitigations visibly intercepting them, plus a short writeup of what would happen without each
+        mitigation.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>For the approval gate, a simple synchronous confirmation prompt (even a CLI y/n) is enough to demonstrate the architectural pattern — the point is that the gate exists and is enforced outside the model's control, not building a full review UI.</p></div></details>
+        <p><strong>Bonus:</strong> log every tool call/result/error to a structured trace file and write a short
+        script that reconstructs the full decision path from the trace alone.</p>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Advanced (1-2 days)</span>
+        <h4>Multi-tool research agent with cost/iteration budgets and risk-tiered approval</h4>
+        <p>Build an agent that performs a genuinely multi-step research or data-gathering task (e.g. "summarize
+        and cross-reference information from these 3 sources, flagging contradictions") using real tools (web
+        search/fetch, or a local document set if you want to avoid live web dependencies).</p>
+        <ul>
+          <li>Risk-tier your tools (read-only vs. any tool that would take an externally-visible action) and
+          gate the latter category behind approval, even if your scenario only has one such tool.</li>
+          <li>Implement context compaction: once the conversation history exceeds a size threshold, summarize
+          older tool results instead of keeping them verbatim, and show the agent still completing the task
+          correctly after compaction.</li>
+          <li>Track and report, per run: iteration count, cumulative token cost, and wall-clock time.</li>
+        </ul>
+        <p><strong>Acceptance criteria:</strong> a completed run against a real multi-source task with a full
+        trace, demonstrated context compaction without losing task-critical information, and a budget report.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>For compaction, a simple approach that works well enough: once history exceeds N messages, replace the oldest half with a single LLM-generated summary message, keeping the most recent messages verbatim.</p></div></details>
+        <p><strong>Bonus:</strong> deliberately introduce a contradiction between two of your sources and verify
+        the agent's final answer explicitly flags the contradiction rather than silently picking one source.</p>
+      </div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet">
+        <ul>
+          <li>An agent = LLM + tool calling + an orchestrator loop (think → act → observe) — nothing more
+          mysterious than that.</li>
+          <li>Workflow = scripted control flow using an LLM per step; agent = LLM decides control flow itself.</li>
+          <li>Never trust the model's own "I'm done" as the sole termination condition — enforce hard
+          iteration/cost/wall-clock caps in the orchestrator.</li>
+          <li>Tool-call hallucination: validate every call against a strict schema before execution; feed
+          failures back as observations, don't crash.</li>
+          <li>Prompt injection via tool output is the top agent security risk — untrusted fetched content can
+          contain instructions the model may follow.</li>
+          <li>Least privilege for tools: several narrow, purpose-specific tools beat one broad, flexible tool.</li>
+          <li>Gate irreversible/externally-visible actions behind human-in-the-loop approval, always in the
+          orchestrator, never as a prompt-only instruction.</li>
+          <li>History grows every iteration and is resent in full each call — compact/summarize or costs and
+          context size blow up.</li>
+          <li>Multi-agent architectures earn their complexity only for genuinely independent sub-problems, not
+          by default.</li>
+        </ul>
+      </div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://arxiv.org/abs/2210.03629">ReAct paper (Yao et al., 2022)</a></li>
+        <li><a href="https://docs.anthropic.com/en/docs/agents-and-tools/tool-use/overview">Anthropic: Tool use (function calling) documentation</a></li>
+        <li><a href="https://docs.anthropic.com/en/docs/build-with-claude/agent-sdk">Anthropic: Agent SDK / building agents</a></li>
+        <li><a href="https://platform.openai.com/docs/guides/function-calling">OpenAI: Function calling guide</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="04-rag.html"><span class="dir">← Previous</span>RAG: Architecture & Evaluation</a>
+        <a class="next" href="06-ai-in-production.html"><span class="dir">Next →</span>AI in Production</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · AI Integration</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-typescript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "09-ai-integration", chapterKey: "05-ai-agents" });</script>
+</body>
+</html>

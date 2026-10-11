@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Transformers Part 1 — From Text to Attention</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <input class="searchbox" placeholder="Search topics..." />
+    <a href="../index.html">← Home</a>
+    <h3>100x_AI</h3>
+    <a href="ai-ml-orientation.html">AI & ML Course Orientation</a>
+    <a href="fasttracking-ai-what-is-ai-to-how-chatgpt-works.html">Fast-Tracking AI: What is AI → How ChatGPT Works</a>
+    <a href="neural-networks-from-scratch.html">Neural Networks from Scratch</a>
+    <a href="transformers-part-1-tokenization-embeddings-positional-encoding.html">Transformers Part 1: Text → Attention</a>
+    <a href="tensors-and-pytorch.html">Tensors, Matrices & PyTorch</a>
+    <a href="transformers-part-2-self-attention-qkv-multihead.html">Transformers Part 2: Self-Attention, Q/K/V & Multi-Head</a>
+    <a href="what-changed-since-2017-modern-transformer-upgrades.html">What Changed Since 2017: The Four Upgrades</a>
+    <a href="building-training-modern-llm-from-scratch.html">Building & Training a Modern LLM from Scratch</a>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumbs"><a href="../index.html">Home</a> / 100x_AI</div>
+      <button class="theme-toggle" onclick="toggleTheme()">🌓 Theme</button>
+    </div>
+    <h1>Transformers Part 1 — From Text to Attention: Tokenization, Embeddings & Positional Encoding</h1>
+    <span class="tag good">Stable</span><span class="tag">Last verified: 2026-10-07</span>
+    <p class="callout">Source: "From Text To Attention — How Transformers See Language, Part 1" slides. This covers the first half of a Transformer's input pipeline: how raw text becomes numbers a neural network can process (tokenization), how those arbitrary IDs become meaningful vectors (embeddings), and how sequence/word-order is injected back in (positional encoding) — the three steps that happen before self-attention (Part 2) ever runs.</p>
+
+    <div class="toc">
+      <b>On this page</b>
+      <a href="#what">1. What is this?</a>
+      <a href="#whyexist">2. Why does it exist?</a>
+      <a href="#whyimportant">3. Why is it important?</a>
+      <a href="#whereused">4. Where is it used?</a>
+      <a href="#prereq">5. Prerequisites</a>
+      <a href="#core">6. Core concepts</a>
+      <a href="#terms">7. Terminology</a>
+      <a href="#arch">8. Architecture</a>
+      <a href="#internal">9. How it works internally</a>
+      <a href="#steps">10. Step-by-step explanation</a>
+      <a href="#simple">11. Simple example</a>
+      <a href="#real">12. Real-world example</a>
+      <a href="#code">13. Code example</a>
+      <a href="#advanced">14. Advanced example</a>
+      <a href="#mistakes">15. Common mistakes</a>
+      <a href="#best">16. Best practices</a>
+      <a href="#production">17. Production considerations</a>
+      <a href="#security">18. Security considerations</a>
+      <a href="#performance">19. Performance considerations</a>
+      <a href="#cost">20. Cost considerations</a>
+      <a href="#debug">21. Debugging/troubleshooting</a>
+      <a href="#related">22. Related concepts</a>
+      <a href="#comparison">23. Comparison with alternatives</a>
+      <a href="#exercise">24. Mini practical exercise</a>
+      <a href="#project">25. Practical project</a>
+      <a href="#projectarch">26. Project architecture</a>
+      <a href="#interview-b">27. Interview Questions — Beginner</a>
+      <a href="#interview-i">28. Interview Questions — Intermediate</a>
+      <a href="#interview-a">29. Interview Questions — Advanced</a>
+      <a href="#interview-s">30. Interview Questions — Senior/Architect</a>
+      <a href="#interview-sc">31. Scenario-Based Questions</a>
+      <a href="#revision">32. Quick revision notes</a>
+      <a href="#cheat">33. Cheat sheet</a>
+      <a href="#further">34. Further topics to learn</a>
+    </div>
+
+    <h2 id="what">1. What is this?</h2>
+    <p>This is the "input pipeline" of a Transformer — the three mechanical steps that turn raw human text into the structured, numeric, order-aware representation that self-attention (Part 2) actually operates on: (1) <b>Tokenization</b> — splitting text into subword units and assigning each a unique integer ID; (2) <b>Embeddings</b> — converting those arbitrary IDs into dense, meaning-encoding vectors; (3) <b>Positional Encoding</b> — injecting word-order/sequence information back in, since raw attention is otherwise "bag-of-words" and ignores order entirely.</p>
+
+    <h2 id="whyexist">2. Why does it exist?</h2>
+    <p>Neural networks only operate on numbers, but language is text — this pipeline exists to bridge that gap without losing the two things that matter most about language: meaning (which word embeddings capture) and order (which positional encoding captures). Each of the three stages exists because a simpler, more obvious approach (character-level IDs, word-level IDs, or raw embeddings with no position) was tried first and found to fail in specific, instructive ways.</p>
+
+    <h2 id="whyimportant">3. Why is it important?</h2>
+    <p>Tokenization alone directly determines a model's context-window limits, API billing costs, and even its ability to do seemingly trivial tasks (like counting letters in a word) — most "why does the LLM fail at X" surprises trace back to tokenization. Embeddings and positional encoding are the literal first two computations inside every single Transformer forward pass, including every LLM API call you've ever made — understanding them is prerequisite to understanding attention, fine-tuning, or any deeper model internals.</p>
+
+    <h2 id="whereused">4. Where is it used?</h2>
+    <ul>
+      <li>Every Transformer-based model's input stage: GPT, Claude, LLaMA, BERT, and all derivatives.</li>
+      <li>Prompt engineering and cost optimization — understanding tokenization directly informs how to write prompts that use fewer tokens.</li>
+      <li>Multilingual model design — tokenizer vocabulary choices directly affect cost/performance equity across languages.</li>
+      <li>The from-scratch MiniLLM build in <a href="building-training-modern-llm-from-scratch.html">Building & Training a Modern LLM from Scratch</a>, which uses a (simpler, character-level) tokenizer plus a token embedding table plus RoPE as its positional-encoding mechanism.</li>
+    </ul>
+
+    <h2 id="prereq">5. Prerequisites</h2>
+    <p><a href="fasttracking-ai-what-is-ai-to-how-chatgpt-works.html">Fast-Tracking AI</a> (word embeddings, attention intuition) and <a href="neural-networks-from-scratch.html">Neural Networks from Scratch</a> (what a neural network can/can't directly process).</p>
+
+    <h2 id="core">6. Core concepts</h2>
+    <table>
+      <tr><th>Concept</th><th>One-line definition</th></tr>
+      <tr><td>Tokenization</td><td>Splitting text into discrete units (characters, words, or subwords) and mapping each to a unique integer ID.</td></tr>
+      <tr><td>Character-level tokenization</td><td>One ID per character — simple but creates very long sequences and forces the model to re-learn vocabulary from scratch.</td></tr>
+      <tr><td>Word-level tokenization</td><td>One ID per whole word — intuitive, but suffers vocabulary explosion (170,000+ English words) and fails on unseen/rare words (out-of-vocabulary).</td></tr>
+      <tr><td>Subword tokenization</td><td>The "Goldilocks" middle ground — common words stay whole, rare/complex words split into meaningful fragments (e.g., "understanding" → "under" + "stand" + "ing"); modern standard.</td></tr>
+      <tr><td>Byte Pair Encoding (BPE)</td><td>The algorithm that builds a subword vocabulary by starting from individual characters and iteratively merging the most frequent adjacent pair, until a target vocabulary size is reached.</td></tr>
+      <tr><td>Embedding</td><td>A dense vector (hundreds of numbers) representing a token's meaning, looked up from a trained embedding matrix via its token ID.</td></tr>
+      <tr><td>Semantic vector arithmetic</td><td>The phenomenon where relationships between concepts are encoded as consistent vector offsets (e.g., king − man + woman ≈ queen).</td></tr>
+      <tr><td>Positional encoding</td><td>A vector added to each token embedding to inject information about its position in the sequence, since attention is otherwise order-blind.</td></tr>
+      <tr><td>Sinusoidal positional encoding</td><td>The original Transformer's method: using sine/cosine waves of varying frequency per dimension to give every position a unique, generalizable "fingerprint."</td></tr>
+    </table>
+
+    <h2 id="terms">7. Terminology</h2>
+    <table>
+      <tr><th>Term</th><th>Meaning</th></tr>
+      <tr><td>Out-of-vocabulary (OOV)</td><td>A word not present in a fixed vocabulary — word-level tokenizers fail/degrade on these; subword tokenizers largely avoid this by falling back to smaller fragments.</td></tr>
+      <tr><td>Token ID</td><td>The arbitrary integer index assigned to a token by the tokenizer, used to look up its row in the embedding matrix.</td></tr>
+      <tr><td>Embedding matrix / lookup table</td><td>A large trained matrix where row <code>i</code> is the embedding vector for token ID <code>i</code> — looking up a token's vector is a simple indexing operation.</td></tr>
+      <tr><td>Dense vector</td><td>A vector where most/all values are non-zero and meaningful (as opposed to a sparse one-hot vector) — embeddings are dense.</td></tr>
+      <tr><td>Permutation invariance</td><td>The property where a function's output doesn't change if you reorder the input elements — raw attention/embeddings are permutation-invariant (bag-of-words) without positional encoding.</td></tr>
+      <tr><td>Token density</td><td>How many tokens a given piece of text (in a given language) requires — directly affects cost and context-window usage.</td></tr>
+      <tr><td>t-SNE</td><td>A dimensionality-reduction technique used to visualize high-dimensional embedding spaces (e.g., 768 dimensions) in 2D/3D for human inspection.</td></tr>
+    </table>
+
+    <h2 id="arch">8. Architecture</h2>
+    <pre><code>Raw text: "The cat sat on the mat."
+   ↓ Step 1: Tokenization (BPE / subword)
+["The", " cat", " sat", " on", " the", " mat", "."]
+   → Token IDs: [1996, 4937, 2938, 2006, 1996, 13523, 1012]
+   ↓ Step 2: Embedding (lookup table)
+each ID → 768-dim dense vector (e.g., ID 1996 → [0.12, -0.45, 0.88, ...])
+   ↓ Step 3: Positional Encoding (sinusoidal, added to embedding)
+position 0 → PE(0) vector, position 1 → PE(1) vector, ... (unique per position)
+   final input = token_embedding + positional_encoding, per token
+   ↓
+   → fed into Self-Attention (Part 2)</code></pre>
+
+    <h2 id="internal">9. How it works internally</h2>
+    <p><b>Tokenization</b> (via Byte Pair Encoding) starts with every character as its own token, then iteratively finds and merges the single most frequent adjacent pair of tokens across the training corpus into one new token, repeating until a target vocabulary size (typically 30k–100k) is reached. This self-organizing process means frequent patterns (common words, common subwords like "-ing" or "under-") collapse into single tokens, while rare patterns stay fragmented into smaller pieces — giving the tokenizer graceful degradation on unseen/rare words instead of hard failure.</p>
+    <p><b>Embeddings</b> work as a simple lookup: each token ID indexes directly into a row of a large trained matrix (e.g., 768 columns for a base model), and that row is the token's semantic vector. This vector is learned during training such that semantically similar tokens end up spatially close together (measured by vector distance/cosine similarity), and relationships between concepts are captured as consistent vector offsets — the famous <code>king − man + woman ≈ queen</code> result emerges because the "royalty" direction and the "gender" direction in the embedding space are each roughly consistent across many word pairs.</p>
+    <p><b>Positional encoding</b> solves the fact that embeddings alone (and raw attention) are permutation-invariant — "The dog bit the man" and "The man bit the dog" would be seen as the exact same set of tokens without positional information. The original Transformer solution adds a vector built from sine and cosine waves of varying frequency (one wave-pair per embedding dimension) to each token's embedding; because each position gets a unique combination of sine/cosine values across all frequencies, every position has a distinct mathematical "fingerprint," and because the waves are mathematically related to each other, the model can learn to infer relative distance between positions, and the continuous nature of the waves lets it generalize to sequence lengths longer than it saw during training.</p>
+
+    <h2 id="steps">10. Step-by-step explanation</h2>
+    <ol>
+      <li><b>Start with raw text:</b> e.g., <code>"Hello world"</code>.</li>
+      <li><b>Tokenize via BPE:</b> split into subword tokens (e.g., <code>["Hello", " world"]</code>) and map each to its integer token ID (e.g., <code>[15496, 995]</code>).</li>
+      <li><b>Recognize the arbitrary-ID problem:</b> these IDs carry no inherent meaning — 15496 doesn't "know" it's a greeting.</li>
+      <li><b>Embed each token ID:</b> look up each ID's row in the trained embedding matrix, producing a dense vector (e.g., 768 dimensions) per token that does encode meaning.</li>
+      <li><b>Recognize the order problem:</b> embeddings (and raw attention) are permutation-invariant — a reordered sentence looks identical to the model without more information.</li>
+      <li><b>Compute positional encodings:</b> for each position (0, 1, 2, ...) in the sequence, compute a sinusoidal vector of the same dimensionality as the embeddings.</li>
+      <li><b>Combine:</b> add the positional encoding vector to each token's embedding vector, producing a final per-token vector that encodes both "what" the token is and "where" it is.</li>
+      <li><b>Hand off to self-attention:</b> these combined vectors are what the Transformer's attention layers (Part 2) actually operate on.</li>
+    </ol>
+
+    <h2 id="simple">11. Simple example</h2>
+    <p>The word "understanding" demonstrates all three tokenization strategies: character-level would need 13 separate tokens (one per letter); word-level would need exactly one token, but only if "understanding" already exists in the fixed vocabulary; subword (BPE) splits it into recognizable, meaningful pieces like <code>["under", "stand", "ing"]</code> — three tokens that balance granularity and meaning, and that can still represent related unseen words like "standing" or "misunderstand" by recombining known subword pieces.</p>
+
+    <h2 id="real">12. Real-world example</h2>
+    <p>GPT-4's 128K context limit is a limit on <i>tokens</i>, not words or characters — in English this is roughly 1.3 tokens per word, but can be significantly higher for code or for lower-resource languages, which require more subword fragments per word because the tokenizer's vocabulary was trained predominantly on English/high-resource-language text. This directly and unevenly affects both API cost and effective context-window capacity across languages — a real production "language equity" consequence of a tokenization design decision.</p>
+
+    <h2 id="code">13. Code example</h2>
+    <pre><code class="language-python">import numpy as np
+
+# Simplified embedding lookup (as a real model would do, minus training)
+vocab_size, embed_dim = 50000, 768
+embedding_matrix = np.random.randn(vocab_size, embed_dim) * 0.02  # trained in reality
+
+def embed(token_ids):
+    return embedding_matrix[token_ids]  # simple row lookup, shape: [seq_len, embed_dim]
+
+token_ids = [15496, 995]   # "Hello", " world" (illustrative GPT-style IDs)
+embeddings = embed(token_ids)
+print("Embeddings shape:", embeddings.shape)   # (2, 768)
+
+# Sinusoidal positional encoding (original Transformer formula)
+def positional_encoding(seq_len, dim):
+    pe = np.zeros((seq_len, dim))
+    position = np.arange(seq_len)[:, None]
+    div_term = np.exp(np.arange(0, dim, 2) * -(np.log(10000.0) / dim))
+    pe[:, 0::2] = np.sin(position * div_term)
+    pe[:, 1::2] = np.cos(position * div_term)
+    return pe
+
+pe = positional_encoding(seq_len=2, dim=embed_dim)
+final_input = embeddings + pe   # combine meaning + position
+print("Final input shape:", final_input.shape)   # (2, 768)
+</code></pre>
+
+    <h2 id="advanced">14. Advanced example</h2>
+    <p>A minimal, from-scratch implementation of Byte Pair Encoding's core merge loop — demonstrating how a subword vocabulary self-organizes from character-level beginnings purely by frequency:</p>
+    <pre><code class="language-python">from collections import Counter
+
+def get_pair_counts(corpus_tokens):
+    pairs = Counter()
+    for word_tokens in corpus_tokens:
+        for i in range(len(word_tokens) - 1):
+            pairs[(word_tokens[i], word_tokens[i + 1])] += 1
+    return pairs
+
+def merge_pair(pair, corpus_tokens):
+    merged = "".join(pair)
+    new_corpus = []
+    for word_tokens in corpus_tokens:
+        new_word, i = [], 0
+        while i < len(word_tokens):
+            if i < len(word_tokens) - 1 and (word_tokens[i], word_tokens[i+1]) == pair:
+                new_word.append(merged)
+                i += 2
+            else:
+                new_word.append(word_tokens[i])
+                i += 1
+        new_corpus.append(new_word)
+    return new_corpus
+
+# Start: every word as individual characters
+corpus = [list(w) for w in ["low", "lower", "lowest", "slow", "slower"]]
+
+for step in range(5):   # run 5 BPE merges
+    pairs = get_pair_counts(corpus)
+    if not pairs:
+        break
+    best_pair = max(pairs, key=pairs.get)
+    corpus = merge_pair(best_pair, corpus)
+    print(f"Merge {step+1}: {best_pair} -> {''.join(best_pair)}")
+
+print("Final tokenized corpus:", corpus)
+# Frequent patterns like "lo", "low", "er" self-organize into single tokens
+</code></pre>
+
+    <h2 id="mistakes">15. Common mistakes</h2>
+    <ul>
+      <li>Assuming "1 word ≈ 1 token" when estimating context-window usage or API costs — subword tokenization means this ratio varies by language, domain (code vs. prose), and word rarity.</li>
+      <li>Expecting a model to reliably count letters within a word or reverse a word character-by-character — these tasks are hard for Transformers precisely because they see subword tokens, not individual characters.</li>
+      <li>Forgetting that positional encoding is necessary at all — without it, a Transformer's attention mechanism is mathematically permutation-invariant and cannot distinguish "the dog bit the man" from "the man bit the dog."</li>
+      <li>Treating embeddings as static, context-aware representations — the raw embedding (pre-attention) is the <i>isolated</i>, context-free meaning of a token; context-dependent meaning only emerges after self-attention (Part 2) processes it.</li>
+      <li>Assuming word-level tokenization would be "better" because it's more intuitive — it suffers vocabulary explosion (170,000+ English words → huge embedding matrices) and catastrophic failure on any out-of-vocabulary word.</li>
+    </ul>
+
+    <h2 id="best">16. Best practices</h2>
+    <ul>
+      <li>When estimating cost/context usage for a prompt, actually run it through the target model's tokenizer (e.g., <code>tiktoken</code> for OpenAI models) rather than estimating from word count.</li>
+      <li>When debugging strange model failures on character-level tasks (spelling, counting, reversing), consider whether tokenization — not model "intelligence" — is the root cause.</li>
+      <li>For multilingual applications, be aware that tokenizer vocabulary coverage directly affects both cost and quality per language — evaluate token density across your target languages, not just English.</li>
+      <li>Use subword tokenization (BPE or similar) as the default choice for any new text-processing pipeline — it balances vocabulary size, OOV robustness, and sequence length far better than character- or word-level alternatives.</li>
+    </ul>
+
+    <h2 id="production">17. Production considerations</h2>
+    <p>Production LLM serving pipelines must count tokens (not characters or words) to enforce context-window limits and compute accurate request costs before or during generation — this requires using the exact tokenizer the target model was trained with, since different models use different vocabularies and will produce different token counts for identical text.</p>
+
+    <h2 id="security">18. Security considerations</h2>
+    <p>Tokenization boundaries can be exploited in prompt-injection or jailbreak attempts — splitting sensitive words across unexpected token boundaries, or using unicode/encoding tricks that tokenize unusually, has historically been used to bypass naive keyword-based content filters that operate on raw text rather than being aware of how the model actually perceives the tokenized input.</p>
+
+    <h2 id="performance">19. Performance considerations</h2>
+    <p>Sequence length (in tokens, not characters) directly drives compute cost in self-attention, which scales quadratically with sequence length — a tokenizer that produces fewer tokens for the same text (better subword efficiency) directly reduces both training and inference compute cost, which is part of why subword tokenization beat character-level approaches (the "Step Problem": a 13-character word needs 13 processing steps at character level vs. 1-3 at subword level).</p>
+
+    <h2 id="cost">20. Cost considerations</h2>
+    <p>API billing for virtually every commercial LLM is based on token counts, not characters or words — understanding tokenization directly translates into cost control: denser prompts (fewer, more information-rich tokens) cost less than verbose ones, and awareness of per-language token density matters for any multilingual product's unit economics.</p>
+
+    <h2 id="debug">21. Debugging/troubleshooting</h2>
+    <ul>
+      <li><b>Model fails at letter-counting or spelling tasks:</b> expected behavior — the model sees subword tokens, not individual characters, so it has no direct access to a word's letter-by-letter composition unless that happens to align with token boundaries.</li>
+      <li><b>Prompt that "looks short" uses far more tokens than expected:</b> check actual tokenization — code, non-English text, or unusual formatting/whitespace can tokenize far less efficiently than plain English prose.</li>
+      <li><b>Context window exceeded unexpectedly:</b> count actual tokens (via the model's tokenizer) rather than estimating from word/character count — the 1.3 tokens/word rule of thumb is English-specific and approximate.</li>
+      <li><b>Model confuses word order (e.g., "who did what to whom"):</b> if working with a custom/from-scratch architecture, verify positional encoding is actually being added to embeddings before attention — without it, order information is lost entirely.</li>
+    </ul>
+
+    <h2 id="related">22. Related concepts</h2>
+    <p><a href="fasttracking-ai-what-is-ai-to-how-chatgpt-works.html">Fast-Tracking AI</a> · <a href="building-training-modern-llm-from-scratch.html">Building & Training a Modern LLM from Scratch</a> (RoPE as a modern positional-encoding alternative) · <a href="../10-Embeddings/">Embeddings</a> · <a href="../05-LLM-Fundamentals/tokens-and-context-window.html">Tokens & Context Window</a></p>
+
+    <h2 id="comparison">23. Comparison with alternatives</h2>
+    <table>
+      <tr><th>Tokenization strategy</th><th>Vocabulary size</th><th>Strength</th><th>Weakness</th></tr>
+      <tr><td>Character-level</td><td>~100 (alphabet + symbols)</td><td>No out-of-vocabulary problem; tiny vocabulary.</td><td>Very long sequences; model must re-learn vocabulary/grammar from raw characters ("The Step Problem").</td></tr>
+      <tr><td>Word-level</td><td>170,000+ (English alone)</td><td>Intuitive, one token per concept.</td><td>Vocabulary explosion, parameter bloat, catastrophic failure on any out-of-vocabulary word.</td></tr>
+      <tr><td>Subword (BPE)</td><td>30,000–100,000 (typical)</td><td>Balances sequence length and vocabulary size; graceful degradation on rare/unseen words.</td><td>Splits can feel arbitrary/non-linguistic (e.g., splitting mid-syllable); still language/corpus-dependent in efficiency.</td></tr>
+      <tr><td>Sinusoidal positional encoding</td><td>N/A (fixed, no parameters)</td><td>No learned parameters; generalizes to longer sequences than seen in training.</td><td>Superseded in modern LLMs by learned or rotary (RoPE) position schemes offering better empirical performance — see <a href="building-training-modern-llm-from-scratch.html">Building & Training a Modern LLM from Scratch</a>.</td></tr>
+    </table>
+
+    <h2 id="exercise">24. Mini practical exercise</h2>
+    <p>Using an online tokenizer visualizer (e.g., OpenAI's tokenizer tool) or the <code>tiktoken</code> Python library, tokenize the same sentence in English and in a non-Latin-script language (e.g., Hindi or Japanese) and compare the resulting token counts — observe how the "equity" issue described in this deck manifests concretely as a cost/context-window difference.</p>
+
+    <h2 id="project">25. Practical project</h2>
+    <p><b>Build a Mini BPE Tokenizer:</b> implement Byte Pair Encoding from scratch in Python (starting from the advanced-example code above), train it on a small text corpus (e.g., a public-domain book), inspect the resulting learned merges/vocabulary, and compare token counts for held-out sentences against a naive word-level and character-level tokenizer on the same text.</p>
+
+    <h2 id="projectarch">26. Project architecture</h2>
+    <pre><code>raw_corpus.txt
+   → pre-tokenize into words, represent each as a list of characters
+   → BPE training loop (N merges):
+       count all adjacent token pairs
+       merge the most frequent pair → new vocabulary entry
+   → save learned merge rules + final vocabulary
+   → encode(): apply learned merges to new text → token IDs
+   → decode(): map token IDs back to text
+eval: compare average tokens-per-word against character-level and word-level baselines
+      on a held-out test set</code></pre>
+
+    <h2 id="interview-b">27. Interview Questions — Beginner</h2>
+    <div class="qa"><b>Q1.</b> Why can't neural networks process raw text directly?<br><b>A.</b> Neural networks only operate on numbers; text must first be converted into a numeric representation via tokenization and embedding before any computation can happen.</div>
+    <div class="qa"><b>Q2.</b> What's the problem with character-level tokenization?<br><b>A.</b> It creates very long sequences (e.g., 13 steps for "understanding") and forces the model to learn vocabulary, grammar, and meaning entirely from individual characters, which is highly inefficient.</div>
+    <div class="qa"><b>Q3.</b> What's the problem with word-level tokenization?<br><b>A.</b> It requires a huge vocabulary (170,000+ English words), creating massive embedding matrices, and it fails on any word not in that fixed vocabulary (the out-of-vocabulary problem) — typos, slang, and rare terms all break it.</div>
+    <div class="qa"><b>Q4.</b> What is subword tokenization, and why is it the modern standard?<br><b>A.</b> It splits text into units bigger than characters but smaller than whole words — common words stay whole, rare words break into meaningful fragments — balancing vocabulary size (30k–100k) against sequence length, avoiding both the character-level step problem and the word-level vocabulary explosion.</div>
+    <div class="qa"><b>Q5.</b> What is Byte Pair Encoding (BPE)?<br><b>A.</b> An algorithm that builds a subword vocabulary by starting with individual characters and iteratively merging the most frequent adjacent pair of tokens into a new single token, repeating until a target vocabulary size is reached.</div>
+    <div class="qa"><b>Q6.</b> What is a word/token embedding?<br><b>A.</b> A dense vector of numbers representing a token's meaning, looked up from a trained embedding matrix using the token's ID — semantically similar tokens end up with similar (close) vectors.</div>
+    <div class="qa"><b>Q7.</b> What does "king − man + woman ≈ queen" demonstrate?<br><b>A.</b> That embeddings encode relationships between concepts as consistent vector offsets/directions — the same "gender" direction that separates man/woman also roughly separates king/queen.</div>
+    <div class="qa"><b>Q8.</b> Why is positional encoding necessary?<br><b>A.</b> Because raw embeddings and attention are permutation-invariant (bag-of-words) — without positional information, "the dog bit the man" and "the man bit the dog" would look identical to the model, even though word order determines meaning.</div>
+    <div class="qa"><b>Q9.</b> How does the original Transformer encode position?<br><b>A.</b> By adding a vector built from sine and cosine waves of varying frequency (per dimension) to each token's embedding — every position gets a unique combination of values, creating a distinct "fingerprint."</div>
+    <div class="qa"><b>Q10.</b> Why does GPT-4's context limit matter in tokens rather than words?<br><b>A.</b> Because the model actually processes tokens (subword units), and the token-to-word ratio varies (roughly 1.3 tokens per English word, higher for code or other languages) — "words" isn't the unit the model or its context window actually operates on.</div>
+
+    <h2 id="interview-i">28. Interview Questions — Intermediate</h2>
+    <div class="qa"><b>Q1.</b> Why does BPE's "self-organizing" merge process tend to produce linguistically meaningful subwords (like "under", "stand", "ing") even though it's purely frequency-driven with no linguistic rules?<br><b>A.</b> Because linguistically meaningful units (common prefixes, suffixes, roots) are, by their nature, frequently recurring patterns across a large corpus — BPE's purely statistical "merge the most frequent adjacent pair" process ends up discovering many of the same units a linguist would identify by hand, simply because frequency and linguistic regularity are highly correlated in natural language, even though the algorithm has no explicit notion of morphology.</div>
+    <div class="qa"><b>Q2.</b> Why do strange model failures in letter-counting or word-reversal tasks trace back to tokenization rather than "lack of intelligence"?<br><b>A.</b> Because the model's actual input units are subword tokens, not individual characters — a word like "strawberry" might be a single token or split into 2-3 subword tokens, and the model has no direct, reliable access to the individual character sequence within those tokens; it must infer character-level structure indirectly from training data patterns, which is unreliable, explaining why these specific task types fail disproportionately compared to tasks that operate at the token/word level the model actually perceives.</div>
+    <div class="qa"><b>Q3.</b> Explain mathematically why sinusoidal positional encoding allows the model to represent relative position as a linear function.<br><b>A.</b> For sinusoidal encodings using sin/cos pairs at each frequency, there exists a fixed rotation-matrix-like linear transformation that maps the encoding at position <code>p</code> to the encoding at position <code>p+k</code> for any fixed offset <code>k</code>, due to standard trigonometric angle-addition identities (sin(p+k) and cos(p+k) can be expressed as linear combinations of sin(p), cos(p) for fixed k) — this means the relative offset between any two positions is linearly recoverable from their encodings, which is part of why this scheme was chosen: it makes learning to attend by relative position straightforward for the model, without needing to memorize all possible absolute position pairs.</div>
+    <div class="qa"><b>Q4.</b> Why is embedding described as the "isolated" or context-free representation of a token, and what does that limitation actually look like in practice?<br><b>A.</b> The embedding lookup is a static operation — the same token ID always maps to the exact same vector regardless of surrounding context, so the word "bank" gets one fixed embedding whether it appears in "river bank" or "savings bank"; disambiguating between those meanings based on context is specifically the job of the self-attention layers that come after embedding + positional encoding (Part 2), not something embeddings alone can do.</div>
+    <div class="qa"><b>Q5.</b> Why does adding (rather than concatenating) positional encoding to the token embedding work, given that it seems to "mix" two different kinds of information into the same vector space?<br><b>A.</b> Because the embedding space has enough dimensionality (hundreds of dimensions) that the learned token-meaning directions and the fixed position-encoding directions can coexist largely orthogonally — in practice, training allows the model's subsequent layers to learn to disentangle and separately make use of both signals from the single combined vector, and addition (vs. concatenation) keeps the dimensionality fixed, which is computationally convenient and was empirically validated to work well in the original Transformer architecture.</div>
+
+    <h2 id="interview-a">29. Interview Questions — Advanced</h2>
+    <div class="qa"><b>Q1.</b> The deck notes sinusoidal positional encoding requires "no learned parameters." What's the practical trade-off of fixed vs. learned positional encodings, and why might a production LLM choose one over the other?<br><b>A.</b> Fixed (sinusoidal) encodings have the theoretical advantage of generalizing to sequence lengths beyond what was seen in training, since the sine/cosine functions are defined continuously for any position value, and they add zero extra trainable parameters; learned positional embeddings (a trainable lookup table per position, as used in original BERT/GPT-2) can in principle fit the specific positional patterns most useful for the training data/task better than a fixed mathematical scheme, but they fail to generalize beyond the maximum sequence length seen in training (there's no learned vector for position 10,000 if training only ever saw up to position 2,048). Many modern production LLMs instead use Rotary Positional Embeddings (RoPE, see <a href="building-training-modern-llm-from-scratch.html">Building & Training a Modern LLM from Scratch</a>), which combine properties of both: a fixed mathematical scheme (no extra parameters) that's applied via rotation directly to Query/Key vectors inside attention (rather than added to the input embedding), empirically shown to generalize better to longer contexts than either sinusoidal or learned absolute positional encoding.</div>
+    <div class="qa"><b>Q2.</b> How would you design a tokenizer to minimize the "language equity" cost/performance disparity the deck raises, without retraining the entire underlying LLM?<br><b>A.</b> The core lever is the training corpus used to build the BPE vocabulary itself — if the corpus is predominantly English, high-resource-language text and subwords dominate the frequency statistics that drive BPE merges, so lower-resource languages end up systematically under-represented in the vocabulary and must fall back to much finer-grained (more numerous) subword splits; building the BPE vocabulary from a more balanced, multilingual corpus (with deliberate per-language sampling weights rather than naive frequency-proportional sampling, which would still favor high-resource languages) directly produces more efficient, equitable per-language tokenization without touching the downstream model architecture at all — this is a tokenizer-training-time decision, fully decoupled from the LLM's own training.</div>
+
+    <h2 id="interview-s">30. Interview Questions — Senior/Architect</h2>
+    <div class="qa"><b>Q1.</b> You're designing a domain-specific LLM (e.g., for legal or medical text) and need to decide whether to use an existing general-purpose tokenizer (e.g., GPT-4's) or train a custom one. Walk through the trade-offs.<br><b>A.</b> A custom tokenizer trained on in-domain text (legal contracts, medical records) will typically achieve much better token efficiency on domain-specific vocabulary (specialized terminology, Latin medical/legal phrases, boilerplate clauses) that a general-purpose tokenizer would otherwise fragment into many inefficient subword pieces — this directly reduces both inference cost and effective context-window usage for domain documents. However, a custom tokenizer requires retraining (or at minimum fine-tuning) any model from scratch with the new vocabulary, since embedding matrices and token IDs are tokenizer-specific and incompatible across vocabularies — you can't swap tokenizers on an already-pretrained model without retraining the embedding and output layers at minimum. The practical default for most teams is to start with an existing general-purpose tokenizer (leveraging a pretrained base model) unless domain token-efficiency losses are measured to be severe enough (e.g., via a token-count audit on representative in-domain documents) to justify the retraining cost of a custom vocabulary — this is a build-vs-reuse cost/benefit decision, not a technical requirement.</div>
+
+    <h2 id="interview-sc">31. Scenario-Based Questions</h2>
+    <div class="qa"><b>Scenario 1.</b> Your product serves users in both English and a lower-resource language, and you notice the lower-resource-language users are hitting context-window limits far more often on equivalent-length conversations. What's the likely root cause, and what are your options?<br><b>A.</b> Likely root cause: the tokenizer's vocabulary (built predominantly from English/high-resource text) requires more subword tokens per word of the lower-resource language, consuming context-window budget faster for equivalent semantic content — the deck's "Language Equity" issue manifesting directly in product UX. Options: measure actual token-density differences across languages to confirm, consider a tokenizer with better multilingual vocabulary coverage (if switching models is feasible), or as a stopgap, surface token-usage warnings earlier for affected languages and consider per-language context-window budgets in UX design.</div>
+    <div class="qa"><b>Scenario 2.</b> A teammate proposes switching your production model's tokenizer mid-deployment to reduce costs, without retraining the model. What do you tell them?<br><b>A.</b> This isn't possible without retraining — a model's embedding matrix and output (un-embedding) layer are indexed by the specific tokenizer's vocabulary and token IDs it was trained with; swapping tokenizers changes what each token ID means, making the existing trained embeddings and all downstream weights meaningless for the new ID scheme. Cost reduction via tokenization would instead need to come from prompt-engineering (reducing token-inefficient phrasing/formatting) or, for a larger investment, training a new model from scratch (or at least retraining the embedding/output layers) with the more efficient tokenizer.</div>
+    <div class="qa"><b>Scenario 3.</b> A custom Transformer implementation your team built shows the model performing identically regardless of input word order during early testing. What's the most likely bug, given this deck?<br><b>A.</b> Most likely bug: positional encoding is either missing, not being correctly added to the token embeddings before being passed into attention, or is being added but then accidentally dropped/overwritten somewhere in the pipeline — without positional information, attention and embeddings are mathematically permutation-invariant, exactly matching the described symptom (identical behavior regardless of word order), so this is the first thing to check and verify in the forward pass.</div>
+
+    <h2 id="revision">32. Quick revision notes</h2>
+    <ul>
+      <li>Neural networks need numbers; text needs translating via tokenization → embedding → positional encoding.</li>
+      <li>Character-level tokenization: too granular, long sequences, inefficient ("Step Problem").</li>
+      <li>Word-level tokenization: vocabulary explosion (170k+ words), fails on out-of-vocabulary words.</li>
+      <li>Subword tokenization (BPE): the modern standard, 30k–100k vocabulary, balances granularity.</li>
+      <li>BPE algorithm: start with characters → iteratively merge most frequent adjacent pair → repeat to target vocab size.</li>
+      <li>Embeddings: dense vectors from a lookup table; similar meaning = close vectors; relationships = consistent offsets (king−man+woman≈queen).</li>
+      <li>Embeddings alone are context-free/isolated — context-aware meaning comes later, from self-attention.</li>
+      <li>Attention/embeddings are permutation-invariant (bag-of-words) without positional encoding.</li>
+      <li>Sinusoidal positional encoding: sine/cosine waves per dimension, unique fingerprint per position, no learned parameters, generalizes to longer sequences.</li>
+      <li>Final Transformer input = token embedding + positional encoding, combined per token.</li>
+      <li>Tokenization directly drives context-window limits, API cost, and multilingual cost/performance equity.</li>
+    </ul>
+
+    <h2 id="cheat">33. Cheat sheet</h2>
+    <div class="callout">Pipeline: text → tokenize (BPE, subword) → token IDs → embed (lookup, dense vectors, captures meaning) → + positional encoding (sin/cos, captures order) → ready for attention. Char-level=too granular. Word-level=vocab explosion + OOV fails. Subword=Goldilocks. No positional encoding = bag-of-words, order lost. 1 word ≈ 1.3 English tokens, varies by language/domain.</div>
+
+    <h2 id="further">34. Further topics to learn</h2>
+    <p>Transformers Part 2 (Self-Attention) → <a href="building-training-modern-llm-from-scratch.html">Building & Training a Modern LLM from Scratch (RoPE, GQA, SwiGLU)</a> → <a href="../10-Embeddings/">Embeddings</a> → <a href="../05-LLM-Fundamentals/tokens-and-context-window.html">Tokens & Context Window</a> → Week 6: What Changed Since 2017.</p>
+
+    <div class="prevnext">
+      <a href="neural-networks-from-scratch.html">← Neural Networks from Scratch</a>
+      <a href="tensors-and-pytorch.html">Next: Tensors, Matrices & PyTorch →</a>
+    </div>
+  </main>
+</div>
+<script src="../assets/app.js"></script>
+</body>
+</html>

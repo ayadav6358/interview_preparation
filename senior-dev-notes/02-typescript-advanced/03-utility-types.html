@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Utility Types — TypeScript Advanced — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">TypeScript Advanced</a><span class="sep">›</span>Utility Types</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>Utility Types</h1>
+      <p class="meta-line"><span>⏱ ~2.5 hrs</span><span>📍 Chapter 3 of 6</span></p>
+      <p><strong>One-line summary:</strong> Built-in utility types like <code>Partial</code>, <code>Pick</code>, and
+      <code>Record</code> are just mapped/conditional types defined in <code>lib.es5.d.ts</code> — once you can read
+      and rebuild them yourself, you can design your own for any shape-transformation problem.</p>
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <div class="box why">
+        <h4>Why</h4>
+        <p>"Implement <code>Partial</code>/<code>Pick</code>/<code>Omit</code> from scratch" is one of the most
+        common TS whiteboard exercises at senior level — not because anyone needs to reimplement them, but because
+        it proves you understand mapped types well enough to write a <em>new</em> one when a built-in doesn't fit.
+        Codebases accumulate domain-specific utility types (<code>DeepPartial</code>, <code>NonNullableFields</code>,
+        <code>PickByValue</code>) and someone has to be able to write and debug them.</p>
+      </div>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>Builds on <a href="01-type-system.html">Type System Deep Dive</a> and <a href="02-generics.html">Generics In Depth</a>. Leads into <a href="04-conditional-mapped-template.html">Conditional/Mapped/Template Literal Types</a>.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="builtins-tour">The built-in utility types, grouped by purpose</h3>
+      <table>
+        <tr><th>Group</th><th>Types</th><th>Purpose</th></tr>
+        <tr><td>Object shape</td><td><code>Partial&lt;T&gt;</code>, <code>Required&lt;T&gt;</code>, <code>Readonly&lt;T&gt;</code>, <code>Pick&lt;T,K&gt;</code>, <code>Omit&lt;T,K&gt;</code>, <code>Record&lt;K,V&gt;</code></td><td>Reshape an object type's properties/optionality/readonly-ness</td></tr>
+        <tr><td>Union filtering</td><td><code>Exclude&lt;T,U&gt;</code>, <code>Extract&lt;T,U&gt;</code>, <code>NonNullable&lt;T&gt;</code></td><td>Remove or keep members of a union matching a condition</td></tr>
+        <tr><td>Function introspection</td><td><code>Parameters&lt;F&gt;</code>, <code>ReturnType&lt;F&gt;</code>, <code>ConstructorParameters&lt;C&gt;</code>, <code>InstanceType&lt;C&gt;</code></td><td>Extract types from a function/class signature</td></tr>
+        <tr><td>String manipulation</td><td><code>Uppercase&lt;S&gt;</code>, <code>Lowercase&lt;S&gt;</code>, <code>Capitalize&lt;S&gt;</code>, <code>Uncapitalize&lt;S&gt;</code></td><td>Compiler-intrinsic template literal transforms</td></tr>
+        <tr><td>Async</td><td><code>Awaited&lt;T&gt;</code></td><td>Unwrap nested Promise/thenable types</td></tr>
+      </table>
+
+      <h3 id="reimplementing">Rebuilding them from scratch</h3>
+      <pre><code class="language-typescript">// Partial<T> — mapped type with the `?` modifier added to every key
+type MyPartial&lt;T&gt; = { [K in keyof T]?: T[K] };
+
+// Required<T> — the `-?` syntax REMOVES the optional modifier
+type MyRequired&lt;T&gt; = { [K in keyof T]-?: T[K] };
+
+// Readonly<T> — adds the readonly modifier
+type MyReadonly&lt;T&gt; = { readonly [K in keyof T]: T[K] };
+
+// Pick<T, K> — mapped type iterating over a constrained subset of keys
+type MyPick&lt;T, K extends keyof T&gt; = { [P in K]: T[P] };
+
+// Omit<T, K> — defined via Pick + Exclude, not a separate mapped type in lib.d.ts
+type MyOmit&lt;T, K extends keyof any&gt; = MyPick&lt;T, Exclude&lt;keyof T, K&gt;&gt;;
+
+// Record<K, V> — mapped type over an arbitrary key union, every value is V
+type MyRecord&lt;K extends keyof any, V&gt; = { [P in K]: V };
+
+// Exclude<T, U> — distributive conditional type (see ch.4) filtering out matches
+type MyExclude&lt;T, U&gt; = T extends U ? never : T;
+
+// Extract<T, U> — the inverse filter
+type MyExtract&lt;T, U&gt; = T extends U ? T : never;
+
+// ReturnType<F> — infer captures the return position of a function type
+type MyReturnType&lt;F extends (...args: any[]) => any&gt; =
+  F extends (...args: any[]) => infer R ? R : never;
+
+// Parameters<F> — infer captures the whole parameter tuple
+type MyParameters&lt;F extends (...args: any[]) => any&gt; =
+  F extends (...args: infer P) => any ? P : never;</code></pre>
+
+      <h3 id="domain-specific">Building your own domain-specific utilities</h3>
+      <pre><code class="language-typescript">// DeepPartial — recursive, handles nested objects (NOT arrays/functions correctly
+// without extra branches — a common follow-up question is "what does this miss?")
+type DeepPartial&lt;T&gt; = T extends object
+  ? { [K in keyof T]?: DeepPartial&lt;T[K]&gt; }
+  : T;
+
+// DeepReadonly — same recursive shape, readonly instead of optional
+type DeepReadonly&lt;T&gt; = T extends (infer U)[]
+  ? ReadonlyArray&lt;DeepReadonly&lt;U&gt;&gt;
+  : T extends object
+    ? { readonly [K in keyof T]: DeepReadonly&lt;T[K]&gt; }
+    : T;
+
+// PickByValue — keep only keys whose value type matches a given type
+type PickByValue&lt;T, V&gt; = Pick&lt;T, { [K in keyof T]: T[K] extends V ? K : never }[keyof T]&gt;;
+
+interface Form { name: string; age: number; email: string; active: boolean; }
+type StringFields = PickByValue&lt;Form, string&gt;; // { name: string; email: string }
+
+// NonNullableFields — strip null/undefined from every property's value type
+type NonNullableFields&lt;T&gt; = { [K in keyof T]: NonNullable&lt;T[K]&gt; };
+
+// RequireAtLeastOne — at least one of a set of keys must be present
+type RequireAtLeastOne&lt;T, Keys extends keyof T = keyof T&gt; =
+  Pick&lt;T, Exclude&lt;keyof T, Keys&gt;&gt; &
+  { [K in Keys]-?: Required&lt;Pick&lt;T, K&gt;&gt; & Partial&lt;Pick&lt;T, Exclude&lt;Keys, K&gt;&gt;&gt; }[Keys];</code></pre>
+      <p>That last one (<code>RequireAtLeastOne</code>) is a genuinely advanced pattern worth memorizing the shape
+      of, not the exact characters — it's the standard trick for "at least one of these fields is required" forms
+      and config objects, built entirely from utilities you already know.</p>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>A mapped type like <code>{ [K in keyof T]: X }</code> is resolved by the checker by first resolving
+      <code>keyof T</code> to a concrete union of literal key types, then iterating that union, re-evaluating the
+      value expression <code>X</code> (with <code>K</code> substituted) for each key, and reassembling the results
+      into a fresh object type. Modifiers (<code>?</code>, <code>readonly</code>, and their <code>-</code>-prefixed
+      removal forms) are applied per-property during this reassembly. Homomorphic mapped types — ones of the exact
+      shape <code>{ [K in keyof T]: ... }</code> over a generic <code>T</code> — get special-cased by the checker to
+      preserve the "shape" of T (optional/readonly modifiers of the source carry through consistently and arrays/tuples
+      map over elements rather than being treated as plain index signatures), which is why <code>Partial&lt;T&gt;</code>
+      maps over tuples element-wise instead of collapsing them to an array type.</p>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+flowchart TD
+  A["Pick&lt;User, 'id' | 'name'&gt;"] --> B["Resolve K in 'id' | 'name'"]
+  B --> C["For K='id': T['id'] → number"]
+  B --> D["For K='name': T['name'] → string"]
+  C --> E["Reassemble: { id: number; name: string }"]
+  D --> E
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-typescript">// BAD: a hand-rolled "optional update" type that silently allows removing
+// required fields because it just slaps Partial over the whole thing.
+interface User { id: number; name: string; email: string; }
+function updateUserBad(id: number, patch: Partial&lt;User&gt;) { /* id itself could be overwritten */ }
+
+// GOOD: Omit the identity field from the patchable set, keep everything else optional
+type UserPatch = Partial&lt;Omit&lt;User, "id"&gt;&gt;;
+function updateUserGood(id: number, patch: UserPatch) { /* ... */ }
+
+// Combining multiple utilities for a real DTO transformation:
+// API response has extra internal fields; the public DTO should hide them
+// and make audit fields readonly.
+interface UserRecord {
+  id: number; name: string; email: string;
+  passwordHash: string; internalNotes: string;
+  createdAt: string; updatedAt: string;
+}
+type UserDTO = Readonly<Pick&lt;UserRecord, "createdAt" | "updatedAt"&gt;> &
+  Omit&lt;UserRecord, "passwordHash" | "internalNotes" | "createdAt" | "updatedAt"&gt;;
+// UserDTO: { id; name; email } + readonly { createdAt; updatedAt } — no secrets, no accidental mutation</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod">
+        <h4>At scale</h4>
+        <p>A team's internal form library used raw <code>Partial&lt;FormValues&gt;</code> for "draft" state across
+        ~30 forms. A production bug let users save a draft that cleared a legally-required field because
+        <code>Partial</code> made literally everything optional including fields that should never be removable, only
+        left blank temporarily during editing. The fix was a custom <code>DraftOf&lt;T, Required extends keyof T&gt;</code>
+        utility combining <code>Partial</code> for most fields with a forced-present (but nullable) type for the
+        protected subset — a five-line addition to the shared types package that closed an entire class of bug
+        across every form that adopted it, which is the kind of leverage interviewers want to hear you reason about.</p>
+      </div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha">
+        <h4>Gotcha</h4>
+        <p><code>Record&lt;string, T&gt;</code> looks like it means "an object with any string keys", but combined
+        with <code>noUncheckedIndexedAccess</code> (a strict flag worth enabling — see ch.6) every lookup becomes
+        <code>T | undefined</code>, which is actually correct (a <code>Record&lt;string,T&gt;</code> doesn't guarantee
+        a key exists) but frequently causes confused bug reports when a team enables that flag mid-project and dozens
+        of previously "safe" lookups suddenly need narrowing.</p>
+      </div>
+      <ul>
+        <li>Prefer composing existing utility types (<code>Pick</code>/<code>Omit</code>/<code>Partial</code>) over hand-writing a new mapped type when possible.</li>
+        <li>Name domain-specific utilities clearly (<code>UserPatch</code>, not <code>PartialOmitUser</code>) — hide the mechanism behind an intention-revealing alias.</li>
+        <li><code>DeepPartial</code>/<code>DeepReadonly</code> need explicit array/tuple branches or they'll behave oddly on nested arrays — always check this in review.</li>
+        <li>Don't blanket-apply <code>Partial</code> to update/patch DTOs without excluding identity/immutable fields first.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>Compose built-ins</td><td>Shape change is standard (pick/omit/optional/readonly)</td><td>Need value-dependent filtering logic</td><td>Custom mapped + conditional type</td></tr>
+        <tr><td>Custom domain utility type</td><td>The same shape transform recurs across the codebase</td><td>One-off, used in a single place</td><td>Inline type at the single use site</td></tr>
+        <tr><td><code>DeepPartial</code>/<code>DeepReadonly</code></td><td>Deeply nested config/state objects</td><td>Flat objects (plain <code>Partial</code>/<code>Readonly</code> suffice)</td><td>Flat utility + manual nesting</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic">
+        <h4>Basic</h4>
+        <details class="qa"><summary>What's the difference between <code>Pick</code> and <code>Omit</code>?</summary><div class="answer"><p><code>Pick&lt;T,K&gt;</code> keeps only the listed keys; <code>Omit&lt;T,K&gt;</code> keeps everything except the listed keys. Omit is implemented internally via Pick + Exclude over keyof T.</p></div></details>
+        <details class="qa"><summary>Implement <code>Partial&lt;T&gt;</code> from scratch.</summary><div class="answer"><p><code>type MyPartial&lt;T&gt; = { [K in keyof T]?: T[K] }</code> — a mapped type adding the optional modifier to every property.</p></div></details>
+        <details class="qa"><summary>What does <code>Record&lt;K, V&gt;</code> produce?</summary><div class="answer"><p>An object type with every key in the union/string type K mapped to value type V — e.g. <code>Record&lt;"a"|"b", number&gt;</code> is <code>{ a: number; b: number }</code>.</p></div></details>
+        <details class="qa"><summary>What's the difference between <code>Exclude</code> and <code>Extract</code>?</summary><div class="answer"><p><code>Exclude&lt;T,U&gt;</code> removes members of union T assignable to U; <code>Extract&lt;T,U&gt;</code> keeps only members of T assignable to U — they're mirror-image conditional types.</p></div></details>
+        <details class="qa"><summary>What does <code>ReturnType&lt;typeof someFn&gt;</code> give you, and why do you need <code>typeof</code>?</summary><div class="answer"><p>It extracts the return type of the function type. <code>typeof</code> is needed because <code>someFn</code> is a value/runtime identifier — you need the type-space operator <code>typeof</code> to refer to its type.</p></div></details>
+      </div>
+      <div class="qa-level medium">
+        <h4>Medium</h4>
+        <details class="qa"><summary>Why does a naive <code>DeepPartial</code> implementation behave oddly on arrays, and how do you fix it?</summary><div class="answer"><p>Without a dedicated array branch, the generic object branch (<code>{ [K in keyof T]?: ... }</code>) would map over an array's numeric-like keys and methods incorrectly, often collapsing useful array typing. The fix adds an explicit <code>T extends (infer U)[] ? Array&lt;DeepPartial&lt;U&gt;&gt; : ...</code> branch checked before the general object branch.</p></div></details>
+        <details class="qa"><summary>How is <code>Omit</code> actually defined in TypeScript's lib.d.ts, and why not as a standalone mapped type?</summary><div class="answer"><p>As <code>Pick&lt;T, Exclude&lt;keyof T, K&gt;&gt;</code> — composed from two existing simpler utilities rather than duplicating mapped-type logic, which keeps the type system's built-in vocabulary small and composable, mirroring good userland type design.</p></div></details>
+        <details class="qa"><summary>What is a "homomorphic" mapped type and why does it matter for how <code>Partial&lt;T&gt;</code> behaves on tuples?</summary><div class="answer"><p>A mapped type of the exact shape <code>{ [K in keyof T]: ... }</code> over a bare generic T is special-cased by the checker to preserve T's underlying structure (array/tuple-ness, existing modifiers) rather than collapsing to a generic indexed type — this is why <code>Partial&lt;[string, number]&gt;</code> yields a tuple of optional slots rather than losing the tuple shape.</p></div></details>
+        <details class="qa"><summary>Design a <code>PickByValue&lt;T, V&gt;</code> utility that keeps only properties whose value type is assignable to V. Explain the two mapped-type passes involved.</summary><div class="answer"><p>First pass: a mapped type producing, for each key, either that key (if its value extends V) or `never`. Second pass: index into that mapped type with `[keyof T]`, which collects the non-never results into a union of valid keys, then feed that union into `Pick`.</p></div></details>
+        <details class="qa"><summary>What's the practical effect of enabling <code>noUncheckedIndexedAccess</code> on existing code using <code>Record&lt;string, T&gt;</code> heavily?</summary><div class="answer"><p>Every indexed lookup (`record[key]`) becomes `T | undefined` instead of `T`, forcing explicit narrowing/guards at every access site — correct behavior, since nothing guarantees the key exists, but it's a large one-time migration cost on existing codebases.</p></div></details>
+      </div>
+      <div class="qa-level advanced">
+        <h4>Advanced</h4>
+        <details class="qa"><summary>Implement <code>RequireAtLeastOne&lt;T, Keys&gt;</code> and explain, mechanically, how the mapped type over a union of keys produces a union of object shapes rather than one merged shape.</summary><div class="answer"><p>The trick is that <code>{ [K in Keys]: ... }[Keys]</code> maps each key in `Keys` to a full variant type requiring that specific key and making the rest optional, THEN indexes the resulting mapped type by `[Keys]` again, which — because the mapped type's keys union is `Keys` — produces a union of all those per-key variant shapes rather than a single intersected object, since indexing a mapped type by its own key union distributes over each member.</p></div></details>
+        <details class="qa"><summary>Why can't you write a fully generic, sound <code>DeepReadonly</code> that correctly handles functions, Maps, Sets, and class instances with private fields, and what do real-world implementations do instead?</summary><div class="answer"><p>Functions have no meaningful "readonly" transformation; Map/Set need bespoke readonly-interface substitutions (`ReadonlyMap`/`ReadonlySet`) rather than generic object mapping; class instances with private fields can't be mapped-typed at all since private members aren't visible to `keyof`. Real implementations special-case each of these (function/Map/Set passthrough or dedicated branches) and explicitly document that arbitrary class instances are out of scope, falling back to treating them as opaque leaves.</p></div></details>
+        <details class="qa"><summary>Explain why `keyof any` is used in `Omit`'s constraint (`K extends keyof any`) instead of `K extends keyof T`.</summary><div class="answer"><p>`keyof any` resolves to `string | number | symbol` — the universal key type — which deliberately allows passing a key that doesn't exist on T (so you can omit a key defensively even if a future refactor removes it from T, without causing a constraint error); constraining to `keyof T` directly would make `Omit` reject omitting a key that a later type change removes, which is the opposite of what a defensive utility should do.</p></div></details>
+        <details class="qa"><summary>How would you design a `Merge&lt;A, B&gt;` utility where B's properties should override A's on key collision, as a real "shallow object merge" type (not a plain intersection)?</summary><div class="answer"><p><code>type Merge&lt;A, B&gt; = Omit&lt;A, keyof B&gt; & B</code> — remove from A any key that also exists on B, then intersect with B, so B's version wins outright rather than producing an unhelpful intersection of both types at the colliding key (which plain `A & B` would do, often resulting in a `never` at that key if the types conflict).</p></div></details>
+        <details class="qa"><summary>What breaks if you try to write a recursive mapped/conditional type utility without a depth limit or base case over a genuinely circular type (e.g. a type that references itself through an optional parent pointer)?</summary><div class="answer"><p>TypeScript detects unbounded recursive type instantiation and throws "type instantiation is excessively deep and possibly infinite" once it exceeds an internal depth threshold, rather than looping forever — the fix is adding an explicit depth-counter type parameter that stops recursing past a fixed limit, or special-casing the circular reference to resolve to a shallow/opaque type instead of recursing through it.</p></div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment">
+        <span class="level-tag">Beginner (30-60 min)</span>
+        <h4>Reimplement 5 built-ins from scratch</h4>
+        <p>Without looking at lib.d.ts, implement <code>MyPartial</code>, <code>MyRequired</code>, <code>MyReadonly</code>,
+        <code>MyPick</code>, <code>MyExclude</code>. Verify each against the real built-in using the
+        <code>Equal&lt;A,B&gt;</code> type-level-test pattern from the topic's capstone.</p>
+        <ul><li>No peeking at lib.d.ts until you've attempted each one.</li><li>Each must match the built-in's behavior on at least 3 test cases.</li></ul>
+        <p><strong>Acceptance criteria:</strong> all type-level equality tests pass under <code>tsc --noEmit</code>.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>Start with the modifier syntax (`?`, `readonly`, and their `-` removal forms) before worrying about conditional logic — most of these five are pure mapped types with no conditional branch.</p></div></details>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Intermediate (2-4 hrs)</span>
+        <h4>Build a DTO-shaping utility library</h4>
+        <p>Build <code>PickByValue</code>, <code>OmitByValue</code>, <code>NonNullableFields</code>, and
+        <code>RequireAtLeastOne</code> as a small reusable module, with doc comments explaining the mechanism of each.</p>
+        <ul><li>Each utility needs at least 2 realistic usage examples in comments.</li><li>No <code>any</code> in any definition.</li></ul>
+        <p><strong>Acceptance criteria:</strong> apply all four to a realistic 10-field "UserRecord" type and show the resulting shapes compile as expected.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>`OmitByValue` is `PickByValue`'s mirror — swap `extends V ? K : never` for `extends V ? never : K`.</p></div></details>
+        <p><strong>Bonus:</strong> add a `DeepPartial` with a correct array branch and a unit-style type test proving it handles `T[]` correctly.</p>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Advanced (1-2 days)</span>
+        <h4>Design a `Merge&lt;A, B, Depth&gt;` with configurable recursion depth</h4>
+        <p>Build a deep-merge type utility (B overrides A on conflicting keys, recursively for nested objects) that
+        takes a numeric literal type parameter capping recursion depth to avoid "excessively deep" errors on
+        pathological inputs, defaulting to a sane depth.</p>
+        <ul><li>Must correctly deep-merge at least 3 levels of nesting by default.</li><li>Must not throw the "excessively deep" compiler error on a deliberately deep (6+ level) test input.</li></ul>
+        <p><strong>Acceptance criteria:</strong> a test type with 6 levels of nesting compiles cleanly with the depth cap in place, and fails obviously (documented, not silently) past the cap.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>Depth-limiting recursive types typically thread a tuple like `[...]["length"]`-based counter or a literal-number decrement type through each recursive call, stopping when it hits 0.</p></div></details>
+      </div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet"><ul>
+        <li>All built-in utility types are just mapped/conditional types in lib.d.ts — none are compiler magic (except the string-case intrinsics).</li>
+        <li><code>Omit</code> = <code>Pick&lt;T, Exclude&lt;keyof T, K&gt;&gt;</code> — composed, not separately defined.</li>
+        <li>Homomorphic mapped types (<code>{ [K in keyof T]: ... }</code> over bare T) preserve tuple/array shape and existing modifiers.</li>
+        <li><code>-?</code> and <code>-readonly</code> remove modifiers in a mapped type; plain <code>?</code>/<code>readonly</code> add them.</li>
+        <li><code>DeepPartial</code>/<code>DeepReadonly</code> need explicit array branches, or nested arrays misbehave.</li>
+        <li>Name domain-specific utility types for intent (<code>UserPatch</code>), hide the mapped-type mechanism behind the alias.</li>
+        <li><code>noUncheckedIndexedAccess</code> makes every <code>Record</code>/index lookup <code>T | undefined</code> — correct, but a big migration if enabled late.</li>
+      </ul></div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://www.typescriptlang.org/docs/handbook/utility-types.html">TS Handbook: Utility Types</a></li>
+        <li><a href="https://github.com/microsoft/TypeScript/blob/main/src/lib/es5.d.ts">TypeScript source: lib.es5.d.ts (the real definitions)</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="02-generics.html"><span class="dir">← Previous</span>Generics In Depth</a>
+        <a class="next" href="04-conditional-mapped-template.html"><span class="dir">Next →</span>Conditional / Mapped / Template Literal Types</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · TypeScript Advanced</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-typescript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-jsx.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "02-typescript-advanced", chapterKey: "03-utility-types" });</script>
+</body>
+</html>

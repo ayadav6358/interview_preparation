@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Streams, Buffers & Backpressure — Node.js Advanced — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">Node.js Advanced</a><span class="sep">›</span>Streams, Buffers & Backpressure</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>Streams, Buffers &amp; Backpressure</h1>
+      <p class="meta-line"><span>⏱ 2.5 hrs</span><span>📍 Chapter 2 of 9</span></p>
+      <p><strong>One-line summary:</strong> Streams are how Node processes data larger than memory and keeps
+      producers from overwhelming slow consumers — but only if you respect the return value of <code>write()</code>
+      and never bypass it, which is exactly where most "it worked in dev, OOM'd in prod" bugs come from.</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>Every file upload/download, CSV/log export, proxy, and HTTP response body in Node runs through streams
+      under the hood. A senior engineer is expected to know when `fs.readFile` is fine (small, bounded files) vs
+      when it will OOM a container (multi-GB exports), and to actually understand <em>why</em> `pipe()` doesn't
+      OOM while a naive manual "read all, write all" loop does. Backpressure is one of the most commonly
+      misunderstood yet interview-tested Node concepts at the senior level, because it requires understanding both
+      the stream internals and real memory/GC consequences.</p>
+      <div class="box why"><h4>Why</h4><p>A service that streams a 2GB export file via `fs.createReadStream().pipe(res)`
+      uses near-constant memory regardless of file size. The same export built by reading the whole file into a
+      Buffer first can spike memory by gigabytes per concurrent request — the difference between a service that
+      scales horizontally fine and one that falls over under moderate concurrent load.</p></div>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>Comfortable with Node's EventEmitter pattern and basic fs/http usage. Related:
+      <a href="01-event-loop.html">Event Loop Internals</a>, <a href="04-memory-gc.html">Memory Management & GC</a>.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="basics">The four stream types and Buffers</h3>
+      <p>Node has four stream base classes: <strong>Readable</strong> (source, e.g. fs.createReadStream),
+      <strong>Writable</strong> (sink, e.g. fs.createWriteStream, http response), <strong>Duplex</strong>
+      (both, e.g. a TCP socket), and <strong>Transform</strong> (duplex that modifies data as it passes through,
+      e.g. zlib.createGzip). A <code>Buffer</code> is a fixed-length chunk of raw binary memory, allocated outside
+      V8's normal JS heap (in Node's "off-heap" memory for buffers ≥ a threshold, pooled below it) — this is why
+      large Buffer usage doesn't directly show up in V8 heap snapshots but does show up in process RSS.</p>
+
+      <h3 id="internals">Backpressure: the actual mechanism</h3>
+      <p>Every Writable stream has an internal buffer with a <code>highWaterMark</code> (default 16KB for
+      non-object streams, 16 objects for object-mode streams). Calling <code>writable.write(chunk)</code> returns
+      <code>true</code> if the internal buffer is below the high water mark (safe to keep writing), or
+      <code>false</code> if it's now at/above it (the consumer is falling behind — you should stop writing).
+      If you keep calling <code>write()</code> while ignoring a <code>false</code> return, Node will still accept
+      and queue the data (it doesn't throw), which is exactly the trap: the internal buffer grows unbounded,
+      consuming memory proportional to how much faster the producer is than the consumer, until you OOM.</p>
+      <p>The correct pattern: when <code>write()</code> returns <code>false</code>, stop writing and wait for the
+      Writable's <code>'drain'</code> event (emitted once the internal buffer empties back below the high water
+      mark) before writing more. <code>stream.pipe()</code> implements exactly this protocol automatically — it
+      pauses the Readable source when the Writable destination signals backpressure, and resumes it on
+      <code>'drain'</code>. This is the entire reason <code>pipe()</code> is memory-safe and manual read/write
+      loops that ignore the return value are not.</p>
+
+      <h3 id="advanced">Readable modes, object mode, and stream composition</h3>
+      <p>Readable streams have two modes: <strong>paused</strong> (default — you call <code>.read()</code> or use
+      <code>'data'</code> events, which actually puts it in flowing mode) and <strong>flowing</strong> (data pushed
+      to you via events as fast as available, respecting the consumer via pause/resume). <code>pipe()</code> and
+      <code>for await (const chunk of readable)</code> (async iteration) both correctly propagate backpressure;
+      manually attaching a `'data'` listener without checking downstream capacity does not. <code>stream.pipeline()</code>
+      (from `node:stream`) is the production-correct way to chain streams: it properly destroys all streams in the
+      chain on error (preventing resource/fd leaks that a raw chain of `.pipe()` calls can leave behind) and returns
+      a Promise/supports callbacks for completion detection. Object-mode streams (used internally by many
+      Transform-based libraries) stream arbitrary JS objects instead of Buffers/strings, with high water mark
+      counted in object count, not bytes.</p>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>When you `pipe()` a Readable to a Writable: the Readable is told to flow; each chunk it emits is passed to
+      `writable.write(chunk)`. If that returns false, `pipe()` internally calls `readable.pause()` — stopping the
+      flow of further 'data' events — and attaches a one-time listener for the Writable's `'drain'` event, which
+      calls `readable.resume()`. This loop continues until the Readable ends, at which point `pipe()` calls
+      `writable.end()`. The key insight: backpressure isn't a Node primitive that automatically happens — it's an
+      explicit, cooperative protocol (check write()'s return value, honor it, wait for drain) that `pipe()` and
+      `pipeline()` implement correctly for you, and that you must implement yourself if you hand-roll stream
+      consumption.</p>
+      <p>For HTTP specifically: an Express/Fastify response object is a Writable stream over the underlying TCP
+      socket. If the client is on a slow connection, the OS-level TCP send buffer fills up, which makes the socket's
+      writes resolve slower, which makes `write()` return false more, which — if your code respects it — naturally
+      throttles how fast you read from your source (e.g., a database cursor or file) to match the slow client. This
+      end-to-end backpressure propagation is what prevents a single slow client from ballooning server memory.</p>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+sequenceDiagram
+  participant R as Readable (source)
+  participant W as Writable (sink)
+  R->>W: write(chunk1) -> true, keep going
+  R->>W: write(chunk2) -> true, keep going
+  R->>W: write(chunk3) -> false (buffer full)
+  Note over R: pipe() calls readable.pause()
+  W->>W: drains internal buffer to consumer
+  W-->>R: emits 'drain'
+  Note over R: pipe() calls readable.resume()
+  R->>W: write(chunk4) -> true, continues
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-typescript">// BAD: reads the whole file into memory before sending — memory scales
+// with file size AND concurrent requests. 50 concurrent 500MB downloads = 25GB RSS.
+import { readFile } from 'node:fs/promises';
+app.get('/export-bad', async (req, res) => {
+  const data = await readFile('/data/export.csv');
+  res.send(data);
+});
+
+// GOOD: constant memory regardless of file size or concurrency.
+import { createReadStream } from 'node:fs';
+import { pipeline } from 'node:stream/promises';
+app.get('/export-good', async (req, res) => {
+  try {
+    await pipeline(createReadStream('/data/export.csv'), res);
+  } catch (err) {
+    // pipeline() cleans up all streams in the chain on error automatically
+    req.log.error(err);
+    if (!res.headersSent) res.status(500).end();
+  }
+});
+
+
+// Manual backpressure-respecting write loop (what pipe() does for you)
+async function writeAll(readable: NodeJS.ReadableStream, writable: NodeJS.WritableStream) {
+  for await (const chunk of readable) {
+    const ok = writable.write(chunk);
+    if (!ok) {
+      // Stop pushing more data until the sink catches up.
+      await new Promise(resolve => writable.once('drain', resolve));
+    }
+  }
+  writable.end();
+}
+
+
+// Transform stream: gzip a large response on the fly, constant memory
+import { createGzip } from 'node:zlib';
+app.get('/export-gz', async (req, res) => {
+  res.setHeader('Content-Encoding', 'gzip');
+  await pipeline(createReadStream('/data/export.csv'), createGzip(), res);
+});
+
+
+// Streaming a DB cursor into an HTTP response without buffering all rows
+// (pg's query stream / Prisma's $queryRaw cursor, conceptually):
+import { Readable } from 'node:stream';
+async function* rowGenerator(cursor: any) {
+  let row;
+  while ((row = await cursor.next())) {
+    yield JSON.stringify(row) + '\n';
+  }
+}
+app.get('/export-rows', async (req, res) => {
+  const cursor = await db.cursor('SELECT * FROM big_table');
+  await pipeline(Readable.from(rowGenerator(cursor)), res);
+});
+
+
+// Custom Transform stream that enforces its own backpressure correctly
+import { Transform } from 'node:stream';
+class UpperCaseTransform extends Transform {
+  _transform(chunk: Buffer, enc: BufferEncoding, callback: Function) {
+    // Calling callback() signals "I'm ready for the next chunk" — this
+    // IS how Transform streams propagate backpressure upstream.
+    this.push(chunk.toString().toUpperCase());
+    callback();
+  }
+}
+</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4><p>A reporting service generated CSV exports (up to 1.5GB) on demand.
+      The original implementation built the CSV as one giant string in memory, then sent it via `res.send()`. Under
+      5 concurrent large-export requests, the container (4GB memory limit) OOM-killed, taking down unrelated
+      requests on the same pod. The fix: rewrite the CSV generator as an async generator yielding rows, pipe it
+      through a custom Transform that formats CSV rows, straight into the response via `stream.pipeline()`. Memory
+      dropped from several GB per concurrent export to tens of MB, because at any instant only a small window of
+      rows existed in memory — the database cursor, the CSV formatter, and the client's TCP receive rate were all
+      naturally synchronized via backpressure propagating end-to-end from client socket back to DB cursor pace.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Chaining streams with raw `.pipe().pipe().pipe()` and no error
+      handling: if the middle stream errors, `pipe()` does NOT automatically destroy the other streams in the
+      chain, leaking file descriptors and leaving dangling resources. Always prefer `stream.pipeline()` (or
+      `stream/promises`'s pipeline) for anything beyond a single trivial pipe, since it guarantees cleanup on
+      error.</p></div>
+      <ul>
+        <li>Never call `fs.readFile`/build full in-memory buffers for payloads whose size scales with user input or isn't tightly bounded — use streams for anything that could plausibly be "large."</li>
+        <li>Always check `write()`'s boolean return value in hand-rolled stream code, or just use `pipe()`/`pipeline()` which handle it for you.</li>
+        <li>Use `stream.pipeline()` over chained `.pipe()` calls in new code — proper error propagation and resource cleanup.</li>
+        <li>Remember Buffers for large allocations live off the V8 JS heap — a memory leak from buffers won't necessarily show up as heap growth in `--max-old-space-size`-style heap metrics, but will show in process RSS.</li>
+        <li>`highWaterMark` is a tuning knob, not a hard cap — larger values trade memory for fewer pause/resume cycles (less overhead) and vice versa; default (16KB/16 objects) is fine for most APIs.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>Buffer entire payload in memory</td><td>Payload size is small and bounded (e.g., a JSON API response under a few KB-MB)</td><td>Payload size scales with user data or file size, or is unbounded</td><td>Streams with pipeline()</td></tr>
+        <tr><td>stream.pipe()</td><td>Simple single-hop piping, quick scripts</td><td>Multi-stage chains, or anywhere error handling/cleanup matters</td><td>stream.pipeline() / stream/promises pipeline</td></tr>
+        <tr><td>for await...of on a Readable</td><td>Need async-generator-style processing with natural backpressure</td><td>Need to compose with other streams declaratively</td><td>pipeline() with Transform streams</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic"><h4>Basic</h4>
+      <details class="qa"><summary>What are the four stream base classes in Node?</summary><div class="answer"><p>Readable (data source), Writable (data sink), Duplex (both directions, independent), and Transform (duplex that modifies data as it flows through, e.g. gzip).</p></div><div class="followup">Follow-up: give one real built-in example of each.</div></details>
+      <details class="qa"><summary>What does write() return and what does it mean?</summary><div class="answer"><p>It returns a boolean: true if the internal buffer is below highWaterMark (safe to keep writing), false if the buffer is at/above it, meaning the consumer is falling behind and you should pause until 'drain' fires.</p></div><div class="followup">Follow-up: what happens if you ignore a false return and keep writing anyway?</div></details>
+      <details class="qa"><summary>What is backpressure in the context of streams?</summary><div class="answer"><p>A mechanism/protocol for a slow consumer to signal a fast producer to slow down, preventing unbounded memory growth in the producer's internal write buffer.</p></div><div class="followup">Follow-up: what's the event that signals the consumer has caught up?</div></details>
+      <details class="qa"><summary>Why is pipe() generally memory-safer than readFile + send?</summary><div class="answer"><p>pipe() processes data in bounded chunks and automatically respects backpressure (pausing the source on a false write() return, resuming on drain), so memory use stays roughly constant regardless of total payload size; readFile loads the entire payload into memory up front.</p></div><div class="followup">Follow-up: at what payload size does this distinction start to matter in practice?</div></details>
+      <details class="qa"><summary>What's the difference between pipe() and pipeline()?</summary><div class="answer"><p>pipeline() (from node:stream or stream/promises) chains multiple streams and guarantees all of them are properly destroyed/cleaned up if any one errors, and gives you a single callback/Promise for overall completion; raw chained pipe() calls don't guarantee that cleanup.</p></div><div class="followup">Follow-up: what resource leak can happen if you use raw pipe() chains without pipeline()?</div></details>
+      </div>
+      <div class="qa-level medium"><h4>Medium</h4>
+      <details class="qa"><summary>Walk through exactly what happens, step by step, when a Writable's write() returns false inside a pipe() call.</summary><div class="answer"><p>pipe() receives false from writable.write(chunk), calls readable.pause() to stop the 'data' event flow, and registers a one-time listener on the Writable's 'drain' event. Once the Writable's internal buffer empties below highWaterMark, it emits 'drain', pipe()'s listener fires and calls readable.resume(), and data flow continues.</p></div><div class="followup">Follow-up: if you're hand-rolling this instead of using pipe(), what's the easiest mistake to make?</div></details>
+      <details class="qa"><summary>Why can a slow client (e.g., mobile on 3G) downloading a large file from your Node API actually protect your server's memory, if you've implemented streaming correctly?</summary><div class="answer"><p>Because backpressure propagates end-to-end: the slow client's TCP receive window fills, OS-level socket writes slow down, write() on the response stream returns false more often, pipe()/pipeline() pauses the upstream source (file read or DB cursor) to match — so the server never reads/buffers data faster than the client can actually consume it.</p></div><div class="followup">Follow-up: what would break this protection, concretely, in your code?</div></details>
+      <details class="qa"><summary>You see production memory climbing steadily under sustained load on a streaming export endpoint. What are your top 2-3 hypotheses and how would you check each?</summary><div class="answer"><p>(1) write() return value being ignored somewhere in a custom Transform or manual loop — check for hand-rolled stream code that doesn't honor backpressure. (2) Raw pipe() chains without pipeline(), leaking streams/listeners on errored requests that never properly close. (3) An unbounded in-memory cache or buffer being filled per-request (e.g., accumulating chunks into an array "just in case") that never gets GC'd. Check each via heap snapshots over time and by auditing the specific endpoint's stream code for explicit backpressure handling.</p></div><div class="followup">Follow-up: how would a heap snapshot help you distinguish hypothesis 1/2 from hypothesis 3?</div></details>
+      <details class="qa"><summary>What's object mode and why would a highWaterMark of 16 (objects) vs 16KB (bytes) matter for tuning?</summary><div class="answer"><p>Object-mode streams transport discrete JS objects rather than byte chunks, so highWaterMark counts objects, not bytes — a stream of large objects (e.g., full DB rows as JSON) can use far more memory at the same highWaterMark count than a byte-mode stream, so object-mode streams need highWaterMark tuned based on average object size, not left at the numeric default assuming it means bytes.</p></div><div class="followup">Follow-up: when would you choose object mode over byte mode for a Transform stream?</div></details>
+      <details class="qa"><summary>How does gzip compression (Transform stream) interact with backpressure in a pipeline like file -> gzip -> response?</summary><div class="answer"><p>Each stage independently respects backpressure — if the client (response, the final sink) is slow, its write() returns false, pausing the gzip Transform's output; the Transform in turn won't call its internal callback() to pull more input until it's processed/pushed what it has, which propagates the pause back to the file read stream. The whole chain self-throttles to the slowest link.</p></div><div class="followup">Follow-up: does compression change memory behavior meaningfully here, beyond normal streaming?</div></details>
+      </div>
+      <div class="qa-level advanced"><h4>Advanced</h4>
+      <details class="qa"><summary>Design a streaming CSV export feature for a service exporting up to 10GB per request, serving 20 concurrent such exports, on containers with 2GB memory each. What's your approach end to end?</summary><div class="answer"><p>Use a DB cursor (not full table SELECT) yielding rows lazily, wrap it as an async generator, run it through a Transform that formats CSV rows incrementally, and pipeline() it directly into the HTTP response — never materializing more than a small window of rows in memory at once. Set a sane highWaterMark, ensure the DB driver's cursor itself supports backpressure-aware fetching (many do via fetch-size/batch options), and add pipeline() error handling to abort the DB cursor and close the response cleanly on client disconnect (listen for 'close' on the response/request). With correct backpressure, memory per request should be a small constant independent of the 10GB total, letting 20 concurrent exports fit well within 2GB containers.</p></div><div class="followup">Follow-up: how do you handle the case where the client disconnects mid-export — what needs explicit cleanup?</div></details>
+      <details class="qa"><summary>Explain a scenario where correctly implemented backpressure can still cause a cascading production incident, and how you'd mitigate it.</summary><div class="answer"><p>If many slow clients are simultaneously downloading large streamed exports, backpressure correctly keeps each request's memory low individually — but each paused/slow stream still holds open a DB cursor/connection and a file descriptor for a long time, potentially exhausting the DB connection pool or OS file descriptor limits even though memory looks fine. Mitigation: set per-request timeouts, cap concurrent streaming exports via a semaphore/queue, and monitor connection pool saturation and fd counts as separate metrics from memory.</p></div><div class="followup">Follow-up: would adding more DB connection pool capacity fully fix this, or just shift the bottleneck?</div></details>
+      <details class="qa"><summary>How would you benchmark and tune highWaterMark for a specific production workload rather than leaving it at default?</summary><div class="answer"><p>Profile typical chunk sizes and downstream consumer speed (e.g., average network throughput to clients, or DB write throughput); a highWaterMark too small causes excessive pause/resume cycling (CPU overhead from frequent event emission) while too large increases per-stream memory footprint under concurrency. Load-test with realistic concurrency at a few candidate values, measuring both memory (RSS under load) and throughput/latency, and pick the point where increasing it stops meaningfully reducing pause/resume overhead.</p></div><div class="followup">Follow-up: would this tuning differ meaningfully between a file-serving workload and a websocket-relay workload? Why?</div></details>
+      <details class="qa"><summary>Compare implementing a custom protocol parser as a Transform stream vs a plain EventEmitter-based parser that buffers incoming chunks manually. What do you give up or gain?</summary><div class="answer"><p>A Transform stream gets backpressure, composability with pipeline(), and standard error propagation for free, at the cost of fitting your parsing logic into the _transform(chunk, enc, callback) contract (which can be awkward for parsers needing variable-length lookahead across chunk boundaries). A hand-rolled EventEmitter parser gives full control over buffering/lookahead logic but requires you to reimplement backpressure and cleanup yourself, which is easy to get subtly wrong under load.</p></div><div class="followup">Follow-up: how would you handle a message that spans multiple incoming chunks inside a Transform's _transform method?</div></details>
+      <details class="qa"><summary>Why might increasing highWaterMark actually make an already-memory-constrained service worse, and how do you reconcile that with "fewer pause/resume cycles is more efficient"?</summary><div class="answer"><p>highWaterMark directly caps how much data each individual stream instance is allowed to buffer before signaling backpressure — raising it increases the worst-case memory footprint per concurrent stream (requests × highWaterMark), so under high concurrency, a larger highWaterMark trades a CPU efficiency win (fewer pause/resume events) for a larger memory ceiling, which can push a memory-constrained service into OOM territory precisely under the concurrent load it's meant to handle.</p></div><div class="followup">Follow-up: how would you decide the right highWaterMark differently for a service bottlenecked on CPU vs one bottlenecked on memory?</div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment"><span class="level-tag">Beginner (30-60 min)</span>
+      <h4>Prove the memory difference</h4>
+      <p>Generate a ~500MB test file. Write two Express endpoints: one using `fs.readFile` + `res.send()`, one using
+      `fs.createReadStream` + `stream.pipeline()`. Hit each with `curl` while watching `process.memoryUsage().rss`
+      logged every second during the request.</p>
+      <ul><li>Must log RSS during both requests.</li><li>Must show a clear numeric difference.</li></ul>
+      <p><strong>Acceptance criteria:</strong> The streaming endpoint's RSS stays roughly flat; the buffered endpoint's RSS spikes by roughly the file size.</p>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>Use `dd` or a Node script to generate the test file; poll memoryUsage() with a short setInterval and log to console during the request lifecycle.</p></div></details>
+      <p><strong>Bonus:</strong> Repeat with 5 concurrent requests and show the buffered version's memory scales roughly 5x while streaming stays flat.</p>
+      </div>
+      <div class="assignment"><span class="level-tag">Intermediate (2-4 hrs)</span>
+      <h4>Build a backpressure-aware rate-limited Transform</h4>
+      <p>Build a Transform stream that artificially throttles throughput to N bytes/sec (simulating a slow consumer),
+      and pipe a fast Readable (e.g., a generated large buffer) through it to a Writable. Instrument it to log every
+      time write() returns false and every 'drain' event, with timestamps, proving the pause/resume cycle is
+      actually happening.</p>
+      <ul><li>Must demonstrably throttle to the configured rate.</li><li>Must log pause/resume cycle evidence.</li></ul>
+      <p><strong>Acceptance criteria:</strong> Total transfer time matches (data size / rate) within a reasonable margin, and logs show multiple drain events during a multi-MB transfer.</p>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>Use setTimeout inside the Transform's _transform to delay calling callback(), which is itself a valid (if crude) backpressure mechanism since downstream won't get more data until callback() fires.</p></div></details>
+      <p><strong>Bonus:</strong> Make the rate configurable at runtime via an EventEmitter signal, simulating adaptive bitrate.</p>
+      </div>
+      <div class="assignment"><span class="level-tag">Advanced (1-2 days)</span>
+      <h4>Build a production-grade streaming CSV export with cancellation</h4>
+      <p>Build an endpoint that streams a large CSV export from a (real or simulated/mocked) paginated data source,
+      using an async generator and a custom Transform for CSV formatting, wired through `stream.pipeline()`. Handle
+      client disconnect mid-stream (abort the underlying data source cleanly, no dangling resources), and add a
+      load test proving memory stays flat under 10 concurrent large exports.</p>
+      <ul><li>Must handle client disconnect without leaking the underlying data source/cursor.</li><li>Must include a load test with memory measurements.</li></ul>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>Listen for 'close' on the request/response and use an AbortController threaded through to your data source to stop pagination fetches once the client is gone.</p></div></details>
+      <p><strong>Bonus:</strong> Add gzip compression to the pipeline and measure the throughput/memory tradeoff versus uncompressed.</p>
+      </div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet"><ul>
+        <li>Four stream types: Readable, Writable, Duplex, Transform.</li>
+        <li>write() returns false when the internal buffer hits highWaterMark — stop writing, wait for 'drain'.</li>
+        <li>pipe()/pipeline() implement the pause-on-false/resume-on-drain protocol for you; manual loops must do it themselves.</li>
+        <li>Prefer stream.pipeline() over chained pipe() — guarantees cleanup of all streams in the chain on error.</li>
+        <li>Default highWaterMark: 16KB (byte mode) or 16 objects (object mode).</li>
+        <li>Buffers for large data live off the V8 JS heap — won't show in heap-size metrics, will show in RSS.</li>
+        <li>Backpressure propagates end-to-end: slow client → slow response write → paused source read/DB cursor.</li>
+        <li>Never readFile/buffer-in-memory a payload whose size scales with user input or file size.</li>
+        <li>for await...of on a Readable respects backpressure naturally, same as pipe().</li>
+      </ul></div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://nodejs.org/en/learn/modules/backpressuring-in-streams">Node.js official docs: Backpressuring in Streams</a></li>
+        <li><a href="https://nodejs.org/api/stream.html">Node.js docs: Stream API reference</a></li>
+        <li><a href="https://nodejs.org/api/stream.html#streampipelinesource-transforms-destination-callback">Node.js docs: stream.pipeline()</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="01-event-loop.html"><span class="dir">← Previous</span>Event Loop Internals & libuv</a>
+        <a class="next" href="03-worker-threads.html"><span class="dir">Next →</span>Worker Threads & Clustering</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · Node.js Advanced</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-typescript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "04-nodejs-advanced", chapterKey: "02-streams-buffers" });</script>
+</body>
+</html>

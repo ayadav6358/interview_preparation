@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Vector Databases</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <input class="searchbox" placeholder="Search topics..." />
+    <a href="../index.html">← Home</a>
+    <h3>11-Vector-Databases</h3>
+    <a href="vector-databases.html">Vector Databases</a>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumbs"><a href="../index.html">Home</a> / 11-Vector-Databases</div>
+      <button class="theme-toggle" onclick="toggleTheme()">🌓 Theme</button>
+    </div>
+    <h1>Vector Databases (pgvector, Pinecone, Qdrant, Weaviate, Milvus, Chroma)</h1>
+    <span class="tag good">Stable</span><span class="tag">Last verified: 2026-10-06</span>
+
+    <div class="toc">
+      <b>On this page</b>
+      <a href="#what">1. What is this?</a>
+      <a href="#whyexist">2. Why does it exist?</a>
+      <a href="#whyimportant">3. Why is it important?</a>
+      <a href="#whereused">4. Where is it used?</a>
+      <a href="#prereq">5. Prerequisites</a>
+      <a href="#core">6. Core concepts</a>
+      <a href="#terms">7. Terminology</a>
+      <a href="#arch">8. Architecture</a>
+      <a href="#internal">9. How it works internally (ANN indexing)</a>
+      <a href="#steps">10. Step-by-step: setting up vector search</a>
+      <a href="#simple">11. Simple example</a>
+      <a href="#real">12. Real-world example</a>
+      <a href="#code">13. Code example</a>
+      <a href="#advanced">14. Advanced example</a>
+      <a href="#mistakes">15. Common mistakes</a>
+      <a href="#best">16. Best practices</a>
+      <a href="#production">17. Production considerations</a>
+      <a href="#security">18. Security considerations</a>
+      <a href="#performance">19. Performance considerations</a>
+      <a href="#cost">20. Cost considerations</a>
+      <a href="#debug">21. Debugging/troubleshooting</a>
+      <a href="#related">22. Related concepts</a>
+      <a href="#comparison">23. Comparison table</a>
+      <a href="#exercise">24. Mini practical exercise</a>
+      <a href="#project">25. Practical project</a>
+      <a href="#projectarch">26. Project architecture</a>
+      <a href="#interview-b">27. Interview Questions — Beginner</a>
+      <a href="#interview-i">28. Interview Questions — Intermediate</a>
+      <a href="#interview-a">29. Interview Questions — Advanced</a>
+      <a href="#interview-s">30. Interview Questions — Senior/Architect</a>
+      <a href="#interview-sc">31. Scenario-Based Questions</a>
+      <a href="#revision">32. Quick revision notes</a>
+      <a href="#cheat">33. Cheat sheet</a>
+      <a href="#further">34. Further topics to learn</a>
+    </div>
+
+    <h2 id="what">1. What is this?</h2>
+    <p>A vector database stores embedding vectors and performs fast similarity search (nearest-neighbor lookup) at scale, typically with metadata filtering and sometimes hybrid lexical+semantic search. Major options: PostgreSQL + pgvector, Pinecone, Qdrant, Weaviate, Milvus, Chroma.</p>
+
+    <h2 id="whyexist">2. Why does it exist?</h2>
+    <p>Brute-force comparing a query vector against millions/billions of stored vectors is too slow for real-time applications; vector databases exist to provide Approximate Nearest Neighbor (ANN) indexing structures that trade a small amount of accuracy for dramatic speed improvements at scale.</p>
+
+    <h2 id="whyimportant">3. Why is it important?</h2>
+    <p>The vector database is the retrieval backbone of every production RAG system — its indexing algorithm, filtering capability, and scaling characteristics directly determine retrieval latency, accuracy, and cost at scale.</p>
+
+    <h2 id="whereused">4. Where is it used?</h2>
+    <p>RAG retrieval, semantic search products, recommendation systems, deduplication, anomaly detection at scale.</p>
+
+    <h2 id="prereq">5. Prerequisites</h2>
+    <p><a href="../10-Embeddings/embeddings-fundamentals.html">Embeddings</a>.</p>
+
+    <h2 id="core">6. Core concepts</h2>
+    <ul>
+      <li><b>ANN (Approximate Nearest Neighbor):</b> algorithms (HNSW, IVF) that find "good enough" nearest neighbors much faster than exact brute-force search.</li>
+      <li><b>Similarity search:</b> retrieving the top-k most similar vectors to a query vector.</li>
+      <li><b>Metadata filtering:</b> restricting similarity search to a subset of vectors matching structured criteria (e.g., `tenant_id = X`).</li>
+      <li><b>Hybrid search:</b> combining semantic (vector) search with lexical (keyword/BM25) search for better precision.</li>
+    </ul>
+
+    <h2 id="terms">7. Terminology</h2>
+    <table>
+      <tr><th>Term</th><th>Meaning</th></tr>
+      <tr><td>HNSW</td><td>Hierarchical Navigable Small World — a popular graph-based ANN indexing algorithm.</td></tr>
+      <tr><td>IVF</td><td>Inverted File index — clusters vectors and searches only relevant clusters.</td></tr>
+      <tr><td>Recall@k</td><td>The fraction of true top-k nearest neighbors actually found by the (approximate) search.</td></tr>
+      <tr><td>Metadata filter</td><td>A structured condition (e.g., date range, tenant ID) applied alongside vector similarity search.</td></tr>
+      <tr><td>Hybrid search</td><td>Combining vector similarity with lexical/keyword search (e.g., BM25) in one query.</td></tr>
+    </table>
+
+    <h2 id="arch">8. Architecture</h2>
+    <pre><code>Documents → Embed → Insert {vector, metadata} into Vector DB (builds ANN index)
+
+Query → Embed → Vector DB.search(query_vector, top_k, filters)
+ → Approximate nearest neighbors (ranked by similarity)
+ → (optional) Rerank → Final context for LLM</code></pre>
+
+    <h2 id="internal">9. How it works internally (ANN indexing)</h2>
+    <p>HNSW builds a multi-layer graph where each node (vector) connects to its approximate nearest neighbors; search starts at a sparse top layer and greedily navigates down through denser layers toward the query's region, achieving logarithmic-ish search time instead of scanning every vector. This trades a small, tunable amount of recall accuracy for massive speed gains — a core trade-off every vector DB exposes via configuration parameters.</p>
+
+    <h2 id="steps">10. Step-by-step: setting up vector search</h2>
+    <ol>
+      <li>Choose a vector DB based on scale, hosting preference, and metadata filtering needs.</li>
+      <li>Embed and insert documents with relevant metadata (source, date, tenant, etc.).</li>
+      <li>Configure the ANN index (e.g., HNSW parameters) balancing recall vs. speed.</li>
+      <li>At query time, embed the query, apply metadata filters, and retrieve top-k results.</li>
+      <li>Optionally rerank results before passing to the LLM.</li>
+    </ol>
+
+    <h2 id="simple">11. Simple example</h2>
+    <p>Storing 10,000 FAQ embeddings in Chroma (a lightweight, local-first vector DB) for a small internal tool — simple to set up, no separate infrastructure needed.</p>
+
+    <h2 id="real">12. Real-world example</h2>
+    <p>An enterprise RAG system uses PostgreSQL + pgvector specifically because the company already runs Postgres for other data, avoiding the operational overhead of a separate specialized vector database while still getting adequate ANN search performance (HNSW support) for their scale.</p>
+
+    <h2 id="code">13. Code example</h2>
+    <pre><code class="language-sql">-- PostgreSQL + pgvector
+CREATE EXTENSION IF NOT EXISTS vector;
+
+CREATE TABLE documents (
+    id SERIAL PRIMARY KEY,
+    content TEXT,
+    embedding VECTOR(1536),
+    tenant_id INT
+);
+
+CREATE INDEX ON documents USING hnsw (embedding vector_cosine_ops);
+
+-- Similarity search with metadata filter
+SELECT content, 1 - (embedding <=> '[0.1, 0.2, ...]') AS similarity
+FROM documents
+WHERE tenant_id = 42
+ORDER BY embedding <=> '[0.1, 0.2, ...]'
+LIMIT 5;
+</code></pre>
+    <pre><code class="language-python"># Qdrant example
+from qdrant_client import QdrantClient
+
+client = QdrantClient(url="http://localhost:6333")
+results = client.search(
+    collection_name="docs",
+    query_vector=query_embedding,
+    query_filter={"must": [{"key": "tenant_id", "match": {"value": 42}}]},
+    limit=5,
+)
+</code></pre>
+
+    <h2 id="advanced">14. Advanced example</h2>
+    <p>Hybrid search combining BM25 lexical scoring with vector similarity (common pattern in Weaviate/Qdrant):</p>
+    <pre><code class="language-python">def hybrid_search(query, alpha=0.5, top_k=10):
+    vector_results = vector_search(embed(query), top_k=top_k*2)
+    bm25_results = bm25_search(query, top_k=top_k*2)
+    combined = merge_and_rerank(vector_results, bm25_results, alpha=alpha)
+    return combined[:top_k]
+</code></pre>
+
+    <h2 id="mistakes">15. Common mistakes</h2>
+    <ul>
+      <li>Not setting up metadata filtering for multi-tenant data, risking cross-tenant data leaks in retrieval.</li>
+      <li>Using brute-force exact search at a scale where it becomes a latency bottleneck instead of configuring ANN properly.</li>
+      <li>Ignoring recall/speed trade-off tuning, leaving default ANN parameters that may be poorly suited to the actual data scale.</li>
+      <li>Forgetting to rebuild/update the index after bulk document updates.</li>
+    </ul>
+
+    <h2 id="best">16. Best practices</h2>
+    <ul>
+      <li>Always scope metadata filters per tenant/user in multi-tenant systems — never rely on embedding similarity alone for isolation.</li>
+      <li>Benchmark recall@k vs. latency for your actual data distribution before committing to ANN parameters.</li>
+      <li>Combine vector search with reranking for production-grade precision.</li>
+      <li>Choose a vector DB matching your operational constraints (managed vs self-hosted, existing infra reuse).</li>
+    </ul>
+
+    <h2 id="production">17. Production considerations</h2>
+    <p>Monitor index build/update latency for frequently-changing corpora; plan capacity for index memory footprint, which grows with vector count × dimensionality; have a reindexing strategy for embedding model upgrades.</p>
+
+    <h2 id="security">18. Security considerations</h2>
+    <p>Enforce metadata-based access control (tenant/user scoping) at the query level — a RAG system that doesn't filter retrieval by tenant can leak one customer's data into another's context, a serious security/compliance failure.</p>
+
+    <h2 id="performance">19. Performance considerations</h2>
+    <p>ANN index type and parameters (e.g., HNSW's `ef_search`) directly trade recall against latency; tune based on measured production query patterns, not defaults alone.</p>
+
+    <h2 id="cost">20. Cost considerations</h2>
+    <p>Managed vector DBs (Pinecone) charge based on vector count/dimensionality and query volume; self-hosted options (pgvector, Qdrant, Milvus) shift cost to infrastructure/ops overhead — compare total cost of ownership, not just sticker price.</p>
+
+    <h2 id="debug">21. Debugging/troubleshooting</h2>
+    <ul>
+      <li><b>Retrieval missing obviously relevant documents:</b> check ANN recall settings (may be too aggressively approximate) or embedding/indexing mismatch.</li>
+      <li><b>Slow queries at scale:</b> check index configuration, consider sharding/partitioning, or verify metadata filters aren't forcing a full scan.</li>
+      <li><b>Cross-tenant data appearing in results:</b> audit metadata filtering logic immediately — this is a security incident.</li>
+    </ul>
+
+    <h2 id="related">22. Related concepts</h2>
+    <p><a href="../10-Embeddings/embeddings-fundamentals.html">Embeddings</a> · <a href="../12-RAG/">RAG</a> · <a href="../13-Advanced-RAG/">Advanced RAG</a></p>
+
+    <h2 id="comparison">23. Comparison table</h2>
+    <table>
+      <tr><th>Technology</th><th>Architecture</th><th>When to use</th><th>Pros</th><th>Cons</th></tr>
+      <tr><td>PostgreSQL + pgvector</td><td>Extension on relational DB</td><td>Already using Postgres, moderate scale</td><td>No new infra, SQL joins with existing data</td><td>Less specialized ANN performance at very large scale</td></tr>
+      <tr><td>Pinecone</td><td>Managed cloud vector DB</td><td>Want zero-ops managed service</td><td>Easy to scale, managed</td><td>Vendor lock-in, recurring cost</td></tr>
+      <tr><td>Qdrant</td><td>Self-hosted or managed, Rust-based</td><td>Need strong filtering + open-source option</td><td>Fast, flexible filtering, open-source</td><td>Self-hosting ops overhead</td></tr>
+      <tr><td>Weaviate</td><td>Self-hosted or managed, GraphQL API</td><td>Need hybrid search, modular ML integrations</td><td>Built-in hybrid search, modules ecosystem</td><td>More complex setup</td></tr>
+      <tr><td>Milvus</td><td>Self-hosted, distributed</td><td>Very large scale (billions of vectors)</td><td>Highly scalable, mature distributed architecture</td><td>Operationally heavier</td></tr>
+      <tr><td>Chroma</td><td>Lightweight, local-first</td><td>Prototyping, small-scale apps</td><td>Simple, easy to start</td><td>Less suited to large-scale production</td></tr>
+    </table>
+
+    <h2 id="exercise">24. Mini practical exercise</h2>
+    <p>Set up a local Chroma or pgvector instance, insert 100 sample document embeddings with metadata, and run a filtered similarity query.</p>
+
+    <h2 id="project">25. Practical project</h2>
+    <p><b>Multi-Tenant RAG Retrieval Service:</b> build a retrieval API using pgvector that enforces tenant-scoped metadata filtering on every query, with a test suite verifying no cross-tenant leakage.</p>
+
+    <h2 id="projectarch">26. Project architecture</h2>
+    <pre><code>POST /index {tenant_id, document} → embed → insert into pgvector with tenant_id
+POST /search {tenant_id, query} → embed → SELECT ... WHERE tenant_id = $1 ORDER BY embedding <=> $2
+Test: verify tenant A's query never returns tenant B's documents</code></pre>
+
+    <h2 id="interview-b">27. Interview Questions — Beginner</h2>
+    <div class="qa"><b>Q1.</b> What is a vector database?<br><b>A.</b> A database specialized for storing embedding vectors and performing fast similarity search at scale.</div>
+    <div class="qa"><b>Q2.</b> What is ANN search?<br><b>A.</b> Approximate Nearest Neighbor search — algorithms that find "good enough" nearest neighbors much faster than exact brute-force comparison.</div>
+    <div class="qa"><b>Q3.</b> Why not just use brute-force similarity search for everything?<br><b>A.</b> It's too slow at scale (millions/billions of vectors); ANN indexing trades a small accuracy loss for major speed gains.</div>
+    <div class="qa"><b>Q4.</b> What is metadata filtering in a vector DB?<br><b>A.</b> Restricting similarity search to vectors matching structured criteria, like a specific tenant or date range.</div>
+    <div class="qa"><b>Q5.</b> Name one popular ANN indexing algorithm.<br><b>A.</b> HNSW (Hierarchical Navigable Small World) or IVF (Inverted File index).</div>
+    <div class="qa"><b>Q6.</b> What's hybrid search?<br><b>A.</b> Combining semantic (vector) search with lexical/keyword search (like BM25) for better retrieval precision.</div>
+    <div class="qa"><b>Q7.</b> Why would you use pgvector instead of a dedicated vector DB?<br><b>A.</b> If you're already running PostgreSQL, pgvector avoids introducing new infrastructure while still providing adequate vector search capability.</div>
+    <div class="qa"><b>Q8.</b> What's recall@k?<br><b>A.</b> The fraction of the true top-k nearest neighbors that an approximate search actually finds.</div>
+    <div class="qa"><b>Q9.</b> Why is metadata filtering critical for multi-tenant RAG systems?<br><b>A.</b> Without it, a query could retrieve another tenant's data purely based on semantic similarity, causing a serious data leak.</div>
+    <div class="qa"><b>Q10.</b> Is Chroma suitable for large-scale production use?<br><b>A.</b> It's better suited for prototyping/small-scale apps; larger scale typically needs Qdrant, Milvus, Pinecone, or similar.</div>
+
+    <h2 id="interview-i">28. Interview Questions — Intermediate</h2>
+    <div class="qa"><b>Q1.</b> How does HNSW achieve fast approximate search, conceptually?<br><b>A.</b> It builds a multi-layer graph of vectors connected to their approximate neighbors; search starts at a sparse top layer and greedily navigates toward the query's region through progressively denser layers, avoiding a full scan.</div>
+    <div class="qa"><b>Q2.</b> What's the trade-off exposed by ANN index tuning parameters (e.g., HNSW's ef_search)?<br><b>A.</b> Higher values search more candidates, improving recall accuracy at the cost of higher latency; lower values are faster but may miss some true nearest neighbors — this must be tuned against your actual data and latency requirements.</div>
+    <div class="qa"><b>Q3.</b> Why would you choose Qdrant or Weaviate over pgvector for a complex multi-tenant filtering use case?<br><b>A.</b> Dedicated vector DBs often have more mature, flexible, and performant filtering capabilities purpose-built for combining vector search with complex metadata conditions at scale, compared to pgvector's extension-on-relational-DB approach, which can face different performance characteristics under heavy filtered search.</div>
+    <div class="qa"><b>Q4.</b> How would you test that your multi-tenant vector search never leaks cross-tenant data?<br><b>A.</b> Write automated tests that insert documents for multiple tenants, then query as one tenant and assert the result set never contains documents belonging to another tenant, regardless of semantic similarity.</div>
+    <div class="qa"><b>Q5.</b> Why is reindexing necessary after an embedding model upgrade, and what's a safe migration strategy?<br><b>A.</b> New embeddings are incompatible with the old vector space; a safe strategy re-embeds the full corpus into a new index/collection using the new model, validates it, then cuts over query traffic, avoiding mixing old and new vectors in the same searchable index.</div>
+
+    <h2 id="interview-a">29. Interview Questions — Advanced</h2>
+    <div class="qa"><b>Q1.</b> How would you design a sharding strategy for a vector database holding billions of vectors across many tenants?<br><b>A.</b> Consider sharding by tenant (keeps each tenant's data physically isolated, simplifies per-tenant deletion/compliance, but can create hot shards for large tenants) versus sharding by a hash of document ID (more even load distribution, but complicates per-tenant operations) — choice depends on tenant size distribution and compliance/isolation requirements.</div>
+    <div class="qa"><b>Q2.</b> What's a subtle failure mode of combining BM25 and vector search scores naively (e.g., simple weighted sum) in hybrid search?<br><b>A.</b> BM25 and cosine similarity scores are on different, non-comparable scales and distributions; naively summing them without proper normalization can let one signal dominate unpredictably across different queries — proper hybrid search needs score normalization or rank-fusion techniques (e.g., reciprocal rank fusion) rather than raw score combination.</div>
+
+    <h2 id="interview-s">30. Interview Questions — Senior/Architect</h2>
+    <div class="qa"><b>Q1.</b> Design a vector database architecture for an enterprise RAG platform serving hundreds of tenants with strict data isolation and compliance requirements.<br><b>A.</b> Enforce tenant isolation at multiple layers (separate collections/namespaces per tenant or strict mandatory metadata filtering with no query path bypassing it), implement audit logging of all retrieval queries, support per-tenant data deletion for compliance (right-to-be-forgotten), choose a vector DB with mature multi-tenancy features, and load-test filtered-query performance at realistic tenant-count and data-scale before committing to an architecture.</div>
+
+    <h2 id="interview-sc">31. Scenario-Based Questions</h2>
+    <div class="qa"><b>Scenario 1.</b> A security audit discovers that a RAG system's retrieval occasionally returns documents belonging to a different customer. What's the root cause and fix?<br><b>A.</b> Missing or improperly enforced tenant-scoped metadata filtering in the vector search query — fix by making tenant filtering mandatory and unbypassable at the query layer, and add automated tests specifically verifying tenant isolation.</div>
+    <div class="qa"><b>Scenario 2.</b> Your vector search latency degrades significantly as the corpus grows past a few million documents. What do you investigate?<br><b>A.</b> Check ANN index configuration (parameters may need tuning for the new scale), consider whether sharding/partitioning is needed, and verify metadata filters aren't forcing inefficient full scans instead of leveraging the index properly.</div>
+
+    <h2 id="revision">32. Quick revision notes</h2>
+    <ul>
+      <li>Vector DB = embeddings + fast ANN similarity search + metadata filtering.</li>
+      <li>HNSW/IVF trade recall accuracy for speed.</li>
+      <li>Always enforce tenant/metadata filtering for multi-tenant systems.</li>
+      <li>Choose DB based on scale, hosting preference, filtering needs.</li>
+    </ul>
+
+    <h2 id="cheat">33. Cheat sheet</h2>
+    <div class="callout">Vector DB = ANN indexing (HNSW/IVF) + metadata filtering + optional hybrid search. Enforce tenant isolation at the query layer, always. Choose based on scale/ops preference: pgvector (reuse Postgres), Pinecone (managed), Qdrant/Weaviate (flexible filtering), Milvus (massive scale), Chroma (prototyping).</div>
+
+    <h2 id="further">34. Further topics to learn</h2>
+    <p><a href="../12-RAG/">RAG</a> → <a href="../13-Advanced-RAG/">Advanced RAG (hybrid search, reranking)</a> → <a href="../44-Enterprise-AI/">Enterprise AI (multi-tenancy)</a></p>
+
+    <div class="prevnext">
+      <a href="../10-Embeddings/embeddings-fundamentals.html">← Embeddings</a>
+      <a href="../12-RAG/rag-fundamentals.html">Next: RAG →</a>
+    </div>
+  </main>
+</div>
+<script src="../assets/app.js"></script>
+</body>
+</html>

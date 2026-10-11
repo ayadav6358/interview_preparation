@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HTTP Module &amp; Basic Servers — Node.js Fundamentals — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">Node.js Fundamentals</a><span class="sep">›</span>HTTP Module &amp; Basic Servers</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>HTTP Module &amp; Basic Servers</h1>
+      <p class="meta-line"><span>⏱ 2 hrs</span><span>📍 Chapter 4 of 6</span></p>
+      <p><strong>One-line summary:</strong> Every framework you've ever used — Express, Fastify, Nest — is built
+      on top of the same <code>node:http</code> module you can use directly; building a raw server once is what
+      makes "middleware," "routing," and "body parsing" stop being framework magic and become three specific,
+      understandable problems you're watching the framework solve for you.</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>You've written hundreds of Express routes. Fewer senior candidates can explain what <code>req</code> and
+      <code>res</code> actually are (they're Node streams — specifically a Readable and a Writable), why a
+      request body doesn't arrive as a parameter but as a stream of <code>data</code> events, or why calling
+      <code>res.end()</code> twice throws. Interviewers probe this because it reveals whether you understand your
+      framework's foundation or have only ever worked one abstraction layer above it — and because debugging a
+      genuinely weird production HTTP issue (a hung connection, a missing <code>Content-Length</code>, a
+      streaming response that never flushes) requires dropping down to this layer.</p>
+      <div class="box why"><h4>Why</h4><p>When Express "just works" for 99% of requests but intermittently hangs or
+      double-sends a response under a specific edge case (a client disconnect mid-stream, an error thrown after
+      headers are already sent), the fix usually requires understanding that <code>res</code> is a writable
+      stream with real state (headersSent, finished) — not a black box object with a <code>.json()</code> method.</p></div>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>Comfortable with async/await and basic networking concepts. Related in this topic:
+      <a href="03-fs-path-os-core-modules.html">Core Modules: fs, path, os</a>,
+      <a href="05-express-basics-routing-middleware.html">Express Basics: Routing &amp; Middleware</a> (the direct
+      next step — same concepts, framework-assisted). Related elsewhere:
+      <a href="../11-web-fundamentals/04-http-and-networking-basics.html">HTTP &amp; Networking Basics</a> for the
+      protocol fundamentals this chapter assumes, and
+      <a href="../04-nodejs-advanced/02-streams-buffers.html">Streams, Buffers &amp; Backpressure</a> for the
+      stream mechanics req/res are built on in depth.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="createServer">http.createServer and the request/response objects</h3>
+      <p><code>http.createServer((req, res) => {...})</code> returns a server instance; the callback fires once
+      per incoming request. <code>req</code> (an <code>IncomingMessage</code>) is a <strong>Readable stream</strong>
+      giving you <code>req.method</code>, <code>req.url</code> (path + query string, not parsed into parts for
+      you), and <code>req.headers</code> (lowercased keys) synchronously, but the request <strong>body</strong>
+      arrives asynchronously as a stream of <code>'data'</code> events (Buffer chunks) followed by an
+      <code>'end'</code> event — there's no built-in "give me the parsed body" without writing that yourself.
+      <code>res</code> (a <code>ServerResponse</code>) is a <strong>Writable stream</strong>: you set
+      <code>res.statusCode</code>, call <code>res.setHeader(name, value)</code>, then
+      <code>res.write(chunk)</code> any number of times, and finally <code>res.end([data])</code> exactly once —
+      calling <code>end()</code> twice, or writing after it, throws.</p>
+
+      <h3 id="manual-routing">Manual routing: matching method and URL yourself</h3>
+      <p>With no framework, "routing" is just reading <code>req.method</code> and parsing <code>req.url</code>
+      yourself (via <code>node:url</code>'s <code>URL</code> class, or simple string splitting) and branching —
+      typically an if/else chain or a small lookup table keyed by <code>`${method} ${pathname}`</code>. There's no
+      built-in concept of route parameters (<code>/:id</code>) — you implement that by splitting the path into
+      segments and comparing positionally, or with a regex. Doing this by hand once is exactly what makes it
+      obvious what Express's router is actually automating.</p>
+
+      <h3 id="parsing-body">Parsing a request body manually</h3>
+      <p>Because the body is a stream, parsing JSON from it means: collect every <code>'data'</code> chunk into an
+      array (or concatenate into a growing Buffer), wait for <code>'end'</code>, concatenate all chunks into one
+      Buffer, convert to a UTF-8 string, then <code>JSON.parse</code> it — wrapped in a try/catch since client
+      input is never trusted to be valid JSON. This is precisely what <code>express.json()</code> (and
+      body-parser before it) does for you automatically, with additional guardrails like a size limit to prevent
+      a malicious or buggy client from streaming gigabytes into memory before you ever get to validate anything.</p>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>Each incoming TCP connection is handled by Node's networking layer using the OS's native async I/O
+      (epoll/kqueue/IOCP — not the libuv thread pool, see <a href="../04-nodejs-advanced/01-event-loop.html">Event
+      Loop Internals</a>), which is exactly why Node scales to large numbers of concurrent <em>idle or slow</em>
+      connections cheaply. HTTP/1.1 keep-alive means a single TCP connection can carry multiple sequential
+      request/response exchanges — the <code>http</code> module manages this transparently, but it's part of why
+      a hung handler (one that never calls <code>res.end()</code>) can tie up a connection indefinitely rather
+      than failing fast.</p>
+      <p>Headers must be sent before any body bytes — calling <code>res.setHeader</code> after the first
+      <code>res.write()</code> or after <code>res.end()</code> has already flushed headers throws
+      <code>ERR_HTTP_HEADERS_SENT</code>, because HTTP/1.1 framing requires headers first, as one block, before
+      the body starts. This is the underlying reason a common Express bug ("Cannot set headers after they are
+      sent") happens: some code path called <code>res.json()</code>/<code>res.end()</code> once, and a later
+      error handler or async callback tries to send a second response for the same request.</p>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+sequenceDiagram
+  participant C as Client
+  participant S as http.Server
+  participant H as Request handler fn
+  C->>S: TCP connect + HTTP request line + headers
+  S->>H: invoke callback(req, res)
+  Note over H: req = Readable stream (headers available now, body streams in)
+  H->>H: collect req 'data' events, wait for 'end'
+  H->>H: parse body, run business logic
+  H->>S: res.writeHead/setHeader, res.write, res.end()
+  S->>C: HTTP response (status, headers, body)
+      </div>
+      <div class="mermaid">
+flowchart LR
+  A["req.url = '/bookmarks/42?tag=js'"] --> B["new URL(req.url, 'http://x')"]
+  B --> C["pathname: '/bookmarks/42'"]
+  B --> D["searchParams: tag=js"]
+  C --> E["split('/') → ['', 'bookmarks', '42']"]
+  E --> F["segments[1]==='bookmarks' && segments[2] → id param"]
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-javascript">import http from 'node:http';
+import { URL } from 'node:url';
+
+// ---- Manual body-parsing helper ----
+function readJsonBody(req) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    req.on('data', (chunk) => chunks.push(chunk));
+    req.on('end', () => {
+      if (chunks.length === 0) return resolve(null);
+      try {
+        resolve(JSON.parse(Buffer.concat(chunks).toString('utf-8')));
+      } catch (err) {
+        reject(new Error('Invalid JSON body'));
+      }
+    });
+    req.on('error', reject);
+  });
+}
+
+function sendJson(res, statusCode, payload) {
+  const body = JSON.stringify(payload);
+  res.writeHead(statusCode, {
+    'Content-Type': 'application/json',
+    'Content-Length': Buffer.byteLength(body),
+  });
+  res.end(body);
+}
+
+// ---- A minimal raw-http bookmarks API with manual routing ----
+let bookmarks = [];
+let nextId = 1;
+
+const server = http.createServer(async (req, res) => {
+  const url = new URL(req.url, `http://${req.headers.host}`);
+  const segments = url.pathname.split('/').filter(Boolean); // ['bookmarks'] or ['bookmarks', '42']
+
+  try {
+    if (req.method === 'GET' && segments[0] === 'bookmarks' && segments.length === 1) {
+      return sendJson(res, 200, bookmarks);
+    }
+
+    if (req.method === 'GET' && segments[0] === 'bookmarks' && segments[1]) {
+      const item = bookmarks.find(b => b.id === Number(segments[1]));
+      if (!item) return sendJson(res, 404, { error: 'Not found' });
+      return sendJson(res, 200, item);
+    }
+
+    if (req.method === 'POST' && segments[0] === 'bookmarks' && segments.length === 1) {
+      const body = await readJsonBody(req);
+      if (!body?.url || !body?.title) {
+        return sendJson(res, 400, { error: 'url and title are required' });
+      }
+      const item = { id: nextId++, url: body.url, title: body.title };
+      bookmarks.push(item);
+      return sendJson(res, 201, item);
+    }
+
+    return sendJson(res, 404, { error: 'Route not found' });
+  } catch (err) {
+    // GOOD: centralized catch — any synchronous or awaited error in the handler ends up here
+    return sendJson(res, 500, { error: err.message });
+  }
+});
+
+server.listen(3000, () => console.log('Listening on http://localhost:3000'));
+
+// BAD: calling res.end() twice — throws ERR_STREAM_WRITE_AFTER_END / similar
+// res.end('first');
+// res.end('second'); // Error: write after end
+</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4><p>A team saw intermittent "Cannot set headers after they are sent to
+      the client" errors in production logs, only under load, never reproducible locally. Root cause: a route
+      handler awaited two independent async operations (a DB lookup and a cache write) without properly sequencing
+      error handling — under normal timing, the DB lookup's error path sent a 404 response and returned; under
+      load (DB occasionally slower than cache), the cache write's own unrelated error fired asynchronously
+      <em>after</em> the 404 had already been sent, and a generic top-level error handler tried to send a second,
+      500 response for the same already-completed request. The fix was disciplined: every async branch that could
+      independently fail needed to check <code>res.headersSent</code> before attempting to respond, and the
+      underlying lesson generalized into a lint rule requiring all route logic to funnel through a single
+      response-sending point rather than multiple scattered <code>res.json()</code> call sites.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Forgetting that <code>req.url</code> includes the query string and
+      is not automatically parsed — treating <code>req.url === '/bookmarks'</code> when it's actually
+      <code>'/bookmarks?tag=js'</code> silently fails every route match. Always parse with <code>new URL(req.url,
+      base)</code> and compare against <code>.pathname</code>.</p></div>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Not setting a body size limit when manually parsing — an
+      unbounded <code>chunks.push()</code> loop will happily buffer gigabytes from a malicious or buggy client
+      into memory before you ever get to reject it. Always track accumulated size and abort/destroy the
+      connection past a sane limit.</p></div>
+      <ul>
+        <li>Always check <code>res.headersSent</code> before attempting to send an error response from an async error path — you may already be too late.</li>
+        <li>Remember <code>res.end()</code> must be called exactly once per request, even on error paths — a hung handler that never calls it leaks the connection.</li>
+        <li>Don't trust `Content-Type` headers blindly — a client claiming `application/json` can still send garbage; always try/catch your JSON.parse.</li>
+        <li>Wrap the entire handler in try/catch (or equivalent) so no unhandled synchronous throw crashes the process via an uncaught exception.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>Raw node:http server</td><td>Learning fundamentals, a tiny single-purpose service, extremely latency-sensitive code with zero framework overhead tolerance</td><td>Any real app needing routing, middleware, validation at scale — reinventing this is wasted effort</td><td>Express, Fastify, Nest</td></tr>
+        <tr><td>Express</td><td>Most REST APIs — mature ecosystem, simple mental model, huge middleware library</td><td>Extreme throughput requirements where Fastify's lower overhead matters, or you want built-in schema validation</td><td>Fastify, raw http</td></tr>
+        <tr><td>Manual body parsing</td><td>Understanding the mechanism, a non-JSON/streaming body use case a framework's parser doesn't fit</td><td>A standard JSON REST API — just use the framework's body parser</td><td>express.json(), Fastify's built-in parsing</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic"><h4>Basic</h4>
+      <details class="qa"><summary>What type of object is req in an http.createServer callback?</summary><div class="answer"><p>An IncomingMessage, which is a Readable stream — headers/method/url are available synchronously, but the body arrives asynchronously as a stream of data events.</p></div><div class="followup">Follow-up: what type is res, and what stream type is it?</div></details>
+      <details class="qa"><summary>Does req.url include the query string?</summary><div class="answer"><p>Yes — req.url is the full path plus query string as sent by the client (e.g. '/bookmarks?tag=js'), not pre-parsed into separate parts. You parse it yourself, typically with the URL class.</p></div><div class="followup">Follow-up: what method/class would you use to split it into pathname and query parameters?</div></details>
+      <details class="qa"><summary>How do you read a request body with the raw http module?</summary><div class="answer"><p>Listen for 'data' events (Buffer chunks) on req, accumulate them, and on the 'end' event concatenate and parse the full body — there's no built-in synchronous "get the body" accessor.</p></div><div class="followup">Follow-up: why might you want to track accumulated size while collecting chunks?</div></details>
+      <details class="qa"><summary>What happens if you call res.end() twice?</summary><div class="answer"><p>It throws an error — a response stream can only be ended once per request; the second call is writing/ending an already-finished stream.</p></div><div class="followup">Follow-up: what property can you check before attempting to send a response to avoid this?</div></details>
+      <details class="qa"><summary>Does the raw http module provide route parameters like /:id out of the box?</summary><div class="answer"><p>No — there's no built-in routing concept at all; you implement path matching and parameter extraction yourself, typically by splitting the pathname into segments and comparing positionally or with a regex.</p></div><div class="followup">Follow-up: what is a framework's router actually automating over this manual approach?</div></details>
+      </div>
+      <div class="qa-level medium"><h4>Medium</h4>
+      <details class="qa"><summary>What does res.headersSent tell you and why does it matter in async error handling?</summary><div class="answer"><p>It's true once headers have actually been flushed to the client (via writeHead, the first write, or end) — once true, you cannot set new headers or send a different status code. In async code where multiple independent operations might each try to send an error response, checking headersSent before responding prevents a "Cannot set headers after they are sent" crash when an earlier code path already responded.</p></div><div class="followup">Follow-up: is checking headersSent sufficient to make your error handling fully correct, or just to prevent the crash?</div></details>
+      <details class="qa"><summary>Why must headers be sent before any body bytes in HTTP/1.1, and what Node error results if you violate this?</summary><div class="answer"><p>HTTP/1.1 message framing requires the status line and headers as one block before the body begins, since the client needs to know things like Content-Length/Transfer-Encoding before it can correctly parse the incoming body stream. Calling setHeader after write()/end() has already flushed headers throws ERR_HTTP_HEADERS_SENT.</p></div><div class="followup">Follow-up: how does Transfer-Encoding: chunked change when the client knows the body is complete, versus Content-Length?</div></details>
+      <details class="qa"><summary>Why is manually parsing JSON bodies risky without a size limit, and what's the fix?</summary><div class="answer"><p>Without bounding accumulated chunk size, a malicious or buggy client can stream an arbitrarily large body, exhausting process memory before you ever get the chance to validate or reject it — a basic denial-of-service vector. The fix: track running byte total as chunks arrive and destroy the connection/respond with 413 once a sane limit is exceeded, exactly what express.json({ limit }) does for you.</p></div><div class="followup">Follow-up: where specifically would you check the size — on every chunk, or only at the end?</div></details>
+      <details class="qa"><summary>Explain what HTTP keep-alive means for a raw http server and why a hung handler is worse than it sounds.</summary><div class="answer"><p>Keep-alive lets one TCP connection serve multiple sequential request/response exchanges without reconnecting. A handler that never calls res.end() doesn't just fail that one request — it holds that TCP connection (and the associated server resources) open indefinitely, and if connection limits are reached, can prevent new clients from connecting at all.</p></div><div class="followup">Follow-up: how would you add a safety-net timeout to guarantee every request eventually completes or fails?</div></details>
+      <details class="qa"><summary>How would you implement route parameters (e.g. /bookmarks/:id) manually with the raw http module?</summary><div class="answer"><p>Split both the registered route pattern and the incoming pathname into segments by '/', compare them positionally, treating any pattern segment starting with ':' as a wildcard that captures the corresponding incoming segment's value into a params object, and requiring equal segment length (or using a trailing wildcard) for a match.</p></div><div class="followup">Follow-up: how would you handle multiple competing route patterns matching the same path (e.g. a static route vs a parameterized one)?</div></details>
+      <details class="qa"><summary>What's the risk of using string .includes() or naive splitting on req.url for routing instead of the URL class?</summary><div class="answer"><p>Query strings, encoded characters (%20, %2F), and trailing slashes can all cause naive string matching to behave incorrectly or inconsistently — e.g. '/bookmarks' matching '/bookmarks-archive' via a loose .includes() check, or failing to strip a query string before comparing the path. The URL class gives you a correctly parsed, decoded pathname and separate searchParams, removing an entire bug class.</p></div><div class="followup">Follow-up: what base URL argument does the URL class need when parsing a relative req.url, and why?</div></details>
+      </div>
+      <div class="qa-level advanced"><h4>Advanced</h4>
+      <details class="qa"><summary>Design a minimal middleware system (array of functions with next()) on top of raw http.createServer, explaining exactly what it needs to replicate Express's core behavior.</summary><div class="answer"><p>Maintain an ordered array of handler functions, each accepting (req, res, next). A dispatcher function tracks an index, invokes handlers[index](req, res, () => dispatch(index+1)) — calling next() advances to the next middleware, and any middleware can instead call res.end() to terminate the chain early without calling next(). Error handling requires a convention: next(err) with an argument skips directly to a special error-handling middleware (checked via function arity or an explicit separate error-middleware array), mirroring Express's actual (req, res, next) vs (err, req, res, next) signature-based dispatch.</p></div><div class="followup">Follow-up: how would you prevent a middleware that forgets to call next() (and doesn't end the response either) from hanging the request forever?</div></details>
+      <details class="qa"><summary>Explain exactly why a single slow raw-http request handler (synchronous CPU-bound work) blocks all other concurrent connections on that process, tying this back to the event loop.</summary><div class="answer"><p>Node's http server accepts new TCP connections via OS-native async I/O, but the JS callback that processes each request's data still executes on the single JS thread; if that callback does synchronous CPU-bound work (a big JSON.parse, a crypto hash, a tight loop), the thread is occupied for that entire duration, and no other request's callback — regardless of which connection it's on — can run until it returns, since there is exactly one JS call stack for the whole process.</p></div><div class="followup">Follow-up: does this change at all if the server is handling requests via a cluster of multiple Node processes?</div></details>
+      <details class="qa"><summary>How would you add graceful shutdown (SIGTERM handling, draining in-flight requests, closing the server cleanly) to a raw http server for a production deployment?</summary><div class="answer"><p>On SIGTERM, call server.close() (which stops accepting new connections but lets in-flight requests finish), track open connections/sockets to actively close idle keep-alive ones that aren't mid-request (server.close() alone won't forcibly close persistent idle connections), and set a hard deadline timer (e.g. 10-30s) after which you forcibly destroy remaining sockets and exit, so a stuck request can't block deployment forever. Signal readiness-probe failure (if using Kubernetes) immediately on SIGTERM receipt, before draining starts, so the load balancer stops routing new traffic to this instance during the drain window.</p></div><div class="followup">Follow-up: why is it important to fail the readiness probe before, not after, you stop accepting connections?</div></details>
+      <details class="qa"><summary>What's the difference in how raw http and Express actually handle an uncaught synchronous throw inside a request handler, and why does it matter for process stability?</summary><div class="answer"><p>In a raw http.createServer callback, an uncaught synchronous throw propagates as an uncaught exception at the process level (since there's no framework wrapping your callback in a try/catch) — by default this crashes the entire process unless you have a global uncaughtException handler, taking down every other in-flight connection too. Express wraps each route handler's synchronous execution so a thrown error is caught and routed to its error-handling middleware instead of crashing the process — but critically, this safety net does NOT extend to errors thrown inside an async callback or a rejected Promise unless you explicitly call next(err) or (in modern Express/async wrappers) rely on async-error-catching middleware, which is a frequent source of "but Express catches errors for me" false confidence.</p></div><div class="followup">Follow-up: in modern Express (4.x with async handlers, or 5.x), what specifically changed about async rejection handling, and what's still the developer's responsibility?</div></details>
+      <details class="qa"><summary>Why does streaming a large response body with res.write() in a loop risk unbounded memory growth if you ignore backpressure, and how do you fix it?</summary><div class="answer"><p>res.write() returns false when the underlying socket's internal buffer is full (the client/network can't drain data as fast as you're writing it); if you ignore this return value and keep calling write() anyway (e.g. in a tight loop reading from a fast source and writing to a slow client), data queues up in memory inside Node's internal buffers unboundedly. The fix is respecting backpressure: pause writing when write() returns false, and resume only after the 'drain' event fires — or, far more simply, use stream.pipe() (source.pipe(res)) which implements this backpressure handling correctly for you.</p></div><div class="followup">Follow-up: why is piping a Readable stream directly to res generally preferred over manually reading-then-writing chunks yourself?</div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment"><span class="level-tag">Beginner (30-60 min)</span>
+      <h4>Build a 3-route raw http server</h4>
+      <p>Using only node:http, build a server with GET /, GET /time (returns current server time as JSON), and a
+      404 fallback for anything else. No framework, no npm dependencies.</p>
+      <ul><li>Must set correct Content-Type headers on every response.</li><li>Must return proper JSON for /time and a clear 404 JSON body for unmatched routes.</li></ul>
+      <p><strong>Acceptance criteria:</strong> curl against all 3 cases returns correct status codes and bodies.</p>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>Use req.method and new URL(req.url, 'http://localhost').pathname to branch; always call res.end() exactly once per branch.</p></div></details>
+      <p><strong>Bonus:</strong> Add a query-string-driven route, e.g. GET /greet?name=X returning a personalized greeting.</p>
+      </div>
+      <div class="assignment"><span class="level-tag">Intermediate (2-4 hrs)</span>
+      <h4>Raw-http bookmarks CRUD API (part 1 of the capstone)</h4>
+      <p>Build the full bookmarks CRUD API (GET list/one, POST, PUT, DELETE) described in this topic's capstone
+      using only node:http and node:fs, with file-based JSON storage. Include manual body parsing, manual route
+      matching (including the :id parameter), and a centralized try/catch per request with a consistent JSON
+      error shape.</p>
+      <ul><li>All 5 capstone endpoints working against bookmarks.json.</li><li>Consistent error response shape across every failure path (400, 404, 500).</li></ul>
+      <p><strong>Acceptance criteria:</strong> A full curl-based test script exercising create/read/update/delete passes end to end against the file-backed store.</p>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>Reuse the readJsonBody and sendJson helpers from this chapter's Code Examples section as your foundation.</p></div></details>
+      <p><strong>Bonus:</strong> Add simple request logging (method, path, status, duration in ms) without any middleware abstraction — just inline timing.</p>
+      </div>
+      <div class="assignment"><span class="level-tag">Advanced (1-2 days)</span>
+      <h4>Build a tiny middleware-and-router library on raw http</h4>
+      <p>Build a minimal library (your own, not a dependency) on top of node:http that provides: an Express-like
+      `app.get/post/put/delete(path, handler)` API with `:param` support, a middleware chain with `next()`,
+      centralized error handling via `next(err)`, and automatic JSON body parsing middleware with a size limit.
+      Then rebuild the bookmarks API using your own library instead of raw http directly.</p>
+      <ul><li>Must support at least one middleware (logging) running before every route.</li><li>Must correctly route next(err) to a dedicated error-handling middleware signature.</li></ul>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>Store routes as an array of {method, pathPattern, paramNames, handler} and match by converting the pattern to a regex with named capture groups, or by segment-splitting and comparing positionally.</p></div></details>
+      <p><strong>Bonus:</strong> Add support for middleware scoped to a path prefix (like Express's app.use('/api', subRouter)).</p>
+      </div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet"><ul>
+        <li>req is a Readable stream (IncomingMessage); res is a Writable stream (ServerResponse).</li>
+        <li>req.url includes the query string unparsed — always parse with the URL class, compare against .pathname.</li>
+        <li>Request body arrives as 'data' events (Buffer chunks) + a final 'end' event — no built-in parsed-body accessor.</li>
+        <li>res.end() must be called exactly once per request; calling it twice throws.</li>
+        <li>Check res.headersSent before sending an error response from an async path — you may already be too late.</li>
+        <li>Headers must be fully sent before any body bytes (HTTP/1.1 framing) — late setHeader throws ERR_HTTP_HEADERS_SENT.</li>
+        <li>No built-in routing or route params (:id) — you implement path matching/param extraction yourself without a framework.</li>
+        <li>Always bound manual body-parsing size to avoid a memory-exhaustion DoS vector.</li>
+        <li>A hung handler (never calling res.end()) ties up a keep-alive connection indefinitely.</li>
+        <li>res.write() respects backpressure via its boolean return value and the 'drain' event — prefer stream.pipe() over manual write loops for large payloads.</li>
+      </ul></div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://nodejs.org/api/http.html">Node.js docs: HTTP (http module)</a></li>
+        <li><a href="https://nodejs.org/api/http.html#class-httpincomingmessage">Node.js docs: http.IncomingMessage</a></li>
+        <li><a href="https://nodejs.org/api/http.html#class-httpserverresponse">Node.js docs: http.ServerResponse</a></li>
+        <li><a href="https://nodejs.org/en/learn/getting-started/introduction-to-nodejs#your-first-nodejs-web-application">Node.js official: Your first Node.js web application</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="03-fs-path-os-core-modules.html"><span class="dir">← Previous</span>Core Modules: fs, path, os</a>
+        <a class="next" href="05-express-basics-routing-middleware.html"><span class="dir">Next →</span>Express Basics: Routing &amp; Middleware</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · Node.js Fundamentals</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-javascript.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "13-nodejs-fundamentals", chapterKey: "04-http-module-and-basic-servers" });</script>
+</body>
+</html>

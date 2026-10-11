@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Transactions — System Design — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">System Design</a><span class="sep">›</span>Transactions</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>Transactions: ACID, Isolation Levels, 2PC, and Sagas</h1>
+      <p class="meta-line"><span>⏱ 2.5 hrs</span><span>📍 Chapter 7 of 14</span></p>
+      <p><strong>One-line summary:</strong> ACID and isolation levels tell you exactly which concurrency anomalies you're protected from on a single database — and once your transaction spans multiple services or databases, you give up atomicity entirely and must choose between the blocking cost of two-phase commit and the eventual-consistency tradeoffs of the Saga pattern.</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>Nearly every senior candidate can recite "ACID = Atomicity, Consistency, Isolation, Durability" but far fewer can explain, with a concrete T1/T2 interleaving, exactly what a dirty read vs a phantom read looks like, or why Repeatable Read in Postgres (which uses snapshot isolation) behaves differently from the textbook definition. And once you move to microservices, "just wrap it in a transaction" stops being an option — interviewers will push you on how you'd keep an order-and-payment flow correct across two separate databases, and "2PC" or "Saga" without understanding their actual failure modes is a red flag, not a strong answer.</p>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>Required: <a href="05-databases.html">Databases</a> (query execution basics) and <a href="06-database-scaling.html">Database Scaling</a> (replication/consistency vocabulary used in the distributed-transactions section). Feeds into <a href="08-message-queues.html">Message Queues & Event-Driven</a> (Sagas are typically implemented over queues/events) and <a href="09-microservices.html">Microservices</a>.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="acid">ACID properties, precisely</h3>
+      <p><strong>Atomicity:</strong> a transaction's operations either all happen or none do — there's no partial state visible to anyone, even if the process crashes mid-transaction (achieved via a write-ahead log: changes are journaled before being applied, and on crash recovery, uncommitted changes are rolled back). <strong>Consistency</strong> (the database-theory meaning, not CAP's C): a transaction only moves the database from one valid state to another, respecting declared invariants — constraints, foreign keys, triggers (this is actually a property the application + schema must jointly uphold; the database only enforces what you've declared). <strong>Isolation:</strong> concurrent transactions appear to execute as if they ran one at a time, to a degree controlled by the chosen isolation level (the next section is entirely about the fact that "appear to" has several real, weaker-than-serial implementations). <strong>Durability:</strong> once committed, a transaction's changes survive a crash — typically by ensuring the WAL entry is flushed to durable storage (fsync) before acknowledging commit to the client; this is also the exact mechanism that makes synchronous replication (Chapter 6) costly, since "durable" in a replicated system often means "flushed on a quorum of nodes," not just one.</p>
+
+      <h3 id="isolation-levels">Isolation levels, each with a concrete T1/T2 anomaly</h3>
+      <p>Isolation levels exist because full serializability (true one-at-a-time execution) is expensive; each weaker level permits specific anomalies in exchange for more concurrency. Here's each level with the exact interleaving that demonstrates what it does and doesn't prevent.</p>
+      <p><strong>Read Uncommitted</strong> — allows dirty reads: a transaction can read another transaction's uncommitted changes.</p>
+      <pre><code class="language-sql">-- T1                                  -- T2
+BEGIN;
+UPDATE accounts SET balance = 0
+  WHERE id = 1;  -- uncommitted
+                                        BEGIN;
+                                        SELECT balance FROM accounts
+                                          WHERE id = 1; -- reads 0 (dirty read!)
+ROLLBACK;  -- T1 aborts, balance reverts
+                                        -- T2 acted on a value that never
+                                        -- actually existed in committed history</code></pre>
+      <p>Virtually no production RDBMS defaults here (even "Read Uncommitted" in MySQL/InnoDB is rarely used deliberately) because acting on data that gets rolled back is almost never acceptable.</p>
+      <p><strong>Read Committed</strong> — prevents dirty reads, but allows non-repeatable reads: re-reading the same row within one transaction can return different values if another transaction commits a change in between.</p>
+      <pre><code class="language-sql">-- T1                                  -- T2
+BEGIN;
+SELECT balance FROM accounts
+  WHERE id = 1; -- returns 100
+                                        BEGIN;
+                                        UPDATE accounts SET balance = 50
+                                          WHERE id = 1;
+                                        COMMIT;
+SELECT balance FROM accounts
+  WHERE id = 1; -- returns 50 -- same transaction, different result!
+COMMIT;</code></pre>
+      <p>This is Postgres's and SQL Server's default. It's fine for most simple reads but dangerous for logic that reads a value, computes something, then writes based on that read (a classic read-then-write race — see "lost update" below).</p>
+      <p><strong>Repeatable Read</strong> — prevents non-repeatable reads (the same row read twice in a transaction is guaranteed stable), but in the textbook definition still allows phantom reads: a range query re-run within the same transaction can return new rows inserted by another committed transaction.</p>
+      <pre><code class="language-sql">-- T1                                  -- T2
+BEGIN;
+SELECT count(*) FROM orders
+  WHERE status = 'pending'; -- returns 5
+                                        BEGIN;
+                                        INSERT INTO orders (status, ...)
+                                          VALUES ('pending', ...);
+                                        COMMIT;
+SELECT count(*) FROM orders
+  WHERE status = 'pending'; -- textbook Repeatable Read: returns 6 (phantom row)
+COMMIT;</code></pre>
+      <p><strong>Important real-world nuance:</strong> Postgres implements Repeatable Read via snapshot isolation (MVCC) — the transaction takes a consistent snapshot at its start and every read within it sees that same snapshot, so in Postgres specifically, the above query would actually still return 5, not 6 — Postgres's Repeatable Read is stricter than the SQL standard requires and does not permit phantom reads. This exact gap between the SQL-standard definition and a specific engine's implementation is a favorite "gotcha" interview question.</p>
+      <p><strong>Serializable</strong> — prevents all of the above, behaving as if transactions ran one after another in some order. Implemented either via actual locking (two-phase locking, blocking) or, in modern engines like Postgres, via Serializable Snapshot Isolation (SSI) — optimistic: transactions proceed concurrently on snapshots, and the engine detects dangerous read/write dependency cycles at commit time, aborting one transaction with a serialization failure that the application must retry.</p>
+      <pre><code class="language-sql">-- T1                                  -- T2
+BEGIN ISOLATION LEVEL SERIALIZABLE;
+SELECT sum(amount) FROM ledger
+  WHERE account_id = 1; -- returns 500
+                                        BEGIN ISOLATION LEVEL SERIALIZABLE;
+                                        INSERT INTO ledger (account_id, amount)
+                                          VALUES (1, 100);
+                                        COMMIT; -- succeeds
+INSERT INTO ledger (account_id, amount)
+  VALUES (1, -500); -- would overdraw based on stale sum
+COMMIT; -- ABORTS with serialization failure --
+        -- engine detected T1's read and T2's write
+        -- formed a dependency cycle; app must retry T1</code></pre>
+      <p><strong>Lost update anomaly</strong> (a special case worth knowing by name): two transactions read the same value, both compute a new value based on it, and both write — the second write silently overwrites the first's logic without ever seeing it, even under Read Committed. Fix: use <code>SELECT ... FOR UPDATE</code> (explicit row lock) or an atomic <code>UPDATE accounts SET balance = balance - 50</code> (push the read-modify-write into a single statement the engine executes atomically) instead of read-then-write in application code.</p>
+
+      <h3 id="distributed-transactions">Distributed transactions: 2PC and its blocking problem, Sagas</h3>
+      <p><strong>Two-phase commit (2PC).</strong> When a logical transaction spans multiple independent databases/services (e.g., debit one database, credit another), 2PC coordinates atomicity across them via a coordinator: <strong>Phase 1 (prepare):</strong> coordinator asks every participant "can you commit?" — each participant does all the work, writes it durably, and replies "yes" (locking resources) or "no." <strong>Phase 2 (commit/abort):</strong> if all said yes, coordinator tells everyone to commit; if any said no, coordinator tells everyone to abort. This guarantees atomicity across nodes, but at a severe cost: <strong>the blocking problem</strong> — if the coordinator crashes after Phase 1 but before sending the Phase 2 decision, every participant is stuck holding its locks indefinitely, unable to unilaterally decide to commit or abort (it doesn't know what the other participants said), blocking other transactions that need those same rows until the coordinator recovers. This is precisely why 2PC is rarely used across microservice boundaries in practice — it trades availability for atomicity in exactly the way CAP warns about, and the coordinator becomes a single point of blocking failure for the entire distributed transaction.</p>
+      <p><strong>Saga pattern.</strong> Instead of one atomic cross-service transaction, break the business operation into a sequence of local transactions, each with a defined <strong>compensating transaction</strong> that undoes its effect if a later step fails. There's no cross-service locking and no blocking coordinator — each local transaction commits independently and immediately, trading strict atomicity for eventual consistency plus explicit, application-level rollback logic.</p>
+      <p><strong>Orchestration vs choreography.</strong> <strong>Orchestration:</strong> a central orchestrator explicitly calls each step in sequence and explicitly calls compensating actions in reverse order on failure — easier to reason about and debug (one place holds the whole flow), but the orchestrator is a new component that needs its own reliability story. <strong>Choreography:</strong> each service reacts to events from the previous service and emits its own event on completion, with no central coordinator — more decoupled, but the overall flow is implicit, spread across services, and harder to trace/debug when something goes wrong (you're reconstructing the saga's state from a trail of events after the fact).</p>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>Concretely, consider "place order → reserve inventory → charge payment → confirm order" as a Saga. If "charge payment" fails after "reserve inventory" already succeeded, the Saga must run a compensating transaction — "release inventory reservation" — to undo step 2's effect, since there's no cross-service rollback. The compensating transaction is not a true undo (the exact prior state might not be perfectly recoverable, e.g., if that inventory slot was taken by someone else in between) — it's a business-defined "best effort to restore correctness," which is why Saga designers must think through compensation semantics per step, not just wire up a generic rollback.</p>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+sequenceDiagram
+    participant C as Coordinator
+    participant A as Participant A (DB)
+    participant B as Participant B (DB)
+    C->>A: PREPARE
+    C->>B: PREPARE
+    A-->>C: YES (locks held, written to log)
+    B-->>C: YES (locks held, written to log)
+    Note over C: Coordinator crashes here!
+    Note over A,B: Both participants stuck holding locks,<br/>cannot unilaterally commit or abort --<br/>blocking problem until coordinator recovers
+    C->>A: COMMIT (after recovery)
+    C->>B: COMMIT (after recovery)
+    A-->>C: ACK
+    B-->>C: ACK
+      </div>
+      <div class="mermaid">
+sequenceDiagram
+    participant O as Orchestrator
+    participant Inv as Inventory Service
+    participant Pay as Payment Service
+    participant Ord as Order Service
+    O->>Inv: Reserve inventory
+    Inv-->>O: Reserved (local commit)
+    O->>Pay: Charge payment
+    Pay-->>O: FAILED (card declined)
+    Note over O: Payment failed -- trigger compensation
+    O->>Inv: Compensate: release reservation
+    Inv-->>O: Released (local commit)
+    O->>Ord: Mark order failed
+    Ord-->>O: Done
+    Note over O,Ord: No global lock was ever held --<br/>each step committed independently;<br/>correctness restored via compensation, not rollback
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <p>Lost update anomaly — bad (read-then-write race) vs good (atomic statement / explicit lock):</p>
+      <pre><code class="language-typescript">// BAD: read-then-write race -- two concurrent calls can both read balance=100,
+// both compute 100-30=70, and the second write silently loses the first debit
+async function withdrawBad(accountId: string, amount: number) {
+  const { rows } = await db.query('SELECT balance FROM accounts WHERE id = $1', [accountId]);
+  const newBalance = rows[0].balance - amount;
+  await db.query('UPDATE accounts SET balance = $1 WHERE id = $2', [newBalance, accountId]);
+}
+
+// GOOD: push the read-modify-write into one atomic statement
+async function withdrawGood(accountId: string, amount: number) {
+  const { rowCount } = await db.query(
+    `UPDATE accounts SET balance = balance - $1
+     WHERE id = $2 AND balance >= $1`, // guard against overdraft in the same atomic op
+    [amount, accountId]
+  );
+  if (rowCount === 0) throw new Error('Insufficient funds or account not found');
+}
+
+// GOOD alternative: explicit row lock when the logic between read and write
+// is too complex to express as one statement
+async function withdrawWithLock(client: PoolClient, accountId: string, amount: number) {
+  await client.query('BEGIN');
+  const { rows } = await client.query(
+    'SELECT balance FROM accounts WHERE id = $1 FOR UPDATE', [accountId] // blocks other writers until commit
+  );
+  if (rows[0].balance < amount) { await client.query('ROLLBACK'); throw new Error('Insufficient funds'); }
+  await client.query('UPDATE accounts SET balance = balance - $1 WHERE id = $2', [amount, accountId]);
+  await client.query('COMMIT');
+}</code></pre>
+      <p>A minimal orchestrated Saga with a compensating transaction:</p>
+      <pre><code class="language-typescript">type SagaStep = { action: () => Promise<void>; compensate: () => Promise<void> };
+
+async function runSaga(steps: SagaStep[]) {
+  const completed: SagaStep[] = [];
+  for (const step of steps) {
+    try {
+      await step.action();
+      completed.push(step);
+    } catch (err) {
+      // Roll back everything that succeeded so far, in reverse order
+      for (const done of completed.reverse()) {
+        await done.compensate().catch(e => console.error('Compensation failed', e));
+      }
+      throw new Error(`Saga failed at step, rolled back ${completed.length} steps: ${err}`);
+    }
+  }
+}
+
+await runSaga([
+  { action: () => inventoryService.reserve(orderId, items),
+    compensate: () => inventoryService.release(orderId, items) },
+  { action: () => paymentService.charge(orderId, amount),
+    compensate: () => paymentService.refund(orderId, amount) },
+  { action: () => orderService.confirm(orderId),
+    compensate: () => orderService.cancel(orderId) },
+]);</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4><p>An early-stage checkout flow used a distributed transaction (effectively 2PC-like behavior via an XA transaction manager) across the orders database and a third-party payment gateway's API. Under normal load this worked, but during a payment gateway slowdown, every in-flight checkout transaction held row locks on the orders table waiting for the gateway's prepare/commit response — new checkouts queued up behind those locks, and the entire orders table's write throughput collapsed even though the orders database itself was healthy. The team migrated to a choreographed Saga: the order is created in a "pending" state (committed immediately, no locks held waiting on payment), a payment-requested event is published, and the payment service's eventual success/failure event asynchronously transitions the order to confirmed or triggers compensation (release any reserved inventory, notify the user). Checkout latency became decoupled from payment gateway latency, and a slow gateway degraded gracefully (orders stayed pending longer) instead of cascading into a full outage — the classic lesson that 2PC's blocking failure mode gets dramatically worse whenever one participant is a third party you don't control and can't make fast or reliable.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Assuming "Repeatable Read" means the same thing across every database. Postgres's Repeatable Read (snapshot isolation) already prevents phantom reads, which is stricter than the SQL standard requires — code tested against Postgres's behavior may not be safe if ported to a database whose Repeatable Read follows the looser textbook definition.</p></div>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Writing read-then-write application logic (read a value, compute, write it back) under Read Committed or even Repeatable Read and assuming it's race-free. This is the lost update anomaly — the fix is an atomic single statement or an explicit row lock (SELECT FOR UPDATE), not a higher isolation level alone (Repeatable Read alone doesn't prevent lost updates in every engine; verify your specific engine's guarantee).</p></div>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Treating a Saga's compensating transaction as a true "undo." It's a business-defined corrective action, and it can itself fail or arrive out of order — compensations need their own idempotency and retry handling, and some effects (an email already sent, a notification already pushed) can't be undone at all, only acknowledged.</p></div>
+
+      <h2 id="tradeoffs">Tradeoffs: When to Use vs When NOT To</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>Read Committed</td><td>General-purpose default, most app logic</td><td>Read-then-write logic without atomic statements/locks</td><td>Serializable, or atomic SQL statements</td></tr>
+        <tr><td>Serializable</td><td>Correctness-critical logic (ledgers, inventory counts)</td><td>High-contention hot paths where retry storms would hurt (consider explicit locking instead)</td><td>Explicit row locks (SELECT FOR UPDATE)</td></tr>
+        <tr><td>Two-phase commit</td><td>Rare: all participants are within your control, strong consistency is non-negotiable, low transaction volume</td><td>Any participant is slow, unreliable, or third-party; high throughput needed</td><td>Saga pattern</td></tr>
+        <tr><td>Saga (orchestration)</td><td>Need a clear, centrally-debuggable multi-step business flow</td><td>Steps are highly independent with no natural central owner</td><td>Saga (choreography)</td></tr>
+        <tr><td>Saga (choreography)</td><td>Services should stay maximally decoupled</td><td>You need easy end-to-end traceability/debugging of the flow</td><td>Saga (orchestration), or add distributed tracing</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic"><h4>Basic</h4>
+        <details class="qa"><summary>What does each letter in ACID stand for?</summary><div class="answer"><p>Atomicity (all-or-nothing), Consistency (valid-state-to-valid-state per declared invariants), Isolation (concurrent transactions appear sequential, to a degree set by isolation level), Durability (committed data survives a crash).</p></div></details>
+        <details class="qa"><summary>What is a dirty read?</summary><div class="answer"><p>Reading another transaction's uncommitted data — if that transaction later rolls back, the reader acted on data that never existed in committed history. Prevented by Read Committed and above.</p></div></details>
+        <details class="qa"><summary>What is a non-repeatable read?</summary><div class="answer"><p>Re-reading the same row twice within one transaction and getting different values because another transaction committed a change in between. Prevented by Repeatable Read and above.</p></div></details>
+        <details class="qa"><summary>What is a phantom read?</summary><div class="answer"><p>Re-running the same range query within one transaction and getting a different set of rows because another transaction inserted/deleted matching rows and committed in between. Prevented by Serializable (and by Postgres's stricter Repeatable Read implementation).</p></div></details>
+        <details class="qa"><summary>What problem does two-phase commit solve, at a high level?</summary><div class="answer"><p>It coordinates atomic commit/abort across multiple independent databases/services so a cross-system transaction either fully commits everywhere or fully aborts everywhere.</p></div></details>
+        <details class="qa"><summary>What is a compensating transaction in the Saga pattern?</summary><div class="answer"><p>A business-defined action that semantically undoes the effect of an earlier successfully-committed step, used when a later step in the saga fails.</p></div></details>
+      </div>
+      <div class="qa-level medium"><h4>Medium</h4>
+        <details class="qa"><summary>Give a concrete T1/T2 interleaving showing a lost update, and explain why Read Committed doesn't prevent it.</summary><div class="answer"><p>T1 reads balance=100, T2 reads balance=100, T1 writes 100-30=70 and commits, T2 writes 100-50=50 and commits — T1's debit is silently lost even though no dirty or non-repeatable read occurred, because Read Committed only governs what a transaction sees, not whether two transactions' writes conflict based on stale reads.</p></div></details>
+        <details class="qa"><summary>Why is 2PC's blocking problem specifically dangerous, compared to a normal transaction timeout?</summary><div class="answer"><p>If the coordinator crashes between Phase 1 and Phase 2, participants have already voted "yes" and hold locks, but have no way to know whether to commit or abort without the coordinator's decision — they cannot safely time out and guess, because guessing wrong violates atomicity. They're stuck until the coordinator recovers (or a human intervenes), unlike a normal lock wait which resolves once the holder finishes.</p></div></details>
+        <details class="qa"><summary>Compare orchestration vs choreography Sagas for debuggability and coupling.</summary><div class="answer"><p>Orchestration centralizes the flow logic in one place, making it easy to trace and reason about but coupling every participant to the orchestrator's contract. Choreography fully decouples services (each only knows about events, not other services) but the overall flow is implicit — debugging requires reconstructing it from a scattered event trail, usually needing distributed tracing to make tractable.</p></div></details>
+        <details class="qa"><summary>How does Postgres's Repeatable Read differ from the SQL standard's definition, and why does it matter?</summary><div class="answer"><p>Postgres implements Repeatable Read via snapshot isolation (MVCC), which already prevents phantom reads — stricter than the standard requires. It matters because code relying on this behavior (e.g., assuming a range count is stable) may break if run against a database whose Repeatable Read follows the looser standard definition that still permits phantoms.</p></div></details>
+        <details class="qa"><summary>When would you choose SELECT FOR UPDATE over simply raising the isolation level to Serializable?</summary><div class="answer"><p>SELECT FOR UPDATE gives precise, targeted locking on exactly the rows you know you're about to modify, with predictable blocking behavior; Serializable (especially SSI-based) can abort transactions with serialization failures that require retry logic throughout the app, which is more invasive to introduce broadly than locking a known hot path.</p></div></details>
+      </div>
+      <div class="qa-level advanced"><h4>Advanced</h4>
+        <details class="qa"><summary>Design the Saga for an e-commerce checkout with inventory reservation, payment, and shipping label creation — including what happens if shipping label creation fails after payment succeeded.</summary><div class="answer"><p>Steps: reserve inventory -> charge payment -> create shipping label -> confirm order. If label creation fails (e.g., carrier API down), compensate in reverse: refund payment, release inventory reservation, mark order failed/retry-pending. Key design point: refund is not instantaneous or guaranteed-successful either, so the compensation step itself needs retry with backoff and an alerting path if refund repeatedly fails (a human-in-the-loop fallback for the rare case where automated compensation can't complete) — compensations are not magic, they're just another operation that can fail.</p></div></details>
+        <details class="qa"><summary>Why doesn't a Saga provide true isolation between the business operation's steps, and what concrete bug can result?</summary><div class="answer"><p>Each step commits independently and is immediately visible to other transactions, so another process can observe or act on intermediate state (e.g., see "inventory reserved" before payment is confirmed, and make a decision based on that partial state) — this is sometimes called a Saga's lack of isolation producing "dirty reads" at the business level. Mitigation: model intermediate states explicitly (e.g., order status = "pending_payment") so other parts of the system know not to treat it as final, rather than assuming Saga steps are invisible until the whole saga completes.</p></div></details>
+        <details class="qa"><summary>How would Serializable Snapshot Isolation (SSI) detect the write skew anomaly that Repeatable Read alone misses?</summary><div class="answer"><p>Write skew: two transactions each read overlapping data, then each write to a different row based on that read, such that neither write conflicts at the row level but the combined effect violates an invariant (e.g., two on-call doctors both check "is at least one other doctor on call" and both go off-call, leaving zero). SSI tracks read-write dependencies between concurrent transactions and detects when a cycle of such dependencies would make the resulting history non-serializable, aborting one transaction at commit time even though no single row was double-written.</p></div></details>
+        <details class="qa"><summary>In a high-throughput system, why might an architect deliberately choose eventual consistency + Saga even when 2PC would be technically correct?</summary><div class="answer"><p>2PC's locking holds resources for the duration of the slowest participant's round trip, which caps throughput at roughly 1/(sum of round trip latencies) per lock-contended resource, and a single slow/unreliable participant can stall the whole system (the blocking problem). Sagas let each local transaction commit immediately, so throughput is governed by each service's own capacity, not the slowest cross-service round trip — at the cost of a temporary window of visible intermediate state and the need to design compensations, which is usually the better trade at real production scale.</p></div></details>
+        <details class="qa"><summary>How do idempotency keys relate to making Saga compensations and retries safe?</summary><div class="answer"><p>Any step or compensation in a Saga can be retried after a timeout without knowing if the first attempt actually succeeded (network ambiguity) — without an idempotency key (a unique ID tied to that specific operation attempt, checked/stored by the receiving service before applying the effect), a retried "charge payment" or "release inventory" could double-charge or double-release. Idempotency keys let the receiving service recognize and safely no-op a duplicate retry, which is what makes Sagas reliable under real-world network failure rather than just in the happy path.</p></div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment"><span class="level-tag">Beginner (30-60 min)</span><h4>Identify the anomaly</h4><p>For each of three given T1/T2 interleavings (write your own three short SQL-pseudocode timelines modeled on this chapter's examples, one each demonstrating a dirty read, a non-repeatable read, and a lost update), state which isolation level is the minimum needed to prevent it.</p><ul><li>Write the timelines in the same T1/T2 column format used in this chapter.</li><li>State the minimum isolation level for each and briefly justify.</li></ul><p><strong>Acceptance criteria:</strong> Three correct, concrete timelines with correctly matched minimum isolation levels.</p><details class="qa"><summary>Hints</summary><div class="answer"><p>Dirty read needs Read Committed to fix. Non-repeatable read needs Repeatable Read. Lost update needs either an atomic statement/explicit lock or Serializable — note it isn't automatically fixed by Repeatable Read in every engine, so justify carefully.</p></div></details><p><strong>Bonus:</strong> Which of your three examples would behave differently in Postgres specifically versus the SQL-standard definition?</p></div>
+      <div class="assignment"><span class="level-tag">Intermediate (2-4 hrs)</span><h4>Reproduce a lost update and fix it</h4><p>Using a real Postgres instance (local Docker is fine), create an accounts table, and write two concurrent Node.js scripts that both read a balance then write a debited value back (the "bad" pattern from this chapter's code). Run them concurrently many times and demonstrate the lost update actually happening (balance ends higher than it should).</p><ul><li>Show the reproduction (a test run where the final balance is wrong).</li><li>Fix it using the atomic UPDATE statement approach and demonstrate the bug no longer reproduces across many concurrent runs.</li></ul><p><strong>Acceptance criteria:</strong> A real reproduction of the bug and a verified fix, not just a theoretical explanation.</p><details class="qa"><summary>Hints</summary><div class="answer"><p>Use Promise.all to fire both withdrawal calls concurrently in a loop many times; under Read Committed the race window is small but real — running many iterations concurrently makes it reproducible.</p></div></details><p><strong>Bonus:</strong> Try the same reproduction attempt using SELECT FOR UPDATE instead of the atomic UPDATE — confirm it also fixes it, and discuss the throughput difference between the two fixes under high contention.</p></div>
+      <div class="assignment"><span class="level-tag">Advanced (1-2 days)</span><h4>Design a Saga for a multi-service booking flow</h4><p>Design a Saga for a travel booking system that must atomically (from the user's perspective) book a flight, book a hotel, and charge a payment, across three independent services, where any step can fail or time out.</p><ul><li>Choose orchestration or choreography and justify the choice.</li><li>Define every step's compensating transaction, including the case where the compensation itself might fail (e.g., hotel API is down when you try to cancel it).</li><li>Address idempotency: what happens if the orchestrator crashes and retries a step that may have already partially succeeded.</li></ul><p><strong>Acceptance criteria:</strong> A written design (pseudocode acceptable, no full working implementation required) covering the happy path, at least two failure/compensation paths, and an explicit idempotency strategy.</p><details class="qa"><summary>Hints</summary><div class="answer"><p>Think about using a persisted saga state machine (current step, status) so an orchestrator crash can resume from the last known state rather than restarting blindly — and require every service's action/compensation endpoints to accept an idempotency key tied to the saga instance ID + step.</p></div></details><p><strong>Bonus:</strong> What's your fallback when a compensation itself fails repeatedly (e.g., the hotel cancellation API is down for an extended outage) — design the human-in-the-loop or dead-letter path.</p></div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet"><ul>
+        <li>ACID: Atomicity (all-or-nothing via WAL), Consistency (invariants), Isolation (apparent serial execution), Durability (survives crash, fsync'd log).</li>
+        <li>Read Uncommitted allows dirty reads; Read Committed prevents them but allows non-repeatable reads.</li>
+        <li>Repeatable Read prevents non-repeatable reads; standard allows phantoms, but Postgres's MVCC-based implementation prevents them too.</li>
+        <li>Serializable prevents all anomalies, via locking (2PL, blocking) or snapshot-based conflict detection (SSI, optimistic + retry).</li>
+        <li>Lost update: read-then-write race, not fixed by isolation level alone in every engine — use atomic statements or SELECT FOR UPDATE.</li>
+        <li>2PC guarantees cross-system atomicity but can block all participants indefinitely if the coordinator dies mid-protocol.</li>
+        <li>Sagas trade atomicity for availability/throughput: each local transaction commits immediately, failures are undone via compensating transactions.</li>
+        <li>Orchestration = central, debuggable, coupled. Choreography = decoupled, but implicit and harder to trace.</li>
+        <li>Compensations and saga steps both need idempotency keys to be safe under retries.</li>
+      </ul></div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://www.postgresql.org/docs/current/transaction-iso.html">PostgreSQL Documentation — Transaction Isolation</a></li>
+        <li><a href="https://microservices.io/patterns/data/saga.html">microservices.io — Saga Pattern</a></li>
+        <li><a href="https://en.wikipedia.org/wiki/Two-phase_commit_protocol">Two-Phase Commit Protocol overview</a></li>
+        <li><a href="https://www.cs.cmu.edu/~pavlo/papers/hekaton-isolation.pdf">A Critique of ANSI SQL Isolation Levels (Berenson et al.)</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="06-database-scaling.html"><span class="dir">← Previous</span>Database Scaling</a>
+        <a class="next" href="08-message-queues.html"><span class="dir">Next →</span>Message Queues & Event-Driven</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · System Design</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-typescript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-sql.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-yaml.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "01-system-design", chapterKey: "07-transactions" });</script>
+</body>
+</html>

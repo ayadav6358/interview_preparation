@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Error Handling Strategy at Scale — Node.js Advanced — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">Node.js Advanced</a><span class="sep">›</span>Error Handling Strategy</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>Error Handling Strategy at Scale</h1>
+      <p class="meta-line"><span>⏱ 2 hrs</span><span>📍 Chapter 5 of 9</span></p>
+      <p><strong>One-line summary:</strong> The single most important distinction in Node error handling is
+      operational errors (expected, recoverable — a validation failure, a timeout) vs programmer errors (bugs —
+      undefined is not a function) — treating them the same is why some services silently serve corrupted
+      responses while others crash on a 404.</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>Poor error handling architecture is the most common reason a Node service degrades unpredictably instead
+      of failing loudly and recoverably. Senior engineers are expected to design a layered error strategy — typed
+      error classes, a central error-handling middleware, correct process-level handlers for uncaught exceptions
+      and unhandled rejections — not just sprinkle try/catch reactively. This is also one of the most reliably
+      asked "show me code" senior interview topics because it reveals architectural maturity quickly.</p>
+      <div class="box why"><h4>Why</h4><p>An uncaught exception in a Node process, by design, leaves the process in
+      a potentially corrupted state (the docs explicitly warn against "resuming normal operation" after one) — the
+      only safe response is to log it, finish in-flight work if possible, and exit, letting your process manager
+      restart cleanly. Teams that try to "recover" from uncaughtException without exiting routinely ship services
+      that silently corrupt state for hours before anyone notices.</p></div>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>Comfortable with async/await error propagation and Express/Fastify middleware. Related:
+      <a href="06-production-apis.html">Production APIs</a>, <a href="09-scaling-node.html">Scaling Node in Production</a>.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="basics">Operational vs programmer errors</h3>
+      <p><strong>Operational errors</strong> are anticipated failure modes of a correctly-written system: invalid
+      user input, a downstream service timing out, a DB constraint violation, a network blip. These should be
+      caught, classified, and turned into a predictable response (a 4xx/5xx with a useful message) — the process
+      itself is healthy and should keep running. <strong>Programmer errors</strong> are bugs: calling a method on
+      undefined, a typo, an unhandled edge case the code never considered. These indicate the process's internal
+      state might now be inconsistent in ways you can't reason about — the correct response is to log with full
+      context, fail the current request, and (for truly uncaught ones) exit the process and let the orchestrator
+      restart it fresh. Conflating the two — e.g., wrapping literally everything in a catch-and-continue — hides
+      real bugs and risks serving corrupted data from a process that should have restarted.</p>
+
+      <h3 id="internals">Error propagation paths: async/await, EventEmitter, callbacks</h3>
+      <p>With async/await, a thrown error (or rejected Promise) propagates up the call stack naturally through
+      awaits, catchable with a single try/catch at the right layer — this is the main reason async/await is
+      preferred over raw callbacks for error ergonomics. <strong>Unhandled Promise rejections</strong> (a rejected
+      Promise with no `.catch`/try-catch anywhere in its chain) are caught process-wide via
+      <code>process.on('unhandledRejection', ...)</code> — as of recent Node versions, the default behavior is to
+      terminate the process on an unhandled rejection (configurable via `--unhandled-rejections`), reflecting a
+      shift toward treating them with the same severity as uncaught exceptions. EventEmitters have their own
+      failure mode: an `'error'` event with no listener registered throws synchronously and crashes the process —
+      this is a deliberate design (Node forces you to handle errors on every emitter you use) and a very common
+      gotcha for engineers coming from other ecosystems.</p>
+
+      <h3 id="advanced">Process-level handlers, and why they're a last resort, not a strategy</h3>
+      <p><code>process.on('uncaughtException', handler)</code> and <code>process.on('unhandledRejection', handler)</code>
+      are the final safety net, not a substitute for proper error handling at each layer. The documented, correct
+      pattern: in the handler, log the error with full context (correlation IDs, stack trace) to your observability
+      pipeline synchronously/as reliably as possible, then gracefully shut down (stop accepting new connections,
+      let in-flight requests finish within a timeout, close DB connections) and <code>process.exit(1)</code> —
+      never attempt to "resume" by just returning, since the Node docs explicitly describe this as unsafe (the
+      stack has unwound in an unexpected way, and the process is in a state the application was never designed to
+      run in). In Express, synchronous errors thrown inside a route handler are caught automatically and routed to
+      your error middleware — but errors thrown inside a callback or inside an unhandled Promise are not, unless
+      you explicitly forward them (`next(err)`, or let your framework's async wrapper do it — Express 5 and
+      Fastify both handle async route-handler rejections automatically; Express 4 requires a wrapper).</p>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>A well-architected error strategy uses a typed error hierarchy — a base `AppError` class with a
+      `statusCode` and an `isOperational` flag, subclassed into `ValidationError`, `NotFoundError`,
+      `UnauthorizedError`, etc. — so a single central error-handling middleware can inspect `isOperational` to
+      decide: known/operational error → map to the right HTTP status and a safe, user-facing message; unknown/
+      programmer error → log full internal detail, return a generic 500 (never leak internals/stack traces to
+      clients), and in many architectures, also flag it for process restart consideration since an unexpected
+      error type suggests unverified process state. This keeps the "is this error expected" decision centralized
+      and consistent instead of scattered across every route handler.</p>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+flowchart TD
+  A[Error occurs] --> B{Operational or programmer error?}
+  B -->|Operational: validation, timeout, 404| C[Catch at the right layer]
+  C --> D[Map to typed AppError subclass]
+  D --> E[Central error middleware: safe response, log]
+  E --> F[Process keeps running]
+  B -->|Programmer: bug, unexpected state| G[Uncaught, bubbles to process handler]
+  G --> H[Log full context]
+  H --> I[Graceful shutdown: drain in-flight, close resources]
+  I --> J[process.exit(1), orchestrator restarts]
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-typescript">// Typed error hierarchy
+class AppError extends Error {
+  constructor(
+    message: string,
+    public statusCode: number,
+    public isOperational = true,
+  ) {
+    super(message);
+    Object.setPrototypeOf(this, new.target.prototype); // preserve instanceof across subclasses
+    Error.captureStackTrace(this, this.constructor);
+  }
+}
+class ValidationError extends AppError {
+  constructor(message: string, public details?: unknown) { super(message, 400); }
+}
+class NotFoundError extends AppError {
+  constructor(resource: string) { super(\`\${resource} not found\`, 404); }
+}
+class UnauthorizedError extends AppError {
+  constructor(message = 'Unauthorized') { super(message, 401); }
+}
+
+
+// Central error-handling middleware (Express) — the single place that
+// decides how every error becomes an HTTP response.
+function errorHandler(err: unknown, req: Request, res: Response, next: NextFunction) {
+  if (err instanceof AppError && err.isOperational) {
+    req.log.warn({ err, reqId: req.id }, 'operational error');
+    return res.status(err.statusCode).json({ error: err.message });
+  }
+  // Unknown/programmer error: log full detail internally, never leak it
+  req.log.error({ err, reqId: req.id }, 'unexpected error');
+  res.status(500).json({ error: 'Internal server error' });
+  // Optionally: flag this for the process health check / restart policy —
+  // an unexpected error type means process state is no longer fully trusted.
+}
+app.use(errorHandler); // registered LAST, after all routes
+
+
+// Async route handlers: ensure rejections actually reach the error middleware
+// (Express 5 / Fastify do this automatically; Express 4 needs a wrapper)
+const asyncHandler = (fn: Function) => (req: Request, res: Response, next: NextFunction) =>
+  Promise.resolve(fn(req, res, next)).catch(next);
+
+app.get('/users/:id', asyncHandler(async (req: Request, res: Response) => {
+  const user = await userService.findById(req.params.id);
+  if (!user) throw new NotFoundError('User'); // propagates to errorHandler via asyncHandler
+  res.json(user);
+}));
+
+
+// Process-level last-resort handlers — log, drain, exit. Never "recover" silently.
+process.on('uncaughtException', (err) => {
+  logger.fatal({ err }, 'uncaught exception — shutting down');
+  gracefulShutdown(() => process.exit(1));
+});
+process.on('unhandledRejection', (reason) => {
+  logger.fatal({ reason }, 'unhandled rejection — shutting down');
+  gracefulShutdown(() => process.exit(1));
+});
+
+// EventEmitter 'error' event gotcha: this throws and crashes if you forget the listener
+const emitter = new EventEmitter();
+emitter.on('error', (err) => logger.error({ err }, 'emitter error')); // REQUIRED, not optional
+</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4><p>A checkout service wrapped its entire request handler in a
+      try/catch that logged the error and returned a generic 200 with a "best effort" partial response, intending
+      to be "resilient." In practice this meant a programmer bug (a null pointer from a malformed upstream payment
+      webhook) was silently swallowed on every request for two hours, serving customers a response claiming
+      "payment processed" when it hadn't been, because the catch-all treated a clear programmer error exactly like
+      an expected operational one. The fix: split error handling into the typed-error pattern above — only
+      explicitly-typed, intentionally-thrown `AppError`s get a graceful mapped response; anything else is logged
+      as unexpected, returns a clear 500 (never a false-success 200), and is paged on.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Forgetting that EventEmitter `'error'` events with no listener
+      throw synchronously and crash the process — this bites teams using raw TCP/HTTP sockets, streams, or any
+      custom EventEmitter-based code without realizing every single emitter instance needs its own `'error'`
+      handler; there's no global catch for this specific case other than the process-level uncaughtException net.</p></div>
+      <ul>
+        <li>Never catch-and-silently-continue for errors you haven't explicitly classified as safe to ignore — default to re-throwing/propagating unless you have a specific reason not to.</li>
+        <li>Always exit the process after an uncaughtException/unhandledRejection, after attempting graceful shutdown — never try to "keep going" from an unknown state.</li>
+        <li>Centralize HTTP error-to-response mapping in one middleware, not scattered per-route try/catches with inconsistent response shapes.</li>
+        <li>Always attach an `'error'` listener on every EventEmitter/stream you create, even if you expect it to "never happen."</li>
+        <li>Never leak stack traces or internal error messages to API clients for non-operational errors — log them internally, return a generic message externally.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>Catch-all try/catch per route returning a generic error</td><td>Quick prototypes, scripts</td><td>Production APIs needing consistent error shapes and classification</td><td>Central error middleware + typed error classes</td></tr>
+        <tr><td>Attempting to "recover" from uncaughtException and continue</td><td>Never recommended for genuinely unknown errors</td><td>Always, per Node's own documentation guidance</td><td>Log, graceful shutdown, process.exit(1), let orchestrator restart</td></tr>
+        <tr><td>Domain-specific typed error hierarchy</td><td>Any API beyond a trivial prototype</td><td>N/A — low cost, high clarity benefit even for small services</td><td>Generic Error with ad-hoc properties (harder to reason about centrally)</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic"><h4>Basic</h4>
+      <details class="qa"><summary>What's the difference between an operational error and a programmer error?</summary><div class="answer"><p>Operational errors are anticipated failure modes of a correct system (bad input, timeout, 404) that should be handled gracefully without crashing. Programmer errors are bugs indicating the process may be in an unexpected/corrupted state, and the safe response is to log and restart the process, not try to continue.</p></div><div class="followup">Follow-up: give an example of each in a typical REST API.</div></details>
+      <details class="qa"><summary>What should you do inside an uncaughtException handler?</summary><div class="answer"><p>Log the error with full context, attempt a graceful shutdown (stop accepting new connections, let in-flight work finish within a timeout), and then process.exit — never attempt to resume normal operation, since the process state is no longer trusted.</p></div><div class="followup">Follow-up: why does Node's own documentation explicitly discourage "recovering" from this event?</div></details>
+      <details class="qa"><summary>What happens if an EventEmitter emits 'error' with no listener attached?</summary><div class="answer"><p>It throws synchronously and crashes the process (unless caught by a process-level uncaughtException handler) — this is deliberate so that error conditions on emitters/streams can't be silently ignored.</p></div><div class="followup">Follow-up: does this apply to all events, or specifically 'error'?</div></details>
+      <details class="qa"><summary>Why would you build a typed error class hierarchy instead of just throwing plain Error objects?</summary><div class="answer"><p>It lets a central error-handling middleware programmatically distinguish operational errors (map to a specific status code/safe message) from unknown ones (log and return a generic 500), rather than needing ad-hoc per-route logic or string-matching error messages.</p></div><div class="followup">Follow-up: what property would you add to the base class to make this distinction easy to check?</div></details>
+      <details class="qa"><summary>In Express 4, why do you need an async wrapper around route handlers but not in Express 5 or Fastify?</summary><div class="answer"><p>Express 4's routing layer doesn't automatically catch rejected Promises returned from async route handlers — an unhandled rejection there bypasses the error middleware entirely, so you need a wrapper that catches and forwards it via next(err). Express 5 and Fastify handle async handler rejections natively.</p></div><div class="followup">Follow-up: what's the actual implementation pattern for such a wrapper?</div></details>
+      </div>
+      <div class="qa-level medium"><h4>Medium</h4>
+      <details class="qa"><summary>Design the response of a central error middleware for both operational and non-operational errors, and justify the differences.</summary><div class="answer"><p>Operational errors (instanceof a known AppError subclass): log at warn level with context, return the specific statusCode and a safe user-facing message derived from the error itself. Non-operational/unknown errors: log at error/fatal level with full stack trace and request context for debugging, but always return a generic 500 with no internal detail to the client — leaking stack traces or internal messages is an information-disclosure risk and also implies to clients that behavior they shouldn't rely on might be "a documented error state."</p></div><div class="followup">Follow-up: should an unknown error also trigger a process restart consideration, and why or why not?</div></details>
+      <details class="qa"><summary>Why is "wrap everything in try/catch and return a generic success-ish response" actively dangerous, beyond just hiding bugs?</summary><div class="answer"><p>It can cause the API to report success for operations that actually failed partway (as in the checkout example), misleading both the calling client and any downstream system/logic that trusts that success signal, and it hides exactly the signal (a crash or clear error) that would otherwise alert you to the bug quickly — instead the bug persists silently, potentially causing data integrity issues across many requests before anyone notices via a different (e.g., financial reconciliation) signal.</p></div><div class="followup">Follow-up: what observability practice would have caught this faster despite the swallowed error?</div></details>
+      <details class="qa"><summary>How does unhandledRejection's default behavior differ across recent Node.js versions, and why does that matter for your error strategy?</summary><div class="answer"><p>Earlier Node versions only warned on an unhandled rejection by default; more recent versions default to terminating the process (configurable via --unhandled-rejections=warn/strict/throw), treating it with the same severity as an uncaught exception. This matters because code written assuming "it'll just warn" can unexpectedly start crashing processes after a Node upgrade if the default changed and the app relies on unhandled rejections happening silently somewhere.</p></div><div class="followup">Follow-up: how would you proactively find all unhandled rejection risks in a codebase before upgrading Node versions?</div></details>
+      <details class="qa"><summary>Walk through what happens, end to end, when a route handler throws inside a nested callback (not awaited, not returned) versus inside an awaited async call.</summary><div class="answer"><p>Inside an awaited async call, the throw becomes a rejected Promise that propagates up through each await, catchable by a surrounding try/catch or the framework's async handling — reaching your error middleware cleanly. Inside a nested callback (e.g., a raw setTimeout or a non-Promise-returning callback API) that throws, the exception occurs on a different, later synchronous call stack with no relation to the original request's try/catch or Express's handler context, so it will NOT be caught by anything local — it becomes an uncaughtException unless you've wrapped that specific callback.</p></div><div class="followup">Follow-up: how would you refactor the callback case to properly propagate the error to your request's error path?</div></details>
+      <details class="qa"><summary>Why should captureStackTrace and prototype preservation matter when building a custom Error subclass hierarchy in TypeScript targeting certain compile targets?</summary><div class="answer"><p>Depending on the TS/JS target and how classes extending the built-in Error are transpiled, instanceof checks against subclasses can break (the prototype chain doesn't get set up correctly by some older transpilation targets), and the stack trace can point to the wrong location (inside the base class constructor rather than where the error was actually thrown) without explicitly calling Error.captureStackTrace. Both directly undermine the ability of a central error handler to correctly classify errors via instanceof and to produce a useful stack trace for debugging.</p></div><div class="followup">Follow-up: how would you write a quick test to catch this kind of transpilation regression before it reaches production?</div></details>
+      </div>
+      <div class="qa-level advanced"><h4>Advanced</h4>
+      <details class="qa"><summary>Design a complete error-handling architecture for a multi-service Node backend (API layer, background workers, a few internal gRPC/HTTP calls between services). What differs between the API layer's error strategy and the worker's?</summary><div class="answer"><p>API layer: errors must ultimately become an HTTP response — typed AppError hierarchy, central middleware, operational vs programmer distinction as described, with correlation IDs threaded through to downstream calls for tracing. Worker layer (e.g., BullMQ job processors): there's no HTTP response to shape — errors instead determine job outcome (retry vs permanent failure vs dead-letter), so the error hierarchy needs a "is this retryable" dimension distinct from "is this operational," and process-level uncaughtException handling must ensure in-flight jobs are either safely requeued or marked failed before the process restarts, not silently lost. Both layers share the principle of never silently swallowing unknown errors, but the "safe response" they produce differs by what the error is actually feeding into.</p></div><div class="followup">Follow-up: how would you propagate a correlation ID from the originating API request through to a background job's error logs?</div></details>
+      <details class="qa"><summary>A service occasionally crashes with an uncaughtException during graceful shutdown itself (e.g., a cleanup handler throws). How do you architect shutdown logic to be robust against this?</summary><div class="answer"><p>Wrap each individual cleanup step (closing DB pool, draining HTTP connections, flushing logs) in its own try/catch so one step's failure doesn't prevent the others from running, use Promise.allSettled rather than Promise.all for parallel cleanup steps so one rejection doesn't short-circuit the rest, and enforce a hard timeout (e.g., force process.exit after N seconds regardless of cleanup completion) so a hung/throwing cleanup step can't leave the process stuck indefinitely between "crashing" and "actually exiting," which is itself a liveness problem for the orchestrator.</p></div><div class="followup">Follow-up: what should the exit code be in this scenario, and why does it matter to your orchestrator/alerting?</div></details>
+      <details class="qa"><summary>How would you decide, architecturally, whether a given failure mode (e.g., "Redis is unreachable") should be an operational error returning a degraded response, or should trigger a programmer-error-style process restart?</summary><div class="answer"><p>This depends on whether the application has been explicitly designed to tolerate that dependency's absence — if Redis is used for a non-critical cache with a documented fallback path (fetch from source of truth, slower but correct), its unavailability is operational: catch it, log a warning, degrade gracefully, keep serving. If Redis is load-bearing for correctness (e.g., distributed locking preventing double-processing) with no safe fallback, treating its absence as "operational, just continue" is actually unsafe — in that case the circuit should intentionally fail closed (reject the operation) rather than silently proceeding incorrectly, which is a design decision made ahead of time, not an emergent property of how you happened to catch the error.</p></div><div class="followup">Follow-up: how does this decision interact with circuit breaker patterns covered in the System Design topic's resilience chapter?</div></details>
+      <details class="qa"><summary>Critique: "We should never let any single request crash our whole process — every error should be caught and handled within that request's scope." Is this a sound principle?</summary><div class="answer"><p>It's sound for operational errors but dangerous as an absolute rule — it implicitly argues for catching literally everything including genuine programmer errors and unknown states at the request boundary, which is exactly the anti-pattern that let the checkout bug in the production scenario ship a false success response for two hours. The principle should be scoped: never let an *operational* error crash the process (that's a real design failure), but genuinely unknown/unexpected errors SHOULD be allowed to escalate to the process level, because the alternative (silently absorbing unknown failure modes forever) is worse for system correctness than occasional, observable, orchestrator-managed restarts.</p></div><div class="followup">Follow-up: how would you phrase this principle correctly for a team's engineering guidelines doc?</div></details>
+      <details class="qa"><summary>How would you retrofit a typed error hierarchy and central error middleware onto a large legacy Express codebase with thousands of scattered try/catch blocks returning inconsistent ad-hoc error shapes, without a risky big-bang rewrite?</summary><div class="answer"><p>Introduce the AppError hierarchy and central middleware first, additive only — register the middleware but let existing scattered handlers keep working as-is initially. Then migrate route-by-route or module-by-module: replace a local catch's ad-hoc response with `throw new SpecificAppError(...)` and let it flow to the central middleware, verified via contract/integration tests comparing old vs new response shape per endpoint before removing the old local handling. Track migration progress as a visible metric (e.g., % of routes migrated) and prioritize high-traffic or high-incident-rate endpoints first, since they have the highest ROI for consistent error observability.</p></div><div class="followup">Follow-up: how would you ensure API consumers aren't broken by subtly different error response shapes during the migration period?</div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment"><span class="level-tag">Beginner (30-60 min)</span>
+      <h4>Build a typed error hierarchy + central middleware</h4>
+      <p>Build a small Express/Fastify API with at least 3 endpoints that can fail in different ways (validation,
+      not-found, an unexpected bug). Implement AppError + at least 2 subclasses, and a single central error
+      middleware that maps them correctly, returning a generic 500 for anything not an AppError.</p>
+      <ul><li>Must have at least one deliberately "unknown" error path (e.g., a thrown plain Error) handled distinctly from the typed ones.</li><li>Response shape must be consistent across all error types.</li></ul>
+      <p><strong>Acceptance criteria:</strong> Each endpoint's error response has the correct status code and a consistent JSON shape; the unknown error never leaks its message/stack to the client.</p>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>Register the error middleware last, after all routes, with the 4-argument Express error-handler signature (err, req, res, next).</p></div></details>
+      <p><strong>Bonus:</strong> Add request-ID correlation so each error log line can be traced back to a specific request.</p>
+      </div>
+      <div class="assignment"><span class="level-tag">Intermediate (2-4 hrs)</span>
+      <h4>Implement graceful shutdown-safe process-level handlers</h4>
+      <p>Build a server with uncaughtException/unhandledRejection handlers that perform a real graceful shutdown
+      (stop accepting new connections, wait for in-flight requests up to a timeout, close a mock DB connection)
+      before process.exit. Trigger an uncaught exception deliberately mid-request and prove the in-flight request
+      still completes before the process exits.</p>
+      <ul><li>Must demonstrate an in-flight request completing successfully despite a concurrent uncaught exception elsewhere.</li><li>Must enforce a hard shutdown timeout.</li></ul>
+      <p><strong>Acceptance criteria:</strong> A load-testing script shows requests in flight at the moment of the triggered exception still receive valid responses, and the process exits within the configured timeout.</p>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>Use server.close() to stop accepting new connections while letting existing ones finish, combined with a Promise.race against a timeout promise for the hard deadline.</p></div></details>
+      <p><strong>Bonus:</strong> Add a cleanup step that itself throws, and show your shutdown logic still exits cleanly instead of hanging.</p>
+      </div>
+      <div class="assignment"><span class="level-tag">Advanced (1-2 days)</span>
+      <h4>Error strategy across API + background worker</h4>
+      <p>Extend a service to have both an HTTP API and a background job processor (can be a simple in-process queue
+      for this exercise, doesn't need real BullMQ). Design and implement an error hierarchy with a "retryable"
+      dimension distinct from "operational," correctly wiring: API errors to HTTP responses via central middleware,
+      and job errors to either a retry-with-backoff or permanent-failure outcome, with correlation IDs threading
+      from the originating API request through to job error logs.</p>
+      <ul><li>Must demonstrate the same logical error type behaving correctly in both contexts (HTTP response vs job retry decision).</li><li>Must thread a correlation ID from API request to job log.</li></ul>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>Add a `retryable: boolean` property to your error base class alongside `isOperational`, and let the job processor's catch block branch on it independently of how an API middleware would branch on isOperational.</p></div></details>
+      <p><strong>Bonus:</strong> Write a short design doc section explaining when "operational" and "retryable" diverge (an error can be operational but not retryable, or vice versa) with a concrete example of each.</p>
+      </div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet"><ul>
+        <li>Operational error = expected, handle gracefully, process stays up. Programmer error = bug, log + exit, let orchestrator restart.</li>
+        <li>Never "recover" from uncaughtException and keep running — Node's own docs call this unsafe.</li>
+        <li>EventEmitter 'error' events with no listener throw synchronously and crash the process.</li>
+        <li>unhandledRejection's default behavior (warn vs terminate) has changed across Node versions — check your target version's default.</li>
+        <li>Build a typed AppError hierarchy with an isOperational flag; central middleware branches on it.</li>
+        <li>Never leak stack traces/internal messages to clients for unknown errors — generic 500 externally, full detail internally.</li>
+        <li>Express 4 needs an async-wrapper for route handlers to forward rejected Promises to next(); Express 5/Fastify do this natively.</li>
+        <li>Graceful shutdown on uncaughtException: drain in-flight work within a hard timeout, then exit — never hang indefinitely.</li>
+        <li>A "retryable" dimension is distinct from "operational" — relevant for background job error handling, not just HTTP responses.</li>
+      </ul></div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://nodejs.org/api/process.html#event-uncaughtexception">Node.js docs: process 'uncaughtException' event</a></li>
+        <li><a href="https://nodejs.org/api/process.html#event-unhandledrejection">Node.js docs: process 'unhandledRejection' event</a></li>
+        <li><a href="https://nodejs.org/api/events.html#error-events">Node.js docs: EventEmitter error events</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="04-memory-gc.html"><span class="dir">← Previous</span>Memory Management & GC</a>
+        <a class="next" href="06-production-apis.html"><span class="dir">Next →</span>Production APIs (Express/Fastify/Nest)</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · Node.js Advanced</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-typescript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "04-nodejs-advanced", chapterKey: "05-error-handling" });</script>
+</body>
+</html>

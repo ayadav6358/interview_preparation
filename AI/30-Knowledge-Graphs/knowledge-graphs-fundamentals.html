@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Knowledge Graphs Fundamentals</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <input class="searchbox" placeholder="Search topics..." />
+    <a href="../index.html">← Home</a>
+    <h3>30-Knowledge-Graphs</h3>
+    <a href="knowledge-graphs-fundamentals.html">Knowledge Graphs Fundamentals</a>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumbs"><a href="../index.html">Home</a> / 30-Knowledge-Graphs</div>
+      <button class="theme-toggle" onclick="toggleTheme()">🌓 Theme</button>
+    </div>
+    <h1>Knowledge Graphs Fundamentals</h1>
+    <span class="tag good">Stable</span><span class="tag">Last verified: 2026-10-06</span>
+
+    <div class="toc">
+      <b>On this page</b>
+      <a href="#what">1. What is this?</a>
+      <a href="#whyexist">2. Why does it exist?</a>
+      <a href="#whyimportant">3. Why is it important?</a>
+      <a href="#whereused">4. Where is it used?</a>
+      <a href="#prereq">5. Prerequisites</a>
+      <a href="#core">6. Core concepts</a>
+      <a href="#terms">7. Terminology</a>
+      <a href="#arch">8. Architecture</a>
+      <a href="#internal">9. How it works internally</a>
+      <a href="#steps">10. Step-by-step: building a knowledge graph</a>
+      <a href="#simple">11. Simple example</a>
+      <a href="#real">12. Real-world example</a>
+      <a href="#code">13. Code example</a>
+      <a href="#advanced">14. Advanced example (graph embeddings)</a>
+      <a href="#mistakes">15. Common mistakes</a>
+      <a href="#best">16. Best practices</a>
+      <a href="#production">17. Production considerations</a>
+      <a href="#security">18. Security considerations</a>
+      <a href="#performance">19. Performance considerations</a>
+      <a href="#cost">20. Cost considerations</a>
+      <a href="#debug">21. Debugging/troubleshooting</a>
+      <a href="#related">22. Related concepts</a>
+      <a href="#comparison">23. Vector DB vs SQL vs Graph DB</a>
+      <a href="#exercise">24. Mini practical exercise</a>
+      <a href="#project">25. Practical project</a>
+      <a href="#projectarch">26. Project architecture</a>
+      <a href="#interview-b">27. Interview Questions — Beginner</a>
+      <a href="#interview-i">28. Interview Questions — Intermediate</a>
+      <a href="#interview-a">29. Interview Questions — Advanced</a>
+      <a href="#interview-s">30. Interview Questions — Senior/Architect</a>
+      <a href="#interview-sc">31. Scenario-Based Questions</a>
+      <a href="#revision">32. Quick revision notes</a>
+      <a href="#cheat">33. Cheat sheet</a>
+      <a href="#further">34. Further topics to learn</a>
+    </div>
+
+    <h2 id="what">1. What is this?</h2>
+    <p>A knowledge graph represents information as entities (nodes) and relationships (edges) between them, stored in a graph database (e.g., Neo4j) — enabling queries about how things connect, not just what individual facts exist.</p>
+
+    <h2 id="whyexist">2. Why does it exist?</h2>
+    <p>Relational databases and vector similarity search both struggle with multi-hop relationship questions ("who are the colleagues of people who worked on project X?") — knowledge graphs exist to natively model and query this kind of connected, relationship-centric information.</p>
+
+    <h2 id="whyimportant">3. Why is it important?</h2>
+    <p>Knowledge graphs are foundational to Graph RAG (next section) and to any application needing to reason about entity relationships rather than just document similarity — an increasingly important complement to vector-based retrieval.</p>
+
+    <h2 id="whereused">4. Where is it used?</h2>
+    <p>Enterprise knowledge management, fraud detection (relationship patterns), recommendation systems, biomedical/scientific research (entity relationships), Graph RAG systems.</p>
+
+    <h2 id="prereq">5. Prerequisites</h2>
+    <p><a href="../11-Vector-Databases/vector-databases.html">Vector Databases</a> (for contrast).</p>
+
+    <h2 id="core">6. Core concepts</h2>
+    <ul>
+      <li><b>Entities (nodes):</b> the "things" in the graph — people, organizations, products, concepts.</li>
+      <li><b>Relationships (edges):</b> typed, directional connections between entities (e.g., "WORKS_AT", "ACQUIRED").</li>
+      <li><b>Graph traversal:</b> following relationships from one entity to discover connected entities, often multiple hops deep.</li>
+      <li><b>Knowledge graph construction:</b> the process of extracting entities and relationships from unstructured text (often via LLM-based extraction) to populate the graph.</li>
+      <li><b>Graph embeddings:</b> vector representations of nodes/edges capturing structural graph information, enabling similarity/ML over graph structure.</li>
+    </ul>
+
+    <h2 id="terms">7. Terminology</h2>
+    <table>
+      <tr><th>Term</th><th>Meaning</th></tr>
+      <tr><td>Node</td><td>An entity in the graph.</td></tr>
+      <tr><td>Edge/Relationship</td><td>A typed, directional connection between two nodes.</td></tr>
+      <tr><td>Cypher</td><td>Neo4j's graph query language, analogous to SQL for relational databases.</td></tr>
+      <tr><td>Multi-hop query</td><td>A query traversing multiple relationships to answer a question (e.g., friend-of-a-friend).</td></tr>
+      <tr><td>Entity extraction</td><td>Identifying entities and relationships from unstructured text, often via NLP/LLM.</td></tr>
+    </table>
+
+    <h2 id="arch">8. Architecture</h2>
+    <pre><code>Unstructured text
+ → Entity/relationship extraction (NLP or LLM-based)
+ → Knowledge graph (nodes + typed edges) stored in Neo4j
+ → Query via Cypher (graph traversal) or natural language → Cypher translation
+ → Results: connected entities, relationship paths</code></pre>
+
+    <h2 id="internal">9. How it works internally</h2>
+    <p>Unlike relational databases, which require expensive JOIN operations to traverse relationships (cost grows with hops), graph databases store relationships as first-class, directly traversable pointers between nodes — making multi-hop traversal queries (e.g., "find all paths of length ≤3 between A and B") efficient operations native to the storage engine, rather than increasingly expensive JOIN chains.</p>
+
+    <h2 id="steps">10. Step-by-step: building a knowledge graph</h2>
+    <ol>
+      <li>Define the entity types and relationship types relevant to your domain (schema design).</li>
+      <li>Extract entities and relationships from source data (structured imports or LLM-based extraction from text).</li>
+      <li>Load into a graph database (Neo4j or similar).</li>
+      <li>Write queries (Cypher) for the relationship questions your application needs to answer.</li>
+      <li>Periodically update the graph as source data changes.</li>
+    </ol>
+
+    <h2 id="simple">11. Simple example</h2>
+    <p>A graph with nodes `(Alice)`, `(Bob)`, `(ProjectX)` and edges `Alice -[WORKS_ON]-> ProjectX`, `Bob -[WORKS_ON]-> ProjectX` lets you easily query "who else works on projects Alice works on" via a 2-hop traversal.</p>
+
+    <h2 id="real">12. Real-world example</h2>
+    <p>A fraud-detection system models accounts, transactions, and devices as a graph, using multi-hop traversal to detect suspicious patterns (e.g., multiple seemingly-unrelated accounts sharing a device or payment method) that would be extremely difficult to express as SQL joins at scale.</p>
+
+    <h2 id="code">13. Code example</h2>
+    <pre><code class="language-sql">// Cypher query example in Neo4j
+MATCH (alice:Person {name: "Alice"})-[:WORKS_ON]->(project:Project)<-[:WORKS_ON]-(colleague:Person)
+WHERE colleague.name <> "Alice"
+RETURN colleague.name, project.name
+</code></pre>
+    <pre><code class="language-python">from neo4j import GraphDatabase
+
+driver = GraphDatabase.driver("bolt://localhost:7687", auth=("neo4j", "password"))
+
+def find_colleagues(tx, person_name):
+    result = tx.run("""
+        MATCH (p:Person {name: $name})-[:WORKS_ON]->(proj:Project)<-[:WORKS_ON]-(colleague:Person)
+        WHERE colleague.name <> $name
+        RETURN colleague.name AS name, proj.name AS project
+    """, name=person_name)
+    return [record.data() for record in result]
+
+with driver.session() as session:
+    print(session.execute_read(find_colleagues, "Alice"))
+</code></pre>
+
+    <h2 id="advanced">14. Advanced example (graph embeddings)</h2>
+    <pre><code class="language-python"># Using LLM-based extraction to populate a knowledge graph from text
+def extract_entities_relationships(text):
+    resp = client.messages.create(
+        model="claude-sonnet-5", max_tokens=500,
+        messages=[{"role": "user", "content":
+            f"Extract entities and relationships as JSON triples (subject, relation, object) from:\n{text}"}],
+    )
+    return json.loads(resp.content[0].text)
+
+triples = extract_entities_relationships(document_text)
+for s, r, o in triples:
+    tx.run("MERGE (a:Entity {name: $s}) MERGE (b:Entity {name: $o}) "
+           "MERGE (a)-[:RELATION {type: $r}]->(b)", s=s, r=r, o=o)
+</code></pre>
+
+    <h2 id="mistakes">15. Common mistakes</h2>
+    <ul>
+      <li>Using a knowledge graph for problems that are actually simple lookups better served by a relational DB or vector search.</li>
+      <li>Poor relationship-type design, leading to an overly generic graph that's hard to query meaningfully.</li>
+      <li>LLM-based entity extraction without validation, introducing noisy/incorrect graph data.</li>
+      <li>Not planning for graph updates as source data changes, leading to a stale graph.</li>
+    </ul>
+
+    <h2 id="best">16. Best practices</h2>
+    <ul>
+      <li>Design a clear, purposeful schema (entity types, relationship types) before bulk loading data.</li>
+      <li>Validate LLM-extracted entities/relationships before committing them to the graph.</li>
+      <li>Use graph databases specifically for genuinely relationship-centric queries — not as a universal database replacement.</li>
+      <li>Plan incremental update/sync processes for evolving source data.</li>
+    </ul>
+
+    <h2 id="production">17. Production considerations</h2>
+    <p>Graph databases require their own operational expertise (query optimization, indexing strategy) distinct from relational DB operations — factor this into team skill investment before committing to a graph-centric architecture.</p>
+
+    <h2 id="security">18. Security considerations</h2>
+    <p>Apply the same access-control scoping as any database — multi-tenant knowledge graphs need relationship-level or subgraph-level access control, not just node-level.</p>
+
+    <h2 id="performance">19. Performance considerations</h2>
+    <p>Multi-hop traversal performance depends on proper indexing and relationship design; very deep/unbounded traversals can still be expensive — bound traversal depth in queries where possible.</p>
+
+    <h2 id="cost">20. Cost considerations</h2>
+    <p>LLM-based entity/relationship extraction at ingestion time adds per-document LLM call cost; batch processing and caching reduce this for large-scale graph construction.</p>
+
+    <h2 id="debug">21. Debugging/troubleshooting</h2>
+    <ul>
+      <li><b>Queries return no/incomplete results:</b> verify relationship direction and type names match exactly what was used during graph construction.</li>
+      <li><b>Graph grows inconsistent/noisy over time:</b> review LLM extraction validation and deduplication logic for entities.</li>
+      <li><b>Slow multi-hop queries:</b> check indexing on node properties used in traversal filters, and consider bounding traversal depth.</li>
+    </ul>
+
+    <h2 id="related">22. Related concepts</h2>
+    <p><a href="../31-Graph-RAG/">Graph RAG</a> · <a href="../11-Vector-Databases/vector-databases.html">Vector Databases</a></p>
+
+    <h2 id="comparison">23. Vector DB vs SQL vs Graph DB</h2>
+    <table>
+      <tr><th>Database type</th><th>Best for</th></tr>
+      <tr><td>SQL (relational)</td><td>Structured, tabular data with well-defined, shallow relationships</td></tr>
+      <tr><td>Vector DB</td><td>Semantic similarity search over unstructured content embeddings</td></tr>
+      <tr><td>Graph DB</td><td>Multi-hop relationship queries, connected/networked data</td></tr>
+    </table>
+
+    <h2 id="exercise">24. Mini practical exercise</h2>
+    <p>Model a small social network (5 people, friendship relationships) in Neo4j and write a Cypher query finding "friends of friends" for one person.</p>
+
+    <h2 id="project">25. Practical project</h2>
+    <p><b>Company Org Knowledge Graph:</b> build a knowledge graph of employees, teams, and projects from a sample dataset, supporting queries like "who else worked with X on any project" and "what's the shortest connection path between two employees."</p>
+
+    <h2 id="projectarch">26. Project architecture</h2>
+    <pre><code>employees.csv, projects.csv, assignments.csv
+ → load into Neo4j as Person/Project nodes + WORKS_ON edges
+ → Cypher queries: colleagues, shortest path, team overlap
+ → simple API wrapping common queries for application use</code></pre>
+
+    <h2 id="interview-b">27. Interview Questions — Beginner</h2>
+    <div class="qa"><b>Q1.</b> What is a knowledge graph?<br><b>A.</b> A representation of information as entities (nodes) and relationships (edges) between them.</div>
+    <div class="qa"><b>Q2.</b> What is a graph database?<br><b>A.</b> A database (e.g., Neo4j) specialized for storing and querying graph-structured data with relationships as first-class citizens.</div>
+    <div class="qa"><b>Q3.</b> What is Cypher?<br><b>A.</b> Neo4j's graph query language, analogous to SQL for relational databases.</div>
+    <div class="qa"><b>Q4.</b> What is a multi-hop query?<br><b>A.</b> A query that traverses multiple relationships to answer a question, like finding friends-of-friends.</div>
+    <div class="qa"><b>Q5.</b> Why are relational databases less suited to deep multi-hop relationship queries?<br><b>A.</b> They require increasingly expensive JOIN operations as the number of hops grows, unlike graph databases where relationships are directly traversable.</div>
+    <div class="qa"><b>Q6.</b> What is entity extraction in the context of knowledge graphs?<br><b>A.</b> Identifying entities and relationships from unstructured text to populate a knowledge graph.</div>
+    <div class="qa"><b>Q7.</b> Should you use a knowledge graph for every data storage need?<br><b>A.</b> No — use it specifically for genuinely relationship-centric queries; simple lookups are better served by relational or vector databases.</div>
+    <div class="qa"><b>Q8.</b> What are graph embeddings?<br><b>A.</b> Vector representations of nodes/edges capturing structural graph information.</div>
+    <div class="qa"><b>Q9.</b> Give one real-world use case for knowledge graphs.<br><b>A.</b> Fraud detection, identifying suspicious relationship patterns between accounts/transactions/devices.</div>
+    <div class="qa"><b>Q10.</b> What's the relationship between knowledge graphs and Graph RAG?<br><b>A.</b> Graph RAG uses a knowledge graph as its retrieval/reasoning backbone instead of (or alongside) vector similarity search.</div>
+
+    <h2 id="interview-i">28. Interview Questions — Intermediate</h2>
+    <div class="qa"><b>Q1.</b> Why does graph database traversal performance scale better than relational JOINs for deep multi-hop queries?<br><b>A.</b> Graph databases store relationships as direct, indexed pointers between nodes, so traversal cost grows roughly with the number of hops and actual connections, not with a combinatorial JOIN cost across potentially large tables as in relational databases.</div>
+    <div class="qa"><b>Q2.</b> What's a key risk of using LLM-based extraction to automatically populate a knowledge graph from unstructured text?<br><b>A.</b> The LLM can hallucinate or incorrectly identify entities/relationships, introducing noisy or inaccurate graph data; validation (confidence thresholds, human review, or cross-referencing extracted facts against source text) is needed before trusting the extracted graph data.</div>
+    <div class="qa"><b>Q3.</b> How would you design a knowledge graph schema to balance flexibility against query performance?<br><b>A.</b> Define a focused, purposeful set of entity and relationship types matching actual query needs rather than an overly generic schema, since well-typed relationships enable more efficient, targeted traversal queries than a catch-all generic "RELATED_TO" relationship type would.</div>
+    <div class="qa"><b>Q4.</b> Why might a knowledge graph complement rather than replace a vector database in a RAG system?<br><b>A.</b> Vector search excels at finding semantically similar content; knowledge graphs excel at answering relationship/connection questions — combining both (Graph RAG) lets a system handle both "what documents are about X" and "how is X connected to Y" style queries.</div>
+    <div class="qa"><b>Q5.</b> How would you keep a knowledge graph's data synchronized as the underlying source data changes frequently?<br><b>A.</b> Build an incremental update pipeline that detects changes in source data and applies corresponding node/relationship updates (rather than full graph rebuilds), similar in spirit to incremental RAG re-indexing, to keep the graph current without excessive reprocessing cost.</div>
+
+    <h2 id="interview-a">29. Interview Questions — Advanced</h2>
+    <div class="qa"><b>Q1.</b> How would you design a knowledge graph construction pipeline that balances LLM-extraction flexibility against data quality for a large, continuously growing document corpus?<br><b>A.</b> Use LLM extraction for candidate entities/relationships, but add a validation layer (confidence scoring, deduplication against existing graph entities, cross-document consistency checks) before committing extractions to the graph, and periodically audit a sample of extracted data against source documents to measure and improve extraction accuracy over time.</div>
+    <div class="qa"><b>Q2.</b> What's a subtle performance pitfall of unbounded-depth traversal queries in a large production knowledge graph?<br><b>A.</b> Without a depth limit, a traversal query can expand combinatorially across a densely connected graph, potentially visiting an enormous number of paths and causing severe latency/resource issues; production queries should bound traversal depth explicitly and consider timeout/result-limit safeguards.</div>
+
+    <h2 id="interview-s">30. Interview Questions — Senior/Architect</h2>
+    <div class="qa"><b>Q1.</b> Design a Graph RAG-ready knowledge graph architecture for an enterprise with both structured (CRM) and unstructured (documents) data sources.<br><b>A.</b> Build a unified entity schema covering both data sources, ingest structured CRM data directly as typed nodes/relationships, extract entities/relationships from unstructured documents via validated LLM extraction linking back to source documents (for citation), maintain incremental sync pipelines for both sources, and expose both direct Cypher-based relationship queries and a Graph RAG retrieval layer combining graph traversal with vector similarity for hybrid structured+semantic queries.</div>
+
+    <h2 id="interview-sc">31. Scenario-Based Questions</h2>
+    <div class="qa"><b>Scenario 1.</b> Your LLM-populated knowledge graph has accumulated many duplicate entities (e.g., "Acme Corp" and "Acme Corporation" as separate nodes). How do you fix this?<br><b>A.</b> Implement entity resolution/deduplication logic (fuzzy matching, embedding similarity, or an LLM-based disambiguation step) during ingestion to merge likely-duplicate entities, and run a one-time cleanup pass to consolidate existing duplicates in the current graph.</div>
+    <div class="qa"><b>Scenario 2.</b> A multi-hop query that worked fine in testing becomes extremely slow in production as the graph has grown. What do you investigate?<br><b>A.</b> Check if the query has an unbounded traversal depth that's now expanding combinatorially across a much larger, more densely connected graph; add explicit depth limits and verify appropriate indexes exist on the properties used for traversal filtering.</div>
+
+    <h2 id="revision">32. Quick revision notes</h2>
+    <ul>
+      <li>Knowledge graph = entities (nodes) + relationships (edges), queried via graph traversal (Cypher in Neo4j).</li>
+      <li>Better than relational DBs for deep multi-hop relationship queries.</li>
+      <li>LLM-based extraction can populate graphs from text, but needs validation.</li>
+      <li>Complements vector search in Graph RAG for relationship-aware retrieval.</li>
+    </ul>
+
+    <h2 id="cheat">33. Cheat sheet</h2>
+    <div class="callout">Knowledge graph = nodes + typed edges, queried via Cypher (Neo4j). Best for multi-hop relationship questions relational DBs struggle with. Validate LLM-based extraction before trusting it. Complements vector search in Graph RAG.</div>
+
+    <h2 id="further">34. Further topics to learn</h2>
+    <p><a href="../31-Graph-RAG/">Graph RAG</a> → <a href="../13-Advanced-RAG/advanced-rag-techniques.html">Advanced RAG</a></p>
+
+    <div class="prevnext">
+      <a href="../29-Fine-Tuning/fine-tuning-fundamentals.html">← Fine-Tuning</a>
+      <a href="../31-Graph-RAG/graph-rag-fundamentals.html">Next: Graph RAG →</a>
+    </div>
+  </main>
+</div>
+<script src="../assets/app.js"></script>
+</body>
+</html>

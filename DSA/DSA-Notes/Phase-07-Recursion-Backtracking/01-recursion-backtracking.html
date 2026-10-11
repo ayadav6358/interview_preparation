@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Recursion &amp; Backtracking — DSA Notes</title>
+<style>
+  :root{
+    --ink:#12181B; --ink2:#1A2226; --ink3:#232C31;
+    --amber:#E8A33D; --amber-soft:#3A2E19;
+    --teal:#4FB3A9; --teal-soft:#12312D;
+    --rust:#D9695F; --rust-soft:#3A1F1C;
+    --slate:#8B9199;
+    --text:#E8E6E1; --text-dim:#A9AFAE;
+    --border: rgba(255,255,255,0.08);
+    --radius: 10px;
+    --mono: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{background:var(--ink); color:var(--text); font-family:var(--sans); line-height:1.65; font-size:16px;}
+  a{color:var(--amber);}
+  code, pre{font-family:var(--mono);}
+  #main{max-width:900px; margin:0 auto; padding:30px 22px 100px;}
+  h1{font-size:2rem; letter-spacing:-.01em; margin:0 0 6px;}
+  h2{font-size:1.5rem; margin-top:52px; padding-top:14px; border-top:1px solid var(--border); letter-spacing:-.01em;}
+  h2:first-of-type{border-top:none; margin-top:20px;}
+  h3{font-size:1.15rem; margin-top:30px; color:var(--amber);}
+  h4{font-size:1rem; margin-top:22px;}
+  .eyebrow{font-size:11px; text-transform:uppercase; letter-spacing:.12em; color:var(--teal); font-weight:700; margin-bottom:4px;}
+  .subtitle{color:var(--text-dim); font-size:15px; margin-bottom:28px;}
+  .callout{border-radius:var(--radius); padding:14px 16px; margin:18px 0; border:1px solid var(--border); font-size:14.5px;}
+  .callout .ctitle{font-weight:700; margin-bottom:4px; display:flex; gap:8px; align-items:center;}
+  .callout.concept{background:var(--teal-soft); border-color:var(--teal);}
+  .callout.concept .ctitle{color:var(--teal);}
+  .callout.example{background:var(--ink3);}
+  .callout.mistake{background:var(--rust-soft); border-color:var(--rust);}
+  .callout.mistake .ctitle{color:var(--rust);}
+  .callout.tip{background:var(--amber-soft); border-color:var(--amber);}
+  .callout.tip .ctitle{color:var(--amber);}
+  .codewrap{position:relative; margin:14px 0;}
+  pre{background:var(--ink3); border:1px solid var(--border); border-radius:var(--radius); padding:16px 18px; overflow-x:auto; font-size:13.5px; line-height:1.6;}
+  .copybtn{position:absolute; top:8px; right:8px; background:var(--ink); color:var(--text-dim); border:1px solid var(--border); border-radius:6px; padding:4px 9px; font-size:11px; cursor:pointer; font-family:var(--sans);}
+  .copybtn:hover{color:var(--amber); border-color:var(--amber);}
+  .lang-tag{font-size:10px; text-transform:uppercase; letter-spacing:.08em; color:var(--slate); margin-bottom:-4px; display:block;}
+  :not(pre) > code{background:var(--ink3); padding:2px 6px; border-radius:4px; font-size:.88em;}
+  table{width:100%; border-collapse:collapse; margin:16px 0; font-size:14px;}
+  th,td{border:1px solid var(--border); padding:9px 12px; text-align:left;}
+  th{background:var(--ink3); font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:var(--slate);}
+  .badge{display:inline-block; font-size:11px; font-weight:700; padding:3px 9px; border-radius:20px; text-transform:uppercase; letter-spacing:.03em;}
+  .badge.easy{background:var(--teal-soft); color:var(--teal);}
+  .badge.medium{background:var(--amber-soft); color:var(--amber);}
+  .badge.hard{background:var(--rust-soft); color:var(--rust);}
+  .qcard{border:1px solid var(--border); border-radius:var(--radius); padding:16px 18px; margin:14px 0; background:var(--ink2);}
+  .qcard .qhead{display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; gap:10px;}
+  .qcard .qhead b{font-size:14.5px;}
+  .qcard .meta{color:var(--text-dim); font-size:13px; margin:6px 0;}
+  .qcard .hint{color:var(--text-dim); font-size:13.5px; margin-top:8px; padding-top:8px; border-top:1px dashed var(--border);}
+  .qcard .hint b{color:var(--amber);}
+  hr.div{border:none; border-top:1px solid var(--border); margin:40px 0;}
+  .navlinks{display:flex; justify-content:space-between; gap:12px; font-size:14px; margin:18px 0; flex-wrap:wrap;}
+  .navlinks a{text-decoration:none; border:1px solid var(--border); padding:8px 14px; border-radius:8px; background:var(--ink2);}
+  .navlinks a:hover{border-color:var(--amber);}
+  .home{font-size:13px; color:var(--text-dim); margin-bottom:10px; display:inline-block;}
+</style>
+</head>
+<body>
+<div id="main">
+
+<a class="home" href="../index.html">&larr; Back to Index</a>
+<div class="navlinks">
+  <a href="../Phase-06-Sorting/01-sorting-algorithms.html">&larr; Prev: Sorting Algorithms</a>
+  <a href="../Phase-08-LinkedList/01-linked-list.html">Next: Linked List &rarr;</a>
+</div>
+
+<div class="eyebrow">Phase 7 · Recursion &amp; Backtracking</div>
+<h1>Recursion &amp; Backtracking</h1>
+<p class="subtitle">Recursion — function khud ko chhoti problem par call karta hai. Backtracking — recursion jisme hum choice explore karke, dead-end pe use undo kar dete hain. Ye dono milkar Trees, Graphs, DP, aur combinatorial problems ki foundation hain.</p>
+
+<h2>Concept — Recursion</h2>
+
+<h3>1. What is it?</h3>
+<p>Recursion matlab ek function <b>khud ko call</b> karta hai, ek chhoti version of the same problem solve karne ke liye — jab tak ek itni chhoti problem na aa jaye jiska answer directly pata ho (base case).</p>
+
+<h3>2. Why do we need it?</h3>
+<p>Kai problems naturally "smaller version of themselves" mein todi ja sakti hain — jaise Trees, Backtracking, Divide &amp; Conquer. Recursion se code chhota aur samajhne mein aasaan ban jata hai un cases mein.</p>
+
+<h3>3. Real-Life Analogy</h3>
+<div class="callout example">
+  <div class="ctitle">📝 Russian Nesting Dolls (Matryoshka)</div>
+  Har doll ke andar ek chhoti doll hai. Tum tab tak kholte jaate ho jab tak sabse chhoti, solid doll (base case) na mil jaye — jisme aur kuch kholne ko nahi hai. Phir tum wapas bahar aate ho, doll ko band karte hue.
+</div>
+
+<h3>4. Base Case, Recursive Case, Call Stack</h3>
+<ul>
+  <li><b>Base Case</b> — wo simplest condition jaha function bina khud ko call kiye directly answer return kar deta hai. Iske bina recursion kabhi rukega nahi.</li>
+  <li><b>Recursive Case</b> — jaha function khud ko ek chhoti/simpler input ke saath call karta hai.</li>
+  <li><b>Call Stack</b> — computer memory ka wo hissa jo track karta hai kaunse function calls "pending" hain. Har recursive call ek nayi "frame" stack par daalta hai.</li>
+  <li><b>Stack Overflow</b> — agar recursion kabhi rukta nahi (missing/galat base case), call stack full ho jata hai aur program crash ho jata hai.</li>
+</ul>
+
+<h3>5. Visual Diagram — Call Stack for factorial(4)</h3>
+<pre><code>factorial(4)
+  → factorial(3)
+      → factorial(2)
+          → factorial(1)
+              → factorial(0) = 1   ← BASE CASE hit, start returning
+          ← returns 1 * 1 = 1
+      ← returns 2 * 1 = 2
+  ← returns 3 * 2 = 6
+← returns 4 * 6 = 24
+
+Stack grows DOWN (calls), then unwinds UP (returns):
+[factorial(0)]
+[factorial(1)]
+[factorial(2)]
+[factorial(3)]
+[factorial(4)]  ← bottom, called first, returns last</code></pre>
+
+<h3>6. Code Examples</h3>
+<div class="lang-tag">Factorial</div>
+<div class="codewrap"><button class="copybtn" onclick="copyCode(this)">Copy</button>
+<pre><code>function factorial(n) {
+  if (n === 0) return 1;          // base case
+  return n * factorial(n - 1);    // recursive case
+}</code></pre></div>
+
+<div class="lang-tag">Fibonacci</div>
+<div class="codewrap"><button class="copybtn" onclick="copyCode(this)">Copy</button>
+<pre><code>function fib(n) {
+  if (n <= 1) return n;                 // base case
+  return fib(n - 1) + fib(n - 2);       // recursive case
+}</code></pre></div>
+<div class="callout mistake">
+  <div class="ctitle">⚠️ Naive Fibonacci is O(2ⁿ)!</div>
+  Har call 2 further calls banata hai, aur bahut sare subproblems <b>baar-baar</b> solve hote hain (overlapping subproblems). Isse fix karne ka tarika — <b>Memoization</b> — Dynamic Programming phase mein cover karte hain.
+</div>
+
+<div class="lang-tag">Reverse an Array using Recursion</div>
+<div class="codewrap"><button class="copybtn" onclick="copyCode(this)">Copy</button>
+<pre><code>function reverseArray(arr, left = 0, right = arr.length - 1) {
+  if (left >= right) return arr;               // base case
+  [arr[left], arr[right]] = [arr[right], arr[left]];
+  return reverseArray(arr, left + 1, right - 1); // recursive case
+}</code></pre></div>
+
+<div class="lang-tag">Power Calculation (Fast Exponentiation)</div>
+<div class="codewrap"><button class="copybtn" onclick="copyCode(this)">Copy</button>
+<pre><code>// Brute: O(n) — multiply n times
+function powerBrute(base, exp) {
+  if (exp === 0) return 1;
+  return base * powerBrute(base, exp - 1);
+}
+
+// Optimal: O(log n) — halve the exponent each time
+function powerOptimal(base, exp) {
+  if (exp === 0) return 1;
+  const half = powerOptimal(base, Math.floor(exp / 2));
+  if (exp % 2 === 0) return half * half;
+  return half * half * base;
+}</code></pre></div>
+<p><b>Why faster:</b> Instead of multiplying n times, hum <code>base^(exp/2)</code> ek baar calculate karte hain aur usse square kar dete hain — jaise Binary Search, har step exponent ko aadha kar deta hai → O(log n).</p>
+
+<h3>7. Dry Run — factorial(3)</h3>
+<div class="callout example">
+  <div class="ctitle">📝 Step by step</div>
+  factorial(3) needs factorial(2) → needs factorial(1) → needs factorial(0) = 1 (base case)<br>
+  factorial(1) = 1 * 1 = 1 (returns to factorial(2))<br>
+  factorial(2) = 2 * 1 = 2 (returns to factorial(3))<br>
+  factorial(3) = 3 * 2 = <b>6</b>
+</div>
+
+<h3>8. Complexity</h3>
+<p>Factorial: Time O(n), Space O(n) (call stack depth). Fibonacci (naive): Time O(2ⁿ), Space O(n) (max stack depth, even though there are exponentially many calls, only n are "in progress" at once).</p>
+
+<h3>How to THINK Recursively</h3>
+<div class="callout concept">
+  <div class="ctitle">💡 The 3-Step Framework</div>
+  <ol>
+    <li><b>Trust the recursion.</b> Assume <code>function(n-1)</code> already correctly solves the smaller problem — don't trace through it mentally.</li>
+    <li><b>Figure out what to do with that trusted smaller answer</b> to build the answer for <code>n</code>.</li>
+    <li><b>Define the base case</b> — the smallest input where you know the answer without recursing.</li>
+  </ol>
+  Beginners often try to "trace the whole tree in their head" — instead, trust that the recursive call works, and just focus on combining its result.
+</div>
+
+<hr class="div">
+<h2>Concept — Backtracking</h2>
+
+<h3>1. What is it?</h3>
+<p>Backtracking ek recursive technique hai jisme hum ek choice <b>karte</b> hain, use <b>explore</b> karte hain, aur agar wo dead-end nikle to use <b>undo</b> karke koi doosri choice try karte hain.</p>
+
+<h3>2. Choose → Explore → Undo</h3>
+<pre><code>function backtrack(path, choices) {
+  if (isComplete(path)) {
+    record(path);
+    return;
+  }
+  for (choice of choices) {
+    path.push(choice);       // CHOOSE
+    backtrack(path, ...);    // EXPLORE
+    path.pop();               // UNDO (backtrack!)
+  }
+}</code></pre>
+
+<h3>3. Real-Life Analogy</h3>
+<div class="callout example">
+  <div class="ctitle">📝 Maze Solving</div>
+  Ek maze mein tum ek raasta choose karte ho, aage badhte ho. Agar dead-end mile, tum wapas (backtrack) aakar doosra raasta try karte ho. Jitna aage gaye the utna "undo" karke.
+</div>
+
+<h3>Example: Generate All Subsets</h3>
+<div class="codewrap"><button class="copybtn" onclick="copyCode(this)">Copy</button>
+<pre><code>function subsets(arr) {
+  const result = [];
+  function backtrack(start, path) {
+    result.push([...path]); // every path is a valid subset
+    for (let i = start; i < arr.length; i++) {
+      path.push(arr[i]);        // CHOOSE
+      backtrack(i + 1, path);   // EXPLORE
+      path.pop();                // UNDO
+    }
+  }
+  backtrack(0, []);
+  return result;
+}</code></pre></div>
+
+<h3>Example: Generate All Permutations</h3>
+<div class="codewrap"><button class="copybtn" onclick="copyCode(this)">Copy</button>
+<pre><code>function permute(arr) {
+  const result = [];
+  const used = new Array(arr.length).fill(false);
+  function backtrack(path) {
+    if (path.length === arr.length) {
+      result.push([...path]);
+      return;
+    }
+    for (let i = 0; i < arr.length; i++) {
+      if (used[i]) continue;
+      used[i] = true;      path.push(arr[i]);   // CHOOSE
+      backtrack(path);                            // EXPLORE
+      used[i] = false;     path.pop();            // UNDO
+    }
+  }
+  backtrack([]);
+  return result;
+}</code></pre></div>
+
+<h3>Example: N-Queens (the classic backtracking problem)</h3>
+<p>Problem: N queens ko N×N board par is tarah rakho ki koi bhi do queens ek doosre ko attack na karein (same row, column, ya diagonal nahi).</p>
+<div class="codewrap"><button class="copybtn" onclick="copyCode(this)">Copy</button>
+<pre><code>function solveNQueens(n) {
+  const results = [];
+  const cols = new Set(), diag1 = new Set(), diag2 = new Set();
+  const board = [];
+
+  function backtrack(row) {
+    if (row === n) {
+      results.push([...board]);
+      return;
+    }
+    for (let col = 0; col < n; col++) {
+      if (cols.has(col) || diag1.has(row - col) || diag2.has(row + col)) {
+        continue; // this column is under attack, skip
+      }
+      // CHOOSE
+      cols.add(col); diag1.add(row - col); diag2.add(row + col);
+      board.push(col);
+
+      backtrack(row + 1); // EXPLORE
+
+      // UNDO
+      cols.delete(col); diag1.delete(row - col); diag2.delete(row + col);
+      board.pop();
+    }
+  }
+  backtrack(0);
+  return results;
+}</code></pre></div>
+<p><b>Line-by-line:</b> Har row ke liye, har column try karte hain. Agar wo column ya diagonal already kisi queen se attacked hai, skip. Warna queen rakho, agli row explore karo. Jab N rows fill ho jaye, ek valid solution mil gaya. Undo karna zaroori hai taaki agli column try ho sake.</p>
+
+<h3>Recursion Tree for Subsets of [1,2]</h3>
+<pre><code>                  []
+              /        \
+           choose 1    skip 1
+            /              \
+          [1]               []
+        /    \             /   \
+   choose 2  skip 2   choose 2  skip 2
+      /         \        /        \
+   [1,2]        [1]     [2]        []
+
+4 leaves = 2² subsets: [1,2], [1], [2], []</code></pre>
+
+<h3>Common Mistakes</h3>
+<div class="callout mistake">
+  <ul>
+    <li><b>Undo step bhool jaana</b> — agar path.pop() ya used[i]=false nahi kiya, purani choices "stuck" reh jaati hain aur galat results aate hain.</li>
+    <li>Base case (missing ya galat) → infinite recursion → stack overflow.</li>
+    <li><code>result.push(path)</code> likhna instead of <code>result.push([...path])</code> — reference push karoge to baad mein path change hone par result bhi change ho jayega!</li>
+  </ul>
+</div>
+
+<h3>When to Use — Checklist</h3>
+<div class="callout tip">
+  <div class="ctitle">🎯 Ask yourself</div>
+  <ul>
+    <li>Problem "sab possible combinations/arrangements find karo" jaisa dikhta hai?</li>
+    <li>Kya tum choices ko step-by-step build karte ho, aur invalid path detect hone par "undo" kar sakte ho?</li>
+    <li>Kya brute-force exponential (2ⁿ ya n!) solutions expected hain, with maybe some pruning?</li>
+  </ul>
+  Agar haan — Backtracking.
+</div>
+
+<h3>Interview Tips</h3>
+<div class="callout tip">
+  Backtracking problems mein hamesha bolo: "Main har position par sabhi valid choices try karunga, aur agar koi choice dead-end de, use undo karke next try karunga." Complexity generally exponential hoti hai (O(2ⁿ) ya O(n!)) — ye bolna zaroori hai taaki interviewer ko pata chale tumhe pata hai ye brute-force-with-pruning hai, na ki koi polynomial solution.
+</div>
+
+<hr class="div">
+<h2>Interview Questions</h2>
+
+<h3>Easy <span class="badge easy">Easy</span></h3>
+
+<div class="qcard">
+  <div class="qhead"><b>Q1. Factorial of a Number</b><span class="badge easy">Easy</span></div>
+  <p>Compute n! recursively.</p>
+  <p><b>Example:</b> n = 5 → Output: 120</p>
+  <div class="hint"><b>Hint:</b> Base case n===0 returns 1; else n * factorial(n-1).</div>
+</div>
+
+<div class="qcard">
+  <div class="qhead"><b>Q2. Sum of Digits (recursive)</b><span class="badge easy">Easy</span></div>
+  <p>Given a non-negative integer, return the sum of its digits recursively.</p>
+  <p><b>Example:</b> n = 1234 → Output: 10</p>
+  <div class="hint"><b>Hint:</b> Base case n &lt; 10 returns n; else n%10 + sumOfDigits(floor(n/10)).</div>
+</div>
+
+<div class="qcard">
+  <div class="qhead"><b>Q3. Reverse a String Recursively</b><span class="badge easy">Easy</span></div>
+  <p>Reverse a string using recursion (no loops).</p>
+  <p><b>Example:</b> "hello" → Output: "olleh"</p>
+  <div class="hint"><b>Hint:</b> Base case empty string returns empty; else reverse(str.slice(1)) + str[0].</div>
+</div>
+
+<div class="qcard">
+  <div class="qhead"><b>Q4. Check if a String is a Palindrome (recursive)</b><span class="badge easy">Easy</span></div>
+  <p>Check palindrome using recursion.</p>
+  <p><b>Example:</b> "racecar" → Output: true</p>
+  <div class="hint"><b>Hint:</b> Base case left &gt;= right returns true; else check str[left]===str[right] and recurse inward.</div>
+</div>
+
+<div class="qcard">
+  <div class="qhead"><b>Q5. Print All Subsequences of a String</b><span class="badge easy">Easy</span></div>
+  <p>Print/return all subsequences of a given string.</p>
+  <p><b>Example:</b> "ab" → Output: ["", "a", "b", "ab"]</p>
+  <div class="hint"><b>Hint:</b> Classic include/exclude recursion — at each character, branch into "take it" and "skip it".</div>
+</div>
+
+<h3>Medium <span class="badge medium">Medium</span></h3>
+
+<div class="qcard">
+  <div class="qhead"><b>Q6. Subsets (Power Set)</b><span class="badge medium">Medium</span></div>
+  <p>Return all possible subsets of a set of unique integers.</p>
+  <p><b>Example:</b> [1,2] → Output: [[],[1],[1,2],[2]]</p>
+  <div class="hint"><b>Hint:</b> Backtrack with a start index, adding the current path at every recursive call.</div>
+</div>
+
+<div class="qcard">
+  <div class="qhead"><b>Q7. Permutations</b><span class="badge medium">Medium</span></div>
+  <p>Return all permutations of a list of distinct integers.</p>
+  <p><b>Example:</b> [1,2,3] → Output: 6 permutations</p>
+  <div class="hint"><b>Hint:</b> Backtrack with a "used" boolean array to avoid reusing an element in the same permutation.</div>
+</div>
+
+<div class="qcard">
+  <div class="qhead"><b>Q8. Combination Sum</b><span class="badge medium">Medium</span></div>
+  <p>Given candidates and a target, find all combinations that sum to target (elements can repeat).</p>
+  <p><b>Example:</b> candidates = [2,3,6,7], target = 7 → Output: [[7],[2,2,3]]</p>
+  <div class="hint"><b>Hint:</b> Allow reusing the same element by not advancing the start index; prune when running sum exceeds target.</div>
+</div>
+
+<div class="qcard">
+  <div class="qhead"><b>Q9. Generate Parentheses</b><span class="badge medium">Medium</span></div>
+  <p>Generate all combinations of n pairs of well-formed parentheses.</p>
+  <p><b>Example:</b> n = 3 → Output: ["((()))","(()())","(())()","()(())","()()()"]</p>
+  <div class="hint"><b>Hint:</b> Backtrack tracking open and close counts; only add "(" if open &lt; n, only add ")" if close &lt; open.</div>
+</div>
+
+<div class="qcard">
+  <div class="qhead"><b>Q10. Letter Combinations of a Phone Number</b><span class="badge medium">Medium</span></div>
+  <p>Given digits 2-9, return all letter combinations the number could represent (like a phone keypad).</p>
+  <p><b>Example:</b> "23" → Output: ["ad","ae","af","bd","be","bf","cd","ce","cf"]</p>
+  <div class="hint"><b>Hint:</b> Backtrack digit by digit, appending each possible letter for the current digit to the path.</div>
+</div>
+
+<h3>Hard <span class="badge hard">Hard</span></h3>
+
+<div class="qcard">
+  <div class="qhead"><b>Q11. N-Queens</b><span class="badge hard">Hard</span></div>
+  <p>Place N queens on an N×N board so that no two queens attack each other. Return all solutions.</p>
+  <p><b>Example:</b> n = 4 → Output: 2 solutions</p>
+  <div class="hint"><b>Hint:</b> Track attacked columns and both diagonals using sets for O(1) conflict checks while backtracking row by row.</div>
+</div>
+
+<div class="qcard">
+  <div class="qhead"><b>Q12. Sudoku Solver</b><span class="badge hard">Hard</span></div>
+  <p>Fill a 9x9 Sudoku board so every row, column, and 3x3 box contains 1-9 without repetition.</p>
+  <p><b>Example:</b> Partially filled board → Output: fully solved board</p>
+  <div class="hint"><b>Hint:</b> Backtrack cell by cell, trying digits 1-9, checking row/col/box validity before placing, undo on dead end.</div>
+</div>
+
+<div class="qcard">
+  <div class="qhead"><b>Q13. Word Search (grid backtracking)</b><span class="badge hard">Hard</span></div>
+  <p>Given a 2D grid of letters and a word, check if the word exists by moving to adjacent cells (no reuse).</p>
+  <p><b>Example:</b> grid with "ABCE/SFCS/ADEE", word = "ABCCED" → Output: true</p>
+  <div class="hint"><b>Hint:</b> DFS/backtrack from each matching starting cell, marking visited cells temporarily and exploring 4 directions.</div>
+</div>
+
+<hr class="div">
+<div class="navlinks">
+  <a href="../Phase-06-Sorting/01-sorting-algorithms.html">&larr; Prev: Sorting Algorithms</a>
+  <a href="../Phase-08-LinkedList/01-linked-list.html">Next: Linked List &rarr;</a>
+</div>
+
+</div>
+<script>
+function copyCode(btn){
+  const code = btn.parentElement.querySelector('code');
+  if(code){ navigator.clipboard.writeText(code.innerText); btn.textContent='Copied!'; setTimeout(()=>btn.textContent='Copy',1200); }
+}
+</script>
+</body>
+</html>

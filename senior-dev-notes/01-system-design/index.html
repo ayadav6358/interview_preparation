@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>System Design — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span>System Design</div>
+      <div class="topbar-actions"><button id="theme-toggle" class="icon-btn">🌙</button></div>
+    </div>
+    <div class="content">
+      <h1>System Design</h1>
+      <p class="meta-line"><span>📚 14 chapters</span><span>⏱ ~28–34 hrs total</span></p>
+      <p>The single most important topic for Senior/Tech Lead interviews. Covers the fundamentals (scalability,
+      CAP), the building blocks (networking, load balancers, caching, databases, queues), architecture
+      (microservices, API design, resilience), LLD (SOLID, design patterns), and full HLD case studies with
+      a repeatable interview framework.</p>
+
+      <h2 id="outcomes">Learning Outcomes</h2>
+      <ul>
+        <li>Reason about latency, throughput, availability and consistency tradeoffs with real numbers.</li>
+        <li>Design a system end-to-end in 35–45 minutes using a repeatable framework and back-of-envelope math.</li>
+        <li>Pick the right database, caching strategy, and messaging pattern for a given access pattern.</li>
+        <li>Apply SOLID and classic design patterns to keep a codebase maintainable at scale.</li>
+        <li>Explain and defend tradeoffs (not just name technologies) under interviewer pushback.</li>
+      </ul>
+
+      <h2 id="chapters">Chapters</h2>
+      <table>
+        <tr><th>#</th><th>Chapter</th><th>Time</th></tr>
+        <tr><td>01</td><td><a href="01-fundamentals.html">Fundamentals: scalability, latency vs throughput, availability, CAP/PACELC</a></td><td>2 hrs</td></tr>
+        <tr><td>02</td><td><a href="02-networking.html">Networking basics: DNS, HTTP/1.1 vs 2 vs 3, TCP vs UDP, WebSockets, SSE</a></td><td>2.5 hrs</td></tr>
+        <tr><td>03</td><td><a href="03-load-balancing.html">Load balancing and reverse proxies</a></td><td>2 hrs</td></tr>
+        <tr><td>04</td><td><a href="04-caching.html">Caching: Redis, CDN, strategies, eviction, invalidation, stampede</a></td><td>2.5 hrs</td></tr>
+        <tr><td>05</td><td><a href="05-databases.html">Databases: SQL vs NoSQL, indexing internals, query optimization</a></td><td>3 hrs</td></tr>
+        <tr><td>06</td><td><a href="06-database-scaling.html">Database scaling: replication, sharding, partitioning, consistency</a></td><td>2.5 hrs</td></tr>
+        <tr><td>07</td><td><a href="07-transactions.html">Transactions: ACID, isolation levels, distributed transactions, Saga</a></td><td>2.5 hrs</td></tr>
+        <tr><td>08</td><td><a href="08-message-queues.html">Message queues and event-driven architecture</a></td><td>2.5 hrs</td></tr>
+        <tr><td>09</td><td><a href="09-microservices.html">Microservices vs monolith, service communication, API gateway</a></td><td>2 hrs</td></tr>
+        <tr><td>10</td><td><a href="10-api-design.html">API design: REST, GraphQL, gRPC, versioning, pagination, idempotency</a></td><td>2.5 hrs</td></tr>
+        <tr><td>11</td><td><a href="11-resilience.html">Rate limiting, circuit breakers, retries, resilience patterns</a></td><td>2 hrs</td></tr>
+        <tr><td>12</td><td><a href="12-lld-design-patterns.html">LLD: SOLID, OOP principles, design patterns</a></td><td>3 hrs</td></tr>
+        <tr><td>13</td><td><a href="13-hld-case-studies.html">HLD case studies (URL shortener, chat, notifications, feed, storage, ride booking, checkout)</a></td><td>4 hrs</td></tr>
+        <tr><td>14</td><td><a href="14-interview-framework.html">How to approach a system design interview</a></td><td>1.5 hrs</td></tr>
+      </table>
+
+      <div class="capstone">
+        <h3>🏆 Capstone Project: Design &amp; Partially Build a "Scalable Notification Platform"</h3>
+        <p><strong>Problem statement:</strong> Design a notification platform (email, push, SMS, in-app) that can
+        send 50M notifications/day, supports templating, per-user rate limits, delivery retries, and user
+        preference management, with an admin dashboard for campaign stats.</p>
+        <p><strong>Required features:</strong></p>
+        <ul>
+          <li>Ingestion API that accepts notification requests and queues them (idempotent on a client-supplied request ID).</li>
+          <li>Fan-out worker pool consuming from a queue, respecting per-channel rate limits (e.g., SMS provider limits).</li>
+          <li>Retry with exponential backoff + dead-letter queue for permanently failed sends.</li>
+          <li>User preference service (opt-outs, quiet hours, channel priority).</li>
+          <li>Delivery status tracking (queued → sent → delivered/failed) exposed via a status API.</li>
+          <li>Basic caching layer for template rendering and user preference lookups.</li>
+        </ul>
+        <p><strong>Tech stack suggestion:</strong> Node.js (Fastify) + TypeScript, Redis (rate limiting + cache),
+        Kafka or BullMQ (queue), Postgres (status + preferences), Docker Compose for local dev.</p>
+        <p><strong>Milestones:</strong></p>
+        <ol>
+          <li>Write the HLD doc: capacity estimation, API contracts, data model, component diagram (Mermaid).</li>
+          <li>Build ingestion API + queue producer with idempotency keys.</li>
+          <li>Build worker consumer with retry/backoff + dead-letter queue.</li>
+          <li>Add rate limiting per channel (token bucket in Redis) and preference checks.</li>
+          <li>Add status tracking API and a minimal dashboard (counts by status).</li>
+          <li>Load-test with a script simulating 10k requests/min; document bottlenecks found and fixed.</li>
+        </ol>
+        <p><strong>Evaluation checklist:</strong></p>
+        <ul>
+          <li>☐ Can explain every component's purpose and what breaks if it's removed.</li>
+          <li>☐ Capacity math is written down and matches the architecture (queue partitions, worker count).</li>
+          <li>☐ Idempotency actually prevents duplicate sends under retry.</li>
+          <li>☐ System degrades gracefully when a downstream provider (e.g., SMS) is slow/down.</li>
+          <li>☐ Can defend at least 2 alternative designs you rejected, and why.</li>
+        </ul>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · System Design</footer>
+  </main>
+</div>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "01-system-design" });</script>
+</body>
+</html>

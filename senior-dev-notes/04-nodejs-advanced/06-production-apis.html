@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Production APIs (Express/Fastify/Nest) — Node.js Advanced — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">Node.js Advanced</a><span class="sep">›</span>Production APIs</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>Building Production APIs: Express vs Fastify vs NestJS</h1>
+      <p class="meta-line"><span>⏱ 2.5 hrs</span><span>📍 Chapter 6 of 9</span></p>
+      <p><strong>One-line summary:</strong> Framework choice at senior level isn't about syntax preference — it's
+      about which architectural guarantees you need built-in (schema validation performance, plugin encapsulation,
+      dependency injection) versus which you're willing to assemble yourself, and getting this tradeoff wrong is
+      why some "simple" Express services calcify into 200-file routers nobody can safely touch.</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>By the time you're interviewing for senior/staff roles, nobody expects you to recite route syntax — they
+      expect you to justify an architectural decision: why this team picked Fastify over Express for a
+      high-throughput ingestion service, or why a 40-engineer org standardized on NestJS despite its steeper
+      learning curve. This chapter is about the real tradeoffs: schema-first validation and serialization
+      performance, plugin/module encapsulation for large codebases, and dependency injection as a testability and
+      scaling mechanism — not a popularity contest between frameworks.</p>
+      <div class="box why"><h4>Why</h4><p>The framework you pick encodes default answers to questions you'll
+      otherwise have to answer manually, repeatedly, across every route: how is input validated, how is output
+      serialized, how are errors centralized, how is the codebase kept from becoming an unstructured ball of
+      middleware. Express answers none of these by default (deliberately minimal); Fastify answers performance and
+      schema questions; NestJS answers structure and DI questions. Picking wrong for your team's size and
+      performance needs is expensive to walk back once you have 100 routes.</p></div>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>Comfortable with Express/Fastify basics and middleware patterns. Related:
+      <a href="05-error-handling.html">Error Handling Strategy</a>, <a href="07-authentication.html">Authentication</a>,
+      <a href="09-scaling-node.html">Scaling Node in Production</a>.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="basics">Express: minimal, unopinionated, middleware-chain architecture</h3>
+      <p>Express is a thin routing + middleware layer over Node's raw http module: every request flows through an
+      ordered chain of <code>(req, res, next)</code> functions you compose yourself. There's no built-in schema
+      validation, no built-in serialization optimization, no enforced project structure — which is exactly its
+      appeal for small services and exactly its liability at scale, because every architectural decision (validation
+      library, error shape, folder structure) is left to convention, and conventions drift across a growing team
+      without enforcement. Express 5 (now the default on new installs) finally handles async route-handler
+      rejections natively, closing one of its longest-standing footguns.</p>
+
+      <h3 id="internals">Fastify: schema-first validation/serialization and plugin encapsulation</h3>
+      <p>Fastify's defining architectural bet is that <strong>JSON schema should drive both input validation and
+      output serialization</strong> — you declare a schema per route (body, params, querystring, response), and
+      Fastify pre-compiles it (via <code>ajv</code> for validation, a fast custom serializer for responses) into
+      optimized functions at startup, rather than validating/serializing generically on every request. This is a
+      meaningful throughput difference under load, not a micro-optimization — serialization is often the actual
+      bottleneck in JSON APIs, and schema-compiled serialization measurably outperforms <code>JSON.stringify</code>
+      on complex objects by skipping properties not in the response schema (which is also a security feature: you
+      can't accidentally leak a field you forgot to strip). Fastify's <strong>plugin system</strong> enforces
+      encapsulation: each plugin gets its own encapsulated instance of the Fastify app (its own decorators, hooks,
+      and routes don't leak into sibling plugins unless explicitly exposed), which is how large Fastify codebases
+      stay modular without a full DI framework.</p>
+
+      <h3 id="advanced">NestJS: DI container, decorators, and module boundaries as an architecture</h3>
+      <p>NestJS wraps Express or Fastify (your choice as the underlying adapter) with an Angular-inspired
+      architecture: everything is a class, wired together by a <strong>dependency injection container</strong>.
+      Controllers, services, and repositories are decorated (<code>@Controller</code>, <code>@Injectable</code>)
+      and the container resolves constructor dependencies automatically, including their lifecycle (singleton by
+      default, request-scoped when needed for things like per-request tenant context). The real architectural
+      payoff at scale: <strong>modules enforce explicit boundaries</strong> — a module only exposes what it
+      explicitly exports, forcing teams to think about public API surface between domains the way you would
+      between microservices, which pays off enormously once a codebase exceeds what any one engineer can hold in
+      their head. The cost is real: more boilerplate, a steeper onboarding curve, and an opinionated structure that
+      actively resists "just hack this in" changes — which is a feature for a 50-engineer org and friction for a
+      2-person startup shipping an MVP.</p>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>The practical decision tree senior engineers actually use: start with raw throughput/latency requirements
+      (if you're serializing large JSON payloads at high RPS, Fastify's compiled schema serialization is a real,
+      measurable win — not a rounding error). Then consider team size and longevity (a service that will be
+      maintained by a rotating cast of 20+ engineers over years benefits enormously from NestJS's enforced
+      structure and DI-driven testability — mocking a service in a unit test is trivial when DI already decouples
+      construction from use). Express remains the right choice when you want minimal abstraction over the platform
+      and are willing to hand-roll your own conventions — which is reasonable for small, stable services or when
+      your team already has strong established patterns that don't need a framework to enforce them.</p>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+flowchart TD
+  A[Incoming request] --> B{Framework}
+  B -->|Express| C[Middleware chain, manual validation]
+  C --> D[Route handler, manual response shaping]
+  B -->|Fastify| E[Pre-compiled schema validation ajv]
+  E --> F[Route handler]
+  F --> G[Pre-compiled schema serialization]
+  B -->|NestJS| H[DI container resolves Controller]
+  H --> I[Guards / Pipes / Interceptors pipeline]
+  I --> J[Service layer, injected dependencies]
+  J --> K[Response, module boundary enforced]
+      </div>
+      <div class="mermaid">
+flowchart LR
+  subgraph NestJS Module Boundary
+    direction LR
+    Ctrl[Controller] --> Svc[Service]
+    Svc --> Repo[Repository]
+  end
+  Repo --> DB[(Database)]
+  Ctrl -.exported provider only.-> OtherModule[Other Module]
+  OtherModule -.cannot access Repo directly.-> Repo
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-typescript">// --- Fastify: schema-first route with compiled validation + serialization ---
+import Fastify from 'fastify';
+
+const app = Fastify({ logger: true });
+
+const userSchema = {
+  type: 'object',
+  properties: { id: { type: 'string' }, email: { type: 'string' }, name: { type: 'string' } },
+  required: ['id', 'email'],
+};
+
+app.get('/users/:id', {
+  schema: {
+    params: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] },
+    response: { 200: userSchema }, // fields not listed here are stripped on serialize — leak-proof by default
+  },
+}, async (req, reply) => {
+  const user = await userService.findById(req.params.id);
+  if (!user) return reply.code(404).send({ error: 'Not found' });
+  return user; // serialized via the pre-compiled schema serializer, not generic JSON.stringify
+});
+
+// --- Fastify: plugin encapsulation ---
+async function usersPlugin(fastify: FastifyInstance) {
+  fastify.decorate('userService', new UserService()); // scoped to this plugin + its children only
+  fastify.get('/users/:id', { /* ... */ }, async (req) => fastify.userService.findById(req.params.id));
+}
+app.register(usersPlugin, { prefix: '/api/v1' }); // encapsulated: sibling plugins can't see userService
+
+
+// --- NestJS: DI container + module boundaries ---
+@Injectable()
+class UserService {
+  constructor(@Inject('USER_REPO') private readonly repo: UserRepository) {} // constructor injection
+  findById(id: string) { return this.repo.findById(id); }
+}
+
+@Controller('users')
+class UserController {
+  constructor(private readonly userService: UserService) {} // Nest resolves this automatically
+
+  @Get(':id')
+  async getUser(@Param('id') id: string) {
+    const user = await this.userService.findById(id);
+    if (!user) throw new NotFoundException('User not found'); // maps to a 404 via Nest's exception filter
+    return user;
+  }
+}
+
+@Module({
+  controllers: [UserController],
+  providers: [UserService, { provide: 'USER_REPO', useClass: PostgresUserRepository }],
+  exports: [UserService], // ONLY UserService is visible to modules that import this one
+})
+class UsersModule {}
+</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4><p>A fintech ingestion API built on Express hit a wall at ~8k RPS: CPU
+      profiling showed <code>JSON.stringify</code> on large nested response objects (many fields pulled straight
+      from a DB row, most of them unused by clients) consuming a disproportionate share of request time. The team
+      migrated the hottest endpoints to Fastify with explicit response schemas — not a full rewrite, just the
+      top 10 endpoints by traffic — and got a measurable throughput increase purely from compiled serialization
+      skipping unlisted fields, plus an incidental security win: two endpoints had been silently leaking an
+      internal `internalRiskScore` field that the new response schema simply excluded. The lesson generalized
+      across the org: schema-driven serialization isn't just a performance knob, it's a contract that prevents
+      silent over-exposure of internal fields as models evolve.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Assuming Fastify's performance advantage shows up automatically just
+      by switching frameworks — without declaring response schemas, Fastify still validates/serializes generically
+      and you lose most of the real-world throughput benefit. The schema declaration is the optimization; the
+      framework alone is not.</p></div>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Treating NestJS's DI container as "automatic" magic without
+      understanding provider scope (singleton vs request-scoped vs transient) — accidentally making a stateful
+      service a singleton when it should be request-scoped (e.g., one holding per-request tenant context) causes
+      subtle cross-request data leakage under concurrent load that's extremely hard to reproduce in local dev.</p></div>
+      <ul>
+        <li>Don't choose a framework based on benchmarks alone — a benchmark ignores team size, hiring pool, and maintainability over years.</li>
+        <li>Express 4 still needs manual async-rejection wrapping in route handlers; Express 5 and Fastify handle it natively.</li>
+        <li>In Fastify, always set a response schema on endpoints returning DB rows directly — it's your cheapest field-leak protection.</li>
+        <li>In NestJS, keep controllers thin — business logic belongs in injectable services, not in the controller method body, so it stays unit-testable without an HTTP layer.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs</h2>
+      <table>
+        <tr><th>Framework</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>Express</td><td>Small/stable services, team wants minimal abstraction, strong existing conventions</td><td>High-RPS JSON APIs, large rotating teams needing enforced structure</td><td>Fastify (perf), NestJS (structure)</td></tr>
+        <tr><td>Fastify</td><td>High-throughput JSON APIs, schema-first validation/serialization matters</td><td>Team wants maximal flexibility/minimal ceremony, tiny services</td><td>Express (simplicity), NestJS (if also need DI/structure)</td></tr>
+        <tr><td>NestJS</td><td>Large team, long-lived service, need enforced module boundaries and DI-driven testability</td><td>Small team/MVP where ceremony costs more than it returns</td><td>Express/Fastify + manual conventions (e.g., a lightweight DI lib)</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic"><h4>Basic</h4>
+      <details class="qa"><summary>What's the core architectural difference between Express and Fastify?</summary><div class="answer"><p>Express is a minimal, unopinionated middleware chain with no built-in validation or serialization optimization. Fastify is schema-first: route schemas are compiled at startup into optimized validation (ajv) and serialization functions, giving measurable performance gains and a leak-proof response contract.</p></div><div class="followup">Follow-up: why does declaring a response schema also act as a security boundary?</div></details>
+      <details class="qa"><summary>What problem does NestJS's dependency injection container solve?</summary><div class="answer"><p>It decouples how a class's dependencies are constructed from how they're used, resolving constructor dependencies automatically and managing their lifecycle (singleton, request-scoped, transient) — this makes unit testing trivial (inject mocks) and keeps large codebases modular.</p></div><div class="followup">Follow-up: what's the difference between a singleton-scoped and request-scoped provider?</div></details>
+      <details class="qa"><summary>Why did Express 5 matter for async route handlers?</summary><div class="answer"><p>Express 4 didn't automatically catch Promise rejections from async route handlers, requiring a manual wrapper to forward them to next(). Express 5 handles async rejections natively, closing a long-standing footgun.</p></div><div class="followup">Follow-up: what would happen in Express 4 if you forgot the wrapper?</div></details>
+      <details class="qa"><summary>What is Fastify plugin encapsulation?</summary><div class="answer"><p>Each plugin gets its own encapsulated Fastify instance — decorators, hooks and routes registered inside it don't leak to sibling plugins unless explicitly exposed, giving modularity without a full DI framework.</p></div><div class="followup">Follow-up: how is this similar to or different from a NestJS module boundary?</div></details>
+      <details class="qa"><summary>Name one performance cost of Express's generic approach to JSON responses.</summary><div class="answer"><p>It relies on generic JSON.stringify over the full response object, which can be a measurable bottleneck for large/nested payloads compared to Fastify's schema-compiled serializer that skips unlisted fields.</p></div><div class="followup">Follow-up: when would this difference actually matter versus being negligible?</div></details>
+      <details class="qa"><summary>What decorators are central to defining a NestJS controller and its route?</summary><div class="answer"><p>@Controller() on the class and HTTP method decorators like @Get(), @Post() on methods, combined with parameter decorators like @Param() and @Body() to extract request data.</p></div><div class="followup">Follow-up: how does @Injectable() relate to these?</div></details>
+      </div>
+      <div class="qa-level medium"><h4>Medium</h4>
+      <details class="qa"><summary>You're building a high-throughput JSON ingestion API. Walk through why Fastify's schema approach specifically helps here, beyond "it's faster."</summary><div class="answer"><p>Fastify pre-compiles validation and serialization functions from your declared JSON schemas at startup rather than doing generic validation/serialization per request. For high RPS, this moves cost from the hot path to startup — validation becomes a compiled function call instead of a generic recursive check, and serialization skips fields not declared in the response schema entirely rather than visiting and stringifying them. The gain compounds with payload size and complexity.</p></div><div class="followup">Follow-up: what happens to this benefit if you don't declare schemas at all?</div></details>
+      <details class="qa"><summary>Explain NestJS module exports and why they matter for a large codebase.</summary><div class="answer"><p>A module only exposes providers listed in its `exports` array to modules that import it — everything else (internal services, repositories) stays private to that module. This forces explicit, intentional API surface between domains, similar to designing microservice boundaries, which prevents the "everything imports everything" entanglement that makes large monoliths unmaintainable.</p></div><div class="followup">Follow-up: how would you enforce this discipline in code review when it's easy to accidentally export too much?</div></details>
+      <details class="qa"><summary>Describe a scenario where NestJS's request-scoped providers are necessary, and the cost of using them.</summary><div class="answer"><p>Necessary when a service needs per-request state (e.g., tenant ID resolved from an auth token, used by downstream injected services in that same request). The cost: request-scoped providers can't be fully resolved at app bootstrap and are instantiated per request, which has a real performance overhead compared to singletons if applied broadly instead of surgically where actually needed.</p></div><div class="followup">Follow-up: how would you scope just the tenant-context piece as request-scoped while keeping the rest of your services singletons?</div></details>
+      <details class="qa"><summary>How would you migrate the hottest endpoints of an Express API to Fastify without a full rewrite?</summary><div class="answer"><p>Run Fastify behind the same reverse proxy/load balancer, route traffic for the specific high-RPS endpoints to the new Fastify service (or mount Fastify routes alongside Express via a gateway), define explicit JSON schemas only for those endpoints, and validate behavior parity via contract tests before cutting traffic over. This avoids a risky big-bang migration while capturing the performance win where it matters most.</p></div><div class="followup">Follow-up: what's a risk of running two frameworks side by side long-term?</div></details>
+      <details class="qa"><summary>Why might a team explicitly choose Express over Fastify or NestJS even in 2026, despite the latter's advantages?</summary><div class="answer"><p>Minimal abstraction means fewer surprises and a shallower learning curve for new hires; the ecosystem of middleware is enormous and battle-tested; and for services that aren't CPU-bound on serialization or large enough to need enforced module boundaries, the extra ceremony of Fastify's schemas or Nest's DI/decorators is pure overhead with no corresponding benefit.</p></div><div class="followup">Follow-up: at what rough team size or RPS would you reconsider that decision?</div></details>
+      </div>
+      <div class="qa-level advanced"><h4>Advanced</h4>
+      <details class="qa"><summary>Design the layered architecture (controller/service/repository or equivalent) for a NestJS-based order-processing API that must remain testable as it grows to 15+ engineers. What goes where, and why?</summary><div class="answer"><p>Controllers: thin, HTTP-only concerns (param extraction, status codes, delegating to services) — no business logic, so they rarely need unit tests beyond request/response shape. Services: all business logic, injected with repository interfaces (not concrete DB classes) so they're unit-testable with mocked repos. Repositories: the only layer that knows about the actual persistence technology, implementing an interface the service depends on — this lets you swap Postgres for another store without touching business logic. Module boundaries: each domain (orders, payments, inventory) is its own module exporting only its public service interface, enforcing that cross-domain communication goes through explicit, reviewable APIs rather than reaching into another domain's internals.</p></div><div class="followup">Follow-up: how would you handle a transaction that spans the orders and inventory domains under this structure?</div></details>
+      <details class="qa"><summary>A Fastify service's response schemas were written once at launch and never updated as the data model evolved. What production risk does this create, and how do you prevent it?</summary><div class="answer"><p>New fields added to the underlying data model are silently stripped from responses because they're not in the schema — this can look like a "bug" (missing field) to API consumers, or worse, mask an intentional field addition that nobody notices is missing until a client complains. Prevention: treat response schemas as part of the API contract under the same change-review process as the data model itself, ideally generating or validating schemas from a single source of truth (e.g., a shared TypeScript type/Zod schema compiled to JSON schema) rather than hand-maintaining two representations that can drift.</p></div><div class="followup">Follow-up: what tooling would you introduce to keep a TypeScript type and a Fastify JSON schema in sync automatically?</div></details>
+      <details class="qa"><summary>Critique: "NestJS's DI container makes testing trivial, so services built with it are inherently more reliable than Express services." Is this reasoning sound?</summary><div class="answer"><p>No — DI makes mocking dependencies *easier*, which lowers the friction to write unit tests, but it doesn't make tests more likely to be written, nor does it guarantee they're meaningful (easy-to-write tests can still be shallow). An Express codebase with disciplined manual dependency passing (constructor injection without a framework) can be equally testable; conversely a NestJS codebase with poor test coverage is no more reliable than an Express one. The actual reliability driver is testing discipline and coverage, not the framework's DI mechanism — DI just removes one excuse for not testing.</p></div><div class="followup">Follow-up: what would you actually look for in code review to judge whether DI-enabled tests are meaningful versus superficial?</div></details>
+      <details class="qa"><summary>How would you architect a system where some services are NestJS (internal, long-lived, large team) and others are lightweight Fastify (high-throughput, narrow-purpose), communicating with each other? What goes wrong if you don't think about this deliberately?</summary><div class="answer"><p>Define a strict contract layer between them (OpenAPI/JSON schema or protobuf for gRPC) independent of either framework's internal types, so a NestJS DTO change doesn't silently break a Fastify consumer or vice versa. Use correlation IDs and consistent structured logging across both regardless of framework, since observability tooling shouldn't need framework-specific adapters. Without this discipline, teams often let framework-specific types (a NestJS class with decorators) leak across the service boundary as the "contract," which couples services to a specific framework choice and makes it impossible to migrate one service's framework later without a breaking change to its consumers.</p></div><div class="followup">Follow-up: how would you version this contract layer as both services evolve independently?</div></details>
+      <details class="qa"><summary>Your team is debating whether to adopt NestJS for a currently-Express 15-service microservices architecture, service by service, or all at once. What's the senior-level recommendation and why?</summary><div class="answer"><p>Service by service, starting with the service(s) that most clearly suffer from Express's lack of structure (highest churn, most engineers touching it, most incidents traceable to inconsistent conventions) — this validates the investment with real data before committing org-wide, and avoids the risk of a big-bang migration introducing bugs across 15 services simultaneously. A blanket all-at-once migration also ignores that some services (a tiny, stable internal tool) may never justify Nest's ceremony — the right end state is likely a mixed architecture, not uniform adoption, with a contract layer (per the previous question) making the mix invisible to consumers.</p></div><div class="followup">Follow-up: how would you measure whether the migration is actually paying off after the first service converts?</div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment"><span class="level-tag">Beginner (30-60 min)</span>
+      <h4>Build the same endpoint in Express and Fastify</h4>
+      <p>Build a `GET /users/:id` endpoint in both Express (manual validation with a library like zod) and Fastify
+      (JSON schema-based validation/serialization), returning the same shape. Deliberately include a field in the
+      DB model that should NOT appear in the response.</p>
+      <ul><li>Must demonstrate the field being present in Express's output unless manually stripped, and automatically stripped in Fastify via the response schema.</li></ul>
+      <p><strong>Acceptance criteria:</strong> Both endpoints return 404 correctly for a missing user, and the comparison clearly shows the leak-prevention difference.</p>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>Use ajv-driven Fastify response schemas with `additionalProperties: false` implied by listing only wanted properties.</p></div></details>
+      <p><strong>Bonus:</strong> Benchmark both with a simple load-testing tool (autocannon) on a payload with 50+ fields.</p>
+      </div>
+      <div class="assignment"><span class="level-tag">Intermediate (2-4 hrs)</span>
+      <h4>Convert an Express CRUD API into a modular NestJS service</h4>
+      <p>Take a small Express CRUD API (users + posts, with a basic relation) and rebuild it in NestJS with proper
+      module boundaries: a UsersModule and a PostsModule, each exporting only what the other needs, with DI-based
+      services and repository interfaces (in-memory is fine).</p>
+      <ul><li>PostsModule must depend on UsersModule only through its exported service, never reaching into UsersModule internals.</li><li>Must include at least 2 unit tests using mocked injected dependencies.</li></ul>
+      <p><strong>Acceptance criteria:</strong> Removing an export from UsersModule that PostsModule doesn't actually use causes no compile/runtime error, proving the boundary is real.</p>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>Use `@Inject()` with a string/symbol token for the repository interface rather than a concrete class, to make the unit test mock swap trivial.</p></div></details>
+      <p><strong>Bonus:</strong> Add a request-scoped provider carrying a mock "tenant ID" and show it correctly varies per request under concurrent calls.</p>
+      </div>
+      <div class="assignment"><span class="level-tag">Advanced (1-2 days)</span>
+      <h4>Design and justify a framework decision for a hypothetical org</h4>
+      <p>Write a short architecture decision record (ADR) choosing a framework (or a mix) for a hypothetical org:
+      a 25-engineer team building both a high-throughput public ingestion API and a dozen internal admin/reporting
+      services. Then implement a minimal proof-of-concept for the ingestion API in your chosen framework,
+      demonstrating the specific architectural feature your ADR calls out as decisive (schema-compiled
+      serialization, DI-driven testability, etc.) under a basic load test.</p>
+      <ul><li>ADR must explicitly address team size, throughput needs, and long-term maintainability — not just a benchmark number.</li><li>PoC must include a measured before/after or comparative metric backing the decision.</li></ul>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>Use autocannon or k6 for the load test, and keep the PoC narrow — one representative endpoint, not a full rebuild.</p></div></details>
+      <p><strong>Bonus:</strong> Address how you'd handle the admin/reporting services differently from the ingestion API, and why a single framework choice might not be the right call.</p>
+      </div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet"><ul>
+        <li>Express: minimal, unopinionated, middleware chain — you own all conventions (validation, error shape, structure).</li>
+        <li>Fastify: schema-first — ajv-compiled validation + compiled serialization, real throughput win, and response schemas prevent field leaks by default.</li>
+        <li>Fastify plugin encapsulation: each plugin's decorators/routes/hooks stay local unless explicitly exposed.</li>
+        <li>NestJS: DI container + decorators + enforced module boundaries (`exports`) — pays off at team/codebase scale, costly ceremony for small projects.</li>
+        <li>Fastify's performance edge requires you to actually declare schemas — the framework alone isn't the optimization.</li>
+        <li>NestJS provider scope matters: singleton (default) vs request-scoped (per-request state) vs transient — misuse causes subtle cross-request bugs.</li>
+        <li>Express 5 and Fastify handle async route-handler rejections natively; Express 4 needs a manual wrapper.</li>
+        <li>Keep controllers thin in any framework — business logic belongs in a testable service layer, not the route handler body.</li>
+        <li>A mixed-framework microservices architecture is legitimate — pick per-service based on throughput/team needs, with a framework-agnostic contract layer between them.</li>
+      </ul></div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://expressjs.com/en/guide/error-handling.html">Express docs: error handling guide</a></li>
+        <li><a href="https://fastify.dev/docs/latest/Reference/Validation-and-Serialization/">Fastify docs: validation and serialization</a></li>
+        <li><a href="https://docs.nestjs.com/fundamentals/dependency-injection">NestJS docs: dependency injection fundamentals</a></li>
+        <li><a href="https://docs.nestjs.com/modules">NestJS docs: modules</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="05-error-handling.html"><span class="dir">← Previous</span>Error Handling Strategy</a>
+        <a class="next" href="07-authentication.html"><span class="dir">Next →</span>Authentication (JWT/OAuth2/SSO)</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · Node.js Advanced</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-typescript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "04-nodejs-advanced", chapterKey: "06-production-apis" });</script>
+</body>
+</html>

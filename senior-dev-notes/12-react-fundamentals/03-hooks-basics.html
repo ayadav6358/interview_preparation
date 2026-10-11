@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hooks Basics (useState/useEffect) — React Fundamentals — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">React Fundamentals</a><span class="sep">›</span>Hooks Basics</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>Hooks Basics: useState and useEffect, Solid Working Knowledge</h1>
+      <p class="meta-line"><span>⏱ 2.5 hrs</span><span>📍 Chapter 3 of 6</span></p>
+      <p><strong>One-line summary:</strong> <code>useState</code> gives a component memory across renders,
+      <code>useEffect</code> lets it synchronize with something outside React (the DOM, a subscription, a
+      fetch) after render — this chapter gets you to "solid working knowledge" of both; the Fiber-level "why"
+      behind hook ordering and scheduling lives in topic 03's deeper hooks chapter.</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>These two hooks are used in nearly every component you'll ever write, which means their misuse
+      (wrong dependency array, missing cleanup, derived state stored redundantly) is also the single largest
+      source of real production bugs: memory leaks from unremoved subscriptions, infinite fetch loops, stale
+      closures reading old prop values. An interviewer asking "what's wrong with this `useEffect`" is testing
+      whether you've actually internalized the dependency-array contract, not whether you've memorized the
+      hook's signature.</p>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>Requires <a href="02-props-state-events.html">Props, State &amp; Events</a> (state fundamentals).
+      Feeds into <a href="04-forms-and-controlled-components.html">Forms &amp; Controlled Components</a> and
+      the capstone's data-fetching requirement. For hook internals — the hooks linked list inside a Fiber, why
+      hook call order matters mechanically, and advanced hooks like <code>useReducer</code>,
+      <code>useMemo</code>/<code>useCallback</code> at a performance-engineering level, and
+      <code>useTransition</code> — see
+      <a href="../03-react-nextjs-advanced/02-hooks-deep-dive.html">Hooks Deep Dive</a> in the advanced topic;
+      this chapter deliberately stays at "use these two correctly every day," not "explain the linked list."</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="usestate-recap">useState: the working model</h3>
+      <p><code>const [state, setState] = useState(initialValue)</code>. Two forms of the setter matter:
+      <code>setState(newValue)</code> replaces the value outright; <code>setState(prev =&gt; next)</code> (the
+      updater function) computes the next value from the current one, and is the <strong>only safe form</strong>
+      when the new value depends on the previous value and you can't guarantee you're reading the latest state
+      (e.g., multiple rapid updates, or updates inside a closure created earlier). <code>initialValue</code> can
+      also be a function (<code>useState(() =&gt; expensiveInit())</code>) — "lazy initialization" — which React
+      calls only once, on mount, instead of on every render (important if computing the initial value is
+      non-trivial).</p>
+
+      <h3 id="useeffect-model">useEffect: synchronizing with something outside React</h3>
+      <p>The mental model that actually holds up: <code>useEffect</code> is not "run code after render" in a
+      generic sense — it's specifically for <strong>synchronizing a component with an external system</strong>
+      (DOM APIs, network subscriptions, timers, third-party widgets, browser storage). Its signature:</p>
+      <pre><code class="language-jsx">useEffect(() =&gt; {
+  // setup: runs after the DOM has been updated for this render
+  return () =&gt; {
+    // cleanup: runs before the NEXT effect run, and on unmount
+  };
+}, [dep1, dep2]); // dependency array</code></pre>
+      <p>The dependency array tells React when to re-run the effect: React compares each dependency to its
+      value from the previous render using <code>Object.is</code>; if any changed, the old cleanup runs first,
+      then the new setup runs. <strong>Three distinct array forms, three distinct behaviors</strong> — this is
+      the single most interview-tested fact in this chapter:</p>
+      <ul>
+        <li><strong>No array at all</strong> — effect runs after every single render. Rarely what you want.</li>
+        <li><strong><code>[]</code> (empty array)</strong> — effect runs once after the first render (mount)
+        only, cleanup runs once on unmount.</li>
+        <li><strong><code>[a, b]</code></strong> — effect re-runs whenever <code>a</code> or <code>b</code>
+        changes between renders (by reference for objects/arrays/functions, by value for primitives).</li>
+      </ul>
+
+      <h3 id="cleanup-functions">Cleanup functions: preventing leaks and stale subscriptions</h3>
+      <p>Anything an effect sets up that outlives a single render — an event listener, an interval, a
+      WebSocket, an in-flight fetch you want to ignore if the component unmounts — needs a cleanup function
+      that undoes it. React calls cleanup (a) right before re-running the effect due to a dependency change,
+      and (b) when the component unmounts. Skipping cleanup for a subscription is the single most common
+      memory-leak pattern in real React codebases.</p>
+      <pre><code class="language-jsx">useEffect(() =&gt; {
+  const controller = new AbortController();
+
+  fetch(`/api/recipes/${id}`, { signal: controller.signal })
+    .then(res =&gt; res.json())
+    .then(setRecipe)
+    .catch(err =&gt; {
+      if (err.name !== "AbortError") setError(err);
+    });
+
+  return () =&gt; controller.abort(); // cancel stale in-flight request if `id` changes or we unmount
+}, [id]);</code></pre>
+
+      <h3 id="common-pitfalls">The dependency-array pitfalls that actually bite in production</h3>
+      <ul>
+        <li><strong>Missing a dependency</strong> (e.g. using <code>userId</code> inside the effect but not
+        listing it) means the effect's closure captures a stale value from whenever it was last created — the
+        effect won't re-run when <code>userId</code> changes, silently showing data for the wrong user.
+        <code>eslint-plugin-react-hooks</code>'s <code>exhaustive-deps</code> rule catches this and should
+        never be disabled casually.</li>
+        <li><strong>Objects/functions as dependencies</strong> created fresh every render (e.g. an inline
+        <code>{ id }</code> object or an inline arrow function) make the dependency array "always different,"
+        causing the effect to re-run every render regardless of whether the logically-meaningful value
+        changed — the fix is to depend on primitives directly, or stabilize the reference with
+        <code>useMemo</code>/<code>useCallback</code>.</li>
+        <li><strong>Fetching without a request-cancellation guard</strong> — if <code>id</code> changes quickly
+        (fast navigation between two recipes), an older, slower response can resolve after a newer one and
+        overwrite it with stale data ("race condition"). Guard with <code>AbortController</code> or an
+        "is this still the latest request" flag.</li>
+      </ul>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>At the fundamentals level (full scheduling mechanics are in topic 03):</p>
+      <ol>
+        <li>React renders the component, calling hooks in the exact same order every render — this is why
+        hooks can't be called conditionally or in loops: React tracks each hook's state by call order/position,
+        not by name.</li>
+        <li>After the render commits and the DOM is updated, React runs effect setup functions in the order
+        they were declared (and runs any pending cleanup from the previous commit for that effect first).</li>
+        <li>On the next render where a listed dependency changed, React runs that effect's cleanup (from the
+        previous run), then its new setup — using the fresh closure with current values.</li>
+        <li>On unmount, React runs every active effect's cleanup one final time, in roughly reverse
+        declaration order.</li>
+      </ol>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+flowchart TD
+  A[Component renders] --> B[DOM committed/updated]
+  B --> C{Did any dep in the array change vs last render?}
+  C -->|First render| D[Run effect setup]
+  C -->|No| E[Skip effect entirely]
+  C -->|Yes| F[Run previous cleanup]
+  F --> G[Run new effect setup with fresh closure]
+  D --> H[Component later unmounts]
+  G --> H
+  H --> I[Run final cleanup]
+      </div>
+      <div class="mermaid">
+sequenceDiagram
+  participant U as User
+  participant C as RecipeDetail component
+  participant E as useEffect
+  participant API as Fetch API
+  U->>C: navigates to /recipes/1
+  C->>E: render with id=1, effect scheduled
+  E->>API: fetch('/recipes/1')
+  U->>C: quickly navigates to /recipes/2
+  C->>E: re-render with id=2, dep changed
+  E->>E: cleanup -- abort id=1 request
+  E->>API: fetch('/recipes/2')
+  API-->>C: id=2 response arrives, sets state safely
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-jsx">// BAD: stale closure bug -- effect doesn't list `step`, so clicking
+// "faster" has no effect because the interval's closure still has the old step.
+function Counter() {
+  const [count, setCount] = useState(0);
+  const [step, setStep] = useState(1);
+
+  useEffect(() =&gt; {
+    const id = setInterval(() =&gt; setCount(c =&gt; c + step), 1000);
+    return () =&gt; clearInterval(id);
+  }, []); // missing `step` dependency -- bug
+
+  return (
+    &lt;&gt;
+      &lt;p&gt;{count}&lt;/p&gt;
+      &lt;button onClick={() =&gt; setStep(s =&gt; s + 1)}&gt;faster&lt;/button&gt;
+    &lt;/&gt;
+  );
+}
+
+// GOOD: list every value the effect reads; interval correctly restarts
+// with the new step each time it changes.
+function Counter() {
+  const [count, setCount] = useState(0);
+  const [step, setStep] = useState(1);
+
+  useEffect(() =&gt; {
+    const id = setInterval(() =&gt; setCount(c =&gt; c + step), 1000);
+    return () =&gt; clearInterval(id);
+  }, [step]); // correct
+
+  return (
+    &lt;&gt;
+      &lt;p&gt;{count}&lt;/p&gt;
+      &lt;button onClick={() =&gt; setStep(s =&gt; s + 1)}&gt;faster&lt;/button&gt;
+    &lt;/&gt;
+  );
+}
+
+// Lazy initial state -- expensiveParse only runs once, on mount.
+function Settings() {
+  const [prefs, setPrefs] = useState(() =&gt; JSON.parse(localStorage.getItem("prefs") ?? "{}"));
+  // ...
+}</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4>
+      <p>A dashboard's "live price ticker" component subscribed to a WebSocket inside <code>useEffect</code>
+      with dependencies <code>[]</code>, intending "subscribe once on mount." The symbol the user was watching
+      was actually a prop (<code>symbol</code>) that could change when the user switched tickers from a
+      dropdown — but because <code>symbol</code> wasn't in the dependency array, the effect never re-ran, so
+      switching tickers kept the OLD WebSocket subscription alive (showing stale prices for the wrong symbol)
+      while also never cleaning up the original connection when the component eventually unmounted elsewhere
+      in the app, leaking one live WebSocket connection per ticker switch. Root cause: the dependency array was
+      treated as "run once" configuration rather than "re-synchronize when these values change," and the
+      missing cleanup compounded it into a connection leak. Fixed by adding <code>symbol</code> to the array and
+      returning a cleanup that closes the socket.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4>
+      <p>"I'll just disable <code>exhaustive-deps</code> for this one effect" is almost always treating a
+      symptom. If a dependency genuinely shouldn't trigger a re-run (e.g., a setter function from
+      <code>useState</code>, which is guaranteed stable across renders), that's fine to omit with
+      justification — but omitting a value that actually changes and matters is how stale-closure bugs enter
+      production code silently, since nothing crashes, it just silently uses old data.</p></div>
+      <ul>
+        <li>Calling hooks conditionally or inside loops/nested functions — React requires hooks to run in the
+        identical order on every render; conditional hook calls corrupt that order and throw at runtime.</li>
+        <li>Using <code>useEffect</code> to derive/sync state that could just be computed directly during render
+        (e.g., <code>useEffect(() =&gt; setFullName(first + " " + last), [first, last])</code>) — this adds an
+        extra render pass for no reason; just compute <code>const fullName = first + " " + last</code> inline.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td><code>useEffect</code> with <code>[]</code></td><td>Truly mount-once setup (e.g., a one-time analytics ping)</td><td>The effect reads any prop/state that can change</td><td>List the real dependencies</td></tr>
+        <tr><td>Deriving values inside an effect + extra state</td><td>Never, if it can be computed inline</td><td>Always, for pure derivations</td><td>Compute directly in the render body</td></tr>
+        <tr><td><code>setState(prev =&gt; next)</code> updater form</td><td>New value depends on previous value, especially in effects/intervals/async callbacks</td><td>You truly want to replace with an independent new value</td><td><code>setState(newValue)</code></td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic"><h4>Basic</h4>
+      <details class="qa"><summary>What are the three forms of a `useEffect` dependency array and what does each mean?</summary><div class="answer"><p>No array: runs after every render. Empty array `[]`: runs once on mount, cleanup once on unmount. Array with values: re-runs whenever any listed value changes between renders (by Object.is comparison).</p></div><div class="followup">Follow-up: What happens if you list a dependency that never actually changes?</div></details>
+      <details class="qa"><summary>When does the cleanup function returned from `useEffect` run?</summary><div class="answer"><p>Right before the effect re-runs due to a changed dependency, and once when the component unmounts.</p></div><div class="followup">Follow-up: What happens if an effect has no cleanup function and the component unmounts?</div></details>
+      <details class="qa"><summary>Why can't you call a hook inside an `if` statement?</summary><div class="answer"><p>React tracks each hook's state by the order hooks are called in, not by name -- calling hooks conditionally would change that order between renders, corrupting which stored state/effect corresponds to which hook call.</p></div><div class="followup">Follow-up: How would you conditionally apply effect logic without conditionally calling the hook itself?</div></details>
+      <details class="qa"><summary>What's the difference between `setState(5)` and `setState(prev =&gt; prev + 1)`?</summary><div class="answer"><p>The first replaces state with a fixed new value. The second computes the new value from whatever the current state actually is at update time -- safer when multiple updates might be queued or when reading from a potentially-stale closure.</p></div><div class="followup">Follow-up: Give an example where using the direct-value form produces a bug.</div></details>
+      <details class="qa"><summary>What is `useEffect` meant to be used for, conceptually?</summary><div class="answer"><p>Synchronizing a component with something outside React's rendering model -- a DOM API, a subscription, a network request, a timer -- not as a generic "run this after render" hook for things that could be computed during render.</p></div><div class="followup">Follow-up: Give an example of code that's commonly put in an effect but shouldn't be.</div></details>
+      </div>
+      <div class="qa-level medium"><h4>Medium</h4>
+      <details class="qa"><summary>Explain the "stale closure" bug with a concrete dependency-array example.</summary><div class="answer"><p>An effect's function closes over whatever values were in scope when it was created. If that effect is only re-created when certain dependencies change (per the array), any other value it reads but doesn't list stays frozen at whatever it was during the render that created the still-active closure -- e.g., an interval callback reading a `step` state variable that isn't in the dependency array keeps using the ORIGINAL step value forever, even after the user updates it, because the effect (and its interval) never re-runs to pick up a fresh closure.</p></div><div class="followup">Follow-up: Does using the updater-function form of setState fix a stale closure bug on its OWN state, and why does that work but not fix a stale read of OTHER state?</div></details>
+      <details class="qa"><summary>Why is fetching inside `useEffect` without cancellation a race-condition risk, specifically?</summary><div class="answer"><p>If the dependency driving the fetch (e.g. an ID) changes before the previous fetch resolves, you now have two in-flight requests. Network timing isn't guaranteed to match request order -- the older request can resolve AFTER the newer one, and if nothing guards against it, its `.then()` callback will blindly overwrite state with stale data for the wrong ID, even though a newer, correct response already arrived first.</p></div><div class="followup">Follow-up: Besides AbortController, what's a lightweight manual way to guard against this?</div></details>
+      <details class="qa"><summary>Why does React call effect cleanup before the NEXT effect run, not just on unmount?</summary><div class="answer"><p>Because an effect represents "the current synchronization with an external system for the current dependency values" -- when a dependency changes, the OLD synchronization (old subscription, old interval, old listener) must be torn down before establishing the NEW one, otherwise you'd have both the stale and fresh subscriptions active simultaneously, which is exactly the leak/double-subscription bug this mechanism prevents.</p></div><div class="followup">Follow-up: What would you observe (symptom-wise) if cleanup didn't run between dependency changes?</div></details>
+      <details class="qa"><summary>Is it ever correct to intentionally omit a dependency that does change, with eslint-disable?</summary><div class="answer"><p>Rarely, and only with a clear comment justifying it -- e.g., intentionally wanting an effect to use only the INITIAL value of a prop ("capture on mount, ignore later changes") is a real, if uncommon, requirement. The disable should be scoped to that one line with a reasoning comment, never applied blanket, since it silences the exact check that catches the majority of real hook bugs.</p></div><div class="followup">Follow-up: What's a cleaner alternative to eslint-disable for "only care about the initial value" semantics?</div></details>
+      </div>
+      <div class="qa-level advanced"><h4>Advanced</h4>
+      <details class="qa"><summary>Why does React guarantee hooks run in the same order every render, and what data structure makes that guarantee meaningful? (High-level only -- full detail in topic 03.)</summary><div class="answer"><p>At the fundamentals level: each hook call within a component corresponds to a slot in that component's per-fiber memoized state, associated by call position/order rather than by name or key. As long as the same hooks are called in the same order every render, React can correctly match each call to its persisted state slot across renders. The full Fiber-level linked-list mechanics are covered in the advanced Hooks Deep Dive chapter.</p></div><div class="followup">Follow-up: What observable error does React throw if you violate this, and what does the error message tell you?</div></details>
+      <details class="qa"><summary>Why doesn't deriving a value via `useEffect` + extra state just work equivalently to computing it inline, even though both eventually show the correct value?</summary><div class="answer"><p>Deriving via effect introduces an extra full render cycle: render with stale/default derived value -&gt; commit -&gt; effect runs -&gt; setState -&gt; second render with correct value. Users can observe a flash of incorrect UI, and if anything else depends on that derived value during the FIRST render (e.g., conditional logic), it operates on stale data. Computing inline during render guarantees the derived value is always correct and consistent within that single render pass, with no extra render needed.</p></div><div class="followup">Follow-up: Is there a legitimate case where you WOULD want to sync derived state via an effect rather than compute inline?</div></details>
+      <details class="qa"><summary>How would you reason about whether an effect needs an AbortController vs. a simple "ignore stale response" boolean flag?</summary><div class="answer"><p>AbortController actually cancels the underlying network request (saving bandwidth/server work and triggering a real abort signal the fetch API understands), which matters for expensive requests or ones with side effects on the server beyond just a read. A boolean "ignore" flag is cheaper to write and sufficient when you only care about not setting state with stale data -- the request still completes server-side and over the wire, you just discard the result client-side. For GET requests to idempotent read endpoints, either is acceptable; for anything with server-side cost or side effects, prefer actual cancellation.</p></div><div class="followup">Follow-up: Does AbortController cancellation guarantee the server stops processing the request?</div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment"><span class="level-tag">Beginner (30-60 min)</span><h4>Find and fix three broken dependency arrays</h4>
+      <p>Given three small provided components, each with a subtly wrong `useEffect` dependency array
+      (missing dep, unnecessary dep causing extra runs, and an inline object dep causing infinite re-runs),
+      identify and fix each one.</p>
+      <p><strong>Acceptance criteria:</strong> `eslint-plugin-react-hooks` reports zero `exhaustive-deps`
+      violations, and you can explain out loud what bug each original version caused.</p>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>The infinite-loop one is almost always an object/array/function literal created fresh inside the component body and placed in the dependency array.</p></div></details>
+      <p><strong>Bonus:</strong> Reproduce each bug's symptom with a console.log before fixing it, to see the actual broken behavior.</p></div>
+
+      <div class="assignment"><span class="level-tag">Intermediate (2-4 hrs)</span><h4>Build a cancel-safe data-fetching hook</h4>
+      <p>Build a custom <code>useFetch(url)</code> hook returning <code>{ data, loading, error }</code> that
+      correctly handles: rapid URL changes (no race conditions), cleanup/abort on unmount, and re-fetching
+      when the URL changes. Test it by rapidly switching between several recipe IDs.</p>
+      <p><strong>Acceptance criteria:</strong> Rapidly clicking through 5 different IDs never shows data for
+      the wrong ID, even on a throttled/slow network (test with DevTools network throttling).</p>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>AbortController's `signal` passed to `fetch` plus checking `err.name === 'AbortError'` in the catch block is the standard pattern.</p></div></details>
+      <p><strong>Bonus:</strong> Add a simple in-memory cache keyed by URL so revisiting an already-fetched ID doesn't show a loading flash.</p></div>
+
+      <div class="assignment"><span class="level-tag">Advanced (1-2 days)</span><h4>Wire real data fetching into the capstone</h4>
+      <p>Replace the capstone's mock recipe data with real fetching from a public recipe API, using the
+      cancel-safe hook pattern above. Add correct loading/error/empty states for the list view and the detail
+      view, and ensure navigating quickly between recipes never flashes stale data.</p>
+      <ul><li>No full solution provided — this directly extends the ongoing capstone project.</li></ul>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>Design your loading/error/empty states as three clearly distinct branches in the render — don't try to infer them implicitly from `data` being null/undefined.</p></div></details>
+      </div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet"><ul>
+        <li><code>useState</code> setter schedules a re-render; doesn't mutate the current closure's value.</li>
+        <li>Use the updater-function form (<code>prev =&gt; next</code>) when the new value depends on the old one.</li>
+        <li>Lazy init: <code>useState(() =&gt; expensive())</code> runs only once, on mount.</li>
+        <li>No array = every render. <code>[]</code> = mount/unmount only. <code>[deps]</code> = re-run when any changes.</li>
+        <li>Cleanup runs before the next effect run AND on unmount — always clean up subscriptions/timers/listeners.</li>
+        <li>Never omit a dependency that actually changes and matters — stale closures are silent, not crashy.</li>
+        <li>Objects/functions created inline every render make "stable" dependencies look like they always changed.</li>
+        <li>Guard async effects against race conditions (AbortController or an ignore-flag).</li>
+        <li>Don't use an effect to derive a value that can simply be computed inline during render.</li>
+        <li>Hooks must run in the same order every render — never call them conditionally or in loops.</li>
+      </ul></div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://react.dev/reference/react/useState">react.dev — useState reference</a></li>
+        <li><a href="https://react.dev/reference/react/useEffect">react.dev — useEffect reference</a></li>
+        <li><a href="https://react.dev/learn/synchronizing-with-effects">react.dev — Synchronizing with Effects</a></li>
+        <li><a href="https://react.dev/learn/you-might-not-need-an-effect">react.dev — You Might Not Need an Effect</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="02-props-state-events.html"><span class="dir">← Previous</span>Props, State &amp; Events</a>
+        <a class="next" href="04-forms-and-controlled-components.html"><span class="dir">Next →</span>Forms &amp; Controlled Components</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · React Fundamentals</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-jsx.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-typescript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-tsx.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "12-react-fundamentals", chapterKey: "03-hooks-basics" });</script>
+</body>
+</html>

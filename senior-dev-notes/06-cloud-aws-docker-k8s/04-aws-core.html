@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AWS Core — Cloud, AWS, Docker &amp; K8s — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">Cloud, AWS, Docker &amp; K8s</a><span class="sep">›</span>AWS Core</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>AWS Core: IAM, VPC, EC2, S3, RDS</h1>
+      <p class="meta-line"><span>⏱ 3 hrs</span><span>📍 Chapter 4 of 7</span></p>
+      <p><strong>One-line summary:</strong> IAM policy evaluation, VPC routing, and the EC2/S3/RDS trust and
+      network boundaries are the actual exam at senior level — not which service does what, but how permissions
+      and packets are evaluated and routed between them.</p>
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>You've clicked through the AWS console and deployed things that work. The senior-level question is
+      different: "a request to this API is getting AccessDenied — walk me through how you'd debug the IAM
+      policy evaluation," or "why can't this EC2 instance reach the internet even though it has a public IP."
+      These require an actual mental model of policy evaluation order and VPC routing, not console familiarity.</p>
+      <div class="box why"><h4>Why</h4><p>Misconfigured IAM is the single most common root cause of both security
+      incidents (over-permissive policies) and production outages (under-permissive ones) in real AWS
+      environments — and is almost always diagnosable purely by understanding the evaluation logic.</p></div>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>Basic familiarity with the AWS console and having launched at least an EC2 instance or S3 bucket before.
+      Related: <a href="06-infrastructure-as-code.html">Infrastructure as Code</a>, <a href="05-serverless.html">Serverless</a>.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="iam-basics">IAM: principals, policies, roles</h3>
+      <p>A <strong>principal</strong> (user, role, or service) makes a request; AWS evaluates every
+      <strong>identity-based policy</strong> attached to that principal plus any <strong>resource-based
+      policy</strong> on the target resource (e.g. an S3 bucket policy) plus any applicable <strong>permission
+      boundary</strong> and <strong>Service Control Policy (SCP)</strong> at the Organization level. A
+      <strong>role</strong> is an identity with no long-term credentials, assumed temporarily via STS
+      (returning short-lived credentials) — this is how an EC2 instance, a Lambda function, or a human doing
+      cross-account access gets permissions without a static access key sitting around.</p>
+
+      <h3 id="iam-evaluation">IAM policy evaluation logic</h3>
+      <p>The actual algorithm, in order: (1) by default, everything is implicitly denied. (2) Evaluate all
+      applicable SCPs — if any SCP denies, or no SCP allows, the request is denied regardless of anything else
+      (SCPs set the outer ceiling of what's possible in an account). (3) Evaluate permission boundaries the same
+      way — they cap what an identity-based policy can grant, they never grant anything by themselves. (4)
+      Evaluate identity-based and resource-based policies together: if <em>any</em> applicable statement is an
+      <strong>explicit Deny</strong>, the request is denied immediately, full stop — this overrides every Allow
+      anywhere, including on the resource policy. (5) Otherwise, if <em>any</em> applicable statement is an
+      Allow, the request is allowed. The single highest-leverage fact here: <strong>explicit Deny always wins,
+      an Allow on one policy cannot override a Deny on another</strong> — this is both the most common source of
+      "why is this still denied, I added an Allow" debugging sessions and the mechanism SCPs rely on to be
+      unbypassable by account-level IAM.</p>
+      <div class="box gotcha"><h4>Gotcha</h4><p>A permission boundary that doesn't include a given action means
+      that action is denied, even if the identity policy explicitly allows it — boundaries are a cap, not a
+      grant, and people often mistakenly treat "not mentioned in the boundary" as "unrestricted" instead of
+      "denied."</p></div>
+
+      <h3 id="vpc">VPC: subnets, route tables, gateways</h3>
+      <p>A VPC is a private IP address space; subnets are AZ-scoped slices of it. A subnet is "public" purely
+      by convention: it's public because its route table has a route to an <strong>Internet Gateway (IGW)</strong>
+      for <code>0.0.0.0/0</code> — nothing else makes it public. A "private" subnet's route table instead
+      routes <code>0.0.0.0/0</code> to a <strong>NAT Gateway</strong> sitting in a public subnet, which lets
+      private-subnet instances initiate outbound connections (e.g. pulling a package, calling an external API)
+      without being reachable from the internet inbound. Security Groups are stateful (a return packet for an
+      allowed outbound request is automatically allowed back in, no matching inbound rule needed) and operate
+      at the instance/ENI level; Network ACLs are stateless (you must explicitly allow both directions) and
+      operate at the subnet level — NACLs are evaluated first as traffic crosses the subnet boundary, then
+      Security Groups are evaluated at the instance.</p>
+
+      <h3 id="ec2-s3-rds">EC2, S3, RDS as building blocks</h3>
+      <p>EC2 is a VM with a instance profile (an IAM role attached via instance metadata, fetched by the app via
+      the metadata service — IMDSv2 should always be enforced, since IMDSv1 is vulnerable to SSRF-based
+      credential theft). S3 is not "a disk" — it's an object store with no file-system semantics, eventual
+      consistency historically (now strong read-after-write consistency on all operations as of the 2020
+      update), and access controlled by a combination of bucket policy, object ACLs (mostly legacy/deprecated
+      in favor of the bucket policy + IAM path), and Block Public Access settings which override everything
+      else as a safety net. RDS is a managed relational database with a Multi-AZ option (synchronous standby
+      replica in another AZ for automatic failover, not for read scaling) separate from Read Replicas
+      (asynchronous, for scaling read traffic, can be promoted but that's a manual/slower operation, not
+      automatic failover).</p>
+
+      <h3 id="sg-vs-nacl">Security Groups vs NACLs in practice</h3>
+      <p>Because Security Groups are stateful and NACLs are stateless, a common production bug is an NACL rule
+      added to block one specific bad actor's IP on inbound, which also needs an explicit matching outbound
+      rule removed/added correctly or legitimate stateful-looking traffic breaks — NACLs don't auto-allow
+      return traffic the way Security Groups do. Most teams use Security Groups as the primary control plane
+      and leave NACLs at their default allow-all, reaching for NACLs only for subnet-wide blunt-instrument
+      blocking (e.g. blocking a known-bad CIDR range cluster-wide) rather than fine-grained app-level rules.</p>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>When an EC2 instance with an attached instance profile calls an AWS API: the SDK fetches temporary
+      credentials from the instance metadata service (IMDS) at <code>169.254.169.254</code>, which are rotated
+      automatically by STS roughly every few hours — the app never sees or stores a long-lived key. The API
+      request is signed with SigV4 using those temporary credentials and sent to the service endpoint; the
+      service's control plane evaluates the full IAM decision chain (SCP → boundary → identity/resource policy
+      with explicit-deny-wins) before performing the action, and returns an AccessDenied with an (often
+      frustratingly vague, unless detailed errors are enabled) reason if any layer denies. For networking: a
+      packet leaving an EC2 instance in a private subnet destined for the internet is evaluated against the
+      instance's Security Group (stateful, outbound rule check), then the subnet's NACL (stateless, outbound
+      rule check), routed per the route table to the NAT Gateway, NAT-translated to the NAT Gateway's Elastic
+      IP, sent through the IGW — the return packet reverses through NACL (inbound rule check, stateless) then
+      is allowed back through the Security Group automatically because of its stateful tracking of the original
+      outbound connection.</p>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+graph TD
+  SCP[Org SCP] -->|deny anywhere = deny| EVAL{Final decision}
+  BOUND[Permission Boundary] -->|caps max possible grant| EVAL
+  IDP[Identity Policy] --> EVAL
+  RP[Resource Policy] --> EVAL
+  EVAL -->|any explicit Deny found| DENY[DENIED]
+  EVAL -->|no deny, at least one Allow| ALLOW[ALLOWED]
+  EVAL -->|no deny, no allow| DENY
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-yaml"># IAM policy demonstrating explicit deny overriding a broader allow elsewhere
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    { "Effect": "Allow", "Action": "s3:*", "Resource": "arn:aws:s3:::my-app-bucket/*" },
+    {
+      "Effect": "Deny",
+      "Action": "s3:*",
+      "Resource": "arn:aws:s3:::my-app-bucket/secrets/*",
+      "Condition": { "Bool": { "aws:SecureTransport": "false" } }
+    }
+  ]
+}
+
+# Permission boundary: caps what ANY identity policy attached to this role can ever grant
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    { "Effect": "Allow", "Action": ["s3:*", "dynamodb:*", "logs:*"], "Resource": "*" }
+  ]
+}
+</code></pre>
+      <pre><code class="language-hcl"># Minimal VPC shape: public subnet (IGW route) + private subnet (NAT route)
+resource "aws_vpc" "main" { cidr_block = "10.0.0.0/16" }
+
+resource "aws_internet_gateway" "igw" { vpc_id = aws_vpc.main.id }
+
+resource "aws_subnet" "public" {
+  vpc_id                  = aws_vpc.main.id
+  cidr_block              = "10.0.1.0/24"
+  map_public_ip_on_launch = true
+}
+
+resource "aws_route_table" "public_rt" {
+  vpc_id = aws_vpc.main.id
+  route { cidr_block = "0.0.0.0/0" gateway_id = aws_internet_gateway.igw.id }
+}
+
+resource "aws_nat_gateway" "nat" {
+  subnet_id     = aws_subnet.public.id
+  allocation_id = aws_eip.nat.id
+}
+
+resource "aws_subnet" "private" {
+  vpc_id     = aws_vpc.main.id
+  cidr_block = "10.0.2.0/24"
+}
+
+resource "aws_route_table" "private_rt" {
+  vpc_id = aws_vpc.main.id
+  route { cidr_block = "0.0.0.0/0" nat_gateway_id = aws_nat_gateway.nat.id }
+}
+# RDS goes in the private subnet; it never needs a route to the IGW at all.
+</code></pre>
+      <pre><code class="language-bash"># Simulate an IAM decision without actually making the call
+aws iam simulate-principal-policy \
+  --policy-source-arn arn:aws:iam::123456789012:role/api-role \
+  --action-names s3:PutObject \
+  --resource-arns arn:aws:s3:::my-app-bucket/uploads/foo.png
+
+# Enforce IMDSv2 only on an existing instance (closes the SSRF credential-theft path)
+aws ec2 modify-instance-metadata-options \
+  --instance-id i-0123456789abcdef0 \
+  --http-tokens required --http-endpoint enabled
+</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4><p>A service running on EC2 behind an ALB intermittently got
+      AccessDenied calling S3, despite an identity policy that clearly allowed <code>s3:GetObject</code> on the
+      bucket. The actual cause: a newly added Organization-level SCP (added for an unrelated compliance reason)
+      denied <code>s3:*</code> outside a specific list of approved regions, and this bucket had been created in
+      a region not on that list. Because SCP denial overrides any identity policy allow unconditionally, no
+      amount of fixing the role's own policy would have helped — the fix was either moving the bucket to an
+      approved region or updating the SCP's region list, which required escalating to the org's security team
+      rather than a self-service IAM change.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Attaching <code>AdministratorAccess</code> to an EC2 instance
+      role "temporarily" during debugging and forgetting to revert it. Since role credentials are fetched via
+      IMDS and any process on the box can request them, this is equivalent to giving every process on that
+      instance (including any RCE vulnerability in the app) full account access.</p></div>
+      <ul>
+        <li>Enforce IMDSv2 (token-required) on every EC2 instance — IMDSv1 is a known SSRF-to-credential-theft
+        vector (this was the root cause of the 2019 Capital One breach).</li>
+        <li>Use permission boundaries on any role that a CI/CD pipeline or junior-privileged automation can
+        create/modify roles under, so even a misconfigured pipeline can't self-escalate beyond the boundary.</li>
+        <li>Default to private subnets for anything that doesn't need to be internet-reachable (RDS, internal
+        services); only put load balancers and NAT gateways in public subnets.</li>
+        <li>Enable S3 Block Public Access at the account level by default and only disable per-bucket with a
+        deliberate, reviewed exception — it's the final safety net against accidental public exposure.</li>
+        <li>Don't rely on Security Group default-stateful behavior as "security" by itself — a wide-open outbound
+        rule plus a compromised instance gives an attacker a route out regardless of inbound rules.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>RDS Multi-AZ</td><td>Need automatic failover for availability</td>
+        <td>Need to scale read throughput</td><td>RDS Read Replicas</td></tr>
+        <tr><td>NAT Gateway</td><td>Private subnet needs outbound internet, managed/low-ops</td>
+        <td>Cost-sensitive at very high data transfer volume</td><td>Self-managed NAT instance (cheaper, more ops)</td></tr>
+        <tr><td>IAM role (EC2 instance profile)</td><td>Any workload on EC2/ECS/Lambda needing AWS API access</td>
+        <td>Never — static access keys on an instance are almost always wrong</td><td>N/A — always prefer roles</td></tr>
+        <tr><td>Resource-based policy (S3 bucket policy)</td><td>Cross-account access, or access from outside IAM's identity scope</td>
+        <td>Simple same-account access control (identity policy is simpler to manage)</td><td>Identity-based policy</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic"><h4>Basic</h4>
+        <details class="qa"><summary>What's the difference between an IAM user, group, and role?</summary><div class="answer"><p>Users and groups hold long-term credentials/policy attachments for humans or static workloads; a role has no long-term credentials and is assumed temporarily (via STS) by a user, service, or another account, returning short-lived credentials.</p></div><div class="followup">Follow-up: why is a role preferred over a user with access keys for an application?</div></details>
+        <details class="qa"><summary>What makes a VPC subnet "public" vs "private"?</summary><div class="answer"><p>Purely its route table — a subnet is public if its route table sends 0.0.0.0/0 traffic to an Internet Gateway; nothing else (not even a public IP on an instance) makes it public or private.</p></div><div class="followup">Follow-up: can an instance in a "public" subnet still be unreachable from the internet?</div></details>
+        <details class="qa"><summary>What's the difference between a Security Group and a Network ACL?</summary><div class="answer"><p>Security Groups are stateful and apply at the instance/ENI level; NACLs are stateless and apply at the subnet level, requiring explicit inbound and outbound rules since return traffic isn't automatically allowed.</p></div><div class="followup">Follow-up: which is evaluated first as traffic enters a subnet?</div></details>
+        <details class="qa"><summary>What's the difference between RDS Multi-AZ and a Read Replica?</summary><div class="answer"><p>Multi-AZ is a synchronous standby in another AZ for automatic failover (availability); a Read Replica is an asynchronous copy for scaling read traffic, and promoting it to primary is a manual, slower operation, not an automatic failover mechanism.</p></div><div class="followup">Follow-up: can you have both on the same RDS instance?</div></details>
+        <details class="qa"><summary>What is S3 Block Public Access and why is it important?</summary><div class="answer"><p>An account/bucket-level setting that overrides bucket policies and ACLs to prevent public access regardless of what those policies say — a safety net against accidental misconfiguration, best left enabled by default everywhere.</p></div><div class="followup">Follow-up: why would you ever need to disable it?</div></details>
+        <details class="qa"><summary>What's the purpose of a NAT Gateway?</summary><div class="answer"><p>Lets instances in a private subnet (no direct route to the IGW) initiate outbound internet connections, while remaining unreachable from inbound internet traffic.</p></div><div class="followup">Follow-up: where does the NAT Gateway itself need to live?</div></details>
+      </div>
+      <div class="qa-level medium"><h4>Medium</h4>
+        <details class="qa"><summary>Walk through the full IAM evaluation order for a request, and state the one rule that overrides everything else.</summary><div class="answer"><p>Default implicit deny, then SCPs (ceiling, deny-anywhere-wins), then permission boundaries (cap, never grant), then identity + resource policies evaluated together where an explicit Deny anywhere wins immediately over any Allow anywhere else. The overriding rule: explicit Deny always beats Allow, regardless of which policy layer it's in.</p></div><div class="followup">Follow-up: can a resource-based policy's Allow override an identity policy's implicit deny (no matching statement)?</div></details>
+        <details class="qa"><summary>Why is IMDSv1 considered a security risk, and what does IMDSv2 change?</summary><div class="answer"><p>IMDSv1 serves instance role credentials over a simple unauthenticated HTTP GET to 169.254.169.254, which is reachable by any SSRF vulnerability in an app running on the instance, letting an attacker steal the role's temporary credentials remotely. IMDSv2 requires a session token obtained via a PUT request with a hop-limited TTL first, which a typical SSRF (that can only make the attacker-controlled GET request, not craft arbitrary PUT+header combinations) usually can't replicate.</p></div><div class="followup">Follow-up: what AWS incident is commonly cited as the motivating case for IMDSv2?</div></details>
+        <details class="qa"><summary>Why can a permission boundary "silently" deny an action that the identity policy clearly allows?</summary><div class="answer"><p>A permission boundary defines the maximum possible permissions for an identity — it's a cap, not a grant. If the boundary doesn't include an action, that action is denied no matter what the identity policy says, because the effective permission is the intersection of the identity policy and the boundary, not their union.</p></div><div class="followup">Follow-up: who typically sets permission boundaries vs identity policies in an org?</div></details>
+        <details class="qa"><summary>Explain exactly why NACL misconfiguration is a more common source of "mystery" connectivity bugs than Security Group misconfiguration.</summary><div class="answer"><p>Because NACLs are stateless, adding an inbound allow rule without a corresponding outbound allow rule (or vice versa) breaks connectivity in a way that's easy to miss, since engineers are used to Security Groups' stateful auto-allow-return-traffic behavior and assume the same applies to NACLs.</p></div><div class="followup">Follow-up: why do most teams leave NACLs at default-allow and rely on Security Groups instead?</div></details>
+        <details class="qa"><summary>Why would RDS Multi-AZ failover not help if an application is experiencing read-replica lag-related data inconsistency?</summary><div class="answer"><p>Multi-AZ addresses availability (automatic failover of the primary), not consistency between a primary and its asynchronous read replicas — lag-related staleness is inherent to the replica's async replication and unaffected by whether Multi-AZ is enabled, since Multi-AZ's standby isn't the entity serving reads in a read-replica setup.</p></div><div class="followup">Follow-up: how would you reduce replica lag-related staleness issues at the application level?</div></details>
+      </div>
+      <div class="qa-level advanced"><h4>Advanced</h4>
+        <details class="qa"><summary>A CI/CD pipeline role can create new IAM roles for deployed services. How do you prevent it from creating a role with broader permissions than itself (privilege escalation)?</summary><div class="answer"><p>Attach a permission boundary to the CI/CD role's own policy requiring that any role it creates must itself have a specific permission boundary attached (enforced via a condition on iam:CreateRole requiring PermissionsBoundary to be set to an approved ARN). This prevents the classic escalation path where a role with iam:CreateRole + iam:AttachRolePolicy but no boundary requirement can create a new unrestricted role and assume it.</p></div><div class="followup">Follow-up: what IAM condition key specifically enforces this boundary requirement?</div></details>
+        <details class="qa"><summary>Design the VPC and IAM boundary for a multi-tenant SaaS where each customer's data must be provably isolated, for a SOC2 audit.</summary><div class="answer"><p>Network isolation: either separate VPCs per tenant tier (strongest, costliest) or shared VPC with per-tenant resource tagging + IAM policies using condition keys (aws:ResourceTag) scoping every role to only act on resources tagged for that tenant. Data isolation: separate RDS schemas or databases per tenant (or row-level security with a tenant_id enforced at the query layer, defense-in-depth beneath IAM). Audit trail: CloudTrail with object-level S3 data events enabled, log retention matching audit requirements, and IAM policies that make it structurally impossible (not just discouraged) for any single service role to read across tenants.</p></div><div class="followup">Follow-up: why is "structurally impossible" a stronger audit claim than "access-logged and monitored"?</div></details>
+        <details class="qa"><summary>An SCP denies a region outside an approved list, but a team insists their identity policy explicitly allows the action in that region. Why are they still denied, and how do you communicate this to them?</summary><div class="answer"><p>SCPs set the outer permission ceiling at the Organization level and are evaluated before, and independently of, any identity/resource policy — an SCP deny (or absence of an SCP allow where the SCP uses an allowlist model) cannot be overridden by any identity policy, because SCPs don't grant permissions at all, they only restrict the maximum possible grant. The identity policy allowing the action is necessary but not sufficient; it operates entirely within whatever envelope the SCP permits. Communicating this requires explaining the layered model rather than treating it as an IAM bug in their own role.</p></div><div class="followup">Follow-up: how would you self-service diagnose this without escalating to the security team every time?</div></details>
+        <details class="qa"><summary>Why might two EC2 instances in the same subnet, same Security Group, have different effective network behavior under a NACL change?</summary><div class="answer"><p>They shouldn't, if the NACL is genuinely subnet-scoped and identical — NACL rules apply uniformly to every instance in the subnet. If behavior differs, suspect either a different subnet than assumed (check actual subnet ID, not just the subnet "name"), an additional Security Group attached to only one instance, or a stale/cached route if one instance recently moved subnets and the app has cached DNS/connection state from before the move.</p></div><div class="followup">Follow-up: what AWS tool would you use to definitively trace the actual path and rule evaluation for a specific flow?</div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment"><span class="level-tag">Beginner (30-60 min)</span><h4>Debug an AccessDenied using policy simulation</h4>
+      <p>Given an IAM role, an identity policy, and a resource policy that together should allow an S3 GetObject but don't, use aws iam simulate-principal-policy to find and fix the issue.</p>
+      <ul><li>Identify whether the blocking statement is an explicit Deny or a missing Allow</li><li>Fix the minimal policy change needed</li></ul>
+      <p><strong>Acceptance criteria:</strong> Simulated call returns Allowed; document which layer was blocking it.</p>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>Check both the identity policy and the bucket policy independently before assuming either one alone is the problem.</p></div></details>
+      <p><strong>Bonus:</strong> Add a permission boundary that would block the fix you just made, and explain why.</p>
+      </div>
+      <div class="assignment"><span class="level-tag">Intermediate (2-4 hrs)</span><h4>Build a correct public/private VPC from scratch</h4>
+      <p>Using Terraform or the console, build a VPC with a public subnet (ALB), a private subnet (app + RDS), a NAT Gateway, and correctly scoped Security Groups.</p>
+      <ul><li>App in private subnet reachable only via the ALB</li><li>App can reach the internet outbound (e.g. call an external API) via NAT</li><li>RDS reachable only from the app's Security Group, not from the ALB or internet</li></ul>
+      <p><strong>Acceptance criteria:</strong> Direct internet access to the app's private IP fails; app's outbound internet call succeeds; RDS port is unreachable from anywhere except the app.</p>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>Security Group referencing another Security Group as the source (rather than a CIDR) is the clean way to scope RDS access to only the app tier.</p></div></details>
+      <p><strong>Bonus:</strong> Enforce IMDSv2 on the app instance and verify a simulated SSRF can't retrieve credentials via the v1 flow.</p>
+      </div>
+      <div class="assignment"><span class="level-tag">Advanced (1-2 days)</span><h4>Design and implement a privilege-escalation-resistant CI/CD IAM setup</h4>
+      <p>Implement a CI/CD role that can create application roles but cannot create a role with permissions broader than a defined boundary, and prove the escalation path is actually blocked.</p>
+      <ul><li>CI/CD role with a condition requiring PermissionsBoundary on any role it creates</li><li>A deliberate attempt to create an unrestricted role and observe the denial</li><li>Document the exact IAM condition key used</li></ul>
+      <p><strong>Acceptance criteria:</strong> left as an exercise — think through what other iam:* actions (PutRolePolicy, AttachRolePolicy) also need the same condition to fully close the escalation path.</p>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>iam:PermissionsBoundary condition key on CreateRole is the starting point, but escalation paths via PutRolePolicy on existing roles need separate coverage.</p></div></details>
+      </div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet"><ul>
+        <li>IAM evaluation order: implicit deny → SCP → permission boundary → identity+resource policy, explicit Deny always wins.</li>
+        <li>Permission boundaries cap grants, they never grant anything by themselves.</li>
+        <li>A subnet is "public" purely because its route table points 0.0.0.0/0 at an IGW — nothing else.</li>
+        <li>Security Groups: stateful, instance-level. NACLs: stateless, subnet-level, evaluated first.</li>
+        <li>RDS Multi-AZ = availability (sync standby, auto failover). Read Replica = read scaling (async, manual promote).</li>
+        <li>Always use IAM roles, never static access keys, for anything running on AWS compute.</li>
+        <li>Enforce IMDSv2 everywhere — IMDSv1 is an SSRF-to-credential-theft vector.</li>
+        <li>S3 Block Public Access overrides bucket policy/ACLs as a safety net — leave it on by default.</li>
+      </ul></div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_evaluation-logic.html">IAM policy evaluation logic</a></li>
+        <li><a href="https://docs.aws.amazon.com/vpc/latest/userguide/what-is-amazon-vpc.html">Amazon VPC user guide</a></li>
+        <li><a href="https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-instance-metadata.html">EC2 instance metadata service (IMDSv2)</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="03-kubernetes-core.html"><span class="dir">← Previous</span>Kubernetes Core</a>
+        <a class="next" href="05-serverless.html"><span class="dir">Next →</span>Serverless (Lambda, API Gateway)</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · Cloud, AWS, Docker &amp; K8s</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-yaml.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-hcl.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-docker.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "06-cloud-aws-docker-k8s", chapterKey: "04-aws-core" });</script>
+</body>
+</html>

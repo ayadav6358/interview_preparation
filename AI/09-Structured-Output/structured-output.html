@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Structured Output</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <input class="searchbox" placeholder="Search topics..." />
+    <a href="../index.html">← Home</a>
+    <h3>09-Structured-Output</h3>
+    <a href="structured-output.html">Structured Output</a>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumbs"><a href="../index.html">Home</a> / 09-Structured-Output</div>
+      <button class="theme-toggle" onclick="toggleTheme()">🌓 Theme</button>
+    </div>
+    <h1>Structured Output (JSON Schema, Validation)</h1>
+    <span class="tag good">Stable</span><span class="tag">Last verified: 2026-10-06</span>
+
+    <div class="toc">
+      <b>On this page</b>
+      <a href="#what">1. What is this?</a>
+      <a href="#whyexist">2. Why does it exist?</a>
+      <a href="#whyimportant">3. Why is it important?</a>
+      <a href="#whereused">4. Where is it used?</a>
+      <a href="#prereq">5. Prerequisites</a>
+      <a href="#core">6. Core concepts</a>
+      <a href="#terms">7. Terminology</a>
+      <a href="#arch">8. Architecture</a>
+      <a href="#internal">9. How it works internally</a>
+      <a href="#steps">10. Step-by-step: reliable structured extraction</a>
+      <a href="#simple">11. Simple example</a>
+      <a href="#real">12. Real-world example</a>
+      <a href="#code">13. Code example</a>
+      <a href="#advanced">14. Advanced example</a>
+      <a href="#mistakes">15. Common mistakes</a>
+      <a href="#best">16. Best practices</a>
+      <a href="#production">17. Production considerations</a>
+      <a href="#security">18. Security considerations</a>
+      <a href="#performance">19. Performance considerations</a>
+      <a href="#cost">20. Cost considerations</a>
+      <a href="#debug">21. Debugging/troubleshooting</a>
+      <a href="#related">22. Related concepts</a>
+      <a href="#comparison">23. Comparison with alternatives</a>
+      <a href="#exercise">24. Mini practical exercise</a>
+      <a href="#project">25. Practical project</a>
+      <a href="#projectarch">26. Project architecture</a>
+      <a href="#interview-b">27. Interview Questions — Beginner</a>
+      <a href="#interview-i">28. Interview Questions — Intermediate</a>
+      <a href="#interview-a">29. Interview Questions — Advanced</a>
+      <a href="#interview-s">30. Interview Questions — Senior/Architect</a>
+      <a href="#interview-sc">31. Scenario-Based Questions</a>
+      <a href="#revision">32. Quick revision notes</a>
+      <a href="#cheat">33. Cheat sheet</a>
+      <a href="#further">34. Further topics to learn</a>
+    </div>
+
+    <h2 id="what">1. What is this?</h2>
+    <p>Structured output is the practice of constraining an LLM's response to a defined schema (typically JSON) so it can be reliably parsed and used programmatically, instead of parsing free-form text.</p>
+
+    <h2 id="whyexist">2. Why does it exist?</h2>
+    <p>LLMs natively generate free-form text; any application that needs to act on the output programmatically (populate a database, call another API, render a UI) needs guaranteed structure — structured output exists to bridge the gap between free-form generation and the strict typing software systems require.</p>
+
+    <h2 id="whyimportant">3. Why is it important?</h2>
+    <p>Unreliable output parsing is one of the most common sources of production bugs in LLM applications — structured output with validation turns a fuzzy, text-based interface into a dependable software contract.</p>
+
+    <h2 id="whereused">4. Where is it used?</h2>
+    <p>Data extraction pipelines, tool/function calling (arguments are structured output), form-filling, classification-via-LLM, any LLM output consumed by downstream code rather than displayed as prose.</p>
+
+    <h2 id="prereq">5. Prerequisites</h2>
+    <p><a href="../07-LLM-APIs-and-SDKs/llm-apis-and-sdks.html">LLM APIs and SDKs</a>, basic <a href="../01-Python-for-AI/python-for-ai-fundamentals.html">Pydantic</a>.</p>
+
+    <h2 id="core">6. Core concepts</h2>
+    <ul>
+      <li><b>JSON Schema:</b> a standard way to define the expected shape (fields, types, required/optional) of JSON output.</li>
+      <li><b>Constrained decoding:</b> some providers restrict the model's token sampling at generation time to only tokens that keep the output schema-valid, guaranteeing valid JSON structurally.</li>
+      <li><b>Prompt-based + validation retry:</b> a simpler approach — ask nicely for JSON, validate the result, and retry with error feedback if invalid.</li>
+      <li><b>Tool calling as structured output:</b> function/tool-call arguments are a special case of structured output, generated against a tool's defined schema.</li>
+    </ul>
+
+    <h2 id="terms">7. Terminology</h2>
+    <table>
+      <tr><th>Term</th><th>Meaning</th></tr>
+      <tr><td>JSON Schema</td><td>A specification language for describing the structure/types of JSON data.</td></tr>
+      <tr><td>Pydantic (Python) / Zod (TypeScript)</td><td>Libraries for defining and validating data schemas in code.</td></tr>
+      <tr><td>Constrained decoding</td><td>Restricting the model's token choices during generation to guarantee schema-valid output.</td></tr>
+      <tr><td>Validation retry loop</td><td>Re-prompting the model with the validation error when its output fails schema validation.</td></tr>
+    </table>
+
+    <h2 id="arch">8. Architecture</h2>
+    <pre><code>Prompt + JSON Schema (or Pydantic model)
+ → LLM (constrained decoding, if supported)
+ → Raw JSON output
+ → Validate against schema (Pydantic/Zod)
+ → Valid: use directly | Invalid: retry with error feedback, or fail gracefully</code></pre>
+
+    <h2 id="internal">9. How it works internally</h2>
+    <p>With constrained decoding, the serving infrastructure maintains a grammar/schema-aware state machine alongside generation, masking out any next-token candidates that would violate the schema before sampling — guaranteeing structural validity (though not semantic correctness of the values). Without native support, structured output relies purely on the model's learned ability to follow formatting instructions, which is less reliable and requires a validation+retry safety net.</p>
+
+    <h2 id="steps">10. Step-by-step: reliable structured extraction</h2>
+    <ol>
+      <li>Define the exact schema needed (Pydantic/Zod model or JSON Schema).</li>
+      <li>Use the provider's native structured-output/tool-calling mode if available.</li>
+      <li>Parse and validate the response against the schema.</li>
+      <li>On validation failure, retry with the specific error message fed back to the model.</li>
+      <li>After N failed retries, fail gracefully (default value, error state, human escalation) rather than crashing.</li>
+    </ol>
+
+    <h2 id="simple">11. Simple example</h2>
+    <pre><code class="language-python">from pydantic import BaseModel
+
+class Person(BaseModel):
+    name: str
+    age: int
+
+# Model asked to output JSON matching this schema
+</code></pre>
+
+    <h2 id="real">12. Real-world example</h2>
+    <p>A resume-parsing tool extracts candidate name, skills, and years of experience as structured JSON, validates it against a Pydantic schema, and only then inserts it into the applicant database — any malformed extraction is caught and retried rather than corrupting downstream data.</p>
+
+    <h2 id="code">13. Code example</h2>
+    <pre><code class="language-python">from anthropic import Anthropic
+from pydantic import BaseModel, ValidationError
+import json
+
+client = Anthropic()
+
+class ExtractedTicket(BaseModel):
+    symptom: str
+    urgency: str
+
+def extract_ticket(text: str) -> ExtractedTicket:
+    resp = client.messages.create(
+        model="claude-sonnet-5", max_tokens=200, temperature=0,
+        messages=[{"role": "user", "content":
+            f"Extract as JSON {{symptom, urgency}}: {text}"}],
+    )
+    raw = json.loads(resp.content[0].text)
+    return ExtractedTicket(**raw)  # raises ValidationError if invalid
+</code></pre>
+
+    <h2 id="advanced">14. Advanced example</h2>
+    <pre><code class="language-python"># Validation retry loop with error feedback
+def extract_with_retry(text: str, max_retries=3):
+    last_error = None
+    for attempt in range(max_retries):
+        prompt = f"Extract as JSON {{symptom, urgency}}: {text}"
+        if last_error:
+            prompt += f"\nPrevious attempt failed validation: {last_error}. Fix and retry."
+        resp = client.messages.create(
+            model="claude-sonnet-5", max_tokens=200, temperature=0,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        try:
+            raw = json.loads(resp.content[0].text)
+            return ExtractedTicket(**raw)
+        except (json.JSONDecodeError, ValidationError) as e:
+            last_error = str(e)
+    raise RuntimeError(f"Failed after {max_retries} attempts: {last_error}")
+</code></pre>
+
+    <h2 id="mistakes">15. Common mistakes</h2>
+    <ul>
+      <li>Using `eval()` or trusting raw LLM output as valid JSON without parsing/validating.</li>
+      <li>Not handling the case where the model wraps JSON in markdown code fences.</li>
+      <li>Assuming structural validity (valid JSON matching schema) implies semantic correctness (values are actually right).</li>
+      <li>No retry/fallback path when validation fails, causing hard crashes in production.</li>
+    </ul>
+
+    <h2 id="best">16. Best practices</h2>
+    <ul>
+      <li>Use the provider's native structured-output/tool-calling mode when available.</li>
+      <li>Always validate with a schema library (Pydantic/Zod), even with native structured-output guarantees.</li>
+      <li>Implement a validation-retry loop with error feedback for robustness.</li>
+      <li>Keep schemas as simple/flat as reasonably possible — deeply nested schemas are harder for models to follow reliably.</li>
+    </ul>
+
+    <h2 id="production">17. Production considerations</h2>
+    <p>Log validation failure rates per extraction type to catch prompt/schema drift issues early; have a defined fallback behavior (default values, human review queue) for persistent extraction failures.</p>
+
+    <h2 id="security">18. Security considerations</h2>
+    <p>Never directly execute/interpret extracted structured output as code (no `eval`); if extracted data flows into SQL, shell commands, or file paths, apply the same injection-prevention discipline as any other untrusted input.</p>
+
+    <h2 id="performance">19. Performance considerations</h2>
+    <p>Constrained decoding (native structured output) adds minimal overhead; validation-retry loops add latency proportional to retry count — monitor retry rates to catch systemic prompt/schema issues degrading performance.</p>
+
+    <h2 id="cost">20. Cost considerations</h2>
+    <p>Each retry in a validation loop is a full additional LLM call — a high retry rate directly multiplies cost; fixing the root cause (better prompt/schema) is cheaper than relying on retries long-term.</p>
+
+    <h2 id="debug">21. Debugging/troubleshooting</h2>
+    <ul>
+      <li><b>JSON parse errors:</b> check if the model wrapped output in markdown fences; strip them before parsing, or instruct the model explicitly not to use them.</li>
+      <li><b>Validation fails on a specific field repeatedly:</b> that field's instructions/schema may be ambiguous — add a few-shot example demonstrating the exact expected format.</li>
+      <li><b>High retry rate in production:</b> review recent prompt/schema changes, or check if the task has edge cases not covered by current instructions.</li>
+    </ul>
+
+    <h2 id="related">22. Related concepts</h2>
+    <p><a href="../08-Prompt-Engineering/prompt-engineering-fundamentals.html">Prompt Engineering</a> · <a href="../16-Tool-Calling/">Tool Calling</a> · <a href="../01-Python-for-AI/python-for-ai-fundamentals.html">Python for AI (Pydantic)</a></p>
+
+    <h2 id="comparison">23. Comparison with alternatives</h2>
+    <table>
+      <tr><th>Approach</th><th>Reliability</th><th>Notes</th></tr>
+      <tr><td>Prompting for JSON only</td><td>Low-moderate</td><td>No structural guarantee; needs validation</td></tr>
+      <tr><td>Native structured-output/constrained decoding</td><td>High (structural)</td><td>Guarantees valid JSON shape; doesn't guarantee semantic correctness</td></tr>
+      <tr><td>Tool/function calling</td><td>High (structural)</td><td>Same mechanism as structured output, framed as a callable function</td></tr>
+    </table>
+
+    <h2 id="exercise">24. Mini practical exercise</h2>
+    <p>Write a Pydantic model for extracting {product_name, price, in_stock} from a product description, and test it against 5 varied example descriptions.</p>
+
+    <h2 id="project">25. Practical project</h2>
+    <p><b>Structured Output API:</b> build a small FastAPI service that accepts free text and a target schema name, extracts matching structured data via LLM with validation-retry, and returns the validated JSON or a clear error.</p>
+
+    <h2 id="projectarch">26. Project architecture</h2>
+    <pre><code>POST /extract {text, schema_name}
+ → look up Pydantic model by schema_name
+ → LLM call with validation-retry loop
+ → return validated JSON or 422 error with details</code></pre>
+
+    <h2 id="interview-b">27. Interview Questions — Beginner</h2>
+    <div class="qa"><b>Q1.</b> What is structured output?<br><b>A.</b> LLM output constrained to a defined schema (typically JSON) so it can be reliably parsed and used programmatically.</div>
+    <div class="qa"><b>Q2.</b> What is JSON Schema?<br><b>A.</b> A specification language for describing the expected structure, fields, and types of JSON data.</div>
+    <div class="qa"><b>Q3.</b> Why validate LLM output even if asked to return JSON?<br><b>A.</b> Because the model can still produce malformed, incomplete, or schema-violating output despite instructions — validation catches this before it breaks downstream code.</div>
+    <div class="qa"><b>Q4.</b> What is Pydantic used for?<br><b>A.</b> Defining and validating structured data schemas in Python.</div>
+    <div class="qa"><b>Q5.</b> What's a validation retry loop?<br><b>A.</b> Re-prompting the model with the specific validation error when its output fails schema validation, asking it to correct the mistake.</div>
+    <div class="qa"><b>Q6.</b> Is tool calling a form of structured output?<br><b>A.</b> Yes — tool-call arguments are structured output generated against the tool's defined schema.</div>
+    <div class="qa"><b>Q7.</b> Does structural validity guarantee the extracted values are correct?<br><b>A.</b> No — a JSON object can be structurally valid (right shape/types) while containing semantically wrong or hallucinated values.</div>
+    <div class="qa"><b>Q8.</b> Why might raw LLM JSON output fail to parse directly?<br><b>A.</b> The model might wrap it in markdown code fences, add explanatory text around it, or produce a small syntax error.</div>
+    <div class="qa"><b>Q9.</b> What's constrained decoding?<br><b>A.</b> A technique where the serving infrastructure restricts token sampling during generation to guarantee the output matches a schema structurally.</div>
+    <div class="qa"><b>Q10.</b> Should you use `eval()` to parse LLM-generated "JSON"?<br><b>A.</b> No — always use a proper JSON parser plus schema validation; `eval()` on untrusted text is a security risk.</div>
+
+    <h2 id="interview-i">28. Interview Questions — Intermediate</h2>
+    <div class="qa"><b>Q1.</b> Why is native constrained decoding more reliable than prompting-only JSON generation?<br><b>A.</b> Constrained decoding structurally restricts the model's token choices at generation time, guaranteeing schema-valid output by construction, whereas prompting-only relies entirely on the model's learned instruction-following, which can fail.</div>
+    <div class="qa"><b>Q2.</b> What's a good strategy when a validation retry loop keeps failing on the same field across many inputs?<br><b>A.</b> Treat it as a prompt/schema design signal rather than just retrying harder — add a clarifying few-shot example for that field, simplify its type/format requirement, or split it into a separate, more constrained extraction step.</div>
+    <div class="qa"><b>Q3.</b> Why might deeply nested JSON schemas be harder for an LLM to reliably produce than flat schemas?<br><b>A.</b> Deep nesting increases the chance of structural errors (missing brackets, misplaced fields) and requires the model to track more structural state simultaneously; flatter schemas reduce the surface area for formatting mistakes.</div>
+    <div class="qa"><b>Q4.</b> How would you handle streaming structured output, where you want partial results before generation completes?<br><b>A.</b> Use an incremental/partial JSON parser designed for streaming (rather than a strict all-or-nothing parser), buffering and parsing what's valid so far, and finalizing validation once the stream completes.</div>
+    <div class="qa"><b>Q5.</b> Why does tool-calling schema design matter even though it's "just" structured output?<br><b>A.</b> Ambiguous or overly complex tool schemas lead to the model generating incorrect or incomplete arguments just like any other structured-output task — tool schemas deserve the same prompt/schema-design rigor as any extraction task.</div>
+
+    <h2 id="interview-a">29. Interview Questions — Advanced</h2>
+    <div class="qa"><b>Q1.</b> How would you design a structured-output system that gracefully degrades when a complex nested schema repeatedly fails validation?<br><b>A.</b> Decompose the complex schema into a sequence of simpler, independently validated extraction steps (task decomposition), each targeting a smaller sub-schema, then assemble the final structure in code — trading one fragile complex call for several more reliable simple calls.</div>
+    <div class="qa"><b>Q2.</b> What's a risk of relying solely on structural validation (schema match) for a high-stakes extraction task, and how would you add a semantic correctness check?<br><b>A.</b> Structural validation can't catch a value that's the right type but factually wrong (e.g., extracting a plausible but incorrect date); add a semantic verification step — cross-checking extracted values against the source text (e.g., via a secondary LLM-as-judge pass or rule-based consistency checks) rather than trusting shape-validity alone.</div>
+
+    <h2 id="interview-s">30. Interview Questions — Senior/Architect</h2>
+    <div class="qa"><b>Q1.</b> How would you design a company-wide structured-output validation standard used across many extraction features and teams?<br><b>A.</b> Establish a shared library of common Pydantic/Zod base schemas and validation-retry utilities, require every extraction feature to log validation failure rates centrally, set alerting thresholds for failure-rate regressions, and mandate native structured-output/tool-calling modes be used wherever the provider supports them instead of prompting-only approaches.</div>
+
+    <h2 id="interview-sc">31. Scenario-Based Questions</h2>
+    <div class="qa"><b>Scenario 1.</b> Your extraction pipeline's validation failure rate suddenly spiked after a model provider update. How do you respond?<br><b>A.</b> Check whether the new model version changed its default formatting tendencies (e.g., now wraps JSON in markdown fences); adjust the prompt/parsing accordingly, and add this to your regression-testing checklist for future model upgrades.</div>
+    <div class="qa"><b>Scenario 2.</b> A downstream service crashed because it received and blindly trusted a malformed field from an LLM extraction. How do you prevent this going forward?<br><b>A.</b> Enforce schema validation at the extraction boundary so malformed data never reaches downstream services in the first place; downstream services should also defensively validate inputs rather than trusting any upstream source implicitly.</div>
+
+    <h2 id="revision">32. Quick revision notes</h2>
+    <ul>
+      <li>Structured output = schema-constrained LLM output for programmatic use.</li>
+      <li>Use native structured-output/tool-calling modes when available; always validate with Pydantic/Zod regardless.</li>
+      <li>Structural validity ≠ semantic correctness.</li>
+      <li>Validation-retry loops add cost/latency — fix root causes (prompt/schema) rather than relying on retries alone.</li>
+    </ul>
+
+    <h2 id="cheat">33. Cheat sheet</h2>
+    <div class="callout">Define schema (Pydantic/Zod) → use native structured-output/tool-calling if available → validate every response → retry with error feedback on failure → fail gracefully, never trust unvalidated output.</div>
+
+    <h2 id="further">34. Further topics to learn</h2>
+    <p><a href="../16-Tool-Calling/">Tool Calling</a> → <a href="../37-AI-Guardrails/">AI Guardrails</a> → <a href="../35-AI-Evaluation/">AI Evaluation</a></p>
+
+    <div class="prevnext">
+      <a href="../08-Prompt-Engineering/advanced-prompting-patterns.html">← Advanced Prompting Patterns</a>
+      <a href="../10-Embeddings/embeddings-fundamentals.html">Next: Embeddings →</a>
+    </div>
+  </main>
+</div>
+<script src="../assets/app.js"></script>
+</body>
+</html>

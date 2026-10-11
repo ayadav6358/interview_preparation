@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Error Handling &amp; Debugging — Python Fundamentals — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">Python Fundamentals</a><span class="sep">›</span>Error Handling &amp; Debugging</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>Error Handling &amp; Debugging</h1>
+      <p class="meta-line"><span>⏱ ~1.5 hrs</span><span>📍 Chapter 5 of 6</span></p>
+      <p><strong>One-line summary:</strong> Python's try/except/else/finally is a richer shape than JS's
+      try/catch/finally, exceptions are the idiomatic control-flow tool for "this didn't work" (not an
+      edge case to avoid), and <code>pdb</code> is Python's interactive debugger — the closest thing to
+      Node's <code>--inspect</code> but terminal-native and always available.</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>Python's philosophy leans harder into "exceptions are normal control flow" than JS culture
+      typically does — EAFP ("easier to ask forgiveness than permission") is the idiomatic default, versus
+      the LBYL ("look before you leap") style more common in JS (checking <code>if (x)</code> before using
+      <code>x</code>). Writing defensive if-checks everywhere instead of embracing try/except where
+      appropriate is a visible tell of translated-from-JS code, and knowing when each style actually fits
+      is a real senior-level judgment call, not just a stylistic preference.</p>
+      <div class="box why"><h4>Why</h4><p>A bare <code>except:</code> (catching everything, including
+      <code>KeyboardInterrupt</code> and <code>SystemExit</code>) is one of the most common and most
+      dangerous Python anti-patterns in real codebases — it silently swallows bugs that should have crashed
+      loudly. Interviewers watch for whether you reach for specific exception types or hide behind a
+      catch-all, because it's a direct signal of production debugging maturity.</p></div>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>Requires <a href="02-control-flow-and-functions.html">Control Flow &amp; Functions</a> and
+      <a href="04-file-io-and-modules.html">File I/O &amp; Modules</a> (context managers and exceptions
+      interact constantly). Leads into <a href="06-intro-to-web-with-flask-fastapi.html">Intro to Web with
+      Flask/FastAPI</a>, where exception handling becomes HTTP error responses. See
+      <a href="../08-python-intermediate/index.html">Python Intermediate</a> for logging and testing in
+      depth.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="try-except">try/except/else/finally</h3>
+      <p>JS gives you try/catch/finally. Python adds a fourth clause, <code>else</code>, which runs only if
+      the <code>try</code> block completed with <em>no</em> exception — genuinely useful for separating
+      "the risky operation" from "what to do only on success," without nesting.</p>
+      <pre><code class="language-python">
+try:
+    result = 10 / int(input("Enter a divisor: "))
+except ValueError:
+    print("That wasn't a valid number")
+except ZeroDivisionError:
+    print("Can't divide by zero")
+else:
+    print(f"Result: {result}")      # runs ONLY if no exception occurred
+finally:
+    print("Done processing")         # always runs, exception or not -- same as JS finally
+
+# JS equivalent -- no `else` clause exists, success-only logic goes inline in `try`
+# try {
+#   const result = 10 / parseDivisor(input);
+#   console.log(`Result: ${result}`);   // success logic mixed into the try block itself
+# } catch (e) {
+#   console.log("Something went wrong");   // JS often catches broadly by default
+# } finally {
+#   console.log("Done processing");
+# }
+</code></pre>
+      <div class="box gotcha"><h4>Gotcha</h4><p>JS's single <code>catch</code> clause catches everything by
+      default, and you check <code>e instanceof SomeError</code> manually inside it if you need to
+      differentiate. Python's multiple <code>except</code> clauses are matched top-to-bottom like a type
+      switch — always catch the most specific exception types first, since Python stops at the first
+      matching clause (a broader <code>except Exception:</code> placed first would shadow more specific
+      clauses below it).</p></div>
+
+      <h3 id="raising-custom">Raising exceptions and custom exception classes</h3>
+      <p>Raising is <code>raise ExceptionType("message")</code> — the direct analog of JS's
+      <code>throw new Error("message")</code>. Custom exceptions are just classes inheriting from
+      <code>Exception</code> (or a more specific built-in), the same idea as extending <code>Error</code>
+      in JS.</p>
+      <pre><code class="language-python">
+class InsufficientFundsError(Exception):
+    """Raised when a withdrawal exceeds the available balance."""
+    def __init__(self, balance: float, requested: float):
+        self.balance = balance
+        self.requested = requested
+        super().__init__(f"Cannot withdraw {requested}, balance is only {balance}")
+
+def withdraw(balance: float, amount: float) -> float:
+    if amount > balance:
+        raise InsufficientFundsError(balance, amount)
+    return balance - amount
+
+try:
+    withdraw(100, 150)
+except InsufficientFundsError as e:
+    print(f"Failed: {e}")
+    print(f"Shortfall: {e.requested - e.balance}")   # custom attributes are accessible on the exception object
+
+# JS equivalent:
+# class InsufficientFundsError extends Error {
+#   constructor(balance, requested) {
+#     super(`Cannot withdraw ${requested}, balance is only ${balance}`);
+#     this.balance = balance;
+#     this.requested = requested;
+#   }
+# }
+</code></pre>
+      <p>Re-raising while preserving context uses <code>raise ... from ...</code> — Python's explicit way
+      to chain a new exception to the one that caused it, which shows up in tracebacks as "the above
+      exception was the direct cause of the following exception," similar in spirit to setting
+      <code>error.cause</code> in modern JS (<code>Error</code>'s <code>cause</code> option, ES2022+).</p>
+
+      <h3 id="debugging">Print-debugging vs pdb</h3>
+      <p>Print-debugging in Python is identical in spirit to <code>console.log</code> debugging in JS —
+      quick, universally understood, but noisy and requires editing code. <code>pdb</code> (Python DeBugger,
+      built into the standard library, no install needed) gives you breakpoints, step-through execution,
+      and live variable inspection — the terminal-native equivalent of Node's <code>--inspect</code> +
+      Chrome DevTools, or VS Code's JS debugger.</p>
+      <pre><code class="language-python">
+def process(items):
+    total = 0
+    for item in items:
+        breakpoint()      # built-in since Python 3.7 -- drops into pdb right here
+        total += item["value"]
+    return total
+
+# At the breakpoint prompt (pdb), common commands:
+#   n       -- next line (step over)
+#   s       -- step into a function call
+#   c       -- continue execution until the next breakpoint
+#   p item  -- print the value of `item`
+#   pp item -- pretty-print item (useful for dicts/lists)
+#   l       -- list source code around the current line
+#   q       -- quit the debugger
+</code></pre>
+      <p><code>breakpoint()</code> is the modern, idiomatic entry point (3.7+) — it's a thin wrapper that by
+      default calls <code>pdb.set_trace()</code>, but respects the <code>PYTHONBREAKPOINT</code> env var so
+      it can be redirected to a richer debugger (like <code>ipdb</code>) without changing your code.</p>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>When an exception is raised, CPython constructs an exception object and begins unwinding the call
+      stack, looking for a matching <code>except</code> clause in each enclosing <code>try</code> block —
+      this unwinding builds the traceback you see printed, which is literally a linked list of frame
+      records (file, line, function) walked from the raise point outward. Python's <code>except</code>
+      clause matching uses <code>isinstance()</code> checks against the exception's class hierarchy, which
+      is exactly why exception class inheritance matters for catching: <code>except Exception:</code> catches
+      any subclass of <code>Exception</code>, including your custom ones, because it's a real class
+      hierarchy check, not string matching. <code>pdb</code> works by hooking Python's trace function
+      (<code>sys.settrace</code>) — the same low-level hook that coverage tools and profilers use — to pause
+      execution and give you an interactive prompt at a specific line, line-by-line stepping being
+      implemented as toggling trace callbacks on/off per frame.</p>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+flowchart TD
+  A["try block raises exception"] --> B{"Matches except\nclause 1 type?"}
+  B -->|Yes| C["Run except clause 1\nException object available as 'as e'"]
+  B -->|No| D{"Matches except\nclause 2 type?"}
+  D -->|Yes| E["Run except clause 2"]
+  D -->|No| F["Propagate up the call stack\n(unwinding builds the traceback)"]
+  C --> G["finally block always runs"]
+  E --> G
+  F --> G
+  H["try block completes, no exception"] --> I["else block runs"]
+  I --> G
+      </div>
+      <div class="mermaid">
+sequenceDiagram
+  participant Dev
+  participant Code
+  participant pdb
+  Dev->>Code: runs script
+  Code->>Code: hits breakpoint()
+  Code->>pdb: sys.settrace hook fires
+  pdb->>Dev: interactive (Pdb) prompt
+  Dev->>pdb: p item
+  pdb-->>Dev: prints current value
+  Dev->>pdb: n (next line)
+  pdb->>Code: resumes one line, re-pauses
+  Dev->>pdb: c (continue)
+  pdb->>Code: resumes to completion or next breakpoint
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-python">
+# ---- BAD: bare except swallows everything, including bugs and Ctrl+C ----
+def load_data_bad(path):
+    try:
+        with open(path) as f:
+            return f.read()
+    except:                      # catches EVERYTHING -- including KeyboardInterrupt, SystemExit, typos
+        return None                # silent failure -- you'll never know why this returned None
+
+# ---- GOOD: catch specific exceptions, let unexpected ones propagate loudly ----
+def load_data_good(path):
+    try:
+        with open(path, encoding="utf-8") as f:
+            return f.read()
+    except FileNotFoundError:
+        print(f"Config file not found: {path}, using defaults")
+        return None
+    except PermissionError:
+        print(f"No permission to read: {path}")
+        raise                      # re-raise -- this one shouldn't be silently handled
+
+# ---- EAFP vs LBYL: the idiomatic Python style ----
+data = {"name": "Alice"}
+
+# LBYL (JS-habit style) -- check first, then act
+if "age" in data:
+    age = data["age"]
+else:
+    age = 0
+
+# EAFP (idiomatic Python) -- try the operation, handle the failure
+try:
+    age = data["age"]
+except KeyError:
+    age = 0
+
+# In practice, .get() is even more idiomatic than either for this specific case:
+age = data.get("age", 0)
+</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4><p>An API integration script wrapped every external call in a
+      bare <code>except: continue</code> "to be safe" during a demo sprint, and that pattern shipped to
+      production unchanged. Weeks later, a downstream API started returning malformed responses that
+      triggered a real bug in the parsing code — but because the bare except silently swallowed it and
+      moved on, the team had no idea data was being silently dropped for days, discovered only when a
+      business stakeholder noticed missing records in a report. The fix: replace every bare except with
+      specific exception types, log unexpected failures loudly with <code>logging.exception()</code>
+      (which captures the full traceback), and let truly unexpected exceptions propagate and alert rather
+      than vanish. This incident is the canonical argument for why "catch everything, just in case" is
+      actively dangerous in production code.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Using a bare <code>except:</code> (or the nearly-as-bad
+      <code>except Exception:</code> with no logging) to silence errors "temporarily." This hides real bugs,
+      including ones that should crash the program loudly (a bare except even catches
+      <code>KeyboardInterrupt</code>, meaning Ctrl+C might not stop your script). Always name the specific
+      exception type(s) you expect, and log or re-raise anything else.</p></div>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Writing heavily nested if-checks to avoid exceptions
+      entirely (pure LBYL) out of a JS-flavored defensive-coding habit, when the idiomatic and often more
+      correct Python style is EAFP — attempt the operation and handle the specific failure. This matters
+      especially with dict/attribute access and concurrent code, where an LBYL check-then-act can have a
+      race condition between the check and the act that EAFP's single atomic attempt avoids.</p></div>
+      <ul>
+        <li>Prefer <code>logging.exception("message")</code> over <code>print(e)</code> in except blocks — it captures the full traceback automatically and integrates with real log aggregation.</li>
+        <li>Use <code>raise ... from ...</code> when re-raising a different exception type, to preserve the original cause in the traceback for debugging.</li>
+        <li>Reach for <code>breakpoint()</code> instead of sprinkling <code>print()</code> statements when you need to inspect multiple variables or step through logic — it's faster once you know the basic pdb commands.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>EAFP (try/except)</td><td>The failure case is rare, or checking first has a race condition (concurrent access, file existence)</td><td>The failure case is common/expected on every call — exceptions have overhead and hurt readability if constant</td><td>LBYL (if-check first)</td></tr>
+        <tr><td>LBYL (if-check first)</td><td>The check is cheap and the failure case is frequent/expected</td><td>A race condition exists between the check and the action</td><td>EAFP</td></tr>
+        <tr><td>print-debugging</td><td>Quick, single-value sanity checks</td><td>Multi-variable, multi-step investigation</td><td><code>breakpoint()</code> / <code>pdb</code></td></tr>
+        <tr><td><code>pdb</code>/<code>breakpoint()</code></td><td>Stepping through nontrivial logic, inspecting state interactively</td><td>Production code (never ship a breakpoint call)</td><td>Structured logging + unit tests to reproduce the issue</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic">
+        <h4>Basic</h4>
+        <details class="qa"><summary>What does the <code>else</code> clause on a try/except do, and when does it run?</summary><div class="answer"><p>
+        It runs only if the <code>try</code> block completes with no exception raised — it's for
+        success-only logic that you want to keep separate from both the risky operation and any cleanup in
+        <code>finally</code>.</p></div><div class="followup">Follow-up: why not just put that code directly after the try/except block instead of in else?</div></details>
+        <details class="qa"><summary>What's wrong with a bare <code>except:</code> clause?</summary><div class="answer"><p>
+        It catches every exception, including ones you almost never want to catch silently, like
+        <code>KeyboardInterrupt</code> and <code>SystemExit</code> — and it hides the actual error type,
+        making debugging much harder. Always name specific exception types.</p></div><div class="followup">Follow-up: what's the difference between a bare except and except Exception?</div></details>
+        <details class="qa"><summary>How do you raise an exception in Python, and how does it compare to JS?</summary><div class="answer"><p>
+        <code>raise ExceptionType("message")</code> — directly analogous to JS's <code>throw new Error("message")</code>.</p></div><div class="followup">Follow-up: what's the minimum you need to define a custom exception class?</div></details>
+        <details class="qa"><summary>What is <code>breakpoint()</code> and when was it introduced?</summary><div class="answer"><p>
+        A built-in function (since Python 3.7) that drops into the <code>pdb</code> interactive debugger at
+        the line it's called, without needing to import pdb manually.</p></div><div class="followup">Follow-up: how would you redirect breakpoint() to use a different debugger like ipdb?</div></details>
+        <details class="qa"><summary>What's the difference between EAFP and LBYL?</summary><div class="answer"><p>
+        EAFP ("easier to ask forgiveness than permission") attempts an operation and handles failure via
+        except; LBYL ("look before you leap") checks a condition before acting. Python culture favors EAFP
+        more than typical JS culture does.</p></div><div class="followup">Follow-up: give an example where LBYL is clearly the better choice despite Python's EAFP preference.</div></details>
+        <details class="qa"><summary>Does Python's <code>finally</code> run even if the try block has a <code>return</code> statement?</summary><div class="answer"><p>
+        Yes — <code>finally</code> always runs before the function actually returns, even if both the
+        <code>try</code> and <code>finally</code> blocks contain return statements (in which case
+        <code>finally</code>'s return wins, which is a notorious gotcha in its own right).</p></div><div class="followup">Follow-up: what happens if try returns a value and finally also returns a different value?</div></details>
+      </div>
+      <div class="qa-level medium">
+        <h4>Medium</h4>
+        <details class="qa"><summary>Why must more specific except clauses come before more general ones in the same try statement?</summary><div class="answer"><p>
+        Python checks except clauses top-to-bottom and uses the first one whose type matches (via
+        <code>isinstance</code>) the raised exception. If a general clause like <code>except Exception:</code>
+        is listed first, it will catch and handle exceptions that a more specific clause below it was meant
+        to handle — the specific clause becomes unreachable dead code.</p></div><div class="followup">Follow-up: does Python raise a warning or error if you order except clauses incorrectly like this?</div></details>
+        <details class="qa"><summary>What does <code>raise NewError("msg") from original_error</code> actually do, and why use it over a plain raise inside an except block?</summary><div class="answer"><p>
+        It sets the new exception's <code>__cause__</code> attribute to <code>original_error</code>, which
+        the default traceback printer shows as "The above exception was the direct cause of the following
+        exception" — preserving the full causal chain for debugging, versus a plain re-raise of a different
+        exception type which would otherwise hide what originally triggered it (though Python does still
+        attach it as <code>__context__</code> automatically even without `from`, just with different
+        wording in the traceback).</p></div><div class="followup">Follow-up: what's the difference between __cause__ and __context__ specifically?</div></details>
+        <details class="qa"><summary>Why is EAFP sometimes the only correct choice, not just a style preference, in concurrent code?</summary><div class="answer"><p>
+        An LBYL check-then-act (e.g. "if key in dict: then access it") has a window between the check and
+        the action where another thread could change the state — a classic TOCTOU (time-of-check to
+        time-of-use) race condition. EAFP's single atomic attempt-and-handle-failure avoids that window
+        entirely for many built-in operations.</p></div><div class="followup">Follow-up: give a concrete concurrent scenario where dict.get() (an LBYL-flavored EAFP hybrid) is still safe despite this concern.</div></details>
+        <details class="qa"><summary>How does pdb's step ("s") differ from next ("n") when the current line is a function call?</summary><div class="answer"><p>
+        <code>n</code> (next) executes the current line as a whole and stops at the next line in the
+        <em>same</em> frame, treating any function call on that line as a black box. <code>s</code> (step)
+        steps into the function call itself if the current line calls one, pausing at its first line — the
+        pdb equivalent of "step over" vs "step into" in a GUI debugger like Chrome DevTools or VS Code.</p></div><div class="followup">Follow-up: what does "step out" / "finish" do in pdb, and when would you use it after stepping into a function you didn't mean to?</div></details>
+        <details class="qa"><summary>Design a custom exception hierarchy for a payments module with at least 3 distinct failure categories, and explain how callers would use it.</summary><div class="answer"><p>
+        Define a base <code>PaymentError(Exception)</code>, then subclasses like
+        <code>InsufficientFundsError(PaymentError)</code>, <code>CardDeclinedError(PaymentError)</code>, and
+        <code>GatewayTimeoutError(PaymentError)</code>. Callers that only care about "something went wrong
+        with payment" can catch the base <code>PaymentError</code> broadly; callers that need to react
+        differently (retry on timeout, show a specific message on decline) catch the specific subclasses —
+        the hierarchy gives both coarse and fine-grained catching for free, the same design principle as a
+        custom Error subclass hierarchy in a well-structured JS/TS codebase.</p></div><div class="followup">Follow-up: should GatewayTimeoutError inherit from a built-in exception type as well, via multiple inheritance? Why or why not?</div></details>
+      </div>
+      <div class="qa-level advanced">
+        <h4>Advanced</h4>
+        <details class="qa"><summary>Explain exactly how CPython builds a traceback object during exception propagation, and what information it preserves at each frame.</summary><div class="answer"><p>
+        Each time an exception propagates out of a frame, CPython prepends a new <code>traceback</code> node
+        recording that frame's code object (file name, function name, line number) to a linked list attached
+        to the exception's <code>__traceback__</code> attribute — so the final traceback, printed outermost
+        frame first... actually innermost (raise point) last in the default printed order, reflects the
+        exact call chain the exception unwound through, which is why you can read a traceback bottom-up to
+        find the originating line.</p></div><div class="followup">Follow-up: what happens to the traceback object's reference chain if you store a caught exception in a long-lived variable — any memory leak risk?</div></details>
+        <details class="qa"><summary>Why does chaining exceptions with bare re-raise still show "During handling of the above exception, another exception occurred" even without an explicit `from` clause?</summary><div class="answer"><p>
+        Python automatically sets the new exception's <code>__context__</code> to whatever exception was
+        currently being handled at the point of the new raise — this is implicit context chaining, distinct
+        from the explicit <code>__cause__</code> set by <code>raise X from Y</code>. Both get surfaced in the
+        printed traceback, with slightly different wording depending on which attribute is set, which is why
+        the two chaining mechanisms exist side by side rather than one subsuming the other.</p></div><div class="followup">Follow-up: how would you suppress the implicit context entirely if you intentionally want a "clean" new exception with no chain?</div></details>
+        <details class="qa"><summary>How does sys.settrace (which pdb relies on) affect the performance of code it's attached to, and why is this relevant to production debugging decisions?</summary><div class="answer"><p>
+        Once a trace function is installed, CPython calls it on nearly every line executed (and every
+        function call/return/exception event) across every frame in that thread, which adds meaningful
+        per-line overhead — this is why running code under pdb or a profiler based on the same hook is
+        measurably slower than normal execution, and why you'd never leave a trace function active in a
+        production hot path; you'd use targeted logging or sampling profilers (py-spy) that don't rely on
+        per-line tracing instead.</p></div><div class="followup">Follow-up: how does py-spy avoid this overhead while still providing stack sampling in production?</div></details>
+        <details class="qa"><summary>A teammate wants to use exceptions for ordinary control flow in a hot loop (e.g. StopIteration-style signaling for every iteration) — is this actually a performance concern in CPython, and how would you evaluate it?</summary><div class="answer"><p>
+        Exception raising/handling in CPython has real but historically shrinking overhead (3.11+ introduced
+        "zero-cost" exception handling for the non-raising path specifically, so a try block that doesn't
+        raise is nearly free; the raise path itself still costs more than a simple conditional). For a hot
+        loop raising exceptions on every iteration as the normal case rather than the rare case, you'd
+        benchmark with realistic data rather than assume — but idiomatically, exceptions should signal
+        exceptional/rare conditions, and iterator protocols already use StopIteration internally in a way
+        that's optimized at the C level, which is different from hand-rolled per-item exception signaling in
+        pure Python code.</p></div><div class="followup">Follow-up: what did Python 3.11's "zero-cost exceptions" change specifically about the non-exceptional path's bytecode?</div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment">
+        <span class="level-tag">Beginner (30-60 min)</span>
+        <h4>Exception type bug hunt and fix</h4>
+        <p>Write five small functions, each containing one classic Python error-handling mistake: a bare
+        except, catching the wrong exception type, an except clause ordered after a broader one that
+        shadows it, a missing <code>raise</code> when re-raising was needed, and silent failure with no
+        logging. Fix each and add a one-line comment naming the rule violated.</p>
+        <ul><li>Each must be runnable standalone with a small demo in <code>if __name__ == "__main__":</code>.</li>
+        <li>Comments must name the actual rule (e.g. "except order matters — specific before general").</li></ul>
+        <p><strong>Acceptance criteria:</strong> Running the script shows the buggy behavior first (via a comment or printed note), then the fixed version behaving correctly.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>For the shadowed-except example, deliberately trigger the specific exception type and show that the broader clause catches it first before fixing the ordering.</p></div></details>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Intermediate (2-4 hrs)</span>
+        <h4>Build a retry-with-backoff decorator using custom exceptions</h4>
+        <p>Write a decorator <code>@retry(max_attempts=3, retry_on=(TransientError,))</code> that retries a
+        wrapped function if it raises one of the specified exception types, with exponential backoff
+        between attempts, and re-raises the last exception if all attempts are exhausted. Define
+        <code>TransientError</code> and at least one non-transient custom exception that should NOT be
+        retried.</p>
+        <ul><li>Must only retry on the specified exception type(s) — other exceptions propagate immediately on first occurrence.</li>
+        <li>Must use <code>functools.wraps</code> to preserve the wrapped function's metadata.</li>
+        <li>Include a pytest suite using a function that fails N times then succeeds, verifying the right number of attempts occurred.</li></ul>
+        <p><strong>Acceptance criteria:</strong> The decorator correctly retries only on the specified exception type, respects max_attempts, and the pytest suite passes including a case where retries are exhausted.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>Use a mutable counter in a closure (or an object attribute) in your test fixture function to track how many times it's been called, incrementing and raising until a target call count is reached.</p></div></details>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Advanced (1-2 days)</span>
+        <h4>Build a tiny "traceback explainer" CLI tool</h4>
+        <p>Build a CLI that takes a Python script with an intentional bug, runs it, catches the resulting
+        exception, and prints a plain-English explanation of the exception type and the likely fix pattern
+        (e.g. "KeyError on 'age' — the dict is missing this key; consider .get() with a default or check
+        'in' first"). Support at least 5 distinct common exception types with tailored explanations.</p>
+        <ul><li>Must run the target script in a subprocess or controlled exec and capture the real traceback, not simulate it.</li>
+        <li>CLI takes a file path argument.</li>
+        <li>Include test fixture scripts (one per supported exception type) and a pytest suite asserting the right explanation is chosen per fixture.</li></ul>
+        <p><strong>Acceptance criteria:</strong> Running against each fixture produces the correct tailored explanation, and the pytest suite passes. No full solution here — this is meant to build real pattern-recognition for common Python exceptions.</p>
+      </div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet"><ul>
+        <li>try/except/<strong>else</strong>/finally — <code>else</code> runs only when no exception occurred; Python adds this clause beyond JS's try/catch/finally.</li>
+        <li>Never use a bare <code>except:</code> — always name specific exception types.</li>
+        <li>Order except clauses from most specific to most general — the first match wins.</li>
+        <li>Custom exceptions are just classes inheriting from <code>Exception</code> (or a more specific type).</li>
+        <li>Use <code>raise ... from ...</code> to explicitly chain a new exception to its cause.</li>
+        <li>EAFP (try/except) is often more idiomatic than LBYL (if-check first) in Python, especially under concurrency.</li>
+        <li><code>breakpoint()</code> (3.7+) drops into <code>pdb</code> without importing it manually.</li>
+        <li>pdb commands: <code>n</code> next, <code>s</code> step into, <code>c</code> continue, <code>p</code>/<code>pp</code> print, <code>l</code> list source, <code>q</code> quit.</li>
+        <li>Use <code>logging.exception()</code> instead of <code>print(e)</code> to capture full tracebacks.</li>
+        <li>Never ship a <code>breakpoint()</code> call to production code.</li>
+      </ul></div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://docs.python.org/3/tutorial/errors.html">Python docs: Errors and Exceptions tutorial</a></li>
+        <li><a href="https://docs.python.org/3/library/exceptions.html">Python docs: Built-in Exceptions reference</a></li>
+        <li><a href="https://docs.python.org/3/library/pdb.html">Python docs: pdb — The Python Debugger</a></li>
+        <li><a href="https://docs.python.org/3/library/logging.html#logging.Logger.exception">Python docs: logging.Logger.exception</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="04-file-io-and-modules.html"><span class="dir">← Previous</span>File I/O &amp; Modules</a>
+        <a class="next" href="06-intro-to-web-with-flask-fastapi.html"><span class="dir">Next →</span>Intro to Web with Flask/FastAPI</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · Python Fundamentals</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "14-python-fundamentals", chapterKey: "05-error-handling-and-debugging" });</script>
+</body>
+</html>

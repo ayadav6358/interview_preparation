@@ -1,0 +1,511 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Virtual Envs, Packaging, Testing with pytest — Python Intermediate — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">Python Intermediate</a><span class="sep">›</span>Virtual Envs, Packaging, Testing with pytest</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>Virtual Envs, Packaging, Testing with pytest</h1>
+      <p class="meta-line"><span>⏱ ~3 hrs</span><span>📍 Chapter 6 of 6</span></p>
+      <p><strong>One-line summary:</strong> Python's dependency story (venv + pip/<code>pyproject.toml</code>)
+      solves the same "isolated, reproducible dependencies" problem <code>node_modules</code>+<code>package.json</code>
+      solves, with one crucial difference you must internalize — isolation is per-interpreter-environment, not
+      automatic per-project — and pytest gives you Jest-equivalent fixtures, parametrization, and mocking with
+      a philosophy of plain functions over class-based test suites.</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>Every Python interview that goes past "write a function" eventually touches tooling: how you'd set up
+      a reproducible dev environment, how you'd structure a test suite for a FastAPI service, how you'd mock
+      an async dependency. These are exactly the questions that separate "wrote some Python scripts" from
+      "can own a Python service in production" — and they map cleanly onto things you already know cold from
+      Node, so the leverage here is high relative to the effort.</p>
+      <div class="box why"><h4>Why</h4><p>Unlike npm, where <code>node_modules</code> is scoped to the project
+      directory automatically, Python's default <code>pip install</code> targets whatever interpreter is
+      currently active <strong>globally</strong> unless you've explicitly activated a virtual environment first.
+      Forgetting this is the single most common "works on my machine" bug new Python developers (including
+      experienced engineers new to Python) introduce, and it's a very fair interview probe for whether you
+      actually understand the tooling or just copy-pasted commands that happened to work.</p></div>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>Builds on <a href="01-python-for-js-devs.html">Python for JS Developers</a> (interpreter basics) and
+      pairs with <a href="05-fastapi.html">FastAPI</a> (the service you'll actually be testing and packaging).
+      No further Python-intermediate prerequisites — this is the capstone tooling chapter for the topic.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="venv-basics">Virtual environments vs node_modules (bridge from npm)</h3>
+      <table>
+        <tr><th>npm/Node</th><th>Python</th><th>Notes</th></tr>
+        <tr><td><code>node_modules/</code> (automatic, project-scoped)</td><td><code>python -m venv .venv</code> then <code>source .venv/bin/activate</code></td><td>Python's isolation is <strong>not automatic</strong> — you must create and activate an environment explicitly, or packages install into your global/system Python.</td></tr>
+        <tr><td><code>package.json</code></td><td><code>pyproject.toml</code></td><td>Modern standard (PEP 621) for declaring project metadata and dependencies — replaces the older, messier <code>setup.py</code>/<code>requirements.txt</code>-only world.</td></tr>
+        <tr><td><code>package-lock.json</code> / <code>npm ci</code></td><td><code>uv.lock</code> / <code>poetry.lock</code> / <code>pip-compile</code> output</td><td>Pip alone has historically had no built-in universal lockfile; modern tools (uv, Poetry, pip-tools) fill this gap — expect interviewers to ask which you'd pick and why.</td></tr>
+        <tr><td><code>npx &lt;tool&gt;</code></td><td><code>uvx &lt;tool&gt;</code> / <code>pipx run &lt;tool&gt;</code></td><td>Run a CLI tool in an ephemeral isolated environment without permanently installing it.</td></tr>
+        <tr><td>Node version via <code>nvm</code>/<code>.nvmrc</code></td><td>Python version via <code>pyenv</code>, or <code>uv python install</code></td><td>Same category of problem (multiple Python versions on one machine), different tool ecosystem — <code>uv</code> increasingly handles both venv and Python-version management in one tool, the closest thing to Node's nvm+npm combined.</td></tr>
+      </table>
+      <pre><code class="language-bash">
+# Classic stdlib workflow
+python -m venv .venv
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
+pip install fastapi uvicorn pytest
+pip freeze > requirements.txt    # crude lockfile -- pins exact versions, but not a real lockfile (no hashes, no resolution graph)
+
+# Modern workflow with uv (2025-26 default for new projects -- much faster, Rust-based)
+uv init my-service
+uv add fastapi uvicorn
+uv add --dev pytest pytest-asyncio
+uv run pytest                    # runs inside the project's venv automatically, no manual activate needed
+</code></pre>
+
+      <h3 id="pyproject">pyproject.toml (bridge from package.json)</h3>
+      <pre><code class="language-bash">
+[project]
+name = "my-service"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "pydantic>=2.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.24", "httpx>=0.27"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+
+# Equivalent package.json shape:
+# {
+#   "dependencies": { "express": "^4.19.0" },
+#   "devDependencies": { "jest": "^29.0.0" },
+#   "scripts": { "test": "jest" }
+# }
+</code></pre>
+      <p>Where npm has <code>dependencies</code>/<code>devDependencies</code> as top-level keys, Python's
+      convention is <code>[project.optional-dependencies]</code> groups (often named <code>dev</code>, <code>test</code>),
+      installed with <code>pip install -e ".[dev]"</code> or <code>uv sync --extra dev</code>. There's no single
+      universally standardized "devDependencies" keyword — it's a convention, not enforced by the spec.</p>
+
+      <h3 id="pytest-basics">pytest: fixtures, parametrize, mocking (bridge from Jest)</h3>
+      <table>
+        <tr><th>Jest</th><th>pytest</th><th>Notes</th></tr>
+        <tr><td><code>beforeEach(() => {...})</code> / <code>afterEach</code></td><td><code>@pytest.fixture</code> with <code>yield</code></td><td>pytest fixtures are more composable — a test function just declares the fixture names it needs as parameters, and pytest resolves/injects them, including fixtures that depend on other fixtures.</td></tr>
+        <tr><td><code>test.each([...])('...', (a, b) => {...})</code></td><td><code>@pytest.mark.parametrize("a,b", [...])</code></td><td>Nearly identical concept — run the same test body against many input combinations.</td></tr>
+        <tr><td><code>jest.fn()</code> / <code>jest.mock()</code></td><td><code>unittest.mock.Mock</code> / <code>monkeypatch</code> fixture / <code>pytest-mock</code>'s <code>mocker</code></td><td>pytest has no built-in auto-mocking of modules like Jest's <code>jest.mock('./module')</code> — mocking is more explicit, usually via patching a specific attribute/function.</td></tr>
+        <tr><td><code>expect(x).toBe(y)</code></td><td><code>assert x == y</code></td><td>pytest rewrites plain <code>assert</code> statements to give rich failure diffs — no special assertion API needed, unlike Jest's <code>expect</code> chain.</td></tr>
+        <tr><td><code>describe</code> blocks for grouping</td><td>Classes (optional, <code>TestSomething</code>) or just file/module organization</td><td>pytest strongly favors plain functions; classes are supported but not the idiomatic default the way <code>describe</code> blocks are in Jest.</td></tr>
+      </table>
+      <pre><code class="language-python">
+import pytest
+
+@pytest.fixture
+def sample_user():
+    return {"id": 1, "name": "Ada"}
+
+def test_user_has_name(sample_user):
+    assert sample_user["name"] == "Ada"
+
+@pytest.mark.parametrize("a,b,expected", [
+    (1, 2, 3),
+    (0, 0, 0),
+    (-1, 1, 0),
+])
+def test_add(a, b, expected):
+    assert a + b == expected
+
+# Equivalent Jest:
+# test.each([[1,2,3],[0,0,0],[-1,1,0]])('add(%i,%i)=%i', (a,b,expected) => {
+#   expect(a + b).toBe(expected);
+# });
+</code></pre>
+
+      <h2 id="under-the-hood">How It Works Under the Hood: environment isolation vs node_modules resolution</h2>
+      <p>Node's module resolution walks up the directory tree looking for <code>node_modules</code>, and
+      every project gets a fresh, isolated tree by default — isolation is a property of the <em>filesystem
+      layout</em>, enforced per-project automatically. Python's import system instead resolves against
+      <code>sys.path</code>, which is populated based on <strong>which interpreter binary you invoked</strong> —
+      a venv works by giving you a separate interpreter (or a symlink to the system one) with its own
+      <code>site-packages</code> directory baked into that interpreter's <code>sys.path</code>. Activating a
+      venv just prepends that venv's <code>bin</code>/<code>Scripts</code> directory to your shell's
+      <code>PATH</code>, so typing <code>python</code> or <code>pip</code> resolves to the venv's copies instead
+      of the system ones — isolation is a property of <em>which binary your shell finds first</em>, not of the
+      project directory itself. This is why running the wrong interpreter (forgetting to activate, or a
+      misconfigured IDE) silently uses the wrong — often global — set of installed packages, with no error at
+      all, unlike Node where a missing project-local package simply fails to resolve.</p>
+      <table>
+        <tr><th>Aspect</th><th>Node/npm</th><th>Python/venv</th></tr>
+        <tr><td>Isolation mechanism</td><td>Directory-based (<code>node_modules</code> tree walked per-import)</td><td>Interpreter-based (which <code>python</code>/<code>pip</code> binary is first on PATH)</td></tr>
+        <tr><td>Default scope</td><td>Project-local by default</td><td>Global/system by default unless a venv is active</td></tr>
+        <tr><td>Multiple projects, different dep versions</td><td>Trivial — each has its own <code>node_modules</code></td><td>Requires a separate venv per project — shared global installs would conflict</td></tr>
+        <tr><td>Failure mode when isolation is wrong</td><td>Explicit "module not found" error</td><td>Silent — code runs against whatever's actually on <code>sys.path</code>, which may be the wrong version or entirely missing the package without obvious indication</td></tr>
+      </table>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+graph LR
+  A[python -m venv .venv] --> B[.venv/bin/python<br/>own site-packages]
+  C[shell: source .venv/bin/activate] --> D[PATH prepended with .venv/bin]
+  D --> E{typing 'python' or 'pip'}
+  E -->|resolves to| B
+  F[pip install fastapi] --> G[installs into .venv/site-packages]
+  G --> B
+  H[deactivate] --> I[PATH restored<br/>python resolves to system interpreter again]
+      </div>
+      <div class="mermaid">
+sequenceDiagram
+  participant Test as test_create_order
+  participant Fixture as client fixture (app + overrides)
+  participant Override as dependency_overrides[get_db]
+  participant App as FastAPI app
+  Test->>Fixture: request client fixture
+  Fixture->>Override: swap get_db for fake_db fixture
+  Fixture->>App: wrap in TestClient/ASGITransport
+  Fixture-->>Test: yield configured client
+  Test->>App: client.post("/orders", json=payload)
+  App->>Override: resolve get_db -> fake in-memory db
+  App-->>Test: response (201, fake data)
+  Test->>Test: assert response.status_code == 201
+  Note over Fixture: after test, fixture teardown restores original dependency_overrides
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-python">
+# conftest.py -- shared fixtures, auto-discovered by pytest (no import needed in test files)
+import pytest
+import pytest_asyncio
+from httpx import AsyncClient, ASGITransport
+from main import app, get_db
+
+class FakeDB:
+    def __init__(self):
+        self.orders = {}
+        self._next_id = 1
+
+    async def insert_order(self, product_id: int, quantity: int) -> dict:
+        order = {"id": self._next_id, "product_id": product_id, "quantity": quantity, "total_cents": quantity * 500}
+        self.orders[self._next_id] = order
+        self._next_id += 1
+        return order
+
+@pytest.fixture
+def fake_db():
+    return FakeDB()
+
+@pytest_asyncio.fixture
+async def client(fake_db):
+    async def override_get_db():
+        yield fake_db
+    app.dependency_overrides[get_db] = override_get_db
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as c:
+        yield c
+    app.dependency_overrides.clear()   # teardown: don't leak overrides into other tests
+
+# test_orders.py
+import pytest
+
+@pytest.mark.asyncio
+async def test_create_order_success(client):
+    response = await client.post("/orders", json={"product_id": 1, "quantity": 3})
+    assert response.status_code == 201
+    body = response.json()
+    assert body["quantity"] == 3
+    assert body["total_cents"] == 1500
+
+@pytest.mark.asyncio
+async def test_create_order_validation_error(client):
+    response = await client.post("/orders", json={"product_id": "not-a-number", "quantity": 3})
+    assert response.status_code == 422
+
+@pytest.mark.parametrize("quantity,expected_total", [
+    (1, 500), (2, 1000), (10, 5000),
+])
+@pytest.mark.asyncio
+async def test_create_order_pricing(client, quantity, expected_total):
+    response = await client.post("/orders", json={"product_id": 1, "quantity": quantity})
+    assert response.json()["total_cents"] == expected_total
+
+# Mocking an external call with monkeypatch (vs jest.mock)
+import httpx
+
+async def fetch_exchange_rate() -> float:
+    async with httpx.AsyncClient() as c:
+        r = await c.get("https://api.example.com/rate")
+        return r.json()["rate"]
+
+@pytest.mark.asyncio
+async def test_fetch_exchange_rate_uses_mocked_response(monkeypatch):
+    class FakeResponse:
+        def json(self):
+            return {"rate": 1.23}
+
+    class FakeClient:
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): pass
+        async def get(self, url): return FakeResponse()
+
+    monkeypatch.setattr(httpx, "AsyncClient", lambda *a, **kw: FakeClient())
+    rate = await fetch_exchange_rate()
+    assert rate == 1.23
+</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4><p>A team's CI pipeline passes consistently, but a new engineer's
+      local "it works on my machine" report doesn't match a bug reported in staging. Root cause, after
+      investigation: the engineer's editor was configured to use the system Python interpreter directly
+      (no venv activated), which happened to have an older <code>pydantic</code> version installed globally
+      from a previous unrelated project — their local runs silently used that version's (different) validation
+      behavior, while CI correctly used the pinned version from the project's lockfile inside a clean venv. The
+      fix wasn't a code change at all: standardizing on <code>uv</code> (or any tool that creates and
+      auto-activates a project-scoped venv transparently, erroring instead of silently falling back to a global
+      interpreter) and adding a pre-commit check that fails if <code>sys.prefix</code> doesn't point into the
+      project's <code>.venv</code>. This class of bug — silent interpreter/dependency mismatch — is Python's
+      most common "works on my machine" failure mode, and it has no real Node equivalent because
+      <code>node_modules</code> resolution makes the equivalent mistake nearly impossible to make by accident.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Running <code>pip install</code> without an active virtual
+      environment installs into the global/system Python silently — no warning, no error. This is almost never
+      what you want outside of throwaway scripts, and it's the single most common Python tooling mistake
+      engineers new to the ecosystem make, since nothing in the default experience forces you to notice.</p></div>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Writing async tests without <code>pytest-asyncio</code> installed
+      and configured (or without the <code>@pytest.mark.asyncio</code> marker / <code>asyncio_mode = "auto"</code>
+      in <code>pyproject.toml</code>) makes pytest silently treat an <code>async def test_...</code> function as
+      passing without ever actually running its body — pytest just gets back a coroutine object, doesn't await
+      it, and reports success. A test that can never fail is far more dangerous than one that's merely slow.</p></div>
+      <ul>
+        <li>Forgetting to add <code>app.dependency_overrides.clear()</code> in fixture teardown lets overrides
+        from one test leak into unrelated tests run later in the same session — a classic shared-mutable-state bug.</li>
+        <li>Committing a <code>.venv</code> directory to version control (instead of <code>.gitignore</code>-ing
+        it and relying on <code>pyproject.toml</code>/lockfile for reproducibility) bloats the repo and bakes in
+        platform-specific binaries that won't work on a different OS.</li>
+        <li>Relying on <code>pip freeze > requirements.txt</code> as a lockfile: it pins every installed package
+        including transitive ones with no distinction between direct and transitive dependencies, and has no
+        hash verification — reproducible but not auditable or minimal the way a real lockfile (uv.lock, poetry.lock) is.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>stdlib <code>venv</code> + <code>pip</code></td><td>Simple projects, minimal tooling dependencies, matches most tutorials/CI images out of the box</td><td>You want fast installs, built-in lockfiles, or unified Python-version management</td><td><code>uv</code> (fast, Rust-based, increasingly the 2025-26 default) or Poetry</td></tr>
+        <tr><td><code>uv</code></td><td>New projects, want speed and a real lockfile with minimal config</td><td>Legacy codebases deeply tied to an older pip/setuptools workflow with custom build steps</td><td>Keep pip + pip-tools for compiling locked requirements</td></tr>
+        <tr><td>Function-based pytest tests</td><td>Almost always — pytest's idiomatic style, maximum fixture composability</td><td>Porting an existing large <code>unittest.TestCase</code> suite where rewriting isn't worth the cost yet</td><td>Class-based tests (pytest supports <code>unittest.TestCase</code> natively)</td></tr>
+        <tr><td><code>monkeypatch</code>/manual mocks</td><td>Mocking a specific function/attribute precisely, want explicit control</td><td>Heavy, repeated mocking needs across many tests where boilerplate adds up</td><td><code>pytest-mock</code>'s <code>mocker</code> fixture (thin wrapper reducing boilerplate) or dependency-injection overrides at the framework level (FastAPI's <code>dependency_overrides</code>)</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic">
+        <h4>Basic</h4>
+        <details class="qa"><summary>What problem does a virtual environment solve, and how is it different from `node_modules`?</summary><div class="answer"><p>
+        It isolates a project's installed packages from the system Python and from other projects' dependencies,
+        avoiding version conflicts. Unlike `node_modules`, which is automatically project-scoped by directory
+        structure, a venv requires you to explicitly create and activate it — if you forget, `pip install`
+        silently installs into the global interpreter instead.</p></div><div class="followup">Follow-up: how do you check, from the command line, whether a venv is currently active?</div></details>
+        <details class="qa"><summary>What is `pyproject.toml` and what's its closest npm equivalent?</summary><div class="answer"><p>
+        It's the modern standardized file (PEP 621) for declaring a Python project's metadata, dependencies, and
+        build configuration — the direct equivalent of `package.json`. It replaces the older, more fragmented
+        combination of `setup.py` and separate `requirements.txt` files.</p></div><div class="followup">Follow-up: where would you declare dev-only dependencies in pyproject.toml?</div></details>
+        <details class="qa"><summary>What's a pytest fixture, and what's its closest Jest equivalent?</summary><div class="answer"><p>
+        A fixture is a function decorated with `@pytest.fixture` that provides setup (and optionally teardown,
+        via `yield`) for tests that declare it as a parameter — pytest injects the fixture's return/yielded value
+        automatically. It's conceptually similar to Jest's `beforeEach`/`afterEach`, but more composable since
+        fixtures can depend on other fixtures and are requested explicitly per test rather than applying globally.</p></div><div class="followup">Follow-up: how would a fixture with yield handle cleanup if the test raises an exception?</div></details>
+        <details class="qa"><summary>What does `@pytest.mark.parametrize` do?</summary><div class="answer"><p>
+        It runs the same test function multiple times, once per set of parameters provided, reporting each as a
+        separate test case — directly equivalent to Jest's `test.each`. It avoids copy-pasting near-identical
+        test functions that only differ in input/expected-output values.</p></div><div class="followup">Follow-up: can you stack multiple parametrize decorators on one test, and what does that produce?</div></details>
+        <details class="qa"><summary>Why would `pip freeze > requirements.txt` be considered an incomplete substitute for a real lockfile?</summary><div class="answer"><p>
+        It lists every installed package with its exact version, including transitive dependencies, with no
+        distinction between what you directly declared and what was pulled in indirectly, and no cryptographic
+        hashes to verify package integrity on install. A real lockfile (uv.lock, poetry.lock, or pip-tools output)
+        tracks the resolution graph and often includes hashes, making installs both reproducible and auditable.</p></div><div class="followup">Follow-up: what problem specifically arises if you try to remove one no-longer-needed dependency from a pip-freeze-generated requirements.txt?</div></details>
+        <details class="qa"><summary>How does pytest's plain `assert` statement give useful failure output without a special assertion API like Jest's `expect`?</summary><div class="answer"><p>
+        pytest rewrites assert statements at import/collection time (via its assertion rewriting hook) to
+        capture the values of subexpressions, so a failed `assert x == y` can show you the actual values of
+        `x` and `y` in the failure output, without you needing to call a special comparison function.</p></div><div class="followup">Follow-up: does this assertion rewriting work on third-party library code too, or only your own test files by default?</div></details>
+      </div>
+      <div class="qa-level medium">
+        <h4>Medium</h4>
+        <details class="qa"><summary>Explain exactly why running `pip install` with the wrong (or no) venv active can produce a "works on my machine" bug that's hard to diagnose.</summary><div class="answer"><p>
+        Python resolves imports based on whichever interpreter binary is currently first on `PATH` — if no venv
+        is active, that's the system Python, whose `site-packages` may already contain unrelated packages (at
+        different versions) from previous work. Code then silently runs against whatever happens to be globally
+        installed, with no error, producing behavior that differs from a clean environment (like CI) without any
+        obvious signal that the wrong interpreter was used at all.</p></div><div class="followup">Follow-up: what command would you run to print the exact interpreter path currently in use, to debug this?</div></details>
+        <details class="qa"><summary>Why must you clear `app.dependency_overrides` in a FastAPI test fixture's teardown, and what class of bug does forgetting it cause?</summary><div class="answer"><p>
+        `dependency_overrides` is a mutable dict on the shared `app` instance — if one test overrides `get_db`
+        and doesn't clear it afterward, that override persists into the next test that reuses the same `app`
+        object, potentially making an unrelated test pass or fail incorrectly because it's silently using a fake
+        dependency it never asked for. This is a shared-mutable-state bug, the same category as leaking global
+        variables between Jest test files that don't reset module state between runs.</p></div><div class="followup">Follow-up: how would you structure fixtures to make this cleanup automatic and impossible to forget?</div></details>
+        <details class="qa"><summary>What specifically goes wrong if you write `async def test_foo(): ...` without pytest-asyncio configured, and why is it worse than a normal test failure?</summary><div class="answer"><p>
+        Without `pytest-asyncio` (or `asyncio_mode` configured), pytest calls the test function, gets back a
+        coroutine object (since it's `async def`), and — because nothing awaits it — simply records the test as
+        passed, since no exception was raised by merely creating the coroutine object. The test body, including
+        every assertion inside it, never actually executes. It's worse than a normal failure because it reports
+        false confidence — a test that can never catch a real bug, silently.</p></div><div class="followup">Follow-up: how would you write a meta-test or CI check to catch this misconfiguration before it hides a real bug?</div></details>
+        <details class="qa"><summary>Compare mocking strategy in pytest (`monkeypatch`) versus Jest's `jest.mock()` for replacing a module-level import.</summary><div class="answer"><p>
+        Jest's `jest.mock('./module')` can auto-mock an entire module's exports based on static analysis of the
+        import graph, often with minimal setup. pytest's `monkeypatch.setattr(module, "name", replacement)` is
+        more explicit and surgical — you patch one specific attribute/function on an already-imported module
+        object, which means you need to know exactly where the thing is looked up from (the consuming module's
+        namespace, not necessarily the defining module's), a common source of "my mock didn't take effect" bugs.</p></div><div class="followup">Follow-up: why does patching `httpx.AsyncClient` at the httpx module level work in the example, but patching it on a module that did `from httpx import AsyncClient` would not?</div></details>
+        <details class="qa"><summary>What's the practical benefit of `uv` over stdlib venv + pip for a team's CI pipeline, beyond raw install speed?</summary><div class="answer"><p>
+        `uv` produces a real lockfile (`uv.lock`) with a full resolved dependency graph and hashes, resolves
+        dependencies deterministically, and can manage the Python interpreter version itself — collapsing what
+        would otherwise be pyenv + venv + pip + pip-tools into one tool with one config source of truth
+        (`pyproject.toml`). For CI specifically, `uv sync` reproduces an exact environment from the lockfile
+        reliably and quickly, reducing both flakiness and pipeline duration compared to a fresh `pip install`
+        resolving dependencies from scratch each run.</p></div><div class="followup">Follow-up: how does uv's dependency resolution algorithm differ from pip's, and why did pip's historically cause more conflicts?</div></details>
+      </div>
+      <div class="qa-level advanced">
+        <h4>Advanced</h4>
+        <details class="qa"><summary>Design a pytest fixture hierarchy for testing a FastAPI service with layered dependencies: a fake DB, an authenticated test user, and a per-test transaction rollback so tests don't leak state into each other.</summary><div class="answer"><p>
+        A session-scoped fixture creates the FastAPI app once; a function-scoped `fake_db` fixture provides a
+        fresh in-memory (or SQLite-in-memory) database per test, with a transaction begun at test start and
+        rolled back at teardown regardless of pass/fail (via `yield` inside a try/finally); a `client` fixture
+        depends on `fake_db` and wires it into `app.dependency_overrides` for `get_db`, clearing overrides at
+        teardown; an `authenticated_client` fixture builds on `client`, additionally overriding `get_current_user`
+        to return a fixed test user. Scoping `fake_db` at function level (not session) is the key decision that
+        guarantees test isolation — a session-scoped DB fixture would leak state across tests even with
+        per-test transaction rollback if the rollback logic has any gap.</p></div><div class="followup">Follow-up: how would you handle a test that specifically needs to verify behavior ACROSS a transaction commit, where rollback-per-test would defeat the test's purpose?</div></details>
+        <details class="qa"><summary>Explain the tradeoff between pinning exact versions in `pyproject.toml` dependencies versus using compatible-release operators (`>=2.0,<3.0`), especially for a library versus an application.</summary><div class="answer"><p>
+        An application (deployed as a whole, with a lockfile pinning exact resolved versions for reproducibility)
+        can afford loose version ranges in `pyproject.toml` itself since the lockfile is the actual source of
+        truth for what gets installed — the ranges just express compatibility intent. A library published to
+        others (who have their own dependency trees) should use loose ranges deliberately, since over-pinning a
+        library's dependencies causes version conflicts for every consumer who also depends on that same package
+        at a slightly different version — the Python equivalent of an npm package pinning an exact React version
+        and breaking everyone who's on a different one.</p></div><div class="followup">Follow-up: what's the specific mechanism (dependency resolution algorithm) that causes an over-pinned library dependency to produce an unresolvable conflict for a consumer?</div></details>
+        <details class="qa"><summary>A test suite passes reliably in CI but is flaky locally for one team member, intermittently failing on async tests with "Event loop is closed" errors. Diagnose likely causes.</summary><div class="answer"><p>
+        This is a classic symptom of event-loop-scoped fixtures/resources being created in one test's event loop
+        and reused in another after pytest-asyncio has torn down and created a new loop between tests (depending
+        on the configured event loop scope — function vs session) — often caused by a fixture that caches an
+        async resource (like an httpx client or DB connection) at session scope while pytest-asyncio's default
+        loop scope is function-level, so the cached resource's loop reference goes stale between tests. The
+        team member's local flakiness versus CI stability suggests a timing-dependent factor (test ordering via
+        `pytest-xdist` parallelism, or a slower machine surfacing a race that CI's consistent ordering happens to avoid).</p></div><div class="followup">Follow-up: how would you configure pytest-asyncio's event loop scope to fix this, and what's the tradeoff of a session-scoped loop?</div></details>
+        <details class="qa"><summary>How would you structure packaging for a monorepo containing a shared internal library and multiple FastAPI services that depend on it, without publishing the library to PyPI?</summary><div class="answer"><p>
+        Give the shared library its own `pyproject.toml` and treat it as a local path dependency: each service's
+        `pyproject.toml` references it via `{ path = "../shared-lib", editable = true }` (uv/Poetry syntax) or an
+        editable pip install (`pip install -e ../shared-lib`), so changes to the shared library are immediately
+        reflected in each service's environment without a publish/version-bump cycle during development. For
+        CI/production builds, decide whether to vendor a pinned snapshot or keep the editable/path reference
+        depending on whether services need independent release cadences from the shared library.</p></div><div class="followup">Follow-up: what breaks if two services in the monorepo need genuinely different versions of the shared library simultaneously, and how would you resolve that?</div></details>
+        <details class="qa"><summary>Explain how you'd design a test suite's mocking boundary for a service that calls an LLM API (e.g., for an AI feature) — what should be mocked versus tested against the real API, and why?</summary><div class="answer"><p>
+        Unit/integration tests for business logic (prompt construction, response parsing, error handling,
+        retry/timeout behavior) should mock the LLM client entirely — real API calls are slow, costly, and
+        non-deterministic, making them unsuitable for a fast CI feedback loop and for asserting exact behavior.
+        A small, separate suite of "contract" or smoke tests, run less frequently (nightly, or pre-release, not
+        on every commit) and clearly isolated, should hit the real API to catch breaking changes in the
+        provider's response shape or behavior that a mock could silently drift away from. The mocking boundary
+        should sit at your own client wrapper function, not deep inside a third-party SDK, so your tests assert
+        against a stable interface you control.</p></div><div class="followup">Follow-up: how would you structure the mock's fake responses to stay honest about real API response variability (e.g., token limits, partial failures) rather than only ever testing the happy path?</div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment">
+        <span class="level-tag">Beginner (30-60 min)</span>
+        <h4>Set up a project from scratch and write your first fixtures</h4>
+        <p>Create a new project using `uv init` (or stdlib venv + pip if you prefer), add `pytest` as a dev
+        dependency, write a small module with 2-3 pure functions, and write tests using at least one fixture
+        and one `@pytest.mark.parametrize` test covering at least 4 input cases.</p>
+        <ul><li>Must include a `pyproject.toml` with dependencies correctly separated into main vs dev groups.</li></ul>
+        <p><strong>Acceptance criteria:</strong> `pytest` (or `uv run pytest`) runs and passes from a clean
+        clone of the project with no manually pre-installed global packages required.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>Verify isolation actually works by running `which python` (or `where python` on Windows) before and after activating your venv — confirm the path changes.</p></div></details>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Intermediate (2-4 hrs)</span>
+        <h4>Test a small FastAPI service with dependency overrides and mocking</h4>
+        <p>Using the FastAPI orders service from chapter 5 (or a similar small service you build), write a test
+        suite covering: a fake-DB-backed happy path via `dependency_overrides`, a validation-failure case, an
+        authenticated-vs-unauthenticated case, and a mocked external HTTP call (using `monkeypatch` or
+        `pytest-mock`) that simulates both a successful response and a timeout.</p>
+        <ul><li>Must use `httpx.AsyncClient` with `ASGITransport` (not the deprecated sync `TestClient` pattern) for async route testing.</li>
+        <li>Must demonstrate fixture teardown correctly clearing `dependency_overrides` between tests.</li>
+        <li>Must achieve test isolation: running tests in random order (`pytest-randomly` or similar) still passes.</li></ul>
+        <p><strong>Acceptance criteria:</strong> Full suite passes in any test order; coverage report (via
+        `pytest-cov`) shows the critical paths (success, validation failure, auth failure, downstream timeout)
+        are all exercised.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>Run `pytest --random-order` (after installing `pytest-randomly`) specifically to catch hidden test-order dependencies — this is the fastest way to surface a forgotten teardown.</p></div></details>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Advanced (1-2 days)</span>
+        <h4>Build and package a reusable internal library, consumed by a separate test project</h4>
+        <p>Create two separate projects: a small internal library (e.g., a shared Pydantic schema package plus
+        a couple of utility functions) packaged correctly with `pyproject.toml` for editable local installation,
+        and a second "consumer" project (a tiny FastAPI service) that depends on it via a local path reference.
+        Write a CI-style script (a shell script or Makefile target) that sets up both projects' environments
+        from clean, runs the consumer's test suite against the library, then simulates a breaking change in the
+        library (change a function's signature) and shows the consumer's tests catching it.</p>
+        <ul><li>Must use editable/path-based local dependency resolution, not a copy-pasted or manually symlinked library.</li>
+        <li>Must include a lockfile-based reproducible setup (uv.lock, poetry.lock, or pip-compile output) for the consumer project.</li>
+        <li>Must demonstrate, with a real before/after test run, that the breaking change is caught by the test suite rather than silently passing.</li></ul>
+        <p><strong>Acceptance criteria:</strong> Clean-environment setup script works end to end; the breaking-change
+        demonstration shows a clear pass-then-fail transition in test output. No full reference solution — this
+        is meant to force real engagement with Python's local/monorepo packaging story, which has no single
+        standardized "right answer" the way basic pip install does.</p>
+      </div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet"><ul>
+        <li>Python isolation is interpreter-based (which `python`/`pip` binary is first on PATH), not directory-based like `node_modules` — you must create and activate a venv explicitly.</li>
+        <li><code>pyproject.toml</code> ≈ `package.json`; modern standard replacing `setup.py`/bare `requirements.txt`.</li>
+        <li><code>uv</code> is the fast, increasingly default 2025-26 tool combining venv creation, dependency resolution, lockfiles, and Python version management.</li>
+        <li><code>pip freeze > requirements.txt</code> is a crude pin list, not a real lockfile — no hash verification, no direct/transitive distinction.</li>
+        <li>pytest fixtures (<code>@pytest.fixture</code>, optionally with <code>yield</code> for teardown) ≈ Jest's <code>beforeEach</code>/<code>afterEach</code>, but composable via explicit parameter declaration.</li>
+        <li><code>@pytest.mark.parametrize</code> ≈ Jest's `test.each` — one test body, many input/expected cases.</li>
+        <li>Async tests silently "pass" without running if <code>pytest-asyncio</code> isn't configured — verify `asyncio_mode` or markers are set.</li>
+        <li>Always clear <code>app.dependency_overrides</code> (FastAPI) in fixture teardown to avoid leaking state between tests.</li>
+        <li><code>monkeypatch.setattr</code> patches a specific attribute where it's looked up from — know the difference between patching a module attribute vs a name imported via `from x import y`.</li>
+      </ul></div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://docs.python.org/3/library/venv.html">Python docs: venv — Virtual environments</a></li>
+        <li><a href="https://packaging.python.org/en/latest/guides/writing-pyproject-toml/">Python Packaging Guide: Writing pyproject.toml</a></li>
+        <li><a href="https://docs.pytest.org/en/stable/how-to/fixtures.html">pytest docs: Fixtures</a></li>
+        <li><a href="https://docs.astral.sh/uv/">uv documentation</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="05-fastapi.html"><span class="dir">← Previous</span>FastAPI: Building Production APIs</a>
+        <a class="next" href="../09-ai-integration/index.html"><span class="dir">Next →</span>AI Integration</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · Python Intermediate</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "08-python-intermediate", chapterKey: "06-venv-packaging-pytest" });</script>
+</body>
+</html>

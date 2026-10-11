@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>API Design — System Design — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">System Design</a><span class="sep">›</span>API Design</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>API Design: REST, GraphQL, gRPC, Versioning, Pagination, Idempotency</h1>
+      <p class="meta-line"><span>⏱ 2.5 hrs</span><span>📍 Chapter 10 of 14</span></p>
+      <p><strong>One-line summary:</strong> There is no universally "best" API style — REST, GraphQL, and gRPC solve different fetch/coupling/performance problems, and a senior engineer picks based on client shape and network boundary, then gets the unglamorous details right: versioning, pagination that doesn't fall over at scale, and idempotency that survives retries.</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>You've built REST APIs for a decade; that's not what's being tested. What's being tested is whether you know <em>why</em> GraphQL exists (and its real cost — the N+1 problem), whether you'd ever actually recommend gRPC and where its boundary should be, and whether you can design pagination that doesn't degrade into a full table scan at page 10,000. The idempotency-key pattern for payment-like POST endpoints is a near-guaranteed interview topic because it combines API design with distributed systems correctness — get the Redis-backed implementation right and you demonstrate exactly the kind of practical depth a Staff-level interview is probing for.</p>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>Read <a href="09-microservices.html">Microservices vs Monolith</a> first — API design choices (REST vs gRPC especially) are driven by whether you're designing a public API or an internal service boundary. <a href="04-caching.html">Caching</a> is useful background for pagination and ETags.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="rest-maturity">REST maturity and the HATEOAS reality check</h3>
+      <p>The Richardson Maturity Model describes REST adoption in levels: Level 0 is a single POST endpoint tunneling everything (basically RPC-over-HTTP); Level 1 introduces multiple resource URIs; Level 2 (where the overwhelming majority of "REST APIs" in production actually sit) uses proper HTTP verbs and status codes against resource URIs; Level 3 adds HATEOAS — responses include hypermedia links telling the client what actions are available next, so clients don't hardcode URL structure.</p>
+      <p>The reality check: almost nobody ships Level 3 in practice, and that's a defensible engineering choice, not a failure. HATEOAS promises discoverability and loose coupling, but in practice clients are written against a known API contract anyway (via OpenAPI/Swagger codegen), and the extra payload size and parsing complexity of hypermedia links rarely pays for itself outside of a few domains (hypermedia APIs for long-lived, evolving public ecosystems like payment processors). Know what Level 3 is and be ready to explain why your API stops at Level 2 — that's the senior answer, not "we should add HATEOAS."</p>
+
+      <h3 id="graphql">GraphQL: schema, resolvers, N+1, and the overfetching tradeoff</h3>
+      <p>GraphQL exposes a single endpoint with a strongly-typed schema; clients specify exactly which fields they want, and a <strong>resolver</strong> function executes per field (or per type) to fetch that piece of data. This directly solves REST's overfetching (getting a huge user object when you only needed the name) and underfetching (needing 3 round trips to assemble a page because the single REST endpoint didn't include nested data) problems — the client asks for precisely the shape it needs in one request.</p>
+      <p>The cost is the <strong>N+1 query problem</strong>: if you query 50 users and each user's resolver independently fetches their posts, you fire 1 query for users plus 50 separate queries for posts — this is invisible in the GraphQL query itself and only shows up as a database/latency disaster in production. <strong>DataLoader</strong> solves this by batching and caching requests within a single tick of the event loop: instead of 50 individual <code>getPostsByUserId</code> calls, DataLoader collects all 50 user IDs requested during that request and issues one batched <code>WHERE user_id IN (...)</code> query, then distributes results back to each resolver. This is not optional infrastructure for production GraphQL — shipping without DataLoader (or equivalent batching) on any one-to-many field is a near-guaranteed production incident waiting to happen.</p>
+      <p>Senior framing on the REST-vs-GraphQL tradeoff: GraphQL wins when clients have genuinely divergent, evolving data needs (many client types, frequently changing UI requirements) and you can afford the added backend complexity (schema stitching, resolver performance, query cost analysis to prevent abusive deeply-nested queries). REST wins when your API surface is simpler, cacheable at the HTTP/CDN layer (GraphQL's single POST endpoint defeats standard HTTP caching), and your team doesn't want to own a GraphQL gateway's operational complexity.</p>
+
+      <h3 id="grpc">gRPC: protobuf, HTTP/2, and where it actually belongs</h3>
+      <p>gRPC defines service contracts in <strong>Protocol Buffers</strong> (protobuf) — a compact binary serialization format with strict schemas, generating strongly-typed client/server code in many languages. It runs over HTTP/2, which gives you multiplexed streams over a single connection and native support for bidirectional streaming (not just request/response — a client can stream, a server can stream, or both simultaneously).</p>
+      <p>Where it belongs: <strong>internal service-to-service communication</strong> inside your infrastructure, where you control both ends, deploy them together-ish, and care about raw performance (smaller payloads than JSON, no parsing overhead of text-based formats, HTTP/2 multiplexing avoiding head-of-line blocking that plain HTTP/1.1 REST suffers from). It's a poor fit for public-facing APIs: browsers have limited native gRPC support (you typically need gRPC-Web plus a proxy translation layer), the binary format isn't human-debuggable in a browser's network tab the way JSON is, and third-party API consumers expect REST/JSON as the lingua franca. The senior answer to "should we use gRPC for our public API" is almost always no — but "should we use gRPC between our order service and inventory service" is often yes.</p>
+
+      <h3 id="versioning">API versioning strategies</h3>
+      <p><strong>URL versioning</strong> (<code>/v1/orders</code>, <code>/v2/orders</code>): simplest, most visible, trivially routable at the load balancer/gateway level, but "pollutes" the URL and makes resource identity feel version-dependent. <strong>Header versioning</strong> (a custom header like <code>Api-Version: 2</code>): keeps URLs clean and resource-identity-stable, but is less discoverable (you can't just look at a URL to know the version) and harder to test by pasting a URL into a browser. <strong>Content negotiation versioning</strong> (via the <code>Accept</code> header, e.g. <code>Accept: application/vnd.myapi.v2+json</code>): the most "RESTful" in theory since it treats versions as different representations of the same resource, but it's the least ergonomic for API consumers and the least commonly seen in practice outside a few API design purist shops. In practice, URL versioning dominates for public APIs because of its operational simplicity (you can literally route <code>/v1/*</code> and <code>/v2/*</code> to different backend deployments at the gateway), even though it's the "least pure" option academically.</p>
+
+      <h3 id="pagination">Pagination: offset vs cursor vs keyset</h3>
+      <p><strong>Offset pagination</strong> (<code>LIMIT 20 OFFSET 1000</code>) is simple and lets users jump to an arbitrary page, but degrades badly at scale: the database still has to scan and discard the first 1000 rows before returning the next 20, so deep pages get progressively slower, and if rows are inserted/deleted between page requests, results can shift (a user sees duplicate or skipped rows while paging).</p>
+      <p><strong>Cursor-based pagination</strong> returns an opaque cursor (often an encoded version of the last row's sort key) with each page; the next request says "give me 20 rows after this cursor." This avoids the scan-and-discard cost and is stable under concurrent inserts/deletes for rows outside the current page, but sacrifices the ability to jump to an arbitrary page number — you can only page forward/backward sequentially, which is the right tradeoff for infinite-scroll feeds and the wrong one for "jump to page 47" admin tables.</p>
+      <p><strong>Keyset pagination</strong> is the concrete database-level technique that makes cursor pagination fast: instead of <code>OFFSET</code>, the query uses a <code>WHERE (created_at, id) &lt; (:lastCreatedAt, :lastId)</code> clause against an indexed column (or composite index), so the database can seek directly to the right spot using the index rather than scanning — this is what "cursor pagination" means under the hood in a well-implemented system, and it's the detail that separates "I've heard of cursor pagination" from "I've implemented it correctly."</p>
+
+      <h3 id="idempotency">Idempotency keys for POST</h3>
+      <p>GET/PUT/DELETE are naturally idempotent (or should be, by HTTP semantics) — calling them N times has the same effect as calling them once. POST is not: retrying a "create payment" POST because the client timed out waiting for a response can create two charges if the first request actually succeeded server-side but the response was lost in transit. The fix is an <strong>idempotency key</strong>: the client generates a unique key (typically a UUID) per logical operation and sends it in a header; the server checks a store (Redis is standard) for that key before processing — if seen before, it returns the cached result of the original request instead of reprocessing, regardless of how many times the client retries with the same key.</p>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>Trace an idempotency-key-protected payment POST end to end: client generates <code>idempotencyKey = uuid()</code>, sends <code>POST /charges</code> with header <code>Idempotency-Key: &lt;key&gt;</code>. Server atomically checks-and-locks that key in Redis (e.g. <code>SET key "processing" NX EX 86400</code>) — if the key didn't exist, it proceeds to actually charge the card and, on completion, overwrites the Redis entry with the final response body and status code, still under the same key with a TTL. If a retry arrives with the same key while the original is still "processing" (client retried too fast, e.g. due to a client-side timeout shorter than server processing time), the server should return a 409 "still processing" or block briefly rather than double-processing. If a retry arrives after completion, the server returns the cached final response verbatim, without touching the payment provider again — the client sees a consistent result either way, and the payment provider is called exactly once no matter how many times the client retries.</p>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+sequenceDiagram
+    participant C as Client
+    participant S as API Server
+    participant R as Redis (idempotency store)
+    participant P as Payment Provider
+    C->>S: POST /charges (Idempotency-Key: abc123)
+    S->>R: SET abc123 "processing" NX EX 86400
+    alt Key is new
+        R-->>S: OK (lock acquired)
+        S->>P: charge card
+        P-->>S: success, chargeId=ch_1
+        S->>R: SET abc123 {status:200, body:{chargeId:ch_1}}
+        S-->>C: 200 {chargeId: ch_1}
+    else Key already exists (retry)
+        R-->>S: existing entry found
+        S-->>C: 200 {chargeId: ch_1} (cached, no re-charge)
+    end
+      </div>
+      <div class="mermaid">
+flowchart TD
+    A["Choosing an API style"] --> B{"Internal service-to-service,<br/>control both ends,<br/>need max performance?"}
+    B -->|Yes| C["gRPC: protobuf, HTTP/2 streaming"]
+    B -->|No| D{"Clients have divergent,<br/>evolving data shape needs<br/>(many UIs, nested data)?"}
+    D -->|Yes, and can own resolver/N+1 complexity| E["GraphQL: client-specified shape,<br/>needs DataLoader for N+1"]
+    D -->|No| F["REST: simple, cacheable,<br/>HTTP-semantics-native"]
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-typescript">// Idempotency key middleware for Express — the real production pattern
+import { Request, Response, NextFunction } from "express";
+import Redis from "ioredis";
+
+const redis = new Redis();
+
+export function idempotent() {
+  return async (req: Request, res: Response, next: NextFunction) => {
+    const key = req.header("Idempotency-Key");
+    if (!key) return res.status(400).json({ error: "Idempotency-Key header required" });
+
+    const redisKey = `idem:${key}`;
+    const acquired = await redis.set(redisKey, "processing", "EX", 86_400, "NX");
+
+    if (!acquired) {
+      const existing = await redis.get(redisKey);
+      if (existing === "processing") {
+        return res.status(409).json({ error: "Request with this key is still processing" });
+      }
+      const cached = JSON.parse(existing!);
+      return res.status(cached.status).json(cached.body); // replay original result, no reprocessing
+    }
+
+    // Monkeypatch res.json to capture and cache the final response before sending it
+    const originalJson = res.json.bind(res);
+    res.json = (body: any) => {
+      redis.set(redisKey, JSON.stringify({ status: res.statusCode, body }), "EX", 86_400);
+      return originalJson(body);
+    };
+    next();
+  };
+}
+
+// Usage: app.post("/charges", idempotent(), chargeHandler);
+</code></pre>
+      <pre><code class="language-sql">-- Keyset pagination: seeks via the index instead of scanning+discarding like OFFSET does.
+-- Requires a composite index on (created_at, id) for this to actually be fast.
+SELECT id, title, created_at
+FROM posts
+WHERE (created_at, id) < (:lastCreatedAt, :lastId)   -- cursor from the previous page's last row
+ORDER BY created_at DESC, id DESC
+LIMIT 20;
+
+-- Compare to offset pagination, which gets slower as the offset grows because the DB
+-- must still count through all skipped rows:
+-- SELECT id, title, created_at FROM posts ORDER BY created_at DESC LIMIT 20 OFFSET 100000;
+</code></pre>
+      <pre><code class="language-typescript">// DataLoader pattern solving GraphQL's N+1 problem for a "user.posts" resolver
+import DataLoader from "dataloader";
+
+// Batches all postsByUserId calls made within one tick into a single query.
+const postsLoader = new DataLoader<string, Post[]>(async (userIds) => {
+  const allPosts = await db.query(
+    `SELECT * FROM posts WHERE user_id = ANY($1)`,
+    [userIds]
+  );
+  // Must return results in the SAME ORDER as the input userIds array — DataLoader contract.
+  return userIds.map((id) => allPosts.filter((p: Post) => p.userId === id));
+});
+
+const resolvers = {
+  User: {
+    posts: (user: { id: string }) => postsLoader.load(user.id),
+    // Without DataLoader: this naive version fires one query PER user, causing N+1:
+    // posts: (user) => db.query("SELECT * FROM posts WHERE user_id = $1", [user.id]),
+  },
+};
+
+interface Post { id: string; userId: string; title: string; }
+declare const db: { query: (sql: string, params: any[]) => Promise<Post[]> };
+</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4><p>A SaaS billing platform exposes a public REST API (URL-versioned, <code>/v1</code> and <code>/v2</code> coexisting during a 12-month deprecation window) for creating invoices, using idempotency keys on every POST because clients integrate via webhooks and retries are common when their own infrastructure has transient failures. Internally, the invoice service talks to the tax-calculation service and the ledger service via gRPC, since both are owned by the same team, called extremely frequently (every invoice line item), and benefit from protobuf's smaller payloads and HTTP/2 multiplexing under high internal QPS. The customer-facing dashboard, which needs deeply nested, frequently-changing views (invoice + line items + customer + payment history in one screen, shape changing every sprint as product iterates), is served by a GraphQL layer in front of the same services — with DataLoader batching mandatory on every one-to-many resolver after an early incident where a dashboard page loading 100 invoices fired 100 separate "get line items" queries and took 8 seconds under load.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Shipping GraphQL resolvers without DataLoader and discovering the N+1 problem only under production load, because it's invisible in a single developer's local testing with a handful of rows — the query looks identical whether it fires 1 query or 101.</p></div>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Implementing "cursor pagination" as just base64-encoding an offset number — this isn't real cursor pagination, it still has the scan-and-discard cost and the instability under concurrent writes. A real cursor must encode a sort-key value used in a keyset <code>WHERE</code> clause against an index.</p></div>
+      <ul>
+        <li>Always require an idempotency key on any POST that has a real-world side effect with a cost (payments, provisioning resources, sending irreversible notifications).</li>
+        <li>Pick REST by default for public APIs; justify GraphQL or gRPC with a specific client-shape or performance need, not novelty.</li>
+        <li>Version your public API from day one (even if it's just <code>/v1</code>) — retrofitting versioning onto an unversioned API in production is far more painful than starting with it.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs: When to Use vs When NOT To</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>REST</td><td>Simple resource CRUD, need HTTP-layer caching, public API conventions</td><td>Clients need highly divergent, nested data shapes</td><td>GraphQL</td></tr>
+        <tr><td>GraphQL</td><td>Many client types with evolving, nested data needs</td><td>Small team without resolver/N+1 performance discipline</td><td>REST with sparse fieldsets</td></tr>
+        <tr><td>gRPC</td><td>Internal service-to-service, high QPS, both ends controlled</td><td>Public/browser-facing APIs</td><td>REST/JSON</td></tr>
+        <tr><td>Offset pagination</td><td>Small datasets, need arbitrary page jump (admin UI)</td><td>Large datasets, infinite scroll, high write concurrency</td><td>Cursor/keyset pagination</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic"><h4>Basic</h4>
+        <details class="qa"><summary>What is Richardson Maturity Model Level 2 and why do most REST APIs stop there?</summary><div class="answer"><p>Level 2 uses proper HTTP verbs and status codes against resource URIs. Most APIs stop there because Level 3 (HATEOAS) adds payload/parsing overhead for discoverability benefits that are rarely needed since clients are usually built against a known contract anyway.</p></div></details>
+        <details class="qa"><summary>What is the N+1 problem in GraphQL?</summary><div class="answer"><p>When a list of parent objects each independently triggers a separate query for related child data, turning what should be 1-2 queries into N+1 queries — invisible in the GraphQL query syntax but devastating for performance.</p></div></details>
+        <details class="qa"><summary>What problem does DataLoader solve?</summary><div class="answer"><p>It batches multiple individual data-fetch requests made within the same tick into a single batched query, and caches results per request, solving the N+1 problem.</p></div></details>
+        <details class="qa"><summary>Why is gRPC a poor fit for public-facing browser APIs?</summary><div class="answer"><p>Browsers lack native gRPC support (requiring gRPC-Web plus a proxy), the binary protobuf format isn't human-readable/debuggable the way JSON is in browser dev tools, and third-party consumers expect REST/JSON conventions.</p></div></details>
+        <details class="qa"><summary>What's the difference between offset and cursor pagination?</summary><div class="answer"><p>Offset pagination uses LIMIT/OFFSET, which gets slower at deep pages since the DB scans and discards skipped rows, and can show shifted results under concurrent writes. Cursor pagination returns an opaque pointer to the last seen row and fetches "after" it, avoiding the scan cost and staying stable under concurrent changes.</p></div></details>
+        <details class="qa"><summary>Why do you need an idempotency key on a POST endpoint but not typically on GET?</summary><div class="answer"><p>GET is naturally idempotent (reading has no side effect), so retries are always safe. POST often creates something with a side effect (a charge, a resource), so retrying without protection can duplicate that side effect — the idempotency key lets the server recognize and dedupe retries.</p></div></details>
+        <details class="qa"><summary>Name the three common API versioning strategies.</summary><div class="answer"><p>URL versioning (/v1/...), custom header versioning (Api-Version header), and content-negotiation versioning (Accept header media type).</p></div></details>
+      </div>
+      <div class="qa-level medium"><h4>Medium</h4>
+        <details class="qa"><summary>Why does GraphQL defeat standard HTTP caching, and what's the workaround?</summary><div class="answer"><p>GraphQL typically uses a single POST endpoint for all queries, and HTTP caching is keyed on GET URLs — POST responses aren't cached by CDNs/browsers by default. Workarounds include persisted queries (mapping a query to a hash usable as a GET URL) or application-level caching (e.g., normalized client caches like Apollo/Relay, or server-side response caching keyed on the query+variables).</p></div></details>
+        <details class="qa"><summary>Explain keyset pagination's WHERE clause and why it needs a composite index.</summary><div class="answer"><p>A clause like WHERE (created_at, id) &lt; (:lastCreatedAt, :lastId) lets the database seek directly to the right position using an index on (created_at, id), rather than scanning. Without that exact composite index, the database falls back to a slower scan-and-filter, losing the performance benefit over plain offset pagination.</p></div></details>
+        <details class="qa"><summary>How should your idempotency-key server behave if a retry arrives while the original request is still being processed?</summary><div class="answer"><p>It should not start a second concurrent execution of the side effect. Typically it returns a 409 "still processing" response (if the lock entry shows "processing" rather than a completed result), letting the client retry again shortly, or it can hold the connection briefly if latency allows — but it must never let two processing attempts race to completion.</p></div></details>
+        <details class="qa"><summary>When would URL versioning cause real operational pain, and how do teams mitigate it?</summary><div class="answer"><p>If /v1 and /v2 diverge significantly in underlying data models, running both versions in production means maintaining dual code paths or translation layers for a long deprecation window, which is real maintenance cost. Teams mitigate by setting and communicating a hard deprecation timeline, using usage analytics to see which clients are still on v1, and designing v2 to minimize unnecessary breaking changes.</p></div></details>
+        <details class="qa"><summary>What's the risk of generating the idempotency key server-side instead of client-side?</summary><div class="answer"><p>If the server generates the key, a client retry (e.g., due to a network timeout before the response arrived) would get a new key each time, since the "idempotency" has to be tied to the client's intent to perform a single logical operation — the key must be client-generated and reused across retries of the same logical request to actually prevent duplicate side effects.</p></div></details>
+        <details class="qa"><summary>How would you prevent an abusive, deeply-nested GraphQL query from overloading your server?</summary><div class="answer"><p>Implement query cost analysis/complexity limits (assign a cost per field/depth and reject queries exceeding a budget), enforce maximum query depth, and apply per-client rate limiting at the resolver or gateway level — GraphQL's flexibility means a single malicious or buggy query can be disproportionately expensive compared to REST's naturally bounded endpoints.</p></div></details>
+      </div>
+      <div class="qa-level advanced"><h4>Advanced</h4>
+        <details class="qa"><summary>Design an idempotency system that works correctly across multiple server instances behind a load balancer, including the race where two requests with the same key arrive near-simultaneously at different instances.</summary><div class="answer"><p>Use a shared store (Redis, not in-memory per-instance) with an atomic SETNX as the lock primitive — this is inherently safe across instances since Redis arbitrates the race: whichever instance's SETNX succeeds proceeds, the other sees the key already exists and returns the "processing" response or waits/polls. The response cache written on completion must also go to the shared store so any instance can serve the cached replay, not just the one that processed it originally.</p></div></details>
+        <details class="qa"><summary>You need to migrate a public REST API's pagination from offset to cursor-based without breaking existing clients. Design the rollout.</summary><div class="answer"><p>Add a new cursor-based parameter (e.g., `after` cursor) alongside existing `offset`/`limit` params rather than replacing them immediately; have the response include both the legacy offset-compatible fields and a new cursor field during a transition window; document the new cursor approach as preferred and communicate a deprecation timeline for offset params; monitor usage to confirm migration before removing offset support, since public API consumers can't be forced to update on your schedule.</p></div></details>
+        <details class="qa"><summary>Compare how REST, GraphQL, and gRPC each handle the overfetching/underfetching problem, and which one's solution has the highest engineering cost.</summary><div class="answer"><p>REST solves it ad hoc via sparse fieldsets or multiple endpoint variants (e.g., `/users/:id/summary` vs `/users/:id/full`), which is simple but proliferates endpoints. GraphQL solves it natively by letting clients specify exact fields, at the cost of resolver complexity and the N+1 problem. gRPC doesn't really solve this problem at all — it defines fixed message schemas per RPC method, so overfetching/underfetching is handled the same way REST does (define more granular RPCs), since gRPC's value proposition is performance and typed contracts, not flexible field selection. GraphQL's solution has the highest engineering cost (schema design, resolver performance, query cost limiting) but the most client flexibility.</p></div></details>
+        <details class="qa"><summary>How would you design an idempotency-key system to also be safe against the payment provider's own idempotency keys, avoiding "double idempotency" confusion?</summary><div class="answer"><p>Derive the payment provider's idempotency key deterministically from your own internal idempotency key (e.g., forward the same key or a hash of it) rather than generating a new random key per attempt to the provider — this way even if your own server crashes after calling the provider but before recording the result, a retry will reuse the same provider-level key and the provider itself will dedupe the charge, giving you defense in depth instead of relying solely on your own Redis lock.</p></div></details>
+        <details class="qa"><summary>Explain how HTTP/2 multiplexing in gRPC avoids head-of-line blocking that can affect HTTP/1.1-based REST APIs, and what this means in practice for a high-QPS internal service.</summary><div class="answer"><p>HTTP/1.1 (without pipelining issues) typically needs multiple TCP connections or serializes requests per connection, so a slow request can block others behind it on the same connection. HTTP/2 multiplexes many concurrent streams over a single TCP connection, so one slow gRPC call doesn't block other calls sharing that connection, reducing connection overhead and improving tail latency under high concurrent internal traffic compared to naive REST-over-HTTP/1.1 clients.</p></div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment"><span class="level-tag">Beginner (30-60 min)</span><h4>Classify and justify</h4><p>For a given public weather API, a given internal "order-service calls pricing-service" boundary, and a given social media feed with highly variable per-client (web/mobile/smartwatch) data needs, state whether you'd choose REST, GraphQL, or gRPC for each, and justify in 2-3 sentences using the tradeoffs from this chapter.</p><ul><li>Each justification must reference at least one specific tradeoff (caching, N+1 cost, browser support, etc.), not just "it's popular."</li></ul><p><strong>Acceptance criteria:</strong> All three choices are correct with specific, non-generic justifications.</p><details class="qa"><summary>Hints</summary><div class="answer"><p>Public + cacheable → REST. Internal, high QPS, both ends controlled → gRPC. Highly divergent client shapes → GraphQL.</p></div></details><p><strong>Bonus:</strong> What would change your answer for the feed API if the team had only 2 backend engineers?</p></div>
+      <div class="assignment"><span class="level-tag">Intermediate (2-4 hrs)</span><h4>Implement idempotency-key middleware</h4><p>Build the Express idempotency middleware from the Code Examples section against a real Redis instance (or redis-memory-server for testing), including the "still processing" 409 behavior for concurrent duplicate requests, and write a test that fires two simultaneous POSTs with the same idempotency key and asserts the underlying side effect (e.g., a counter increment simulating "charge card") only happens once.</p><ul><li>Test the three cases: first request, retry after completion (should return cached result), and retry while still processing (should 409).</li></ul><p><strong>Acceptance criteria:</strong> All three test cases pass and the side-effect counter is provably incremented exactly once across all scenarios.</p><details class="qa"><summary>Hints</summary><div class="answer"><p>Simulate "still processing" by adding an artificial delay in the handler and firing the duplicate request before that delay resolves.</p></div></details><p><strong>Bonus:</strong> Add TTL expiry handling — what should happen if a client retries with the same key after the 24h TTL has expired and the key was evicted from Redis?</p></div>
+      <div class="assignment"><span class="level-tag">Advanced (1-2 days)</span><h4>Design and benchmark keyset pagination at scale</h4><p>Design a keyset-paginated API for a table with 50 million rows (e.g., a transaction log), including the exact composite index needed, the cursor encoding scheme (what fields it contains and how it's serialized/obscured from the client), and how you'd handle a tie-breaker when the primary sort column has duplicate values across rows.</p><ul><li>Specify the full SQL query shape and the index DDL.</li><li>Explain how your cursor format prevents a client from tampering with it to skip around arbitrarily (if that's undesirable) or whether you intentionally allow it.</li></ul><p><strong>Acceptance criteria:</strong> A design document covering index DDL, query shape, cursor encoding, and tie-breaker handling, with reasoning for each choice.</p><details class="qa"><summary>Hints</summary><div class="answer"><p>Use a composite sort key like (created_at, id) where id is a tiebreaker for rows with identical timestamps; encode the cursor as base64(JSON.stringify({createdAt, id})) and optionally HMAC-sign it if you don't want clients constructing arbitrary cursors.</p></div></details><p><strong>Bonus:</strong> How would you support "jump to approximate page N" for an admin UI on top of a fundamentally cursor-paginated API, if product insists on it?</p></div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet"><ul>
+        <li>Richardson Level 2 (verbs + status codes on resources) is where almost all production REST APIs sit; HATEOAS (Level 3) is rarely worth its cost.</li>
+        <li>GraphQL solves over/underfetching but introduces the N+1 problem — DataLoader batching is mandatory, not optional.</li>
+        <li>gRPC (protobuf + HTTP/2) belongs between internal services you control, not public/browser-facing APIs.</li>
+        <li>URL versioning dominates in practice for operational simplicity, even though header/content-negotiation is "more RESTful."</li>
+        <li>Offset pagination degrades at depth (scan-and-discard) and is unstable under concurrent writes.</li>
+        <li>Cursor pagination + keyset queries (WHERE on indexed composite key) is the real fix for pagination at scale.</li>
+        <li>Idempotency keys must be client-generated and reused across retries of the same logical operation.</li>
+        <li>Idempotency store (Redis) needs atomic check-and-lock (SETNX) plus a cached final response for safe replay.</li>
+        <li>Pick REST by default; justify GraphQL/gRPC with a specific client-shape or performance need, not trend-following.</li>
+      </ul></div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://graphql.org/learn/">GraphQL Official Docs — Learn GraphQL</a></li>
+        <li><a href="https://grpc.io/docs/what-is-grpc/introduction/">gRPC — Introduction</a></li>
+        <li><a href="https://github.com/graphql/dataloader">DataLoader (GitHub)</a></li>
+        <li><a href="https://stripe.com/docs/api/idempotent_requests">Stripe — Idempotent Requests</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="09-microservices.html"><span class="dir">← Previous</span>Microservices vs Monolith</a>
+        <a class="next" href="11-resilience.html"><span class="dir">Next →</span>Resilience Patterns</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · System Design</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-typescript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-sql.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-yaml.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "01-system-design", chapterKey: "10-api-design" });</script>
+</body>
+</html>

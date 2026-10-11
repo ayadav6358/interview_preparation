@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Guardrails Fundamentals</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <input class="searchbox" placeholder="Search topics..." />
+    <a href="../index.html">← Home</a>
+    <h3>37-AI-Guardrails</h3>
+    <a href="ai-guardrails-fundamentals.html">AI Guardrails Fundamentals</a>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumbs"><a href="../index.html">Home</a> / 37-AI-Guardrails</div>
+      <button class="theme-toggle" onclick="toggleTheme()">🌓 Theme</button>
+    </div>
+    <h1>AI Guardrails: Input/Output Validation, PII, Content Policies</h1>
+    <span class="tag good">Stable</span><span class="tag">Last verified: 2026-10-06</span>
+
+    <div class="toc">
+      <b>On this page</b>
+      <a href="#what">1. What is this?</a>
+      <a href="#whyexist">2. Why does it exist?</a>
+      <a href="#whyimportant">3. Why is it important?</a>
+      <a href="#whereused">4. Where is it used?</a>
+      <a href="#prereq">5. Prerequisites</a>
+      <a href="#core">6. Core concepts</a>
+      <a href="#terms">7. Terminology</a>
+      <a href="#arch">8. Architecture</a>
+      <a href="#internal">9. How it works internally</a>
+      <a href="#steps">10. Step-by-step: adding guardrails to a pipeline</a>
+      <a href="#simple">11. Simple example</a>
+      <a href="#real">12. Real-world example</a>
+      <a href="#code">13. Code example</a>
+      <a href="#advanced">14. Advanced example (NeMo Guardrails style)</a>
+      <a href="#mistakes">15. Common mistakes</a>
+      <a href="#best">16. Best practices</a>
+      <a href="#production">17. Production considerations</a>
+      <a href="#security">18. Security considerations</a>
+      <a href="#performance">19. Performance considerations</a>
+      <a href="#cost">20. Cost considerations</a>
+      <a href="#debug">21. Debugging/troubleshooting</a>
+      <a href="#related">22. Related concepts</a>
+      <a href="#comparison">23. Comparison with alternatives</a>
+      <a href="#exercise">24. Mini practical exercise</a>
+      <a href="#project">25. Practical project</a>
+      <a href="#projectarch">26. Project architecture</a>
+      <a href="#interview-b">27. Interview Questions — Beginner</a>
+      <a href="#interview-i">28. Interview Questions — Intermediate</a>
+      <a href="#interview-a">29. Interview Questions — Advanced</a>
+      <a href="#interview-s">30. Interview Questions — Senior/Architect</a>
+      <a href="#interview-sc">31. Scenario-Based Questions</a>
+      <a href="#revision">32. Quick revision notes</a>
+      <a href="#cheat">33. Cheat sheet</a>
+      <a href="#further">34. Further topics to learn</a>
+    </div>
+
+    <h2 id="what">1. What is this?</h2>
+    <p>AI guardrails are automated checks wrapped around an LLM application's input and output — input validation, output validation, PII detection, prompt-injection detection, schema validation, content policy enforcement, and human approval gates — designed to catch problems before they reach users or before risky actions execute.</p>
+
+    <h2 id="whyexist">2. Why does it exist?</h2>
+    <p>LLMs can't be made to never produce undesired output purely through prompting — guardrails exist as an external, enforceable safety layer that doesn't rely on the model's cooperation, catching what prompting alone can't guarantee.</p>
+
+    <h2 id="whyimportant">3. Why is it important?</h2>
+    <p>Guardrails are the practical, deployable answer to "how do you make an inherently probabilistic system safe enough for production" — a defense-in-depth layer referenced throughout hallucination mitigation, security, and compliance discussions in this knowledge base.</p>
+
+    <h2 id="whereused">4. Where is it used?</h2>
+    <p>Any customer-facing LLM application, regulated industries (finance, healthcare), agent systems with real-world actions, any system needing to prevent specific categories of harmful/non-compliant output.</p>
+
+    <h2 id="prereq">5. Prerequisites</h2>
+    <p><a href="../09-Structured-Output/structured-output.html">Structured Output</a>, <a href="../05-LLM-Fundamentals/sampling-and-hallucination.html">Sampling & Hallucination</a>.</p>
+
+    <h2 id="core">6. Core concepts</h2>
+    <ul>
+      <li><b>Input validation:</b> checking/filtering user input before it reaches the model (e.g., blocking known injection patterns).</li>
+      <li><b>Output validation:</b> checking the model's output before it reaches the user (e.g., schema compliance, content policy checks).</li>
+      <li><b>PII detection:</b> identifying and potentially redacting personally identifiable information in input or output.</li>
+      <li><b>Prompt injection detection:</b> identifying attempts to manipulate the model via embedded instructions in input/context.</li>
+      <li><b>Schema validation:</b> ensuring structured output matches its expected schema (overlaps with Structured Output).</li>
+      <li><b>Human approval:</b> a guardrail requiring explicit human sign-off before a risky action executes.</li>
+      <li><b>Content policies:</b> rules defining disallowed categories of output (hate speech, illegal content, etc.).</li>
+    </ul>
+
+    <h2 id="terms">7. Terminology</h2>
+    <table>
+      <tr><th>Term</th><th>Meaning</th></tr>
+      <tr><td>Guardrails AI</td><td>An open-source library providing configurable input/output validation guardrails.</td></tr>
+      <tr><td>NVIDIA NeMo Guardrails</td><td>A framework for defining programmable conversational guardrails/rails.</td></tr>
+      <tr><td>Pydantic</td><td>Used as a guardrail mechanism for structured output schema enforcement.</td></tr>
+      <tr><td>Moderation API</td><td>A classifier (often provider-supplied) flagging content violating policy categories.</td></tr>
+    </table>
+
+    <h2 id="arch">8. Architecture</h2>
+    <pre><code>User input
+ → Input guardrails (injection detection, PII scrub, content policy check)
+ → LLM processing
+ → Output guardrails (schema validation, content policy check, PII scrub, fact-check)
+ → (if risky action) Human approval gate
+ → Response to user</code></pre>
+
+    <h2 id="internal">9. How it works internally</h2>
+    <p>Guardrails are typically implemented as a mix of rule-based checks (regex/pattern matching for known PII formats, blocklists), classifier models (lightweight models trained to flag policy violations or injection attempts), and LLM-based checks (asking a separate model call to judge compliance) — layered so that cheap, fast checks run first and catch the majority of cases, with more expensive LLM-based checks reserved for ambiguous cases that simpler checks can't confidently resolve.</p>
+
+    <h2 id="steps">10. Step-by-step: adding guardrails to a pipeline</h2>
+    <ol>
+      <li>Identify specific risks relevant to your application (PII leakage, injection, off-topic/policy-violating content, malformed structured output).</li>
+      <li>Implement input guardrails addressing injection/malicious input risks.</li>
+      <li>Implement output guardrails addressing schema compliance and content policy risks.</li>
+      <li>Add PII detection/redaction wherever sensitive data could appear in input or output.</li>
+      <li>Add human approval gates for any high-risk/irreversible actions.</li>
+      <li>Monitor guardrail trigger rates and false positive/negative rates over time.</li>
+    </ol>
+
+    <h2 id="simple">11. Simple example</h2>
+    <p>A customer-support bot validates that its output doesn't contain any credit card number patterns before sending a response, catching accidental PII leakage from retrieved context.</p>
+
+    <h2 id="real">12. Real-world example</h2>
+    <p>A financial services chatbot uses output guardrails to ensure every response discussing investment advice includes a required compliance disclaimer and never makes a specific "guaranteed return" claim — a rule-based check layered on top of the LLM's natural language output, enforced regardless of what the model generates.</p>
+
+    <h2 id="code">13. Code example</h2>
+    <pre><code class="language-python">import re
+from pydantic import BaseModel, ValidationError
+
+PII_PATTERNS = {
+    "credit_card": r"\b(?:\d[ -]*?){13,16}\b",
+    "ssn": r"\b\d{3}-\d{2}-\d{4}\b",
+}
+
+def detect_pii(text: str) -> list[str]:
+    found = []
+    for label, pattern in PII_PATTERNS.items():
+        if re.search(pattern, text):
+            found.append(label)
+    return found
+
+def output_guardrail(response_text: str) -> dict:
+    pii_found = detect_pii(response_text)
+    if pii_found:
+        return {"blocked": True, "reason": f"PII detected: {pii_found}"}
+    return {"blocked": False, "text": response_text}
+
+response = generate_llm_response(user_query)
+result = output_guardrail(response)
+if result["blocked"]:
+    log_guardrail_violation(result)
+    final_response = "I can't share that information. Let me know if I can help another way."
+else:
+    final_response = result["text"]
+</code></pre>
+
+    <h2 id="advanced">14. Advanced example (NeMo Guardrails style)</h2>
+    <pre><code class="language-python"># Conceptual programmable rail definition (Colang-style, simplified)
+"""
+define user ask about competitors
+    "what do you think about [competitor]"
+    "is [competitor] better"
+
+define bot decline competitor comparison
+    "I'm not able to comment on other companies' products, but I'm happy to discuss our own."
+
+define flow
+    user ask about competitors
+    bot decline competitor comparison
+"""
+# NeMo Guardrails intercepts matching intents before they reach the main LLM flow,
+# enforcing a deterministic response for specific sensitive topics.
+</code></pre>
+
+    <h2 id="mistakes">15. Common mistakes</h2>
+    <ul>
+      <li>Relying solely on prompt instructions ("please don't reveal PII") instead of enforceable external checks.</li>
+      <li>Overly aggressive guardrails causing excessive false positives, frustrating legitimate use cases.</li>
+      <li>Not monitoring guardrail trigger rates, missing both false positives and emerging bypass patterns.</li>
+      <li>Treating guardrails as a one-time setup rather than continuously tuned based on observed failures.</li>
+    </ul>
+
+    <h2 id="best">16. Best practices</h2>
+    <ul>
+      <li>Layer guardrails: cheap rule-based checks first, LLM-based checks for ambiguous cases.</li>
+      <li>Monitor false positive/negative rates and tune thresholds based on real data.</li>
+      <li>Apply guardrails at both input and output — don't rely on just one side.</li>
+      <li>Use human approval gates for genuinely high-risk/irreversible actions, not as a blanket default that degrades UX.</li>
+    </ul>
+
+    <h2 id="production">17. Production considerations</h2>
+    <p>Log every guardrail trigger (block, warning, modification) for auditability and continuous tuning; treat guardrail logic itself as production code requiring testing and versioning.</p>
+
+    <h2 id="security">18. Security considerations</h2>
+    <p>Guardrails are a core defense-in-depth layer against prompt injection and excessive agency — but they're not infallible; combine with least-privilege tool scoping and human approval for genuinely high-stakes actions rather than relying on guardrails alone (see <a href="../38-AI-Security/">AI Security</a>).</p>
+
+    <h2 id="performance">19. Performance considerations</h2>
+    <p>Rule-based/regex checks are essentially free; classifier-based checks add modest latency; LLM-based guardrail checks add a full additional API call's latency — reserve them for cases simpler checks can't resolve.</p>
+
+    <h2 id="cost">20. Cost considerations</h2>
+    <p>LLM-based guardrail checks double (or more) the LLM call cost per request if applied universally — layer cheaper checks first to minimize how often the expensive check actually runs.</p>
+
+    <h2 id="debug">21. Debugging/troubleshooting</h2>
+    <ul>
+      <li><b>Too many false positives blocking legitimate requests:</b> review and tune detection patterns/thresholds against real traffic samples.</li>
+      <li><b>PII still leaking through despite guardrails:</b> check pattern coverage (PII can take many formats) and consider adding an LLM-based PII check as a secondary layer.</li>
+      <li><b>Guardrails add too much latency:</b> profile which specific check is slow, and consider moving it to an async/post-hoc check if it doesn't need to block the response.</li>
+    </ul>
+
+    <h2 id="related">22. Related concepts</h2>
+    <p><a href="../38-AI-Security/">AI Security</a> · <a href="../09-Structured-Output/structured-output.html">Structured Output</a> · <a href="../05-LLM-Fundamentals/sampling-and-hallucination.html">Hallucination</a></p>
+
+    <h2 id="comparison">23. Comparison with alternatives</h2>
+    <table>
+      <tr><th>Approach</th><th>Notes</th></tr>
+      <tr><td>Prompt instructions alone</td><td>Not enforceable; model can still fail to comply</td></tr>
+      <tr><td>Rule-based guardrails (regex, blocklists)</td><td>Fast, cheap, but limited to known patterns</td></tr>
+      <tr><td>Classifier-based guardrails</td><td>Better generalization than rules, needs training data</td></tr>
+      <tr><td>LLM-based guardrails</td><td>Most flexible/general, but highest cost/latency</td></tr>
+    </table>
+
+    <h2 id="exercise">24. Mini practical exercise</h2>
+    <p>Write a regex-based PII detector for phone numbers and emails, and test it against both clean and PII-containing sample text to measure false positive/negative behavior.</p>
+
+    <h2 id="project">25. Practical project</h2>
+    <p><b>Layered Guardrail Pipeline:</b> build an input/output guardrail pipeline for a chatbot combining regex PII detection, a content-policy keyword blocklist, and an LLM-based check reserved only for ambiguous cases the first two layers don't resolve.</p>
+
+    <h2 id="projectarch">26. Project architecture</h2>
+    <pre><code>input → regex injection check → (if clear) continue : block
+ → LLM response generated
+ → output → regex PII check → keyword policy check
+ → (if ambiguous) LLM-based final check → (if clear) send : block
+ → log every guardrail decision</code></pre>
+
+    <h2 id="interview-b">27. Interview Questions — Beginner</h2>
+    <div class="qa"><b>Q1.</b> What are AI guardrails?<br><b>A.</b> Automated checks wrapped around an LLM application's input and output to catch problems before they reach users or before risky actions execute.</div>
+    <div class="qa"><b>Q2.</b> What's the difference between input and output guardrails?<br><b>A.</b> Input guardrails check/filter user input before it reaches the model; output guardrails check the model's output before it reaches the user.</div>
+    <div class="qa"><b>Q3.</b> What is PII detection?<br><b>A.</b> Identifying personally identifiable information in input or output, often for redaction or blocking.</div>
+    <div class="qa"><b>Q4.</b> Why can't you rely solely on prompting to prevent undesired output?<br><b>A.</b> Prompting isn't enforceable — the model can still fail to comply, so an external, enforceable check is needed as a safety net.</div>
+    <div class="qa"><b>Q5.</b> Name one open-source guardrails library.<br><b>A.</b> Guardrails AI (or NVIDIA NeMo Guardrails).</div>
+    <div class="qa"><b>Q6.</b> What's a human approval gate?<br><b>A.</b> A guardrail requiring explicit human sign-off before a risky or irreversible action executes.</div>
+    <div class="qa"><b>Q7.</b> Why layer cheap rule-based checks before expensive LLM-based checks?<br><b>A.</b> To minimize cost/latency — cheap checks handle the majority of cases, reserving the expensive check only for genuinely ambiguous cases.</div>
+    <div class="qa"><b>Q8.</b> What is schema validation as a guardrail?<br><b>A.</b> Ensuring structured output matches its expected schema before it's used downstream.</div>
+    <div class="qa"><b>Q9.</b> Should guardrails be a one-time setup?<br><b>A.</b> No — they should be continuously monitored and tuned based on observed false positives/negatives and emerging failure patterns.</div>
+    <div class="qa"><b>Q10.</b> What's a content policy in this context?<br><b>A.</b> Rules defining disallowed categories of output, like hate speech or illegal content.</div>
+
+    <h2 id="interview-i">28. Interview Questions — Intermediate</h2>
+    <div class="qa"><b>Q1.</b> Why might a layered guardrail approach (rules → classifier → LLM) be more effective than relying on just one method?<br><b>A.</b> Each layer has different strengths: rules are fast/cheap but limited to known patterns, classifiers generalize better but need training data, LLM-based checks are most flexible but costly — combining them lets cheap methods handle the bulk of cases while reserving expensive, flexible checks for genuinely ambiguous situations, optimizing both cost and coverage.</div>
+    <div class="qa"><b>Q2.</b> How would you measure whether your guardrails are too aggressive (high false positive rate)?<br><b>A.</b> Track the rate at which guardrails block/flag legitimate requests (requiring either manual review of blocked cases or user feedback signals), and compare against the rate of actual problems the guardrails correctly catch — a high false-positive-to-true-positive ratio indicates over-aggressive tuning hurting UX for little safety benefit.</div>
+    <div class="qa"><b>Q3.</b> Why is regex-based PII detection alone often insufficient for comprehensive PII protection?<br><b>A.</b> PII can take many formats regex patterns might not anticipate (international phone formats, less structured data like addresses or names), and regex has no semantic understanding — a secondary classifier or LLM-based check can catch cases pure pattern matching misses.</div>
+    <div class="qa"><b>Q4.</b> What's a practical reason to log every guardrail decision, not just the blocks?<br><b>A.</b> Logging near-misses and borderline allowed cases (not just hard blocks) provides the data needed to tune thresholds and catch emerging patterns before they become actual incidents, and supports auditing why specific content was or wasn't allowed.</div>
+    <div class="qa"><b>Q5.</b> How would you decide which actions in an agentic system need a human approval gate versus which can proceed autonomously?<br><b>A.</b> Classify actions by risk/reversibility — irreversible or high-impact actions (payments, data deletion, external communications) warrant human approval; low-risk, easily-reversible actions can proceed autonomously, balancing safety against practical usability (same principle as computer-use/coding-agent safety gating).</div>
+
+    <h2 id="interview-a">29. Interview Questions — Advanced</h2>
+    <div class="qa"><b>Q1.</b> How would you design a guardrail system that adapts over time as new bypass/injection patterns are discovered, without requiring constant manual rule updates?<br><b>A.</b> Combine a core set of rule-based checks for known patterns with a continuously-retrained or periodically-recalibrated classifier trained on a growing dataset of confirmed violation/bypass examples, and establish a feedback loop where flagged-but-unclear cases are reviewed and fed back into the classifier's training data, reducing dependence on purely manual rule authorship over time.</div>
+    <div class="qa"><b>Q2.</b> What's a subtle risk of using the same LLM for both the primary task and an LLM-based output guardrail check?<br><b>A.</b> The guardrail check can share the same blind spots/biases as the primary generation (correlated failure modes), reducing its independence as a safety check — using a different model, a specifically fine-tuned classifier, or combining with independent rule-based checks provides more robust, less correlated verification.</div>
+
+    <h2 id="interview-s">30. Interview Questions — Senior/Architect</h2>
+    <div class="qa"><b>Q1.</b> Design a guardrail architecture for a regulated financial services chatbot that must comply with strict content and disclosure requirements.<br><b>A.</b> Layer deterministic rule-based checks (mandatory disclaimer insertion, blocklisted claim patterns like "guaranteed returns") as non-bypassable output gates; add a classifier-based compliance check for more nuanced policy violations; require human approval for any response touching specific high-risk topics (e.g., specific investment recommendations); maintain full audit logging of every guardrail decision for regulatory review; and establish a formal process (legal/compliance review) for updating guardrail rules as regulations or policies change, treating guardrail configuration as a governed, versioned artifact.</div>
+
+    <h2 id="interview-sc">31. Scenario-Based Questions</h2>
+    <div class="qa"><b>Scenario 1.</b> Your chatbot's guardrails are blocking many legitimate customer questions, frustrating users. How do you fix this without compromising safety?<br><b>A.</b> Review logged false-positive cases to identify over-broad patterns/thresholds, tune the rules/classifier to be more precise based on that real data, and consider moving borderline cases to an LLM-based secondary check (allowing most legitimate requests through) rather than hard-blocking at the first, coarser layer.</div>
+    <div class="qa"><b>Scenario 2.</b> A security audit finds that a known prompt-injection pattern bypasses your current guardrails. What's your response process?<br><b>A.</b> Immediately add a rule/pattern specifically addressing the discovered bypass, test it against the specific exploit case plus a broader set of known injection patterns to ensure the fix generalizes reasonably, and review whether a classifier or LLM-based layer would have caught this pattern even without the specific rule, informing whether to invest more in adaptive detection versus purely reactive rule patching.</div>
+
+    <h2 id="revision">32. Quick revision notes</h2>
+    <ul>
+      <li>Guardrails = enforceable checks on input/output, not relying on prompt compliance alone.</li>
+      <li>Layer: cheap rules first → classifiers → expensive LLM-based checks for ambiguous cases.</li>
+      <li>Apply at both input and output; log every decision for tuning and audit.</li>
+      <li>Human approval gates for genuinely high-risk/irreversible actions.</li>
+    </ul>
+
+    <h2 id="cheat">33. Cheat sheet</h2>
+    <div class="callout">Guardrails: input validation + output validation + PII detection + injection detection + schema validation + human approval for high-risk actions. Layer cheap→expensive checks. Log everything; tune continuously.</div>
+
+    <h2 id="further">34. Further topics to learn</h2>
+    <p><a href="../38-AI-Security/">AI Security</a> → <a href="../44-Enterprise-AI/">Enterprise AI (compliance)</a></p>
+
+    <div class="prevnext">
+      <a href="../36-LLM-Observability/llm-observability-fundamentals.html">← LLM Observability</a>
+      <a href="../38-AI-Security/ai-security-fundamentals.html">Next: AI Security →</a>
+    </div>
+  </main>
+</div>
+<script src="../assets/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Array Techniques - Simple Hinglish Notes</title>
+<style>
+  body{font-family:Arial,Helvetica,sans-serif;line-height:1.6;margin:0;background:#f5f7fb;color:#172033}
+  .wrap{max-width:1000px;margin:auto;padding:28px}
+  header{background:#111827;color:white;padding:28px;border-radius:16px;margin-bottom:22px}
+  h1{margin:0 0 8px;font-size:32px}
+  h2{color:#0f766e;border-bottom:2px solid #d1d5db;padding-bottom:8px}
+  h3{color:#374151}
+  .card{background:white;border-radius:14px;padding:22px;margin:18px 0;box-shadow:0 3px 12px #00000010}
+  .easy{background:#ecfeff;border-left:5px solid #06b6d4;padding:14px;border-radius:8px}
+  .important{background:#fff7ed;border-left:5px solid #f97316;padding:14px;border-radius:8px}
+  .memory{background:#f0fdf4;border-left:5px solid #22c55e;padding:14px;border-radius:8px}
+  code{background:#eef2ff;padding:2px 6px;border-radius:5px}
+  pre{background:#111827;color:#e5e7eb;padding:16px;border-radius:10px;overflow:auto}
+  table{width:100%;border-collapse:collapse;margin:12px 0}
+  th,td{border:1px solid #d1d5db;padding:9px;text-align:left}
+  th{background:#f3f4f6}
+  .tag{display:inline-block;background:#e0f2fe;color:#075985;padding:4px 9px;border-radius:20px;margin:3px}
+  .small{color:#6b7280;font-size:14px}
+  .formula{font-size:20px;text-align:center;background:#f9fafb;padding:14px;border-radius:10px;font-weight:bold}
+  .toc a{color:#0f766e;text-decoration:none}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>Array Techniques — Simple Hinglish Notes</h1>
+  <p>Based on the uploaded <b>Array Techniques.pdf</b>. Goal: concept samajhna, ratna nahi.</p>
+</header>
+
+<div class="card toc">
+<h2>What this PDF covers</h2>
+<p>The class material mainly covers:</p>
+<span class="tag">Time Complexity</span>
+<span class="tag">Constraints</span>
+<span class="tag">Space Complexity</span>
+<span class="tag">Range Sum Query</span>
+<span class="tag">Prefix Sum</span>
+<span class="tag">Multiple Queries</span>
+<span class="tag">Subarrays</span>
+<span class="tag">Sum of All Subarrays</span>
+<span class="tag">Contribution Technique</span>
+<p class="small">Page 1 also shows a broader upcoming schedule containing Sliding Window, Contribution, Sets/Maps, Two Pointers, Binary Search, Bit Manipulation and Number Theory, but the remaining pages of this PDF mainly teach the array/prefix-sum material above.</p>
+</div>
+
+<div class="card">
+<h2>1. Time Complexity — "Code kitna time lega?"</h2>
+<div class="easy"><b>Simple meaning:</b> Time Complexity ka matlab actual seconds measure karna nahi hai. Hum dekhte hain ki input size <code>N</code> badhne par operations kitni speed se badhte hain.</div>
+
+<h3>Step 1: Iterations count karo</h3>
+<p>PDF page 2 ka rule:</p>
+<ol>
+<li>Input size <code>N</code> ke terms mein iterations find karo.</li>
+<li>Constants hatao.</li>
+<li>Lower contribution terms hatao.</li>
+</ol>
+
+<h3>O(N) — one loop</h3>
+<pre><code>for (i = 1; i &lt;= N; i++) {
+    // work
+}</code></pre>
+<p>Loop roughly <code>N</code> times chalega → <b>O(N)</b>.</p>
+
+<h3>Reverse loop bhi O(N)</h3>
+<pre><code>for (i = N; i &gt;= 1; i--) {
+    // work
+}</code></pre>
+<p>N se 1 tak ja raha hai, total roughly N iterations → <b>O(N)</b>.</p>
+
+<h3>i ko 2 se multiply karna</h3>
+<pre><code>for (i = 1; i &lt;= N; i = i * 2) {
+    // work
+}</code></pre>
+<p>Values: 1, 2, 4, 8, 16, 32... Jab tak N. Ye roughly <b>log₂N</b> steps leta hai → <b>O(log N)</b>.</p>
+
+<h3>Nested loops</h3>
+<pre><code>for (i = 1; i &lt;= N; i++) {
+    for (j = 1; j &lt;= i; j++) {
+        // work
+    }
+}</code></pre>
+<p>Iterations: 1 + 2 + 3 + ... + N = <code>N(N+1)/2</code>.</p>
+<div class="formula">N(N+1)/2 = N²/2 + N/2 → O(N²)</div>
+<p>Constant <code>1/2</code> aur lower term <code>N/2</code> ignore karne par O(N²).</p>
+</div>
+
+<div class="card">
+<h2>2. Common Time Complexities</h2>
+<table>
+<tr><th>Complexity</th><th>Simple meaning</th><th>Example</th></tr>
+<tr><td>O(1)</td><td>Input bada ho, work almost same</td><td>A[5] access</td></tr>
+<tr><td>O(log N)</td><td>Har step mein problem ka size bahut reduce</td><td>i = i * 2</td></tr>
+<tr><td>O(N)</td><td>Ek pass / one loop</td><td>Array traverse</td></tr>
+<tr><td>O(N log N)</td><td>N work with log factor</td><td>Typical efficient sorting</td></tr>
+<tr><td>O(N²)</td><td>Nested loops / pair-like work</td><td>All pairs</td></tr>
+<tr><td>O(N³)</td><td>3 nested levels</td><td>All triples</td></tr>
+</table>
+<div class="memory"><b>Memory trick:</b> 1 loop ≈ O(N), 2 nested loops ≈ O(N²), 3 nested loops ≈ O(N³). But always count actual iterations; blindly counting loops can sometimes mislead.</div>
+</div>
+
+<div class="card">
+<h2>3. Constraints — "N kitna bada ho sakta hai?"</h2>
+<p>PDF page 5 mein constraints diye hain:</p>
+<table>
+<tr><th>Constraint</th><th>Meaning</th></tr>
+<tr><td>N ≤ 10²</td><td>N ≤ 100</td></tr>
+<tr><td>N ≤ 10³</td><td>N ≤ 1,000</td></tr>
+<tr><td>N ≤ 10⁴</td><td>N ≤ 10,000</td></tr>
+<tr><td>N ≤ 10⁵</td><td>N ≤ 100,000</td></tr>
+<tr><td>N ≤ 10⁷</td><td>N ≤ 10,000,000</td></tr>
+<tr><td>N ≤ 10⁹</td><td>N ≤ 1,000,000,000</td></tr>
+<tr><td>N ≤ 10¹⁸</td><td>N can be extremely large</td></tr>
+</table>
+<div class="important"><b>Why important?</b> Constraint dekhkar decide karte hain ki O(N²) jaisa approach feasible ho sakta hai ya O(N)/O(log N) jaisa efficient approach chahiye.</div>
+<table>
+<tr><th>N</th><th>O(N)</th><th>O(N²)</th><th>O(N³)</th></tr>
+<tr><td>100</td><td>100</td><td>10,000</td><td>1,000,000</td></tr>
+<tr><td>1,000</td><td>1,000</td><td>1,000,000</td><td>1,000,000,000</td></tr>
+<tr><td>100,000</td><td>100,000</td><td>10,000,000,000</td><td>Huge</td></tr>
+</table>
+<p><b>Rule:</b> Pehle constraint dekho → phir expected complexity socho → phir algorithm choose karo.</p>
+</div>
+
+<div class="card">
+<h2>4. Space Complexity — "Extra memory kitni chahiye?"</h2>
+<div class="easy"><b>Time</b> = kitna work/time. <b>Space</b> = algorithm ko extra memory kitni chahiye.</div>
+
+<h3>Example: one array</h3>
+<pre><code>int A[N];
+
+for (int i = 0; i &lt; N; i++) {
+    // work
+}</code></pre>
+<p>Array itself N memory leta hai → <b>O(N)</b> space. Loop ka counter sirf constant extra memory hai.</p>
+
+<h3>Important: nested loop ≠ automatically O(N²) space</h3>
+<pre><code>for (int i = 0; i &lt; N; i++) {
+    for (int j = 0; j &lt; M; j++) {
+        // work
+    }
+}</code></pre>
+<p>Time can be <b>O(N×M)</b>, but agar koi N×M size ka extra data store nahi ho raha, extra space O(1) ho sakta hai. PDF page 8 isi distinction ko highlight karta hai.</p>
+<div class="memory"><b>Shortcut:</b> Har variable ko memory mein count karne ki zarurat nahi. Usually complexity ke liye growing data structures/arrays ko track karo.</div>
+</div>
+
+<div class="card">
+<h2>5. Range Sum Query — Problem kya hai?</h2>
+<p>Suppose:</p>
+<pre><code>A = [7, 1, 5, -9, 2, 10, 5, 8]
+     0  1  2   3  4   5  6  7</code></pre>
+<p>Question ho sakta hai: <b>L se R tak ka sum batao.</b></p>
+<p>For <code>L=1, R=3</code>:</p>
+<div class="formula">A[1] + A[2] + A[3] = 1 + 5 - 9 = -3</div>
+
+<p>Agar sirf ek query hai, simple loop se sum nikal sakte ho.</p>
+<pre><code>sum = 0;
+for (i = L; i &lt;= R; i++) {
+    sum += A[i];
+}</code></pre>
+<p>One query ka cost range length ke proportional hai. PDF page 11 mein multiple queries ke case mein TLE concern dikhaya gaya hai.</p>
+</div>
+
+<div class="card">
+<h2>6. Multiple Range Queries — Problem kyun hoti hai?</h2>
+<p>Maan lo N array elements hain aur Q queries hain.</p>
+<p>Har query ke liye L se R tak loop karoge to worst case roughly:</p>
+<div class="formula">O(Q × N)</div>
+<p>Agar <code>N</code> aur <code>Q</code> dono large hain, ye bahut expensive ho sakta hai.</p>
+<div class="important"><b>Idea:</b> Same work baar-baar karne ke bajay pehle kuch useful information calculate kar lo, phir har query ko quickly answer karo.</div>
+</div>
+
+<div class="card">
+<h2>7. Prefix Sum — Main Technique</h2>
+<p>Prefix sum ka matlab: <b>start se current index tak ka sum store karna.</b></p>
+<pre><code>A = [7, 1, 5, -9, 2, 10, 5, 8]
+
+P = [7, 8, 13, 4, 6, 16, 21, 29]</code></pre>
+
+<p>Formula:</p>
+<div class="formula">P[i] = A[0] + A[1] + ... + A[i]</div>
+
+<p>Ya recursive form:</p>
+<div class="formula">P[i] = P[i-1] + A[i]</div>
+
+<p>For example:</p>
+<ul>
+<li>P[0] = 7</li>
+<li>P[1] = 7 + 1 = 8</li>
+<li>P[2] = 8 + 5 = 13</li>
+<li>P[3] = 13 - 9 = 4</li>
+</ul>
+</div>
+
+<div class="card">
+<h2>8. Prefix Sum se L..R Sum</h2>
+<p>Ye sabse important formula hai.</p>
+<div class="formula">
+If L = 0 → sum(L,R) = P[R]<br>
+If L &gt; 0 → sum(L,R) = P[R] - P[L-1]
+</div>
+
+<h3>Example</h3>
+<pre><code>A = [7, 1, 5, -9, 2, 10, 5, 8]
+P = [7, 8, 13, 4, 6, 16, 21, 29]</code></pre>
+
+<p>Find sum from <code>L=2</code> to <code>R=6</code>:</p>
+<div class="formula">P[6] - P[1] = 21 - 8 = 13</div>
+
+<p>Actual values: 5 + (-9) + 2 + 10 + 5 = 13.</p>
+
+<div class="memory"><b>Why works?</b> P[R] contains everything from 0..R. P[L-1] contains everything from 0..L-1. Subtract karne par left wala part cancel ho jata hai, aur L..R bach jata hai.</div>
+</div>
+
+<div class="card">
+<h2>9. Prefix Sum with Many Queries</h2>
+<p>Approach:</p>
+<ol>
+<li>Array read karo → O(N)</li>
+<li>Prefix array build karo → O(N)</li>
+<li>Har query ko prefix se answer karo → O(1) each</li>
+</ol>
+<p>Total roughly:</p>
+<div class="formula">O(N + Q)</div>
+<p>Space agar prefix array store kar rahe ho → <b>O(N)</b>.</p>
+
+<div class="easy"><b>Big idea:</b> Thoda extra memory/time upfront spend karo, taaki later queries fast ho jayein. Isko preprocessing idea samjho.</div>
+</div>
+
+<div class="card">
+<h2>10. Query Example</h2>
+<pre><code>A = [7, 1, 5, -9, 2, 10, 5, 8]
+P = [7, 8, 13, 4, 6, 16, 21, 29]
+
+Query: L=0, R=4
+Answer = P[4] = 6
+
+Query: L=2, R=6
+Answer = P[6] - P[1]
+       = 21 - 8
+       = 13</code></pre>
+<p>PDF pages 12–17 isi prefix-sum formula ko visually explain karte hain.</p>
+</div>
+
+<div class="card">
+<h2>11. Subarray kya hota hai?</h2>
+<p><b>Subarray = array ke continuous elements ka group.</b></p>
+<p>For:</p>
+<pre><code>A = [1, 7, 5, 9]</code></pre>
+<p>Examples:</p>
+<ul>
+<li>[1]</li>
+<li>[1, 7]</li>
+<li>[1, 7, 5]</li>
+<li>[7]</li>
+<li>[7, 5]</li>
+<li>[5, 9]</li>
+<li>[1, 7, 5, 9]</li>
+</ul>
+<p><b>Important:</b> Elements continuous hone chahiye. [1, 5] is array ka subarray nahi hai because 7 ko skip kiya.</p>
+</div>
+
+<div class="card">
+<h2>12. Number of Subarrays</h2>
+<p>Array length N hai. Total subarrays:</p>
+<div class="formula">N(N+1) / 2</div>
+
+<h3>Why?</h3>
+<p>Index 0 se start hone wale subarrays = N.</p>
+<p>Index 1 se = N-1.</p>
+<p>Index 2 se = N-2.</p>
+<p>...</p>
+<p>Last index se = 1.</p>
+<div class="formula">N + (N-1) + ... + 2 + 1 = N(N+1)/2</div>
+
+<p>For N=4:</p>
+<div class="formula">4×5/2 = 10 subarrays</div>
+</div>
+
+<div class="card">
+<h2>13. All Subarrays Print Karna</h2>
+<p>PDF page 24 mein L aur R se subarrays generate karne ka basic idea hai:</p>
+<pre><code>for (L = 0; L &lt; N; L++) {
+    for (R = L; R &lt; N; R++) {
+        // subarray [L, R]
+    }
+}</code></pre>
+<p>Har <code>[L,R]</code> choose karne ke baad uske elements print karne ke liye ek aur loop lag sakta hai.</p>
+<p>Isliye agar actual elements bhi print kar rahe ho, total work O(N³) tak ho sakta hai. PDF page 24 mein subarray generation ke code ka TC O(N³) aur SC O(1) shown hai.</p>
+</div>
+
+<div class="card">
+<h2>14. Sum of All Subarrays — Brute Force</h2>
+<p>PDF pages 25–26 mein pehla approach hai: har subarray ka sum nikalo aur total answer mein add karo.</p>
+<pre><code>ans = 0;
+
+for (L = 0; L &lt; N; L++) {
+    for (R = L; R &lt; N; R++) {
+        sum = 0;
+
+        for (i = L; i &lt;= R; i++) {
+            sum += A[i];
+        }
+
+        ans += sum;
+    }
+}</code></pre>
+<p>Isme repeated summation ho rahi hai, so ye inefficient hai. PDF page 26 is brute-force version ko O(N³) time, O(N) space ke context mein show karta hai.</p>
+</div>
+
+<div class="card">
+<h2>15. Prefix Sum se All Subarray Sums</h2>
+<p>Same problem ko prefix sum se improve kar sakte ho.</p>
+<pre><code>for (L = 0; L &lt; N; L++) {
+    for (R = L; R &lt; N; R++) {
+
+        if (L == 0)
+            sum = P[R];
+        else
+            sum = P[R] - P[L-1];
+
+        ans += sum;
+    }
+}</code></pre>
+<p>Ab har subarray ka sum O(1) mein milta hai. L,R ke pairs O(N²) hain.</p>
+<div class="formula">Time ≈ O(N²)</div>
+<p>PDF page 26 isi improvement ko highlight karta hai.</p>
+</div>
+
+<div class="card">
+<h2>16. Contribution Technique — Smart Way</h2>
+<p>PDF pages 27–30 ka most important idea: <b>Har subarray ko individually generate karne ki jagah, har element kitni subarrays mein contribute karta hai, ye count karo.</b></p>
+
+<h3>Example</h3>
+<pre><code>A = [1, 7, 5, 9]
+     [0, 1, 2, 3]</code></pre>
+
+<p>Element <code>A[i]</code> ke liye:</p>
+<ul>
+<li>Uske left mein kitne choices hain? <code>i + 1</code></li>
+<li>Uske right mein kitne choices hain? <code>N - i</code></li>
+</ul>
+
+<div class="formula">Contribution of A[i] = A[i] × (i+1) × (N-i)</div>
+
+<h3>Why?</h3>
+<p>Subarray mein A[i] ko include karne ke liye:</p>
+<ul>
+<li>Start index 0..i mein se koi bhi choose kar sakte ho → <code>i+1</code> choices.</li>
+<li>End index i..N-1 mein se koi bhi choose kar sakte ho → <code>N-i</code> choices.</li>
+</ul>
+<p>Har left choice × har right choice ek subarray banata hai jisme A[i] included hai.</p>
+</div>
+
+<div class="card">
+<h2>17. Contribution Example — A = [1, 7, 5, 9]</h2>
+<table>
+<tr><th>i</th><th>A[i]</th><th>Left choices</th><th>Right choices</th><th>Count</th></tr>
+<tr><td>0</td><td>1</td><td>1</td><td>4</td><td>1×4 = 4</td></tr>
+<tr><td>1</td><td>7</td><td>2</td><td>3</td><td>2×3 = 6</td></tr>
+<tr><td>2</td><td>5</td><td>3</td><td>2</td><td>3×2 = 6</td></tr>
+<tr><td>3</td><td>9</td><td>4</td><td>1</td><td>4×1 = 4</td></tr>
+</table>
+
+<p>Contributions:</p>
+<div class="formula">
+1×4 + 7×6 + 5×6 + 9×4<br>
+= 4 + 42 + 30 + 36<br>
+= 112
+</div>
+
+<p>So all subarrays ke sums ka total = <b>112</b>.</p>
+<p>PDF page 27 exactly isi style ka example use karta hai.</p>
+</div>
+
+<div class="card">
+<h2>18. Contribution Technique ka Code</h2>
+<pre><code>long long ans = 0;
+
+for (int i = 0; i &lt; N; i++) {
+    ans += 1LL * (i + 1) * (N - i) * A[i];
+}
+
+cout &lt;&lt; ans;</code></pre>
+<p>PDF page 30 mein isi formula ka O(N) time aur O(1) space approach diya gaya hai.</p>
+<div class="memory"><b>Big win:</b> Brute force mein bahut saare subarrays process karne pad sakte hain. Contribution approach mein har element ko sirf ek baar process karte hain → O(N).</div>
+</div>
+
+<div class="card">
+<h2>19. Ye 3 techniques ka connection</h2>
+<table>
+<tr><th>Problem</th><th>Basic approach</th><th>Better idea</th></tr>
+<tr><td>One range sum</td><td>L se R loop</td><td>Prefix sum</td></tr>
+<tr><td>Many range sum queries</td><td>Har query mein loop</td><td>Prefix sum + O(1) query</td></tr>
+<tr><td>Print all subarrays</td><td>L,R loops + printing</td><td>Generation with L,R</td></tr>
+<tr><td>Sum of all subarrays</td><td>Brute force</td><td>Prefix sum → O(N²)</td></tr>
+<tr><td>Sum of all subarrays, smarter</td><td>Subarray processing</td><td>Contribution → O(N)</td></tr>
+</table>
+</div>
+
+<div class="card">
+<h2>20. Most Important Formulas — Cheat Sheet</h2>
+<div class="formula">Prefix: P[i] = P[i-1] + A[i]</div>
+<br>
+<div class="formula">Range Sum: L=0 → P[R]</div>
+<br>
+<div class="formula">Range Sum: L&gt;0 → P[R] - P[L-1]</div>
+<br>
+<div class="formula"># Subarrays = N(N+1)/2</div>
+<br>
+<div class="formula">Contribution of A[i] = A[i] × (i+1) × (N-i)</div>
+<br>
+<div class="formula">All subarray sums = Σ A[i](i+1)(N-i)</div>
+</div>
+
+<div class="card">
+<h2>21. Interview mein kaise sochna hai?</h2>
+<ol>
+<li><b>Constraint dekho:</b> N kitna bada hai?</li>
+<li><b>Brute force imagine karo:</b> sab kuch directly karne par kitna time lagega?</li>
+<li><b>Repeated work identify karo:</b> kya same sum baar-baar calculate ho raha hai?</li>
+<li><b>Prefix sum socho:</b> kya range sum repeatedly chahiye?</li>
+<li><b>Contribution socho:</b> kya har element ka contribution independently count ho sakta hai?</li>
+<li><b>Space check karo:</b> extra array banana allowed/needed hai?</li>
+</ol>
+</div>
+
+<div class="card">
+<h2>22. 30-second revision</h2>
+<div class="memory">
+<p><b>Constraint</b> → N kitna bada hai.</p>
+<p><b>Time Complexity</b> → operations input ke saath kaise grow karte hain.</p>
+<p><b>Space Complexity</b> → extra memory kitni grow karti hai.</p>
+<p><b>Prefix Sum</b> → pehle se cumulative sums store karo, range queries fast karo.</p>
+<p><b>Subarray</b> → continuous part of array.</p>
+<p><b>Total Subarrays</b> → N(N+1)/2.</p>
+<p><b>Contribution</b> → har element kitni subarrays mein aata hai: (i+1)(N-i).</p>
+</div>
+</div>
+
+<div class="card">
+<h2>Source map</h2>
+<p>This explanation follows the uploaded PDF: time-complexity rules and loop examples are on pages 2–4; constraints on page 5; space complexity on pages 6–8; range sum and prefix sum on pages 9–17; query counting on page 18; subarray indexing/examples on pages 19–24; sum of all subarrays and prefix-sum optimization on pages 25–26; contribution technique on pages 27–30.</p>
+<p class="small">Note: The PDF's page 1 is an upcoming-class schedule. The detailed teaching material after it focuses primarily on the topics covered above.</p>
+</div>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Python Syntax &amp; Basics — Python Fundamentals — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">Python Fundamentals</a><span class="sep">›</span>Python Syntax &amp; Basics</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>Python Syntax &amp; Basics</h1>
+      <p class="meta-line"><span>⏱ ~1.5 hrs</span><span>📍 Chapter 1 of 6</span></p>
+      <p><strong>One-line summary:</strong> Python trades braces and semicolons for significant whitespace,
+      trades <code>const</code>/<code>let</code>/<code>var</code> for plain name binding, and runs as a
+      script interpreted top-to-bottom — the syntax looks sparse compared to JS, but every omission is a
+      deliberate design choice you need to internalize, not just memorize.</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>You will read far more Python than you write for the first few months in any Python-adjacent role —
+      data pipelines, ML notebooks, internal tooling, infra scripts. If you're still mentally inserting
+      semicolons or hunting for braces that don't exist, every code review and every pairing session is
+      slower than it needs to be. The goal here isn't "learn Python syntax" in the abstract; it's to get the
+      muscle memory fast enough that reading a 200-line Python file feels as automatic as reading a 200-line
+      TypeScript file.</p>
+      <div class="box why"><h4>Why</h4><p>Interviewers calibrate "how comfortable are you actually in Python"
+      within the first two minutes, usually by watching whether you reach for the right idiom without
+      thinking (f-strings, snake_case, no semicolons) or write JS-shaped Python with the serial numbers
+      filed off. Getting the basics automatic is what buys you the mental bandwidth to focus on the actual
+      problem being asked.</p></div>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>None beyond having Python 3.13 installed and a terminal. This is the first chapter of
+      <a href="index.html">Python Fundamentals</a>; later chapters build directly on this one:
+      <a href="02-control-flow-and-functions.html">Control Flow &amp; Functions</a>,
+      <a href="03-data-types-and-collections.html">Data Types &amp; Collections</a>. Once this whole topic is
+      comfortable, continue to <a href="../08-python-intermediate/index.html">Python Intermediate</a>.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="indentation">Indentation is the block syntax — there are no braces</h3>
+      <p>In JS, <code>{ }</code> delimit a block and whitespace is cosmetic — you could write an entire
+      Node app on one line (badly, but it would run). In Python, indentation <em>is</em> the block
+      delimiter. The interpreter tracks indentation level as a real part of the grammar, not a linter
+      preference.</p>
+      <pre><code class="language-python">
+# Python: indentation defines the block
+if True:
+    print("inside the if")   # 4 spaces — this line belongs to the if
+    print("still inside")
+print("outside the if")      # back to column 0 — outside the block
+
+# JS equivalent — braces define the block, indentation is just style
+# if (true) {
+#   console.log("inside the if");
+#   console.log("still inside");
+# }
+# console.log("outside the if");
+</code></pre>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Mixing tabs and spaces in the same file raises a
+      <code>TabError</code> (or silently misbehaves in older Pythons). Configure your editor to insert 4
+      spaces per indent level — this is PEP 8 convention and effectively mandatory in any real codebase.
+      VS Code's Python extension does this by default; just don't fight it by hand-typing tabs.</p></div>
+
+      <h3 id="variables">Variables, dynamic typing, and the absence of declaration keywords</h3>
+      <p>There's no <code>const</code>, <code>let</code>, or <code>var</code>. Writing <code>x = 5</code>
+      creates a name binding in the current scope — full stop. Python is dynamically typed like JS (a name
+      can be rebound to any type at any time), but unlike JS it has no <code>undefined</code>/<code>null</code>
+      split — there is only <code>None</code>.</p>
+      <table>
+        <tr><th>Concept</th><th>JS/TS</th><th>Python</th></tr>
+        <tr><td>Declare a variable</td><td><code>let x = 5;</code></td><td><code>x = 5</code> (no keyword)</td></tr>
+        <tr><td>Constant-ish binding</td><td><code>const x = 5;</code> (binding is fixed, value may still mutate)</td><td>No true constant — convention is <code>ALL_CAPS</code> name, enforced by nothing</td></tr>
+        <tr><td>Absent / not-yet-set value</td><td><code>undefined</code> vs <code>null</code></td><td>Just <code>None</code> — one concept for both</td></tr>
+        <tr><td>Block scope</td><td><code>let</code>/<code>const</code> are block-scoped</td><td>No block scope — only function and module scope</td></tr>
+        <tr><td>Type of a variable</td><td>Dynamic, checked with <code>typeof</code></td><td>Dynamic, checked with <code>type(x)</code> or <code>isinstance(x, T)</code></td></tr>
+      </table>
+      <pre><code class="language-python">
+x = 5
+x = "now a string"   # perfectly legal — same name, different type, just like JS `let x`
+print(type(x))        # &lt;class 'str'&gt;
+
+# No block scoping -- a variable assigned inside an `if` leaks to the enclosing function/module
+if True:
+    leaked = "I'm visible outside this if"
+print(leaked)   # works -- would NOT work in JS with `let leaked` inside the if block
+</code></pre>
+
+      <h3 id="operators-io">Basic operators, print/input, and running a script</h3>
+      <p>Arithmetic and comparison operators are mostly the same shapes as JS with a few additions:
+      <code>**</code> for exponent (JS also has this since ES2016), <code>//</code> for floor division
+      (no JS equivalent — you'd write <code>Math.floor(a / b)</code>), and <code>and</code>/<code>or</code>/<code>not</code>
+      spelled as words instead of <code>&amp;&amp;</code>/<code>||</code>/<code>!</code>.</p>
+      <pre><code class="language-python">
+print(7 // 2)     # 3  -- floor division, like Math.floor(7/2) in JS
+print(7 % 2)       # 1  -- modulo, same as JS
+print(2 ** 10)      # 1024 -- exponent, same operator JS added in ES2016
+print(True and False, True or False, not True)  # words, not && || !
+
+name = input("What's your name? ")   # blocking read from stdin -- like a synchronous readline
+print(f"Hello, {name}!")              # f-string -- Python's template literal equivalent
+
+# JS equivalent of the f-string:
+# console.log(`Hello, ${name}!`);
+</code></pre>
+      <p>Running a script is a single command, no build step: <code>python script.py</code> (or
+      <code>python3</code> depending on your system PATH setup). There's no transpilation step comparable
+      to Babel/tsc — CPython compiles to bytecode internally and runs it immediately.</p>
+      <div class="box gotcha"><h4>Gotcha</h4><p>On many systems, <code>python</code> still points to Python 2
+      or doesn't exist at all, while <code>python3</code> is the real Python 3.13 binary. Always verify with
+      <code>python3 --version</code> before assuming which one a <code>python</code> command resolves to —
+      this trips up almost every JS dev's first hour with Python.</p></div>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>When you run <code>python3 script.py</code>, CPython parses the source into a syntax tree, compiles
+      that tree into bytecode (the same intermediate form you'd get cached as a <code>.pyc</code> file inside
+      <code>__pycache__</code> for imported modules — your entry-point script itself isn't cached), and then
+      a bytecode interpreter — a stack-based virtual machine — executes it instruction by instruction. This
+      is conceptually similar to how V8 compiles your JS to bytecode (Ignition) before potentially JIT-ing
+      hot paths, except mainstream CPython has historically had no JIT for your Python-level code — the
+      speed of built-ins comes from their C implementation, not runtime optimization of your loops. The
+      practical effect: there's no "warm-up" period and no build artifact to inspect — what you write is,
+      line for line, what runs.</p>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+flowchart LR
+  A[script.py source] --> B[Tokenizer]
+  B --> C[AST]
+  C --> D[Bytecode compiler]
+  D --> E[Bytecode interpreter\nstack-based VM]
+  E --> F[Program output]
+  D -.->|imported modules only| G[".pyc cache in __pycache__"]
+      </div>
+      <div class="mermaid">
+flowchart TD
+  A["x = 5"] --> B{"Name 'x' bound\nin current scope"}
+  B --> C["Module scope\n(top-level script)"]
+  B --> D["Function scope\n(inside def)"]
+  C -.->|no block scope| E["if/for/while bodies\nshare enclosing scope"]
+  D -.->|no block scope| E
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-python">
+# ---- BAD: JS habit of expecting block scope ----
+# This "feels wrong" to a JS dev used to `let` in a for loop, but it's correct Python:
+for i in range(3):
+    pass
+print(i)   # 2 -- `i` is still bound after the loop; no error, unlike `let i` in JS
+
+# ---- GOOD: naming convention matters (PEP 8) ----
+user_name = "alice"        # snake_case for variables/functions -- not camelCase
+MAX_RETRIES = 3             # ALL_CAPS by convention for "constant-ish" module-level values
+class HttpClient:           # PascalCase for classes -- same convention as JS/TS
+
+    def __init__(self, base_url: str) -> None:
+        self.base_url = base_url   # no `this`, use explicit `self` as first param
+
+# ---- f-strings vs template literals ----
+amount = 42.5
+print(f"Total: ${amount:.2f}")   # :.2f -- format spec, 2 decimal places
+# JS: `Total: $${amount.toFixed(2)}`
+
+# ---- Multi-line values: no semicolons, line continuation is implicit inside brackets ----
+total = (
+    1 + 2
+    + 3
+)   # parentheses let the expression span lines -- no trailing `\` needed, unlike raw statements
+</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4><p>A platform team's onboarding doc for new hires coming from a
+      Node background used to take three days because new hires kept writing JS-shaped Python: semicolons
+      (harmless but non-idiomatic), camelCase function names (breaks PEP 8 linting in CI and causes failed
+      pre-commit hooks), and relying on block-scoped loop variables for logic that silently leaked past the
+      loop. The fix wasn't more documentation — it was a strict <code>ruff</code> + <code>black</code>
+      pre-commit setup that rejects non-idiomatic style before it ever reaches review, forcing the muscle
+      memory to form in week one instead of being "corrected" piecemeal in code review for a month.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Writing <code>camelCase</code> function and variable names out
+      of JS habit. Python's community convention (PEP 8) is <code>snake_case</code> for variables and
+      functions, <code>PascalCase</code> for classes, and <code>ALL_CAPS</code> for constants. This isn't
+      just style — linters (ruff, pylint) and most style guides in real codebases will flag it, and it marks
+      your code as obviously non-native immediately.</p></div>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Forgetting that there is no block scope, and being surprised
+      when a variable defined inside an <code>if</code> or <code>for</code> is still accessible afterward.
+      This is correct, intentional Python behavior — not a bug — but it means you must be deliberate about
+      not accidentally relying on a loop variable that didn't get set because the loop body never ran.</p></div>
+      <ul>
+        <li>Don't add semicolons at line ends — they're legal (Python tolerates them) but never idiomatic; only used rarely to put two statements on one line.</li>
+        <li>Use f-strings (<code>f"{x}"</code>) over <code>%</code>-formatting or <code>.format()</code> — f-strings are the modern, fastest, and most readable choice since Python 3.6+.</li>
+        <li>Don't confuse <code>python</code> and <code>python3</code> on your PATH — be explicit, especially when scripting CI.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>f-strings</td><td>Almost always, for any string interpolation</td><td>You need a translatable/localized string template</td><td><code>gettext</code> or a templating engine for i18n</td></tr>
+        <tr><td><code>.format()</code></td><td>Supporting very old Python (&lt;3.6) or building format strings dynamically from a variable</td><td>Normal code where f-strings work</td><td>f-strings</td></tr>
+        <tr><td>Running via <code>python3 file.py</code></td><td>Simple scripts, prototyping</td><td>Multi-module project needing packaging</td><td><code>python -m package.module</code> or an installed console-script entry point</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic">
+        <h4>Basic</h4>
+        <details class="qa"><summary>Why doesn't Python use braces for blocks?</summary><div class="answer"><p>
+        Python's design philosophy (PEP 20, "The Zen of Python") treats readability as a primary goal, and
+        significant whitespace forces consistent, visually nested code since the interpreter enforces it as
+        grammar rather than leaving indentation to style convention.</p></div><div class="followup">Follow-up: what error do you get from inconsistent indentation, and how does Python detect it?</div></details>
+        <details class="qa"><summary>What's the Python equivalent of <code>let</code>/<code>const</code>?</summary><div class="answer"><p>
+        There isn't a direct one — any assignment (<code>x = 5</code>) just binds a name, with no keyword and
+        no built-in immutability. "Constants" are a naming convention (<code>ALL_CAPS</code>) only, not an
+        enforced language feature.</p></div><div class="followup">Follow-up: how would you actually enforce immutability for a value in Python?</div></details>
+        <details class="qa"><summary>Does Python have block scope like JS's <code>let</code> inside an <code>if</code>?</summary><div class="answer"><p>
+        No. Python has only function scope and module scope. A name assigned inside an <code>if</code>/<code>for</code>/<code>while</code>
+        block remains accessible after the block ends, within the same function or module.</p></div><div class="followup">Follow-up: what problem can this cause if a conditional branch never executes?</div></details>
+        <details class="qa"><summary>What's the difference between <code>None</code> and JS's <code>undefined</code>/<code>null</code>?</summary><div class="answer"><p>
+        Python collapses both concepts into a single <code>None</code> value. There's no distinction between
+        "never assigned" and "explicitly set to nothing."</p></div><div class="followup">Follow-up: how do you then tell "key was never set" apart from "key was set to None" in a dict?</div></details>
+        <details class="qa"><summary>What does <code>//</code> do that <code>/</code> doesn't?</summary><div class="answer"><p>
+        <code>/</code> is true division and always returns a float in Python 3 (<code>7 / 2 == 3.5</code>).
+        <code>//</code> is floor division, returning the floored quotient (<code>7 // 2 == 3</code>).</p></div><div class="followup">Follow-up: what does <code>//</code> return for negative numbers, and does it round toward zero or toward negative infinity?</div></details>
+        <details class="qa"><summary>How do you run a Python script from the terminal?</summary><div class="answer"><p>
+        <code>python3 script.py</code> on most systems (or just <code>python</code> if that resolves to
+        Python 3). There's no build/transpile step — CPython compiles to bytecode internally and runs it in
+        one invocation.</p></div><div class="followup">Follow-up: what's the difference between running a file directly and running it with <code>python -m</code>?</div></details>
+        <details class="qa"><summary>Is Python statically or dynamically typed?</summary><div class="answer"><p>
+        Dynamically typed — a variable name can be rebound to a value of any type at any time, and types are
+        checked at runtime, not compile time. Type hints are optional annotations, not enforcement.</p></div><div class="followup">Follow-up: how does this compare to TypeScript's compile-time structural typing?</div></details>
+      </div>
+      <div class="qa-level medium">
+        <h4>Medium</h4>
+        <details class="qa"><summary>Explain exactly what happens if you mix tabs and spaces in the same Python file.</summary><div class="answer"><p>
+        CPython's tokenizer raises a <code>TabError</code> (a subclass of <code>IndentationError</code>) when
+        it detects indentation that's ambiguous between tab-width interpretations within the same block —
+        this is a hard parse-time failure, not a style warning, which is why editors are configured to insert
+        spaces only.</p></div><div class="followup">Follow-up: why is this risk higher in files edited by multiple people with different editor configs?</div></details>
+        <details class="qa"><summary>Why does <code>for i in range(3): pass</code> followed by <code>print(i)</code> print <code>2</code> rather than raising an error?</summary><div class="answer"><p>
+        Because Python has no block scope, the loop variable <code>i</code> is bound in the enclosing
+        function/module scope and simply holds whatever value it had on the last iteration when the loop
+        exits normally. This differs fundamentally from JS's <code>let i</code> in a <code>for</code>, which
+        is genuinely out of scope after the loop.</p></div><div class="followup">Follow-up: what happens to that variable if the iterable is empty — does the loop variable even exist afterward?</div></details>
+        <details class="qa"><summary>What's the actual difference between f-strings and <code>.format()</code> under the hood?</summary><div class="answer"><p>
+        f-strings are evaluated and compiled at parse time into efficient bytecode that directly interpolates
+        expressions — they're generally faster. <code>.format()</code> is a regular method call on a string
+        object that parses the format spec at runtime on every call. For hot loops, f-strings have a real,
+        measurable performance edge.</p></div><div class="followup">Follow-up: can f-strings contain arbitrary expressions, including function calls? Any restrictions?</div></details>
+        <details class="qa"><summary>A new hire writes idiomatic-looking code but every function and variable is camelCase. Why is this a real problem beyond aesthetics?</summary><div class="answer"><p>
+        It breaks linting conventions (ruff/pylint flag non-PEP-8 naming by default in most configured
+        projects), signals unfamiliarity with the ecosystem to reviewers, and can clash with actual Python
+        convention-driven behavior in some tooling/autocomplete heuristics that assume snake_case.</p></div><div class="followup">Follow-up: are there any Python standard library APIs that intentionally use camelCase, and why (hint: threading module)?</div></details>
+        <details class="qa"><summary>Explain the compile step a <code>.py</code> file goes through before anything executes, and why your main script file isn't cached as <code>.pyc</code> the way imported modules are.</summary><div class="answer"><p>
+        Source is tokenized, parsed to an AST, compiled to bytecode, then interpreted. Imported modules get
+        their compiled bytecode cached in <code>__pycache__</code> keyed by a hash/mtime of the source so
+        repeated imports skip recompilation; the entry-point script run directly isn't cached this way
+        because it's expected to run once per process invocation, not be re-imported.</p></div><div class="followup">Follow-up: what invalidates the .pyc cache, and what happens if the source changes but the cache doesn't get invalidated correctly?</div></details>
+      </div>
+      <div class="qa-level advanced">
+        <h4>Advanced</h4>
+        <details class="qa"><summary>Why did Python's designers choose significant whitespace over braces, and what's the actual tradeoff versus a brace-delimited language like JS?</summary><div class="answer"><p>
+        The stated design goal (Guido van Rossum, and later formalized in PEP 20) is that forcing visual
+        structure to match logical structure eliminates an entire class of bugs and style disputes (brace
+        placement wars, inconsistent indentation that doesn't match actual nesting). The tradeoff: copy-pasting
+        code across differently-indented contexts is more fragile than in brace languages, and some code
+        generation/templating scenarios are genuinely harder because you can't just insert braces — you must
+        track and emit consistent indentation.</p></div><div class="followup">Follow-up: how do templating tools that generate Python code (e.g. code generators) typically handle this?</div></details>
+        <details class="qa"><summary>Walk through what the CPython tokenizer actually emits for INDENT/DEDENT, and how that interacts with implicit line joining inside brackets.</summary><div class="answer"><p>
+        The tokenizer emits explicit <code>INDENT</code> and <code>DEDENT</code> tokens when leading
+        whitespace increases or decreases between logical lines, and these are what the grammar actually
+        consumes to delimit blocks — it's not "whitespace as a byte count" but a structured token stream.
+        Inside any open bracket (<code>()</code>, <code>[]</code>, <code>{}</code>), the tokenizer suppresses
+        NEWLINE tokens entirely, which is why an expression can span multiple physical lines without a
+        continuation backslash as long as it's inside brackets.</p></div><div class="followup">Follow-up: why does a backslash continuation outside of brackets feel fragile compared to bracket-based continuation, and which do style guides prefer?</div></details>
+        <details class="qa"><summary>Is there any meaningful performance difference between an f-string, %-formatting, and .format() in a hot path, and how would you actually verify it rather than assume it?</summary><div class="answer"><p>
+        f-strings are generally fastest because they compile to direct <code>BUILD_STRING</code>-style
+        bytecode rather than a runtime method dispatch, but the "assume" part is the problem: you'd verify
+        with <code>timeit</code> on a representative snippet at realistic string/interpolation sizes, since
+        the difference is often negligible outside genuinely hot loops and premature micro-optimization here
+        rarely matters compared to I/O or algorithmic costs elsewhere.</p></div><div class="followup">Follow-up: at what call frequency does this difference actually start to matter in a real service?</div></details>
+        <details class="qa"><summary>Design an onboarding lint/pre-commit setup that would catch "JS-shaped Python" systematically rather than relying on code review.</summary><div class="answer"><p>
+        A senior-level answer: <code>ruff</code> (fast, covers PEP 8 naming, unused imports, many
+        correctness checks) plus <code>black</code> (formatting, removes bikeshedding) as pre-commit hooks,
+        wired into CI so a PR can't merge without passing. Add a naming-convention rule set specifically
+        (N-series rules in ruff) to catch camelCase. This shifts the cost from repeated human review comments
+        to a one-time automated gate, which is the same principle as ESLint + Prettier pre-commit hooks in a
+        JS codebase — the pattern transfers directly, only the tool names change.</p></div><div class="followup">Follow-up: how would you roll this out to an existing large codebase without breaking everyone's workflow on day one?</div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment">
+        <span class="level-tag">Beginner (30-60 min)</span>
+        <h4>Rewrite five JS snippets as idiomatic Python</h4>
+        <p>Take five small JS snippets (variable declarations, a template literal, a loop with a scoped
+        variable, a constant, a function) and rewrite each as idiomatic Python, then write one sentence per
+        snippet explaining the biggest syntactic or semantic difference.</p>
+        <ul><li>Use f-strings, snake_case, and no semicolons throughout.</li>
+        <li>At least one snippet must demonstrate the "no block scope" difference explicitly.</li></ul>
+        <p><strong>Acceptance criteria:</strong> All five run with <code>python3 file.py</code> with no
+        errors, and each has a one-line comment explaining the key difference from the JS original.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>For the loop-scope snippet, deliberately print the loop variable after the loop ends in both languages
+        (mentally, for the JS one) to make the contrast concrete.</p></div></details>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Intermediate (2-4 hrs)</span>
+        <h4>Build a small "unit converter" REPL script</h4>
+        <p>Write a script that loops, reading a line of input like <code>"10 km to miles"</code>, parses it,
+        converts, and prints the result, until the user types <code>"exit"</code>. Support at least 4 unit
+        pairs (length, weight, temperature).</p>
+        <ul><li>Use f-strings for all output formatting.</li>
+        <li>Handle malformed input (wrong format, unknown unit) without crashing — print a friendly message and re-prompt.</li>
+        <li>Follow PEP 8 naming throughout; run it through <code>ruff</code> or at least mentally check for camelCase.</li></ul>
+        <p><strong>Acceptance criteria:</strong> The script never raises an unhandled exception for any text
+        input, and correctly converts all 4 supported unit pairs.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>Use <code>input().split()</code> to break the line into tokens, and a dict of conversion functions keyed
+        by a <code>(from_unit, to_unit)</code> tuple to avoid a long if/elif chain.</p></div></details>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Advanced (1-2 days)</span>
+        <h4>Write your own mini indentation checker</h4>
+        <p>Build a small Python script that reads another <code>.py</code> file and reports any line that
+        mixes tabs and spaces in its leading whitespace, plus any place where indentation increases by
+        something other than a consistent multiple of spaces. Don't use the real tokenizer — parse the raw
+        text yourself, line by line, to force yourself to think about what "indentation" actually means
+        character by character.</p>
+        <ul><li>CLI takes a file path argument.</li>
+        <li>Reports line numbers and a short description of each issue found.</li>
+        <li>Include a handful of test fixture files (some clean, some deliberately broken) and assert the right lines get flagged.</li></ul>
+        <p><strong>Acceptance criteria:</strong> Running against your fixtures correctly flags every
+        deliberately broken line and produces zero false positives on the clean fixtures. No full solution
+        here — the point is building the muscle for reasoning about indentation as data.</p>
+      </div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet"><ul>
+        <li>Indentation (4 spaces, PEP 8) is the block delimiter — no braces, no semicolons needed.</li>
+        <li>No <code>const</code>/<code>let</code>/<code>var</code> — assignment just binds a name in the current scope.</li>
+        <li>No block scope — only function scope and module scope; loop/if-body variables leak to the enclosing scope.</li>
+        <li><code>None</code> replaces both JS <code>undefined</code> and <code>null</code>.</li>
+        <li>Naming convention: <code>snake_case</code> functions/variables, <code>PascalCase</code> classes, <code>ALL_CAPS</code> "constants."</li>
+        <li>f-strings (<code>f"{x}"</code>) are the idiomatic way to interpolate — prefer them over <code>.format()</code> or <code>%</code>.</li>
+        <li><code>//</code> is floor division, <code>/</code> is true division (always float), <code>**</code> is exponent.</li>
+        <li><code>and</code>/<code>or</code>/<code>not</code> are words, not <code>&amp;&amp;</code>/<code>||</code>/<code>!</code>.</li>
+        <li>Run scripts with <code>python3 file.py</code> — no build/transpile step.</li>
+        <li>Always verify whether <code>python</code> on your system means Python 2 or 3 — use <code>python3</code> explicitly.</li>
+      </ul></div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://docs.python.org/3/reference/lexical_analysis.html#indentation">Python docs: Indentation (lexical analysis)</a></li>
+        <li><a href="https://peps.python.org/pep-0008/">PEP 8 — Style Guide for Python Code</a></li>
+        <li><a href="https://docs.python.org/3/reference/lexical_analysis.html#f-strings">Python docs: f-strings</a></li>
+        <li><a href="https://peps.python.org/pep-0020/">PEP 20 — The Zen of Python</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="../13-nodejs-fundamentals/06-rest-api-fundamentals.html"><span class="dir">← Previous</span>Node.js Fundamentals</a>
+        <a class="next" href="02-control-flow-and-functions.html"><span class="dir">Next →</span>Control Flow &amp; Functions</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · Python Fundamentals</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "14-python-fundamentals", chapterKey: "01-python-syntax-and-basics" });</script>
+</body>
+</html>

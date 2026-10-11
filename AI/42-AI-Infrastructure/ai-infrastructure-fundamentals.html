@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Infrastructure Fundamentals</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <input class="searchbox" placeholder="Search topics..." />
+    <a href="../index.html">← Home</a>
+    <h3>42-AI-Infrastructure</h3>
+    <a href="ai-infrastructure-fundamentals.html">AI Infrastructure Fundamentals</a>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumbs"><a href="../index.html">Home</a> / 42-AI-Infrastructure</div>
+      <button class="theme-toggle" onclick="toggleTheme()">🌓 Theme</button>
+    </div>
+    <h1>AI Infrastructure: Docker, Kubernetes, GPU, Cloud, CI/CD</h1>
+    <span class="tag good">Stable</span><span class="tag">Last verified: 2026-10-06</span>
+
+    <div class="toc">
+      <b>On this page</b>
+      <a href="#what">1. What is this?</a>
+      <a href="#whyexist">2. Why does it exist?</a>
+      <a href="#whyimportant">3. Why is it important?</a>
+      <a href="#whereused">4. Where is it used?</a>
+      <a href="#prereq">5. Prerequisites</a>
+      <a href="#core">6. Core concepts</a>
+      <a href="#terms">7. Terminology</a>
+      <a href="#arch">8. Architecture</a>
+      <a href="#internal">9. How it works internally</a>
+      <a href="#steps">10. Step-by-step: containerizing an AI service</a>
+      <a href="#simple">11. Simple example</a>
+      <a href="#real">12. Real-world example</a>
+      <a href="#code">13. Code example</a>
+      <a href="#advanced">14. Advanced example (K8s GPU deployment)</a>
+      <a href="#mistakes">15. Common mistakes</a>
+      <a href="#best">16. Best practices</a>
+      <a href="#production">17. Production considerations</a>
+      <a href="#security">18. Security considerations</a>
+      <a href="#performance">19. Performance considerations</a>
+      <a href="#cost">20. Cost considerations</a>
+      <a href="#debug">21. Debugging/troubleshooting</a>
+      <a href="#related">22. Related concepts</a>
+      <a href="#comparison">23. Cloud provider comparison</a>
+      <a href="#exercise">24. Mini practical exercise</a>
+      <a href="#project">25. Practical project</a>
+      <a href="#projectarch">26. Project architecture</a>
+      <a href="#interview-b">27. Interview Questions — Beginner</a>
+      <a href="#interview-i">28. Interview Questions — Intermediate</a>
+      <a href="#interview-a">29. Interview Questions — Advanced</a>
+      <a href="#interview-s">30. Interview Questions — Senior/Architect</a>
+      <a href="#interview-sc">31. Scenario-Based Questions</a>
+      <a href="#revision">32. Quick revision notes</a>
+      <a href="#cheat">33. Cheat sheet</a>
+      <a href="#further">34. Further topics to learn</a>
+    </div>
+
+    <h2 id="what">1. What is this?</h2>
+    <p>AI infrastructure covers the deployment layer for AI applications and self-hosted models: containerization (Docker), orchestration (Kubernetes), GPU provisioning, cloud platforms (AWS/Azure/GCP), model serving, and CI/CD pipelines adapted for AI-specific artifacts (models, embeddings, prompts).</p>
+
+    <h2 id="whyexist">2. Why does it exist?</h2>
+    <p>AI applications need the same deployment rigor as any production software, plus AI-specific concerns (GPU resource management, model versioning, large artifact storage) that standard web-app infrastructure patterns don't fully address out of the box.</p>
+
+    <h2 id="whyimportant">3. Why is it important?</h2>
+    <p>Most of this knowledge base's "production considerations" sections ultimately rely on this infrastructure layer existing and being well-designed — it's the operational foundation everything else runs on.</p>
+
+    <h2 id="whereused">4. Where is it used?</h2>
+    <p>Any self-hosted model deployment, any production AI application requiring reliable, scalable infrastructure, CI/CD for AI-specific artifacts.</p>
+
+    <h2 id="prereq">5. Prerequisites</h2>
+    <p>General software infrastructure familiarity; <a href="../28-LLM-Inference/llm-inference-fundamentals.html">LLM Inference</a> for GPU-specific context.</p>
+
+    <h2 id="core">6. Core concepts</h2>
+    <ul>
+      <li><b>Docker:</b> containerizing AI services (including model serving engines) for consistent, portable deployment.</li>
+      <li><b>Kubernetes:</b> orchestrating containerized AI workloads at scale, including GPU-aware scheduling.</li>
+      <li><b>GPU provisioning:</b> allocating and managing GPU resources, often the most expensive and contended infrastructure resource for self-hosted AI.</li>
+      <li><b>Model serving:</b> deploying model inference as a reliable, scalable service (see LLM Inference for the engine-level detail).</li>
+      <li><b>CI/CD for AI:</b> automated pipelines for testing/deploying not just code but prompts, evaluation suites, and (if applicable) model artifacts.</li>
+    </ul>
+
+    <h2 id="terms">7. Terminology</h2>
+    <table>
+      <tr><th>Term</th><th>Meaning</th></tr>
+      <tr><td>GPU scheduling</td><td>Kubernetes' mechanism for allocating GPU resources to pods, typically via device plugins.</td></tr>
+      <tr><td>Model registry</td><td>A system for versioning and tracking model artifacts (and sometimes prompts/configs) through their lifecycle.</td></tr>
+      <tr><td>Autoscaling</td><td>Automatically adjusting the number of running instances based on load.</td></tr>
+      <tr><td>Cold start</td><td>The latency penalty when scaling up a new instance that needs to load a large model into memory first.</td></tr>
+    </table>
+
+    <h2 id="arch">8. Architecture</h2>
+    <pre><code>CI/CD pipeline
+ → build container image (app code + serving engine + dependencies)
+ → push to registry
+ → Kubernetes deployment (GPU-scheduled pods for self-hosted models)
+ → autoscaling based on request load / queue depth
+ → load balancer → application traffic</code></pre>
+
+    <h2 id="internal">9. How it works internally</h2>
+    <p>Kubernetes GPU scheduling works via device plugins that expose GPU resources to the scheduler, letting pods request specific GPU counts/types just like they request CPU/memory — the scheduler places pods only on nodes with available matching GPU resources, and autoscaling can be configured based on custom metrics (queue depth, GPU utilization) rather than just generic CPU-based autoscaling, which is often a poor proxy for actual LLM serving load.</p>
+
+    <h2 id="steps">10. Step-by-step: containerizing an AI service</h2>
+    <ol>
+      <li>Write a Dockerfile including your application code, dependencies, and (if self-hosting) the serving engine.</li>
+      <li>Build and test the container locally.</li>
+      <li>Push to a container registry.</li>
+      <li>Define a Kubernetes deployment manifest specifying resource requests (including GPU if needed).</li>
+      <li>Configure autoscaling based on meaningful load metrics.</li>
+      <li>Set up CI/CD to automate build → test → deploy on code changes.</li>
+    </ol>
+
+    <h2 id="simple">11. Simple example</h2>
+    <pre><code class="language-dockerfile">FROM python:3.12-slim
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install -r requirements.txt
+COPY . .
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+</code></pre>
+
+    <h2 id="real">12. Real-world example</h2>
+    <p>A company self-hosting an open-weight model deploys vLLM in a Kubernetes cluster with GPU-scheduled pods, custom autoscaling based on request queue depth (not generic CPU metrics, which don't reflect actual GPU-bound load), and a CI/CD pipeline that runs the evaluation suite against any model/config change before promoting to production.</p>
+
+    <h2 id="code">13. Code example</h2>
+    <pre><code class="language-yaml"># Kubernetes deployment snippet requesting a GPU
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vllm-server
+spec:
+  replicas: 2
+  template:
+    spec:
+      containers:
+        - name: vllm
+          image: myregistry/vllm-server:latest
+          resources:
+            limits:
+              nvidia.com/gpu: 1
+          ports:
+            - containerPort: 8000
+</code></pre>
+
+    <h2 id="advanced">14. Advanced example (K8s GPU deployment)</h2>
+    <pre><code class="language-yaml"># Horizontal Pod Autoscaler based on a custom queue-depth metric
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: vllm-server-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: vllm-server
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+    - type: Pods
+      pods:
+        metric:
+          name: inference_queue_depth
+        target:
+          type: AverageValue
+          averageValue: "5"
+</code></pre>
+
+    <h2 id="mistakes">15. Common mistakes</h2>
+    <ul>
+      <li>Using generic CPU-based autoscaling for GPU-bound inference workloads, which doesn't reflect actual load.</li>
+      <li>Not accounting for cold-start latency (loading a large model) when scaling up new instances under load.</li>
+      <li>No CI/CD gating for AI-specific artifacts (prompts, evaluation results), only standard code tests.</li>
+      <li>Underestimating GPU provisioning lead time/cost when planning capacity.</li>
+    </ul>
+
+    <h2 id="best">16. Best practices</h2>
+    <ul>
+      <li>Autoscale based on meaningful AI-specific metrics (queue depth, GPU utilization), not generic CPU metrics.</li>
+      <li>Keep a warm pool of instances if cold-start latency is unacceptable for your use case.</li>
+      <li>Integrate evaluation suite runs into CI/CD for any prompt/model/config change.</li>
+      <li>Plan GPU capacity with realistic lead time given potential scarcity/cost.</li>
+    </ul>
+
+    <h2 id="production">17. Production considerations</h2>
+    <p>Treat self-hosted model serving infrastructure with the same operational rigor as any critical production service: health checks, monitoring, rolling deployments, and disaster recovery planning.</p>
+
+    <h2 id="security">18. Security considerations</h2>
+    <p>Secure container images (scan for vulnerabilities), restrict network access to inference endpoints, and manage secrets (API keys, model registry credentials) via proper secret management, not embedded in container images or code.</p>
+
+    <h2 id="performance">19. Performance considerations</h2>
+    <p>GPU utilization and cold-start latency are the dominant performance concerns specific to AI infrastructure beyond standard web-app infrastructure considerations — design autoscaling and warm-pool strategies around these.</p>
+
+    <h2 id="cost">20. Cost considerations</h2>
+    <p>GPU instances are typically the most expensive infrastructure line item — right-size instance types/counts to actual load, use autoscaling to avoid over-provisioning during low-traffic periods, and consider spot/preemptible instances for fault-tolerant batch workloads.</p>
+
+    <h2 id="debug">21. Debugging/troubleshooting</h2>
+    <ul>
+      <li><b>Pods stuck pending:</b> check GPU resource availability/quota in the cluster.</li>
+      <li><b>Autoscaling not responding to actual load:</b> verify the custom metrics pipeline is correctly reporting queue depth/GPU utilization to the autoscaler.</li>
+      <li><b>High latency during scale-up events:</b> investigate cold-start time and consider a warm pool or pre-scaling strategy for predictable traffic patterns.</li>
+    </ul>
+
+    <h2 id="related">22. Related concepts</h2>
+    <p><a href="../28-LLM-Inference/llm-inference-fundamentals.html">LLM Inference</a> · <a href="../41-AI-Performance-and-Scaling/performance-and-scaling-fundamentals.html">Performance and Scaling</a></p>
+
+    <h2 id="comparison">23. Cloud provider comparison</h2>
+    <table>
+      <tr><th>Provider</th><th>Notes</th></tr>
+      <tr><td>AWS</td><td>Broadest service ecosystem, SageMaker for managed ML infra, Bedrock for managed LLM access</td></tr>
+      <tr><td>Azure</td><td>Strong enterprise/Microsoft ecosystem integration, Azure OpenAI Service</td></tr>
+      <tr><td>GCP</td><td>Strong Vertex AI platform, TPU access, strong data/analytics ecosystem</td></tr>
+    </table>
+    <p class="callout warn">Specific service offerings/pricing change frequently — verify against current official documentation.</p>
+
+    <h2 id="exercise">24. Mini practical exercise</h2>
+    <p>Write a Dockerfile for a simple FastAPI LLM-calling service, build it locally, and run it to confirm it serves requests correctly in a container.</p>
+
+    <h2 id="project">25. Practical project</h2>
+    <p><b>CI/CD Pipeline with Eval Gating:</b> set up a CI/CD pipeline (GitHub Actions or similar) that builds a container, runs an evaluation suite against any prompt/code change, and only deploys if evaluation scores don't regress below a threshold.</p>
+
+    <h2 id="projectarch">26. Project architecture</h2>
+    <pre><code>.github/workflows/deploy.yml:
+  on push:
+    - build docker image
+    - run eval_suite.py against golden_set.json
+    - if eval_score >= baseline_threshold: deploy to k8s
+    - else: fail build, notify team</code></pre>
+
+    <h2 id="interview-b">27. Interview Questions — Beginner</h2>
+    <div class="qa"><b>Q1.</b> What is Docker used for in AI infrastructure?<br><b>A.</b> Containerizing AI services for consistent, portable deployment across environments.</div>
+    <div class="qa"><b>Q2.</b> What is Kubernetes used for?<br><b>A.</b> Orchestrating containerized workloads at scale, including GPU-aware scheduling for AI inference.</div>
+    <div class="qa"><b>Q3.</b> Why is GPU scheduling different from standard CPU scheduling in Kubernetes?<br><b>A.</b> It requires device plugins to expose GPU resources to the scheduler, letting pods request specific GPU counts/types similar to how they request CPU/memory.</div>
+    <div class="qa"><b>Q4.</b> What is a cold start in the context of AI infrastructure?<br><b>A.</b> The latency penalty when scaling up a new instance that needs to load a large model into memory before it can serve requests.</div>
+    <div class="qa"><b>Q5.</b> Why is CPU-based autoscaling often a poor fit for GPU-bound inference workloads?<br><b>A.</b> It doesn't accurately reflect the actual bottleneck (GPU utilization or request queue depth), so scaling decisions based on it can be mistimed or ineffective.</div>
+    <div class="qa"><b>Q6.</b> Name three major cloud providers relevant to AI infrastructure.<br><b>A.</b> AWS, Azure, and GCP.</div>
+    <div class="qa"><b>Q7.</b> What is CI/CD for AI, beyond standard code testing?<br><b>A.</b> Automated pipelines that also test/validate AI-specific artifacts like prompts and evaluation results, not just code.</div>
+    <div class="qa"><b>Q8.</b> Why are GPU instances typically the biggest infrastructure cost for self-hosted AI?<br><b>A.</b> GPUs are expensive, scarce hardware resources, and AI inference/training workloads are GPU-intensive by nature.</div>
+    <div class="qa"><b>Q9.</b> What's a model registry used for?<br><b>A.</b> Versioning and tracking model artifacts (and sometimes prompts/configs) through their deployment lifecycle.</div>
+    <div class="qa"><b>Q10.</b> Should secrets like API keys be embedded in container images?<br><b>A.</b> No — they should be managed via proper secret management, not baked into images or code.</div>
+
+    <h2 id="interview-i">28. Interview Questions — Intermediate</h2>
+    <div class="qa"><b>Q1.</b> How would you design autoscaling for a self-hosted LLM serving deployment to actually reflect real load?<br><b>A.</b> Use a custom metric like inference request queue depth or GPU utilization (exposed via the serving engine's metrics endpoint) as the autoscaler's target, rather than generic CPU utilization, since CPU usage often stays low even under heavy GPU-bound inference load.</div>
+    <div class="qa"><b>Q2.</b> Why might cold-start latency be a significant concern for autoscaled LLM serving but less so for typical stateless web services?<br><b>A.</b> Loading a large model's weights into GPU memory takes meaningfully longer than starting a typical lightweight web service process, so a newly-scaled-up pod can't serve requests immediately — this latency gap matters more for LLM serving where model loading dominates startup time.</div>
+    <div class="qa"><b>Q3.</b> What's a practical reason to integrate evaluation suite runs into CI/CD rather than just running them manually before major releases?<br><b>A.</b> Automated, consistent evaluation on every change (including small prompt tweaks that might not trigger a "major release" mentally) catches regressions early and consistently, rather than relying on developers remembering to manually evaluate every change, especially smaller ones that feel low-risk but can still cause quality regressions.</div>
+    <div class="qa"><b>Q4.</b> Why might a company use spot/preemptible GPU instances for some workloads but not others?<br><b>A.</b> Spot instances are cheaper but can be reclaimed with short notice; they're suitable for fault-tolerant, resumable batch workloads (e.g., non-urgent document processing) but risky for latency-sensitive, continuously-available real-time serving that can't tolerate sudden instance loss.</div>
+    <div class="qa"><b>Q5.</b> How would you keep a "warm pool" of instances to mitigate cold-start latency, and what's the trade-off?<br><b>A.</b> Maintain a minimum number of always-running instances with the model already loaded (setting a higher `minReplicas` even during low traffic), trading some baseline infrastructure cost (paying for idle capacity) for consistently low latency during traffic spikes, rather than scaling fully down to zero and incurring cold-start delay on every scale-up event.</div>
+
+    <h2 id="interview-a">29. Interview Questions — Advanced</h2>
+    <div class="qa"><b>Q1.</b> How would you design a multi-region AI infrastructure deployment balancing latency, cost, and GPU availability across regions?<br><b>A.</b> Deploy serving infrastructure in regions close to major user populations to minimize latency, account for GPU availability/pricing differences across regions/providers in capacity planning, implement cross-region failover for resilience, and consider routing traffic to the lowest-latency healthy region dynamically rather than a fixed single-region deployment, while being mindful of data residency constraints that might restrict which regions can process certain data.</div>
+    <div class="qa"><b>Q2.</b> What's a subtle challenge in building a CI/CD pipeline that gates deployment on evaluation scores when evaluation itself involves non-deterministic LLM-as-judge scoring?<br><b>A.</b> Non-deterministic scoring can cause flaky CI runs (a borderline change might pass or fail the gate unpredictably run to run); mitigate by using low/zero temperature for judge calls, averaging scores across multiple runs rather than a single pass/fail check, and setting a reasonable tolerance band rather than a razor-thin threshold that amplifies evaluation noise into false CI failures.</div>
+
+    <h2 id="interview-s">30. Interview Questions — Senior/Architect</h2>
+    <div class="qa"><b>Q1.</b> Design the full production infrastructure for a company self-hosting open-weight models at significant scale, covering deployment, scaling, cost, and reliability.<br><b>A.</b> Containerize serving (vLLM or similar) with Kubernetes orchestration and GPU device-plugin scheduling; autoscale based on custom queue-depth/GPU-utilization metrics with a warm-pool baseline sized to typical traffic to mitigate cold starts; implement CI/CD gating deployments on both standard tests and AI evaluation suite results; plan multi-AZ/region redundancy for critical serving paths; right-size GPU instance types/counts against measured load with regular capacity reviews; and use spot instances only for fault-tolerant batch workloads, reserving on-demand/reserved capacity for latency-sensitive real-time serving.</div>
+
+    <h2 id="interview-sc">31. Scenario-Based Questions</h2>
+    <div class="qa"><b>Scenario 1.</b> Your self-hosted model deployment scales up fine but users experience latency spikes right after each scale-up event. What's happening and how do you fix it?<br><b>A.</b> Cold-start latency from newly-scaled pods loading the model into memory before they can serve requests; mitigate with a warm-pool baseline (higher minimum replica count) sized to absorb typical traffic growth without needing to scale from zero/low baseline, or pre-scale proactively ahead of known traffic patterns.</div>
+    <div class="qa"><b>Scenario 2.</b> A GPU-based deployment shows low CPU utilization in monitoring dashboards even while users report slow responses under load. What's misleading about the monitoring setup?<br><b>A.</b> CPU utilization is the wrong metric for a GPU-bound inference workload — the actual bottleneck (GPU utilization, inference queue depth) isn't being monitored or isn't driving autoscaling decisions; add GPU-specific and queue-depth metrics to properly reflect and respond to actual load.</div>
+
+    <h2 id="revision">32. Quick revision notes</h2>
+    <ul>
+      <li>Docker (containerize) + Kubernetes (orchestrate, GPU-aware scheduling) + CI/CD (gate on tests + evaluation).</li>
+      <li>Autoscale on GPU utilization/queue depth, not generic CPU metrics.</li>
+      <li>Cold start = model-loading latency penalty on scale-up; mitigate with warm pools.</li>
+      <li>GPU is the dominant cost; right-size and consider spot instances for fault-tolerant workloads.</li>
+    </ul>
+
+    <h2 id="cheat">33. Cheat sheet</h2>
+    <div class="callout">Docker + Kubernetes (GPU-aware scheduling) + CI/CD (gated on eval suite). Autoscale on queue depth/GPU utilization, not CPU. Mitigate cold starts with warm pools. GPU is the dominant cost — right-size and use spot instances for fault-tolerant workloads.</div>
+
+    <h2 id="further">34. Further topics to learn</h2>
+    <p><a href="../43-AI-Protocols/">AI Protocols</a> → <a href="../44-Enterprise-AI/">Enterprise AI</a></p>
+
+    <div class="prevnext">
+      <a href="../41-AI-Performance-and-Scaling/performance-and-scaling-fundamentals.html">← Performance and Scaling</a>
+      <a href="../43-AI-Protocols/ai-protocols-overview.html">Next: AI Protocols →</a>
+    </div>
+  </main>
+</div>
+<script src="../assets/app.js"></script>
+</body>
+</html>

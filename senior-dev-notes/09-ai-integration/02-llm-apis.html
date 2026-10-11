@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Using LLM APIs — AI Integration — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">AI Integration</a><span class="sep">›</span>Using LLM APIs</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>Using LLM APIs: Prompts, Streaming, Function/Tool Calling, Structured Output</h1>
+      <p class="meta-line"><span>⏱ ~2.5 hrs</span><span>📍 Chapter 2 of 7</span></p>
+      <p><strong>One-line summary:</strong> Modern LLM APIs are just HTTP/SSE endpoints with a well-defined message
+      format, streaming semantics, and a tool-calling protocol — the engineering skill is the same server/client
+      plumbing you already know, applied to a new kind of backend that is slow, probabilistic, and occasionally
+      wrong in a structured-sounding way.</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>This is the chapter where AI stops being theory and becomes an API you integrate like any other
+      third-party service — except one with unusual failure modes (partial responses, schema-violating output,
+      wildly variable latency) that your existing REST/GraphQL instincts don't fully prepare you for. Interviewers
+      testing "can this senior engineer actually ship an AI feature" will probe exactly this layer: do you know
+      how to stream a response to a browser without buffering it all server-side first, how to get structured
+      JSON out of a model reliably, how tool/function calling actually routes execution back to your own code
+      (the model never runs anything itself), and how to handle a model that calls a tool with malformed or
+      hallucinated arguments. These are concrete, answerable-in-one-breath questions if you've built this once.</p>
+      <div class="box why"><h4>Why</h4><p>Most "AI feature" production incidents are actually ordinary
+      distributed-systems incidents wearing an AI costume: a slow/hanging stream, a client that doesn't handle
+      partial JSON, a tool call executed with unvalidated arguments, a retry that silently duplicates a
+      side-effecting tool call. Getting this layer right is 80% standard backend engineering and 20%
+      AI-specific nuance.</p></div>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>Comfort with HTTP, async/await, and basic familiarity with Server-Sent Events or streaming responses
+      helps. Related: <a href="01-how-llms-work.html">How LLMs Work</a>, <a href="05-ai-agents.html">AI Agents</a>.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="messages-api">The messages/roles model</h3>
+      <p>Every major LLM API (Claude's Messages API, OpenAI's Chat Completions/Responses API) represents a
+      conversation as an ordered list of messages, each tagged with a <strong>role</strong>: <code>system</code>
+      (instructions that shape the assistant's behavior, highest priority), <code>user</code> (the human's
+      input), and <code>assistant</code> (the model's prior responses, including in multi-turn history you
+      resend). The model was specifically trained to weight these roles differently — a system prompt is not
+      "just text at the top," it occupies a distinct, higher-trust position the model was fine-tuned to respect
+      more than user-role text. This matters directly for security: untrusted content (a user's raw input, a
+      document fetched from the web, a retrieved RAG chunk) should never be placed in the system role or phrased
+      as if it were a system instruction, because that's exactly the confusion prompt injection exploits.</p>
+
+      <h3 id="streaming-mechanics">Streaming mechanics: what's actually on the wire</h3>
+      <p>Non-streaming calls wait for the entire response to finish generating server-side, then return it in
+      one HTTP response — simple, but the user stares at a blank screen for the full generation time (which, as
+      covered in <a href="01-how-llms-work.html">chapter 1</a>, scales with output length since decode is
+      serial). Streaming instead uses <strong>Server-Sent Events (SSE)</strong>: the server keeps the HTTP
+      connection open with <code>Content-Type: text/event-stream</code> and pushes a sequence of small
+      <code>data: {...}\n\n</code> events as each token (or small batch of tokens) is produced, closing the
+      stream with a final event when generation completes. The client reads this incrementally — in the
+      browser via the Fetch API's readable stream or an <code>EventSource</code>, in Node via the HTTP
+      response's own async iterator — and renders text as it arrives instead of waiting for the whole thing.</p>
+      <p>Concretely, a Claude streaming response emits a sequence of named events: <code>message_start</code>,
+      then repeated <code>content_block_start</code> / <code>content_block_delta</code> (carrying each text or
+      tool-input fragment) / <code>content_block_stop</code>, then <code>message_delta</code> (carrying final
+      stop_reason and usage) and <code>message_stop</code>. Your client has to accumulate these deltas into the
+      full message itself — the server never resends the whole thing, only the incremental piece, so a dropped
+      event or broken connection mid-stream genuinely loses that piece of content unless you've buffered it.</p>
+
+      <h3 id="function-tool-calling">Function/tool calling: the model never executes anything</h3>
+      <p>Tool calling (also called function calling) lets you declare a set of functions — name, description,
+      and a JSON Schema for their arguments — in the request. If the model decides a tool is needed to answer,
+      instead of (or alongside) generating free text, it emits a structured block: a tool name plus a JSON
+      object of arguments matching your schema. <strong>Critically, the model does not call anything</strong> —
+      it only emits intent. Your application code is responsible for: validating those arguments against the
+      schema, actually invoking the real function (hit a database, call an internal API, write a record), and
+      sending the result back to the model as a new message (a "tool result" block) so the model can continue
+      generating its answer incorporating that result. This round-trip — model proposes a call, your code
+      executes and validates, you feed the result back — is the entire mechanism behind every "AI agent that
+      takes actions" you've seen; there is no additional magic.</p>
+      <p>This also means tool-call arguments are <em>generated text</em>, subject to the exact same hallucination
+      risk as any other output: the model can call a real tool with a plausible-looking but wrong or malicious
+      argument (e.g. a different user ID than the one actually authenticated), or invent a tool name that
+      doesn't exist, or produce arguments that don't match your schema. None of this is caught by the API layer
+      — your code is the only thing standing between model output and a real side effect.</p>
+
+      <h3 id="structured-output">Structured output / JSON mode</h3>
+      <p>Many product features need the model's output to be strictly parseable JSON matching a schema (e.g. an
+      extraction pipeline, a classification step feeding another system). Two approaches exist: (1)
+      <strong>prompt-based</strong> — instruct the model to respond only in JSON matching an example, then
+      parse defensively and retry on failure; works with any model but is probabilistic — the model can still
+      wrap it in prose, add a trailing comma, or omit a required field; (2) <strong>constrained
+      decoding / native structured output</strong> — the provider enforces, at the sampling step itself, that
+      only tokens consistent with a given JSON Schema can be chosen (it literally masks out invalid next-token
+      options during generation), guaranteeing schema-valid output. Tool calling itself is usually implemented on
+      top of this same constrained-decoding mechanism — the "arguments" of a tool call are structured output
+      against your tool's JSON Schema. Prefer native structured output/tool-schema enforcement over prompt-based
+      JSON whenever the provider supports it for your model; it removes an entire class of parsing failures.</p>
+
+      <h3 id="prompt-caching">Prompt caching</h3>
+      <p>When the same large prefix (a long system prompt, a big set of few-shot examples, a large document) is
+      sent on every request in a session, providers let you mark it as <strong>cacheable</strong>: the provider
+      stores the computed internal state (the attention KV cache, conceptually, from chapter 1) for that prefix
+      for a short TTL (minutes), and subsequent requests reusing the identical prefix skip reprocessing it,
+      cutting both latency and cost (cached input tokens are billed far cheaper than fresh ones). This is one of
+      the single highest-leverage cost optimizations available and is purely an engineering decision — structure
+      your prompt so the large, stable part comes first and is byte-identical across calls, with the small,
+      per-request-varying part (the actual user question) appended last.</p>
+
+      <h3 id="idempotency-retries">Retries, timeouts, and idempotency with side effects</h3>
+      <p>LLM calls are slow (seconds, sometimes tens of seconds) and occasionally fail transiently (rate limits,
+      provider-side overload, network blips). Naive retry-on-failure is dangerous the moment a tool call has a
+      real side effect: if the model already executed a "create ticket" tool call and then the final response
+      generation times out, a naive client retry can re-run the entire turn, including re-invoking the tool,
+      creating a duplicate ticket. The fix is the same one used for any side-effecting API: idempotency keys on
+      the tool's own underlying operation, and treating "did the tool actually execute" as separate, durably
+      tracked state from "did the LLM call that wrapped it succeed."</p>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>A production streaming + tool-calling request, end to end:</p>
+      <ol>
+        <li>Client sends user message to your Node backend (never directly to the LLM provider from the browser
+        — that would expose your API key).</li>
+        <li>Backend builds the messages array (system + history + new user message) and the tool
+        definitions, and opens a streaming request to the provider with <code>stream: true</code>.</li>
+        <li>Backend opens its own SSE connection to the browser, piping/translating provider events into
+        whatever event shape your frontend expects.</li>
+        <li>Provider streams back text deltas; backend forwards them to the browser as they arrive; frontend
+        appends each delta to the rendered message.</li>
+        <li>If the model decides to call a tool, the stream instead carries incremental tool-input JSON deltas
+        for that tool call; the backend accumulates them until the tool call is complete.</li>
+        <li>Backend validates the accumulated tool arguments against its own schema/business rules (never trust
+        the model's JSON Schema conformance alone — validate again server-side), executes the real function,
+        and sends a new request to the provider containing the original messages plus the tool call and its
+        result, asking the model to continue.</li>
+        <li>The model streams its continuation (now informed by the tool result), which is forwarded to the
+        browser the same way, until a final stop event closes the stream.</li>
+      </ol>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+sequenceDiagram
+  participant Browser
+  participant Backend as Node Backend
+  participant LLM as LLM Provider
+  participant Tool as Internal Service
+
+  Browser->>Backend: POST /chat (user message)
+  Backend->>LLM: stream: true, messages, tools
+  LLM-->>Backend: SSE: text deltas
+  Backend-->>Browser: SSE: forwarded deltas
+  LLM-->>Backend: SSE: tool_call(name, args-delta...)
+  Backend->>Backend: validate args against schema
+  Backend->>Tool: execute real function
+  Tool-->>Backend: result
+  Backend->>LLM: messages + tool_result
+  LLM-->>Backend: SSE: continuation text deltas
+  Backend-->>Browser: SSE: forwarded deltas
+  Backend-->>Browser: SSE: done
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-typescript">// Node/Fastify backend: streaming proxy from Claude's SSE to the browser's SSE,
+// with a full tool-calling round trip.
+import Fastify from "fastify";
+import Anthropic from "@anthropic-ai/sdk";
+
+const app = Fastify();
+const client = new Anthropic();
+
+const tools = [
+  {
+    name: "create_ticket",
+    description: "Create a support ticket for the current user.",
+    input_schema: {
+      type: "object",
+      properties: {
+        title: { type: "string" },
+        priority: { type: "string", enum: ["low", "medium", "high"] },
+      },
+      required: ["title", "priority"],
+    },
+  },
+];
+
+// The real function the model is only ever allowed to *propose* calling.
+async function createTicket(userId: string, args: { title: string; priority: string }) {
+  // Always validate again here — schema conformance from the model is not a security boundary.
+  if (!args.title || args.title.length > 200) throw new Error("invalid title");
+  if (!["low", "medium", "high"].includes(args.priority)) throw new Error("invalid priority");
+  // ...insert into DB with an idempotency key derived from (userId, conversationId, toolCallId)
+  return { ticketId: "T-1234", status: "created" };
+}
+
+app.post("/chat", async (req, reply) => {
+  const { userId, messages } = req.body as { userId: string; messages: any[] };
+
+  reply.raw.writeHead(200, {
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache",
+    Connection: "keep-alive",
+  });
+
+  const send = (event: string, data: unknown) =>
+    reply.raw.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+
+  let currentMessages = [...messages];
+  let turnsLeft = 4; // hard cap: never let a tool-call loop run unbounded (see ch. 5)
+
+  while (turnsLeft-- > 0) {
+    const stream = client.messages.stream({
+      model: "claude-sonnet-4-5",
+      max_tokens: 1024,
+      system: "You are a support assistant. Use tools only when necessary.",
+      messages: currentMessages,
+      tools,
+    });
+
+    let pendingToolUse: { id: string; name: string; inputJson: string } | null = null;
+
+    stream.on("text", (delta) => send("text", { delta }));
+
+    stream.on("contentBlock", (block) => {
+      if (block.type === "tool_use") pendingToolUse = { id: block.id, name: block.name, inputJson: "" };
+    });
+
+    const finalMessage = await stream.finalMessage();
+    currentMessages.push({ role: "assistant", content: finalMessage.content });
+
+    const toolUseBlock = finalMessage.content.find((b) => b.type === "tool_use");
+    if (!toolUseBlock) {
+      send("done", {});
+      break; // model finished with plain text — no more tool calls, we're done
+    }
+
+    // Execute the proposed tool call for real, then feed the result back.
+    let result;
+    try {
+      result = await createTicket(userId, toolUseBlock.input as any);
+    } catch (err) {
+      result = { error: (err as Error).message }; // let the model see and recover from failures
+    }
+    currentMessages.push({
+      role: "user",
+      content: [{ type: "tool_result", tool_use_id: toolUseBlock.id, content: JSON.stringify(result) }],
+    });
+    send("tool_call", { name: toolUseBlock.name, result });
+    // loop continues: model gets the tool result and streams its next response
+  }
+
+  reply.raw.end();
+});
+</code></pre>
+      <pre><code class="language-typescript">// Browser: consuming the SSE stream and rendering deltas incrementally.
+async function streamChat(body: unknown, onText: (t: string) => void, onDone: () => void) {
+  const resp = await fetch("/chat", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const reader = resp.body!.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    // SSE events are separated by a blank line; parse complete events out of the buffer.
+    let idx;
+    while ((idx = buffer.indexOf("\n\n")) !== -1) {
+      const rawEvent = buffer.slice(0, idx);
+      buffer = buffer.slice(idx + 2);
+      const dataLine = rawEvent.split("\n").find((l) => l.startsWith("data: "));
+      if (!dataLine) continue;
+      const payload = JSON.parse(dataLine.slice(6));
+      if (rawEvent.startsWith("event: text")) onText(payload.delta);
+      if (rawEvent.startsWith("event: done")) onDone();
+    }
+  }
+}
+</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4><p>A team ships an AI assistant with a "cancel subscription" tool
+      call. Under load, a slow network occasionally causes the browser's fetch to abort and the frontend to
+      retry the whole chat turn. Because the backend had no idempotency key tied to the specific tool-call
+      attempt, the retried turn re-executed the cancellation tool a second time against an already-cancelled
+      subscription, throwing an unhandled error that corrupted the conversation state. The fix: every
+      side-effecting tool execution is keyed by a deterministic idempotency key (conversationId + toolCallId, or
+      a client-generated request ID passed through), and the tool handler itself checks "has this exact
+      operation already been performed" before doing anything, independent of whether the LLM call around it
+      succeeded or was retried.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Calling the LLM provider directly from the browser with an API
+      key embedded in frontend code. This exposes your key (and your bill) to anyone who opens dev tools.
+      Always proxy through your own backend, which also gives you a single place to enforce auth, rate limits,
+      logging, and tool execution.</p></div>
+      <ul>
+        <li>Don't trust a tool call's arguments just because they matched your JSON Schema — schema validity is
+        not authorization or business-rule validity (a user ID in the arguments could still be the wrong user).</li>
+        <li>Don't accumulate SSE text deltas with naive string concatenation if your protocol also sends
+        structured events (tool-call JSON deltas) interleaved — track content blocks by index/id, matching the
+        provider's own event structure, or you'll corrupt multi-block messages.</li>
+        <li>Always cap the number of tool-call round trips in a single turn (a hard max, e.g. 4-6) — a model
+        that keeps calling tools without making progress is a real, common failure mode, not a hypothetical one.</li>
+        <li>Prompt caching only helps if the cached prefix is byte-identical across calls — a cache-busting bug
+        (e.g. including a timestamp in the "stable" part of the prompt) silently disables the optimization
+        while still working correctly, so it's easy to miss without checking cache-hit metrics.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>Streaming responses</td><td>User-facing chat UIs, long generations, perceived-latency matters</td><td>Backend-to-backend pipelines where you need the full result before proceeding anyway</td><td>Non-streaming call with a loading state</td></tr>
+        <tr><td>Prompt-based JSON instructions</td><td>Provider/model lacks native structured output; quick prototyping</td><td>Production pipelines needing guaranteed-valid JSON</td><td>Native structured output / tool-schema-constrained decoding</td></tr>
+        <tr><td>Direct browser→provider calls</td><td>Never, in production</td><td>Always avoid for anything beyond a local throwaway demo</td><td>Backend proxy with auth, rate limiting, logging</td></tr>
+        <tr><td>Unbounded tool-call loop</td><td>Never</td><td>Always — cap round trips explicitly</td><td>Fixed max-turns with a graceful fallback message</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+
+      <div class="qa-level basic">
+        <h4>Basic</h4>
+        <details class="qa"><summary>What is Server-Sent Events (SSE) and why is it used for LLM streaming instead of WebSockets?</summary><div class="answer"><p>SSE is a simple, one-directional (server→client) streaming protocol over a single long-lived HTTP connection, using <code>text/event-stream</code>. LLM streaming only needs server→client push (the client already sent its one request), so SSE's simplicity — built on plain HTTP, auto-reconnect semantics, no separate protocol upgrade — fits better than the full duplex complexity of WebSockets for this use case.</p></div><div class="followup">Follow-up: when might you actually want a WebSocket instead for an AI feature?</div></details>
+        <details class="qa"><summary>What are the three standard message roles in an LLM chat API, and what's different about the system role?</summary><div class="answer"><p>system, user, and assistant. The system role carries instructions the model was specifically fine-tuned to treat as higher-priority behavioral guidance, distinct from ordinary conversational content — it's not just "text placed first," it occupies a trained-in position of elevated trust.</p></div><div class="followup">Follow-up: why is it risky to put untrusted, user-supplied, or retrieved content into the system role?</div></details>
+        <details class="qa"><summary>In tool/function calling, does the model ever actually execute the function?</summary><div class="answer"><p>No. The model only emits a structured intent — a tool name and a JSON object of arguments. Your application code is responsible for validating those arguments and actually invoking the real function; the result is then sent back to the model as a new message so it can continue its answer.</p></div><div class="followup">Follow-up: what's the security implication of this for a tool that performs a sensitive action?</div></details>
+        <details class="qa"><summary>What is prompt caching and why does it reduce cost and latency?</summary><div class="answer"><p>When a large, stable prefix (e.g. a long system prompt) is sent identically across multiple requests, the provider can reuse previously-computed internal state for that prefix instead of reprocessing it, which is both faster (skips recomputation) and cheaper (cached input tokens are billed at a steep discount).</p></div><div class="followup">Follow-up: what would silently break prompt caching without causing any errors?</div></details>
+        <details class="qa"><summary>Why should a frontend never call an LLM provider's API directly with an embedded API key?</summary><div class="answer"><p>Anything shipped to the browser is visible to the end user (dev tools, network tab), so an embedded key would be exposed and could be extracted and abused, running up cost or being used for unrelated/malicious requests under your account. All provider calls should go through your own backend.</p></div><div class="followup">Follow-up: what else does putting the backend in the middle let you add, beyond just hiding the key?</div></details>
+        <details class="qa"><summary>What is the difference between prompt-based JSON output and native structured output / constrained decoding?</summary><div class="answer"><p>Prompt-based JSON just asks the model nicely to respond in JSON and hopes it complies — it can still wrap output in prose or produce invalid JSON. Native structured output enforces validity at the token-sampling level itself, masking out any next-token choice that would violate the given schema, guaranteeing schema-valid output.</p></div><div class="followup">Follow-up: why is tool-calling's argument generation essentially the same mechanism as structured output?</div></details>
+      </div>
+
+      <div class="qa-level medium">
+        <h4>Medium</h4>
+        <details class="qa"><summary>Walk through, event by event, what a streaming response with a tool call looks like on the wire.</summary><div class="answer"><p>message_start opens the message; content_block_start marks the beginning of a block (text or tool_use); repeated content_block_delta events carry incremental text or partial JSON-argument fragments for that block; content_block_stop closes it; this can repeat for multiple blocks (e.g. text, then a tool_use block); message_delta carries final metadata like stop_reason and token usage; message_stop ends the stream. The client must accumulate deltas per block index/id to reconstruct the full message, since nothing is resent in full.</p></div><div class="followup">Follow-up: what happens to a partially-streamed tool_use block's arguments if the connection drops before content_block_stop?</div></details>
+        <details class="qa"><summary>Why is idempotency a bigger concern for LLM-backed tool calls than for a typical REST API retry?</summary><div class="answer"><p>LLM calls are slow and more prone to timeouts/transient failures, so retries are more common; and because a single "turn" can involve multiple internal steps (model call → tool execution → model call again), a naive full-turn retry after a late-stage failure can silently re-execute an already-completed, real-world side effect (like creating a duplicate record) that a simple REST retry at the request level wouldn't necessarily repeat.</p></div><div class="followup">Follow-up: at what granularity would you apply the idempotency key — the whole chat turn, or each individual tool call? Why?</div></details>
+        <details class="qa"><summary>Why should you validate tool-call arguments server-side even when using native structured output / schema-constrained decoding?</summary><div class="answer"><p>Schema constraints guarantee shape and type validity (e.g. "priority is one of these three strings") but say nothing about business or security validity (e.g. whether this user ID belongs to the currently authenticated user, whether this ticket title violates a content policy, whether this amount exceeds an authorization limit). Constrained decoding is a syntax guarantee, not a semantics or authorization guarantee.</p></div><div class="followup">Follow-up: give an example of a schema-valid but semantically dangerous tool call a model could plausibly generate.</div></details>
+        <details class="qa"><summary>Design the backend's handling of a dropped SSE connection mid-generation. What state do you need to recover gracefully?</summary><div class="answer"><p>You need: the partial text/tool-call content generated so far (buffered server-side, not just forwarded-and-forgotten), the conversation's message history up to that point, and a way for the client to resume or restart cleanly without duplicating tool executions that may have already completed server-side before the drop. A common pattern is to let the backend continue generating and buffering even if the client connection drops, store the final result, and let the client re-fetch/reconnect to pick up where it left off.</p></div><div class="followup">Follow-up: would you want the LLM generation to keep running server-side after a client disconnects, or cancel it immediately? What are the cost/UX tradeoffs either way?</div></details>
+        <details class="qa"><summary>Why does placing variable, per-request content before a large stable prefix defeat prompt caching, and how would you restructure a prompt to fix it?</summary><div class="answer"><p>Caching matches on an identical prefix — if anything that changes per request (a timestamp, a user ID, the actual question) appears before the large stable block, the "stable" block is no longer a cacheable common prefix across calls, since the bytes before it differ every time. Fix: always order the prompt as [stable system instructions/context, marked cacheable] followed by [variable per-request content] last.</p></div><div class="followup">Follow-up: how would you detect in production that a prompt-caching optimization you believe is working has actually silently stopped hitting the cache?</div></details>
+      </div>
+
+      <div class="qa-level advanced">
+        <h4>Advanced</h4>
+        <details class="qa"><summary>Design the full request lifecycle for a chat feature that streams text to the browser, supports one tool call mid-turn, and must not duplicate the tool's side effect under any client or network failure. Be specific about where state lives.</summary><div class="answer"><p>Key points: backend owns the authoritative conversation state and generates a server-side idempotency key per tool-call attempt (e.g. hash of conversationId + turn index + tool name + canonicalized arguments) before executing; the tool handler itself checks/writes a durable "already executed" record (e.g. a unique constraint in the DB) atomically with the side effect, so even concurrent/duplicate invocations of the handler collapse to one real execution; the SSE stream to the browser is a view onto this state, not the source of truth — if the client disconnects, the backend keeps running, persists the final assistant message, and the client resumes by polling/reconnecting rather than resending the user message and re-triggering the whole turn.</p></div><div class="followup">Follow-up: how would this design change if the tool call must be approved by a human before executing (human-in-the-loop)?</div></details>
+        <details class="qa"><summary>A model occasionally emits a tool_use block whose JSON arguments are syntactically valid but reference a tool name that doesn't exist in your tools list. How do you defend against and recover from this?</summary><div class="answer"><p>This is tool-name hallucination — treat it like any other invalid input: never dispatch based on an unchecked string, always look up the tool name against your actual registered handlers and reject/no-op with a clear error if it's not found. Feed that error back to the model as a tool_result so it can self-correct (most capable models recover well from "that tool doesn't exist, here are the valid tool names" fed back into the conversation) rather than crashing the request or silently failing.</p></div><div class="followup">Follow-up: why is "feed the error back to the model" usually a better recovery strategy than immediately failing the whole request?</div></details>
+        <details class="qa"><summary>How would you implement cross-request prompt caching cost/latency monitoring, and what would a regression in cache-hit rate look like in your metrics?</summary><div class="answer"><p>Log, per request, the provider-reported cache read/write token counts (most streaming APIs return these in the final usage metadata) alongside total input tokens, and track cache-hit-rate = cached_tokens / total_input_tokens as a time series. A regression shows up as a sudden or gradual drop in this ratio with no change in total cost-per-request explanation other than caching no longer applying — often caused by an unnoticed change to the "stable" prefix (a new field injected before it, a prompt template edit, a new model version with a different cache-eligibility minimum size).</p></div><div class="followup">Follow-up: why might a model version upgrade silently change cache behavior even if your prompt code didn't change?</div></details>
+        <details class="qa"><summary>Design an eval/test strategy for a tool-calling feature that doesn't just test "does the model call the right tool" but also "does it correctly decide NOT to call a tool."</summary><div class="answer"><p>Build a labeled eval set split into cases that should trigger a specific tool call, cases that should trigger a different tool, and — critically — cases that are superficially similar but should produce a plain-text answer with no tool call at all (negative cases). Score precision (tool called when it shouldn't have been) and recall (tool not called when it should have been) separately, since a model over-eager to call tools and one too reluctant fail in very different, equally bad ways. Run this eval set on every prompt or model version change, not just ad hoc.</p></div><div class="followup">Follow-up: why are negative (no-tool-call) cases often the ones teams forget to test, and what's the production cost of that gap?</div></details>
+        <details class="qa"><summary>How would you rate-limit and cost-cap an AI feature per user without simply capping total requests, given that two requests with identical token counts can cost very different amounts (e.g. one triggers three tool-call round trips, one doesn't)?</summary><div class="answer"><p>Rate limit/cap on actual billed cost or total tokens consumed (tracked from provider usage metadata per call, summed across all round trips in a turn), not request count — maintain a per-user rolling cost budget (e.g. token-bucket style, refilled over time) decremented by real usage after each call completes, and reject/degrade (e.g. fall back to a cheaper model, or a non-tool-calling mode) once a user is near their budget, with the check happening before initiating a new turn, not only after.</p></div><div class="followup">Follow-up: how would you handle a user who is mid-conversation when they hit their budget — cut them off, or let the current turn finish?</div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment">
+        <span class="level-tag">Beginner (30-60 min)</span>
+        <h4>Minimal streaming chat endpoint</h4>
+        <p>Build a Fastify (or Express) endpoint that accepts a user message, calls an LLM API with
+        <code>stream: true</code>, and forwards the text deltas to the client as SSE.</p>
+        <ul>
+          <li>Backend: one POST endpoint, sets SSE headers, streams deltas.</li>
+          <li>A tiny HTML/JS page (or curl) that consumes the stream and prints tokens as they arrive.</li>
+          <li>Handle the stream's end event distinctly from a text delta.</li>
+        </ul>
+        <p><strong>Acceptance criteria:</strong> text visibly appears incrementally in the browser console/page,
+        not all at once at the end.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>Most SDKs expose a <code>.stream()</code> helper with event listeners (<code>"text"</code>, etc.) — you don't need to hand-parse the raw SSE from the provider, only re-emit your own SSE to your own client.</p></div></details>
+        <p><strong>Bonus:</strong> add a loading/"thinking" indicator shown before the first token arrives, and measure/log time-to-first-token separately from total generation time.</p>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Intermediate (2-4 hrs)</span>
+        <h4>Tool-calling round trip with validation and idempotency</h4>
+        <p>Extend the streaming endpoint with one real tool (e.g. "get_weather(city)" calling a free weather API,
+        or a mocked "create_note(title, body)" writing to a local JSON file/SQLite table).</p>
+        <ul>
+          <li>Declare the tool's JSON Schema and pass it in the request.</li>
+          <li>On a tool_use block, validate arguments server-side (don't just trust the schema match), execute
+          the real function, and send the result back to continue the turn.</li>
+          <li>Add an idempotency key (e.g. hash of conversationId + tool name + args) so re-invoking the same
+          logical tool call twice (simulate by calling your handler twice with the same key) only performs the
+          side effect once.</li>
+          <li>Cap the loop at a fixed max number of tool round trips per turn.</li>
+        </ul>
+        <p><strong>Acceptance criteria:</strong> a conversation that triggers the tool completes correctly end to
+        end with streaming intact; calling the same idempotency key twice provably executes the side effect only once (test this explicitly).</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>For idempotency testing without a real DB, a simple in-memory Set of "already executed" keys is enough to prove the mechanism — the point is the pattern, not the storage.</p></div></details>
+        <p><strong>Bonus:</strong> add a deliberately malformed/hallucinated tool-call test (mock the model response) and verify your validation rejects it cleanly instead of crashing.</p>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Advanced (1-2 days)</span>
+        <h4>Resilient chat backend: disconnects, retries, and cache-hit monitoring</h4>
+        <p>Harden the chat backend from the intermediate assignment into something closer to production-shaped:
+        survive client disconnects without losing generated content, log prompt-cache hit rate, and add a
+        cost-budget guard per simulated user.</p>
+        <ul>
+          <li>Backend continues generating and persists the final message even if the client's SSE connection
+          drops mid-stream; on reconnect, the client can fetch the completed (or in-progress) message instead
+          of restarting the turn.</li>
+          <li>Structure the prompt so a large stable prefix is cacheable; log cached vs. fresh input tokens from
+          the provider's usage metadata on every call, and expose a simple running cache-hit-rate metric.</li>
+          <li>Maintain a per-user token/cost budget (in-memory or Redis) decremented after each real call;
+          reject new turns once a simulated user exceeds their budget, with a clear error distinguishable from
+          other failures.</li>
+        </ul>
+        <p><strong>Acceptance criteria:</strong> killing the client connection mid-generation does not lose the
+        generated text (verifiable by reconnecting and fetching it); cache-hit-rate metric visibly reflects
+        reality when you deliberately break caching (e.g. by injecting a timestamp into the stable prefix) versus
+        when it's correct.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>Decouple "generate and persist" from "stream to this particular client" — run generation in a way that isn't cancelled by the specific HTTP response closing (e.g. an async job/promise that isn't awaited-and-killed by the request handler alone).</p></div></details>
+        <p><strong>Bonus:</strong> add graceful degradation — when a user is near their budget, automatically switch to a smaller/cheaper model instead of hard-rejecting.</p>
+      </div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet">
+        <ul>
+          <li>Always proxy LLM calls through your own backend — never embed provider API keys in frontend code.</li>
+          <li>SSE streams text/tool-call deltas incrementally; accumulate by content-block index/id, don't naively concatenate.</li>
+          <li>Tool calling = model emits intent only; your code validates, executes, and reports results back — the model never runs anything.</li>
+          <li>Validate tool-call arguments server-side regardless of schema enforcement — schema validity ≠ authorization/business validity.</li>
+          <li>Cap tool-call round trips per turn with a hard max to prevent runaway loops.</li>
+          <li>Use idempotency keys on side-effecting tool executions, independent of whether the surrounding LLM call succeeds or is retried.</li>
+          <li>Prefer native structured output / schema-constrained decoding over prompt-based "please respond in JSON."</li>
+          <li>Order prompts stable-prefix-first to make prompt caching actually hit; monitor cache-hit rate, don't assume it.</li>
+          <li>Rate-limit/budget by actual token/cost usage, not request count — tool-heavy turns cost very differently than plain ones.</li>
+        </ul>
+      </div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://docs.anthropic.com/en/api/messages-streaming">Anthropic: Streaming Messages</a></li>
+        <li><a href="https://docs.anthropic.com/en/docs/build-with-claude/tool-use">Anthropic: Tool use (function calling)</a></li>
+        <li><a href="https://docs.anthropic.com/en/docs/build-with-claude/prompt-caching">Anthropic: Prompt caching</a></li>
+        <li><a href="https://platform.openai.com/docs/guides/function-calling">OpenAI: Function calling guide</a></li>
+        <li><a href="https://html.spec.whatwg.org/multipage/server-sent-events.html">WHATWG: Server-Sent Events spec</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="01-how-llms-work.html"><span class="dir">← Previous</span>How LLMs Work</a>
+        <a class="next" href="03-embeddings-vector-db.html"><span class="dir">Next →</span>Embeddings & Vector Databases</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · AI Integration</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-typescript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "09-ai-integration", chapterKey: "02-llm-apis" });</script>
+</body>
+</html>

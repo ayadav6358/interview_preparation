@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Next.js App Router — React & Next.js Advanced — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">React &amp; Next.js Advanced</a><span class="sep">›</span>Next.js App Router</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>Next.js App Router, Layouts, Routing, Middleware</h1>
+      <p class="meta-line"><span>⏱ 2.5 hrs</span><span>📍 Chapter 6 of 11</span></p>
+      <p><strong>One-line summary:</strong> The App Router is a file-system router built directly on React
+      Server Components and Suspense — every folder is a route segment, every <code>layout.js</code> wraps its
+      children persistently across navigations, and the routing tree itself determines what streams and what
+      stays static.</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>Most teams migrating from Pages Router or CRA get the mental model wrong in the same few places:
+      treating layouts like Pages Router's <code>_app.js</code>, not understanding why state resets across
+      route changes, and misusing middleware for things that belong in a layout or Server Component. This
+      chapter is what interviewers probe when they ask you to design routing for a real app.</p>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>Read <a href="05-concurrent-react.html">Concurrent React</a> first (streaming/Suspense). Related: <a href="07-server-client-components.html">Server vs Client Components</a>, <a href="08-rendering-strategies.html">Rendering Strategies</a>.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="file-conventions">File-system routing conventions</h3>
+      <ul>
+        <li><code>app/dashboard/page.js</code> → route <code>/dashboard</code>, the leaf UI for that segment.</li>
+        <li><code>layout.js</code> → wraps the segment and all its children; persists across navigations within
+        it (its React state is <em>not</em> remounted when a nested page changes).</li>
+        <li><code>loading.js</code> → an automatic Suspense boundary + fallback around the segment's
+        <code>page.js</code> (and everything below it) while it streams in.</li>
+        <li><code>error.js</code> → an automatic Error Boundary for the segment (must be a Client Component).</li>
+        <li><code>template.js</code> → like layout, but remounts (fresh state, re-run effects) on every
+        navigation — useful for enter/exit animations.</li>
+        <li><code>route.js</code> → a Route Handler (API endpoint) for that path, replacing Pages Router's
+        <code>pages/api</code>.</li>
+        <li><code>(groupName)</code> → a route group: organizes files without affecting the URL path.</li>
+        <li><code>[id]</code>, <code>[...slug]</code>, <code>[[...slug]]</code> → dynamic, catch-all, and
+        optional catch-all segments.</li>
+        <li><code>@slotName</code> → a parallel route slot, rendered alongside siblings in the same layout
+        (e.g., a modal slot rendered next to the main content).</li>
+      </ul>
+
+      <h3 id="layout-persistence">Why layouts don't remount on navigation</h3>
+      <p>The App Router keeps a persistent in-memory tree of the currently rendered route segments on the
+      client. When you navigate to a sibling route that shares a layout, Next.js only re-renders the
+      <em>changed</em> segment's subtree — the shared layout's React component instance, and therefore its
+      state (open sidebar, scroll position, a mounted WebSocket), survives untouched. This matches exactly how
+      React's own reconciliation works (Ch. 1): same component type/position in the tree → fiber reused, not
+      torn down.</p>
+
+      <h3 id="middleware">Middleware: edge-level request interception</h3>
+      <p><code>middleware.js</code> at the project root runs on every matching request <em>before</em> routing
+      resolves, in an Edge runtime (a restricted V8-isolate environment, not full Node.js — no filesystem
+      access, limited APIs). Common uses: auth-gate redirects based on a cookie, A/B test bucket assignment via
+      a rewritten URL, locale detection/redirect, and request header injection. It should stay fast and
+      side-effect-light — it runs on the hot path of every request matching its <code>matcher</code> config.</p>
+
+      <h3 id="parallel-intercepting-routes">Parallel and intercepting routes</h3>
+      <p>Parallel routes (<code>@slot</code> folders) let a layout render multiple independent, simultaneously
+      resolving subtrees — e.g., a dashboard's main feed plus a sidebar panel that load/stream independently,
+      each with its own <code>loading.js</code>. Intercepting routes (<code>(.)folder</code>,
+      <code>(..)folder</code> syntax) let a navigation "intercept" and render a route inside a modal overlay
+      (e.g., clicking a photo opens it in a modal, but a hard refresh or direct link to that URL renders the
+      full dedicated page) — the classic Instagram-style photo-modal pattern, now natively supported.</p>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>On first load, the server renders the full route's React tree (Server Components resolved, Client
+      Component boundaries serialized as placeholders — see Ch. 7) and streams HTML. On subsequent
+      client-side navigations, Next.js's router doesn't re-fetch/re-render the whole page — it requests only
+      the <strong>RSC payload</strong> (a serialized description of the new segment's tree, not HTML) for the
+      segments that actually changed, diffs it against the client's in-memory route tree, and patches just
+      that portion, re-using the unaffected layout instances. This is why App Router navigations feel like an
+      SPA (no full page reload, state preserved in shared layouts) while still being built on server
+      rendering for each segment's content.</p>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+flowchart TD
+  A["app/layout.js (root)"] --> B["app/dashboard/layout.js"]
+  B --> C["app/dashboard/page.js"]
+  B --> D["app/dashboard/settings/page.js"]
+  B --> E["app/dashboard/@modal/(.)photo/[id]/page.js"]
+  A --> F["app/login/page.js"]
+  style B fill:#2b6,color:#fff
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-tsx">// app/dashboard/layout.tsx — persists across dashboard sub-route navigations
+export default function DashboardLayout({
+  children,
+}: { children: React.ReactNode }) {
+  return (
+    <div className="dashboard-shell">
+      <Sidebar /> {/* mounted once, keeps its state across /dashboard/* navigations */}
+      <main>{children}</main>
+    </div>
+  );
+}
+
+// app/dashboard/loading.tsx — automatic Suspense fallback for the whole segment
+export default function Loading() {
+  return <DashboardSkeleton />;
+}
+
+// app/dashboard/error.tsx — automatic Error Boundary (must be a Client Component)
+"use client";
+export default function Error({ error, reset }: { error: Error; reset: () => void }) {
+  return (
+    <div>
+      <p>Something went wrong: {error.message}</p>
+      <button onClick={() => reset()}>Try again</button>
+    </div>
+  );
+}
+
+// middleware.ts — auth gate + header injection at the edge
+import { NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
+
+export function middleware(request: NextRequest) {
+  const token = request.cookies.get("session")?.value;
+  if (!token && request.nextUrl.pathname.startsWith("/dashboard")) {
+    return NextResponse.redirect(new URL("/login", request.url));
+  }
+  const response = NextResponse.next();
+  response.headers.set("x-request-id", crypto.randomUUID());
+  return response;
+}
+
+export const config = {
+  matcher: ["/dashboard/:path*"], // only runs middleware on these paths
+};</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4>
+      <p>A SaaS dashboard's sidebar navigation re-mounted (losing scroll position and a live WebSocket
+      connection) on every page change because the team had accidentally used <code>template.js</code> instead
+      of <code>layout.js</code> for the shell (copy-pasted from an animation example), not realizing
+      <code>template.js</code>'s entire point is to remount on every navigation. Switching to
+      <code>layout.js</code> fixed state persistence immediately; a separate, narrower
+      <code>template.js</code> was reintroduced only around the specific page-transition-animation wrapper
+      that actually needed remount-per-navigation semantics.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4>
+      <p>Route groups <code>(marketing)</code>/<code>(app)</code> are invisible in the URL — engineers new to
+      App Router sometimes expect <code>app/(marketing)/about/page.js</code> to serve <code>/marketing/about</code>
+      when it actually serves <code>/about</code>. Use route groups purely for file organization and to apply
+      different root layouts to different sections, not as URL namespacing.</p></div>
+      <ul>
+        <li>Putting heavy/slow logic in middleware — it runs on every matching request in a constrained Edge runtime, and slow middleware adds latency to every navigation.</li>
+        <li>Using <code>template.js</code> by default — most shells want persistence, which is <code>layout.js</code>'s job.</li>
+        <li>Forgetting that <code>error.js</code> must be a Client Component (`"use client"`) since it needs interactivity (`reset()`) and error boundaries are a client-only React feature.</li>
+        <li>Not scoping middleware's <code>matcher</code> — an unscoped middleware runs on every single request including static assets, adding needless overhead.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>layout.js</td><td>Shared shell that should persist state across nested navigations</td><td>You need fresh state/remount on every navigation</td><td>template.js</td></tr>
+        <tr><td>Parallel routes (@slot)</td><td>Independent sections that should load/stream separately</td><td>Sections are tightly coupled/always load together</td><td>Single page.js with nested Suspense</td></tr>
+        <tr><td>Intercepting routes</td><td>Modal-style UX that should also work as a real deep-linkable page</td><td>Simple one-off modal with no dedicated route need</td><td>Client-side modal state (no route)</td></tr>
+        <tr><td>Middleware</td><td>Cheap, request-wide logic needed before routing (auth redirect, locale)</td><td>Logic needs full Node APIs, DB access, or is expensive per-request</td><td>Server Component / Route Handler logic</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic"><h4>Basic</h4>
+      <details class="qa"><summary>What's the difference between layout.js and page.js?</summary><div class="answer"><p>page.js is the actual UI for a route segment (the leaf). layout.js wraps that page (and any nested segments) and persists across navigations within its scope.</p></div><div class="followup">Follow-up: Can a route have a layout.js but no page.js?</div></details>
+      <details class="qa"><summary>What does loading.js do automatically?</summary><div class="answer"><p>Wraps the segment's page in a Suspense boundary and uses loading.js's export as the fallback while the segment streams in, without you writing Suspense manually.</p></div><div class="followup">Follow-up: Does loading.js apply to nested child segments too?</div></details>
+      <details class="qa"><summary>What is middleware and where does it run?</summary><div class="answer"><p>Code in middleware.js that runs on every matching request before routing resolves, in a restricted Edge runtime — commonly used for auth redirects, locale detection, and header injection.</p></div><div class="followup">Follow-up: Can middleware access a database directly?</div></details>
+      <details class="qa"><summary>What is a route group, syntactically, and what's its purpose?</summary><div class="answer"><p>A folder named in parentheses, e.g. `(marketing)`, that organizes files without adding a segment to the URL — used to apply different layouts to different sections or just for organization.</p></div><div class="followup">Follow-up: Does it change the URL path at all?</div></details>
+      <details class="qa"><summary>What's the difference between layout.js and template.js?</summary><div class="answer"><p>layout.js persists its component instance (and state) across nested navigations; template.js creates a new instance on every navigation, remounting and re-running effects each time.</p></div><div class="followup">Follow-up: Give a use case where template.js is actually the right choice.</div></details>
+      </div>
+      <div class="qa-level medium"><h4>Medium</h4>
+      <details class="qa"><summary>Explain exactly why a shared layout's state survives a navigation to a sibling route, down to what Next.js actually does on the client.</summary><div class="answer"><p>The router maintains an in-memory tree of currently-rendered segments. Navigating to a sibling that shares an ancestor layout only fetches/re-renders the RSC payload for the segments below the shared layout; the layout's own React component instance in the tree is never unmounted, so its fiber (and therefore its state) is reused exactly as React would reuse a fiber for a same-type, same-position element during normal reconciliation.</p></div><div class="followup">Follow-up: What would force the layout to remount despite this — what change would make it a "different" layout instance to React?</div></details>
+      <details class="qa"><summary>Design the routing structure for a photo-sharing app where clicking a thumbnail opens a lightbox modal, but sharing the lightbox's URL directly loads a full dedicated page.</summary><div class="answer"><p>Use an intercepting route: `app/feed/@modal/(.)photo/[id]/page.js` intercepts navigation to `/photo/[id]` when navigated to *from within* the feed route, rendering it in a parallel `@modal` slot as an overlay; a direct/hard-navigation to `/photo/[id]` (no client-side intercept context) renders the plain `app/photo/[id]/page.js` as a full page instead.</p></div><div class="followup">Follow-up: What differs in the matching convention between `(.)`, `(..)`, and `(...)`?</div></details>
+      <details class="qa"><summary>Why should expensive logic (DB calls, heavy computation) generally not live in middleware?</summary><div class="answer"><p>Middleware runs in a constrained Edge runtime (no full Node APIs, limited execution time/CPU budget on many platforms) and executes on every single matching request before any caching/routing has happened — so any latency it adds is latency added to every page view in its matcher scope, with none of the caching benefits a Server Component or Route Handler further downstream might get.</p></div><div class="followup">Follow-up: What's an appropriate place to move a "check feature flag from a database" check instead?</div></details>
+      <details class="qa"><summary>How do parallel routes enable independently streaming sections of a dashboard, and what's the role of each slot's own loading.js?</summary><div class="answer"><p>Each `@slot` is rendered by the parent layout as a named prop, and Next.js can resolve/stream each slot's content independently — a slow slot's own `loading.js` fallback shows while that specific slot's data resolves, without blocking the other slot(s) which may resolve faster, giving per-section Suspense granularity without manually nesting Suspense boundaries.</p></div><div class="followup">Follow-up: What happens to a slot's content on a navigation that doesn't target that slot at all?</div></details>
+      </div>
+      <div class="qa-level advanced"><h4>Advanced</h4>
+      <details class="qa"><summary>Explain what actually travels over the network on a client-side App Router navigation to a sibling route, and why this is cheaper than a traditional SPA client-side route render.</summary><div class="answer"><p>The client requests the RSC payload (not HTML, not a JSON blob of raw data either) for just the segments that changed — a serialized description of the new React tree for those segments, including already-resolved Server Component output and references to Client Component modules by ID. This is cheaper than a typical SPA fetch-then-render because the server has already done all Server Component data-fetching/rendering work; the client only needs to reconcile the new serialized tree into its existing fiber tree, not fetch raw JSON and run render logic for Server-Component-equivalent work on the client.</p></div><div class="followup">Follow-up: Does this payload include the actual markup/HTML for Client Components, or something else?</div></details>
+      <details class="qa"><summary>A deeply nested layout wraps a Context Provider for theme. A sibling route navigation changes the theme via a Server Action. Why might the new theme not immediately reflect across the persisted layout's subtree?</summary><div class="answer"><p>Because the layout instance (and its Context Provider, if it reads server-derived initial state only once on mount) persists across the navigation by design, a Server Action changing data on the server doesn't automatically push a new value into an already-mounted client-side Provider unless something explicitly triggers a re-read — e.g., `revalidatePath`/`router.refresh()` to re-fetch the RSC payload for the relevant segment (including the layout, if its data changed) or passing the updated value down through props that genuinely change reference, forcing the Provider's consumers to pick up the new value.</p></div><div class="followup">Follow-up: What's the difference between router.refresh() and a full page reload in terms of what gets re-rendered?</div></details>
+      <details class="qa"><summary>Why does Next.js restrict middleware to a constrained Edge runtime rather than full Node.js, architecturally?</summary><div class="answer"><p>Middleware is designed to run geographically close to the user (at CDN edge locations) on every matching request with minimal cold-start latency; a full Node.js runtime's startup cost and footprint would undermine the "runs on every request, everywhere, fast" design goal. The V8-isolate-based Edge runtime starts in microseconds rather than the hundreds of milliseconds a full Node process might take cold, at the cost of API surface (no filesystem, limited subset of Node built-ins).</p></div><div class="followup">Follow-up: What happens if your middleware genuinely needs a Node-only API — what's the recommended workaround?</div></details>
+      <details class="qa"><summary>Design a multi-tenant app where the subdomain determines the active tenant's layout and data, using middleware plus the App Router. What does middleware do vs. what does the layout do?</summary><div class="answer"><p>Middleware inspects the request's `Host` header, extracts the subdomain, and rewrites the URL (via `NextResponse.rewrite`) to an internal path encoding the tenant (e.g., `/_tenant/[tenantId]/...`) or sets a header/cookie the layout can read — middleware should NOT fetch full tenant configuration from a database per request if avoidable (latency on every request); it should do the minimal routing decision. The matched `app/_tenant/[tenantId]/layout.js` Server Component then does the actual tenant config fetch (ideally cached/memoized) and renders the tenant-specific shell, keeping the expensive/full data-dependent work in the Server Component layer where Next.js's caching and streaming apply.</p></div><div class="followup">Follow-up: How would you cache the tenant-config lookup so it isn't refetched on every nested navigation?</div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment"><span class="level-tag">Beginner (30-60 min)</span><h4>Build a nested layout hierarchy and observe persistence</h4>
+      <p>Create `app/dashboard/layout.js` with a sidebar holding local state (e.g., an expanded/collapsed toggle), and two sibling pages `app/dashboard/overview/page.js` and `app/dashboard/settings/page.js`. Navigate between them and confirm the sidebar's state survives.</p>
+      <p><strong>Acceptance criteria:</strong> Toggling the sidebar, then navigating between the two pages, preserves the toggle state.</p>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>If state resets, check you used layout.js and not template.js.</p></div></details>
+      <p><strong>Bonus:</strong> Add a root-level layout.js and a nested one, and explain which one's state would reset on a navigation to an entirely different top-level section.</p></div>
+
+      <div class="assignment"><span class="level-tag">Intermediate (2-4 hrs)</span><h4>Build an intercepting-route photo modal</h4>
+      <p>Build a photo feed where clicking a thumbnail opens a lightbox modal via an intercepting route, but a direct URL visit or page refresh on that same photo URL renders a full dedicated page instead.</p>
+      <ul><li>Verify both navigation paths (in-app click vs. direct URL) render correctly.</li></ul>
+      <p><strong>Acceptance criteria:</strong> Both the modal and full-page variants work and share the same underlying photo-detail component.</p>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>Use a parallel `@modal` slot plus the `(.)` intercepting convention matching the photo route's folder depth.</p></div></details>
+      <p><strong>Bonus:</strong> Add a close button that navigates back without a full page reload.</p></div>
+
+      <div class="assignment"><span class="level-tag">Advanced (1-2 days)</span><h4>Build subdomain-based multi-tenant routing with middleware</h4>
+      <p>Build an app where `tenant-a.localhost:3000` and `tenant-b.localhost:3000` each render a different tenant's branded dashboard, using middleware to detect the subdomain and rewrite to an internal tenant-scoped route, with the actual tenant config lookup happening in a layout Server Component (not middleware).</p>
+      <ul><li>Design appropriate caching for the tenant-config lookup.</li></ul>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>Consider using Next.js's `fetch` caching or React's `cache()` function to dedupe the tenant lookup across the layout and any nested pages needing the same data within one request.</p></div></details>
+      </div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet"><ul>
+        <li>Folders = route segments; page.js = leaf UI; layout.js = persistent wrapper; template.js = remounting wrapper.</li>
+        <li>loading.js = automatic Suspense boundary; error.js = automatic Error Boundary (must be Client Component).</li>
+        <li>Route groups (name) organize files without affecting the URL.</li>
+        <li>Parallel routes (@slot) render independent, independently-streaming sections in one layout.</li>
+        <li>Intercepting routes let a navigation show a modal while a direct URL hit shows the full page.</li>
+        <li>Middleware runs on the Edge runtime, before routing resolves — keep it fast and side-effect-light.</li>
+        <li>Client-side navigations fetch only the changed segments' RSC payload, not full HTML/full JSON.</li>
+        <li>Shared layouts persist React state across sibling navigations — same fiber, same reconciliation rules as Ch.1.</li>
+      </ul></div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://nextjs.org/docs/app/building-your-application/routing">Next.js — Routing Fundamentals</a></li>
+        <li><a href="https://nextjs.org/docs/app/building-your-application/routing/middleware">Next.js — Middleware</a></li>
+        <li><a href="https://nextjs.org/docs/app/building-your-application/routing/parallel-routes">Next.js — Parallel Routes</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="05-concurrent-react.html"><span class="dir">← Previous</span>Concurrent React</a>
+        <a class="next" href="07-server-client-components.html"><span class="dir">Next →</span>Server vs Client Components</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · React &amp; Next.js Advanced</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-jsx.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-typescript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-tsx.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "03-react-nextjs-advanced", chapterKey: "06-nextjs-app-router" });</script>
+</body>
+</html>

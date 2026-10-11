@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Transformers Part 2 — Self-Attention, Q/K/V, KV Cache & Multi-Head Attention</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <input class="searchbox" placeholder="Search topics..." />
+    <a href="../index.html">← Home</a>
+    <h3>100x_AI</h3>
+    <a href="ai-ml-orientation.html">AI & ML Course Orientation</a>
+    <a href="fasttracking-ai-what-is-ai-to-how-chatgpt-works.html">Fast-Tracking AI: What is AI → How ChatGPT Works</a>
+    <a href="neural-networks-from-scratch.html">Neural Networks from Scratch</a>
+    <a href="transformers-part-1-tokenization-embeddings-positional-encoding.html">Transformers Part 1: Text → Attention</a>
+    <a href="tensors-and-pytorch.html">Tensors, Matrices & PyTorch</a>
+    <a href="transformers-part-2-self-attention-qkv-multihead.html">Transformers Part 2: Self-Attention, Q/K/V & Multi-Head</a>
+    <a href="what-changed-since-2017-modern-transformer-upgrades.html">What Changed Since 2017: The Four Upgrades</a>
+    <a href="building-training-modern-llm-from-scratch.html">Building & Training a Modern LLM from Scratch</a>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumbs"><a href="../index.html">Home</a> / 100x_AI</div>
+      <button class="theme-toggle" onclick="toggleTheme()">🌓 Theme</button>
+    </div>
+    <h1>Transformers Part 2 — Self-Attention, Q/K/V, KV Cache & Multi-Head Attention</h1>
+    <span class="tag good">Stable</span><span class="tag">Last verified: 2026-10-07</span>
+    <p class="callout">Source: "From Text To Attention — How Transformers See Language" slides (mechanical-implementation deep dive). Picking up after tokenization, embeddings, and positional encoding (see <a href="transformers-part-1-tokenization-embeddings-positional-encoding.html">Transformers Part 1</a>), this covers the actual attention mechanism: Query/Key/Value, the attention formula, why generation needs a KV cache, and why production Transformers use multiple attention heads instead of one.</p>
+
+    <div class="toc">
+      <b>On this page</b>
+      <a href="#what">1. What is this?</a>
+      <a href="#whyexist">2. Why does it exist?</a>
+      <a href="#whyimportant">3. Why is it important?</a>
+      <a href="#whereused">4. Where is it used?</a>
+      <a href="#prereq">5. Prerequisites</a>
+      <a href="#core">6. Core concepts</a>
+      <a href="#terms">7. Terminology</a>
+      <a href="#arch">8. Architecture</a>
+      <a href="#internal">9. How it works internally</a>
+      <a href="#steps">10. Step-by-step explanation</a>
+      <a href="#simple">11. Simple example</a>
+      <a href="#real">12. Real-world example</a>
+      <a href="#code">13. Code example</a>
+      <a href="#advanced">14. Advanced example</a>
+      <a href="#mistakes">15. Common mistakes</a>
+      <a href="#best">16. Best practices</a>
+      <a href="#production">17. Production considerations</a>
+      <a href="#security">18. Security considerations</a>
+      <a href="#performance">19. Performance considerations</a>
+      <a href="#cost">20. Cost considerations</a>
+      <a href="#debug">21. Debugging/troubleshooting</a>
+      <a href="#related">22. Related concepts</a>
+      <a href="#comparison">23. Comparison with alternatives</a>
+      <a href="#exercise">24. Mini practical exercise</a>
+      <a href="#project">25. Practical project</a>
+      <a href="#projectarch">26. Project architecture</a>
+      <a href="#interview-b">27. Interview Questions — Beginner</a>
+      <a href="#interview-i">28. Interview Questions — Intermediate</a>
+      <a href="#interview-a">29. Interview Questions — Advanced</a>
+      <a href="#interview-s">30. Interview Questions — Senior/Architect</a>
+      <a href="#interview-sc">31. Scenario-Based Questions</a>
+      <a href="#revision">32. Quick revision notes</a>
+      <a href="#cheat">33. Cheat sheet</a>
+      <a href="#further">34. Further topics to learn</a>
+    </div>
+
+    <h2 id="what">1. What is this?</h2>
+    <p>This is the mechanical core of a Transformer: self-attention, the mechanism that lets every token in a sequence dynamically look at every other token and pull in exactly the context it needs. It covers the Query/Key/Value (Q/K/V) framework, the attention formula <code>Attention(Q,K,V) = softmax(QKᵀ/√dₖ)V</code>, how context-aware meaning is computed from static embeddings, why autoregressive text generation needs a KV cache, and why production models use multi-head attention (many parallel attention "perspectives") instead of a single attention computation.</p>
+
+    <h2 id="whyexist">2. Why does it exist?</h2>
+    <p>Static embeddings (from <a href="transformers-part-1-tokenization-embeddings-positional-encoding.html">Transformers Part 1</a>) give every token one fixed, context-free vector — "bank" has the same embedding whether it means a financial institution or a riverbank. Self-attention exists specifically to solve this: it lets each token's representation be dynamically updated based on which other tokens are actually relevant to it in that specific sentence, resolving ambiguity the way a human reader naturally does by reading surrounding context.</p>
+
+    <h2 id="whyimportant">3. Why is it important?</h2>
+    <p>The attention formula is, almost verbatim, the single most frequently tested equation in AI/ML engineering interviews — being able to derive and explain <code>softmax(QKᵀ/√dₖ)V</code> from first principles, including why scaling by √dₖ matters, is table-stakes for any ML-adjacent role. The KV cache concept directly explains real, observable LLM API behavior (why "time to first token" and "tokens per second" are different metrics), making it one of the highest-value mental models for anyone doing LLM inference or cost optimization work.</p>
+
+    <h2 id="whereused">4. Where is it used?</h2>
+    <ul>
+      <li>Every Transformer-based model: GPT, Claude, LLaMA, BERT, and all derivatives — self-attention is the defining mechanism of the architecture.</li>
+      <li>LLM inference serving infrastructure — KV cache management is one of the primary engineering challenges in serving LLMs at scale and long context lengths.</li>
+      <li>Model interpretability research — attention matrices/heatmaps are a standard tool for visualizing what a model is "looking at" when producing an output.</li>
+      <li>The from-scratch model in <a href="building-training-modern-llm-from-scratch.html">Building & Training a Modern LLM from Scratch</a>, which implements Grouped Query Attention (GQA) — a direct evolution of the multi-head attention and KV-cache concepts covered here.</li>
+    </ul>
+
+    <h2 id="prereq">5. Prerequisites</h2>
+    <p><a href="transformers-part-1-tokenization-embeddings-positional-encoding.html">Transformers Part 1</a> (tokenization, embeddings, positional encoding) and <a href="tensors-and-pytorch.html">Tensors, Matrices & PyTorch</a> (matrix multiplication, dot products).</p>
+
+    <h2 id="core">6. Core concepts</h2>
+    <table>
+      <tr><th>Concept</th><th>One-line definition</th></tr>
+      <tr><td>Self-attention</td><td>The mechanism letting every token in a sequence attend to (be influenced by) every other token simultaneously, producing context-aware representations.</td></tr>
+      <tr><td>Permutation invariance</td><td>The property that, without positional encoding, attention treats a sentence as an unordered "bag of words" — reordering tokens doesn't change the output.</td></tr>
+      <tr><td>Query (Q)</td><td>"What am I looking for?" — the search criteria a token uses to find relevant context elsewhere in the sequence.</td></tr>
+      <tr><td>Key (K)</td><td>"What do I contain?" — the label other tokens compare their Query against to judge relevance.</td></tr>
+      <tr><td>Value (V)</td><td>"What information do I offer?" — the actual content passed through once a Query/Key match is found.</td></tr>
+      <tr><td>Attention formula</td><td><code>Attention(Q,K,V) = softmax(QKᵀ/√dₖ)V</code> — the complete mathematical definition of self-attention.</td></tr>
+      <tr><td>Soft lookup</td><td>Unlike a database's exact-match lookup, attention returns a weighted blend of all Values, weighted by how well each Key matches the Query.</td></tr>
+      <tr><td>KV cache</td><td>Storing previously computed Key and Value vectors during autoregressive generation so they aren't wastefully recomputed at every new token step.</td></tr>
+      <tr><td>Multi-head attention</td><td>Running several independent attention computations ("heads") in parallel, each with its own Q/K/V weights, so the model can capture multiple types of relationships (syntax, coreference, topic, etc.) simultaneously.</td></tr>
+    </table>
+
+    <h2 id="terms">7. Terminology</h2>
+    <table>
+      <tr><th>Term</th><th>Meaning</th></tr>
+      <tr><td>Projection matrices (Wq, Wk, Wv)</td><td>Learned weight matrices that transform a token's embedding into its Query, Key, and Value vectors respectively.</td></tr>
+      <tr><td>Scaled dot-product attention</td><td>The specific attention variant used in Transformers — dot product similarity, scaled by <code>1/√dₖ</code>, then softmax-normalized.</td></tr>
+      <tr><td>Attention matrix / heatmap</td><td>A square grid showing the attention weight between every pair of tokens in a sequence — brighter cells indicate stronger relationships.</td></tr>
+      <tr><td>Context-aware representation</td><td>A token's vector after self-attention has updated it based on surrounding tokens, as opposed to its static, isolated embedding.</td></tr>
+      <tr><td>Time to first token (TTFT)</td><td>Latency before an LLM produces its first output token — slow because it requires processing the entire prompt and filling the KV cache.</td></tr>
+      <tr><td>Tokens per second (TPS)</td><td>Generation speed after the first token — fast because the KV cache means only the new token's Q, K, V need computing each step.</td></tr>
+      <tr><td>Head dimension</td><td>The size of each attention head's Q/K/V vectors — total model dimension divided by number of heads (e.g., 768 ÷ 8 = 96).</td></tr>
+      <tr><td>Concatenation + projection</td><td>The step combining all attention heads' outputs back into one vector, then projecting it back to the model's original dimension.</td></tr>
+    </table>
+
+    <h2 id="arch">8. Architecture</h2>
+    <pre><code>Context-free embeddings (+ positional encoding) for "The animal didn't cross the street because it was too tired"
+            ↓
+For each token, compute via learned projections:
+   Q = X @ Wq      K = X @ Wk      V = X @ Wv
+            ↓
+scores = Q @ K.T / sqrt(d_k)      // similarity between every pair of tokens
+            ↓
+weights = softmax(scores)          // normalize into probabilities summing to 1
+            ↓
+output = weights @ V               // weighted blend of Values = new context-aware vector
+            ↓
+Repeat the above, in parallel, across N attention heads (multi-head attention)
+            ↓
+Concatenate all heads' outputs → project back to model dimension
+            ↓
+"it" now carries features pulled from "animal" — disambiguated by context
+
+Autoregressive generation with KV cache:
+  Step 1: "The"          → compute K,V → CACHE → compute Q → attend → next token
+  Step 2: "The cat"       → compute K,V (new token only) → reuse cached K,V → attend
+  Step 3: "The cat sat"   → compute K,V (new token only) → reuse cached K,V → attend
+  ...</code></pre>
+
+    <h2 id="internal">9. How it works internally</h2>
+    <p>Each token's embedding (after positional encoding) is projected through three separate learned matrices — <code>Wq</code>, <code>Wk</code>, <code>Wv</code> — producing that token's Query, Key, and Value vectors. These three projections give the same underlying token three different "perspectives": Q is used when this token is searching for relevant context, K is used when other tokens are searching and deciding whether this token is relevant to them, and V is the actual content handed over once relevance is established. The attention score between any two tokens is their Q·K dot product (recall from <a href="tensors-and-pytorch.html">Tensors, Matrices & PyTorch</a>: a dot product measures directional similarity) — computing <code>Q @ K.T</code> for an entire sequence produces, in one matrix multiplication, the similarity score between every pair of tokens simultaneously. These raw scores are divided by <code>√dₖ</code> (scaling) to prevent them from growing too large and destabilizing softmax's gradients, then passed through softmax to become attention weights — probabilities summing to 1 for each token's row. Finally, multiplying these weights by <code>V</code> produces a weighted blend of every token's Value vector — the token's new, context-aware representation, directly resolving ambiguity like "it" referring to "animal" rather than "street," because "it"'s Query matched "animal"'s Key far more strongly than "street"'s Key for that particular sentence.</p>
+    <p>During autoregressive generation, naively recomputing K and V for every previous token at every new generation step is wasted work — a previously-generated token's Key and Value never change, since they only depend on that token's own (already-fixed) embedding. The <b>KV cache</b> exploits this: K and V are computed once per token and stored, so each new generation step only computes Q (for the new token) plus K and V for that one new token, reusing everything cached from before. This directly explains why an LLM's first output token is slow (the entire prompt's K/V must be computed and cached before any generation can begin) while subsequent tokens are fast (only one new token's K/V needs computing each step) — and why the KV cache's memory footprint (stored per layer, across potentially 100+ layers in a large model) becomes the dominant constraint on how much context a model can serve efficiently.</p>
+    <p><b>Multi-head attention</b> exists because a single attention computation can only capture one "type" of relationship at a time, but language has many simultaneously relevant relationship types (syntactic subject-verb links, semantic pronoun-referent links, positional nearby-word relevance, topical concept relatedness). Rather than one attention computation over the full model dimension (e.g., 768), the model splits into several smaller attention heads (e.g., 8 heads × 96 dimensions = 768 total), each with its own independently learned Wq/Wk/Wv, computing attention in parallel — different heads empirically tend to specialize in different relationship types, and their outputs are concatenated and projected back to the model's original dimension.</p>
+
+    <h2 id="steps">10. Step-by-step explanation</h2>
+    <ol>
+      <li><b>Start from context-free embeddings:</b> tokens already carry positional encoding but still represent isolated, static meaning.</li>
+      <li><b>Project to Q, K, V:</b> each token's vector is multiplied by three learned matrices to produce its Query, Key, and Value.</li>
+      <li><b>Compute similarity scores:</b> <code>Q @ K.T</code> gives a similarity score between every pair of tokens in the sequence.</li>
+      <li><b>Scale:</b> divide scores by <code>√dₖ</code> to keep them in a numerically stable range for softmax.</li>
+      <li><b>Softmax:</b> convert raw scores into attention weights — probabilities, summing to 1, for each token's row.</li>
+      <li><b>Weighted sum:</b> multiply attention weights by <code>V</code> to produce each token's new, context-aware representation.</li>
+      <li><b>Repeat across multiple heads:</b> run steps 2–6 in parallel with independently-learned Q/K/V weights per head.</li>
+      <li><b>Concatenate and project:</b> combine all heads' outputs and project back to the model's original dimension.</li>
+      <li><b>During generation, reuse via KV cache:</b> cache each token's K and V once computed; each new generation step only computes Q, K, V for the newest token, attending over the full cached sequence.</li>
+    </ol>
+
+    <h2 id="simple">11. Simple example</h2>
+    <p>The sentence "The animal didn't cross the street because it was too tired" requires resolving what "it" refers to. The word "it" sends out a Query asking "what noun am I referring to?"; "animal" and "street" both offer Keys, but "animal"'s Key matches more strongly given the word "tired" (a property associated with living things); the attention weight on "animal" dominates, so "it"'s representation is updated by pulling in semantic features from "animal" — the model now correctly "knows" what "it" refers to.</p>
+
+    <h2 id="real">12. Real-world example</h2>
+    <p>When you send a long prompt to ChatGPT, the noticeable delay before the first word appears ("time to first token") is the model processing your entire prompt and filling the KV cache for every one of its layers — after that, each subsequent word streams out much faster ("tokens per second") because it only needs to compute K, V for the one new token and reuse everything already cached; this is a real, user-visible consequence of the KV cache architecture described here.</p>
+
+    <h2 id="code">13. Code example</h2>
+    <pre><code class="language-python">import numpy as np
+
+def softmax(x, axis=-1):
+    e = np.exp(x - np.max(x, axis=axis, keepdims=True))
+    return e / e.sum(axis=axis, keepdims=True)
+
+def self_attention(X, Wq, Wk, Wv):
+    Q = X @ Wq                      # [seq_len, d_k]
+    K = X @ Wk                      # [seq_len, d_k]
+    V = X @ Wv                      # [seq_len, d_v]
+    d_k = Q.shape[-1]
+    scores = (Q @ K.T) / np.sqrt(d_k)    # [seq_len, seq_len] similarity
+    weights = softmax(scores, axis=-1)    # attention weights, rows sum to 1
+    output = weights @ V             # [seq_len, d_v] context-aware vectors
+    return output, weights
+
+# Toy example: 4 tokens, 8-dim embeddings
+np.random.seed(0)
+X = np.random.randn(4, 8)           # [The, animal, street, it] embeddings
+Wq, Wk, Wv = (np.random.randn(8, 8) for _ in range(3))
+
+output, weights = self_attention(X, Wq, Wk, Wv)
+print("Attention weights for 'it' (row 3):", weights[3])
+print("Context-aware 'it' vector shape:", output[3].shape)
+</code></pre>
+
+    <h2 id="advanced">14. Advanced example</h2>
+    <p>Multi-head attention plus a minimal KV cache, demonstrating both concepts from this deck together:</p>
+    <pre><code class="language-python">import numpy as np
+
+def softmax(x, axis=-1):
+    e = np.exp(x - np.max(x, axis=axis, keepdims=True))
+    return e / e.sum(axis=axis, keepdims=True)
+
+class MultiHeadAttention:
+    def __init__(self, d_model=768, n_heads=8):
+        self.n_heads = n_heads
+        self.d_head = d_model // n_heads     # 768 / 8 = 96
+        self.Wq = [np.random.randn(d_model, self.d_head) * 0.02 for _ in range(n_heads)]
+        self.Wk = [np.random.randn(d_model, self.d_head) * 0.02 for _ in range(n_heads)]
+        self.Wv = [np.random.randn(d_model, self.d_head) * 0.02 for _ in range(n_heads)]
+        self.Wo = np.random.randn(d_model, d_model) * 0.02
+
+    def forward(self, X):
+        head_outputs = []
+        for h in range(self.n_heads):
+            Q, K, V = X @ self.Wq[h], X @ self.Wk[h], X @ self.Wv[h]
+            scores = (Q @ K.T) / np.sqrt(self.d_head)
+            weights = softmax(scores)
+            head_outputs.append(weights @ V)          # [seq_len, d_head]
+        concat = np.concatenate(head_outputs, axis=-1)  # [seq_len, d_model]
+        return concat @ self.Wo
+
+
+class KVCache:
+    """Minimal single-head KV cache demo for autoregressive generation."""
+    def __init__(self):
+        self.K_cache, self.V_cache = [], []
+
+    def step(self, x_new, Wk, Wv, Wq):
+        k_new, v_new = x_new @ Wk, x_new @ Wv      # only compute for NEW token
+        self.K_cache.append(k_new)
+        self.V_cache.append(v_new)
+        K_all = np.vstack(self.K_cache)              # reuse everything cached
+        V_all = np.vstack(self.V_cache)
+        q_new = x_new @ Wq
+        scores = (q_new @ K_all.T) / np.sqrt(x_new.shape[-1])
+        weights = softmax(scores)
+        return weights @ V_all
+</code></pre>
+
+    <h2 id="mistakes">15. Common mistakes</h2>
+    <ul>
+      <li>Forgetting to scale by <code>√dₖ</code> — unscaled dot products grow large with dimension size, pushing softmax into a saturated regime that produces near-zero gradients and unstable training.</li>
+      <li>Applying positional encoding to Q/K/V after projection rather than to the embedding before it — position information needs to already be baked into the input before Q/K/V projections, in the original Transformer scheme (note: RoPE, covered in <a href="building-training-modern-llm-from-scratch.html">Building & Training a Modern LLM from Scratch</a>, deliberately applies position differently).</li>
+      <li>Assuming one attention head is "enough" — a single head can only capture one dominant type of relationship, missing the syntactic, semantic, positional, and topical relationships language actually requires simultaneously.</li>
+      <li>Not caching K/V during generation — recomputing the entire sequence's Key/Value vectors at every single new token step is a massive, unnecessary performance cost that production inference systems always avoid via a KV cache.</li>
+      <li>Confusing "more heads is always better" — too many heads with too small a per-head dimension (e.g., 64 heads × 12 dims) leaves each head without enough capacity to capture a meaningful relationship; there's a real trade-off, and 8–32 heads is the typical practical range.</li>
+    </ul>
+
+    <h2 id="best">16. Best practices</h2>
+    <ul>
+      <li>Always scale attention scores by <code>1/√dₖ</code> — this is standard, non-optional practice in every production Transformer implementation.</li>
+      <li>Use a KV cache for any autoregressive generation workload — implementing or relying on a framework's KV cache support is essential for acceptable inference latency.</li>
+      <li>Default to 8–32 attention heads for typical model dimensions, balancing per-head capacity against the number of distinct relationship "perspectives" needed.</li>
+      <li>When debugging a model's behavior, visualize its attention matrices/heatmaps — they're one of the most direct interpretability tools available for understanding what the model is actually "looking at."</li>
+    </ul>
+
+    <h2 id="production">17. Production considerations</h2>
+    <p>KV cache memory is often the binding constraint on how many concurrent requests an LLM server can handle and how long a context it can serve — this cache must be stored per layer (a large model may have 100+ layers) and scales linearly with both sequence length and number of KV heads, which is precisely the motivation behind Grouped Query Attention (GQA) and Multi-Query Attention (MQA), covered in <a href="building-training-modern-llm-from-scratch.html">Building & Training a Modern LLM from Scratch</a>, as production-driven optimizations that shrink this exact bottleneck.</p>
+
+    <h2 id="security">18. Security considerations</h2>
+    <p>Attention over an entire prompt means injected adversarial content anywhere in a long context can influence the attention-weighted representation of any other token in that context — this is part of why prompt-injection attacks can be effective even when malicious content is buried deep in a long document, since self-attention gives every token global reach over the full sequence, not just nearby tokens.</p>
+
+    <h2 id="performance">19. Performance considerations</h2>
+    <p>Self-attention's compute cost scales quadratically with sequence length (every token attends to every other token, an <code>O(n²)</code> operation), which is the fundamental reason long-context models are expensive — the KV cache trades memory for compute (avoiding redundant recomputation), but doesn't eliminate the quadratic cost of the initial full-prompt attention pass that fills the cache, which is exactly why "time to first token" grows with prompt length.</p>
+
+    <h2 id="cost">20. Cost considerations</h2>
+    <p>Both attention's quadratic compute cost and the KV cache's linear memory cost directly drive LLM API pricing and context-window limits — processing (and caching) a longer prompt costs proportionally more compute and memory, which is reflected in per-token API pricing and is the underlying reason "prompt caching" features (reusing a previously-computed KV cache across requests sharing a common prefix) exist as a cost-saving mechanism in production LLM APIs.</p>
+
+    <h2 id="debug">21. Debugging/troubleshooting</h2>
+    <ul>
+      <li><b>Training loss is unstable / diverges in a custom attention implementation:</b> verify the <code>1/√dₖ</code> scaling is present — its absence is one of the most common root causes of softmax-saturation-driven instability.</li>
+      <li><b>Model fails to resolve pronoun/reference ambiguity correctly:</b> visualize the attention matrix for the ambiguous token — low or misplaced attention weight to the correct referent indicates either insufficient training or an architectural issue (e.g., missing positional encoding).</li>
+      <li><b>Generation is unexpectedly slow, especially for long conversations:</b> confirm the KV cache is actually being used and growing correctly rather than being recomputed from scratch each turn — a common integration bug when building custom inference pipelines.</li>
+      <li><b>Out-of-memory errors serving long-context requests:</b> the KV cache is very likely the culprit — check cache size per layer × number of layers × sequence length, and consider GQA/MQA or reduced context length as mitigations.</li>
+    </ul>
+
+    <h2 id="related">22. Related concepts</h2>
+    <p><a href="transformers-part-1-tokenization-embeddings-positional-encoding.html">Transformers Part 1</a> · <a href="tensors-and-pytorch.html">Tensors, Matrices & PyTorch</a> · <a href="building-training-modern-llm-from-scratch.html">Building & Training a Modern LLM from Scratch</a> (GQA as an evolution of the KV cache/multi-head concepts here) · <a href="../28-LLM-Inference/">LLM Inference</a></p>
+
+    <h2 id="comparison">23. Comparison with alternatives</h2>
+    <table>
+      <tr><th>Approach</th><th>Strength</th><th>Weakness</th></tr>
+      <tr><td>Static embeddings alone (no attention)</td><td>Simple, fast, no quadratic cost.</td><td>"Blended," context-free meaning — cannot disambiguate words like "bank" based on surrounding context.</td></tr>
+      <tr><td>Single-head attention</td><td>Simpler, fewer parameters.</td><td>Can only capture one dominant relationship type per layer, missing the multiple simultaneous relationship types language requires.</td></tr>
+      <tr><td>Multi-head attention</td><td>Captures multiple relationship types (syntax, coreference, topic) in parallel.</td><td>More parameters and compute than single-head, though typically still efficient relative to the gain.</td></tr>
+      <tr><td>No KV cache (recompute every step)</td><td>Simpler implementation, no cache memory overhead.</td><td>Wastes enormous compute recomputing unchanged K/V values at every generation step — impractical for real-time serving.</td></tr>
+      <tr><td>KV cache</td><td>Dramatically faster generation after the first token.</td><td>Memory cost grows linearly with context length and layer count — becomes the dominant serving-cost bottleneck at long context.</td></tr>
+    </table>
+
+    <h2 id="exercise">24. Mini practical exercise</h2>
+    <p>By hand, using the toy similarity scores from the deck (<code>Q_sat · K_the = 0.1</code>, <code>Q_sat · K_cat = 0.8</code>, <code>Q_sat · K_sat = 0.9</code>), apply softmax to these three values and compute the resulting weighted sum assuming simple 1-dimensional Values <code>V_the=1, V_cat=2, V_sat=3</code> — verify that "sat"'s new representation is dominated by its own Value and "cat"'s, confirming the "self-focus + context-focus" pattern described in the attention-matrix material.</p>
+
+    <h2 id="project">25. Practical project</h2>
+    <p><b>Build and Visualize a Multi-Head Attention Layer:</b> implement the <code>MultiHeadAttention</code> class from the advanced example in NumPy or PyTorch, run it on a handful of ambiguous-pronoun sentences (e.g., "The trophy didn't fit in the suitcase because it was too big/small"), and plot each head's attention heatmap separately — observe whether different heads appear to specialize in different relationship types, as the deck predicts.</p>
+
+    <h2 id="projectarch">26. Project architecture</h2>
+    <pre><code>sentences.txt (ambiguous-pronoun examples)
+   → tokenize + embed + positional encode (from Part 1)
+   → MultiHeadAttention(d_model=768, n_heads=8)
+       for each head: Q,K,V projections → scaled dot-product attention
+       concatenate heads → output projection
+   → extract per-head attention weight matrices
+   → plot heatmaps per head, per sentence
+   → implement KVCache class, benchmark generation latency with vs. without cache
+eval: compare first-token latency and per-token latency with/without KV cache,
+      confirm attention weights correctly resolve each sentence's pronoun ambiguity</code></pre>
+
+    <h2 id="interview-b">27. Interview Questions — Beginner</h2>
+    <div class="qa"><b>Q1.</b> What do Query, Key, and Value represent in self-attention?<br><b>A.</b> Query = "what am I looking for?" (a token's search criteria); Key = "what do I contain?" (what other tokens compare their query against); Value = "what information do I offer?" (the actual content passed through if there's a match).</div>
+    <div class="qa"><b>Q2.</b> Write out the attention formula.<br><b>A.</b> <code>Attention(Q, K, V) = softmax(QKᵀ / √dₖ) V</code>.</div>
+    <div class="qa"><b>Q3.</b> Why do we divide by <code>√dₖ</code> in the attention formula?<br><b>A.</b> To prevent the dot products from growing too large as dimensionality increases, which would push softmax into a saturated regime and destabilize gradients during training.</div>
+    <div class="qa"><b>Q4.</b> What does softmax do in the attention formula?<br><b>A.</b> Converts raw similarity scores into attention weights — probabilities that sum to 1 — determining how much each token's Value contributes to the output.</div>
+    <div class="qa"><b>Q5.</b> What is a KV cache?<br><b>A.</b> A store of previously computed Key and Value vectors during autoregressive generation, so they don't need to be wastefully recomputed at every new token generation step.</div>
+    <div class="qa"><b>Q6.</b> Why is an LLM's first output token slower than subsequent tokens?<br><b>A.</b> Generating the first token requires processing the entire input prompt and computing/caching Key and Value vectors for every prompt token; subsequent tokens only need to compute Q, K, V for the one new token and reuse the cache.</div>
+    <div class="qa"><b>Q7.</b> Why does a Transformer need multiple attention heads instead of just one?<br><b>A.</b> Language has many simultaneous types of relationships (syntactic, semantic, positional, topical) that one attention computation can't fully capture; multiple heads let the model learn different relationship "perspectives" in parallel.</div>
+    <div class="qa"><b>Q8.</b> What is "permutation invariance" in the context of attention?<br><b>A.</b> Without positional information, attention treats a sentence as an unordered set of tokens — reordering the words doesn't change the output, which is why positional encoding is necessary.</div>
+    <div class="qa"><b>Q9.</b> How does attention resolve a word like "bank" having two different meanings?<br><b>A.</b> By updating "bank"'s representation based on which surrounding words it attends to most strongly — attending to "money"/"loan" pulls in financial-institution meaning, while attending to "river" pulls in riverbank meaning.</div>
+    <div class="qa"><b>Q10.</b> What's the difference between a "hard lookup" and the "soft lookup" attention performs?<br><b>A.</b> A hard lookup (traditional database) finds an exact key match and returns one value; attention's soft lookup finds partial matches across all keys and returns a weighted blend of values based on how well each key matches the query.</div>
+
+    <h2 id="interview-i">28. Interview Questions — Intermediate</h2>
+    <div class="qa"><b>Q1.</b> Walk through, mathematically, how the model knows "it" refers to "animal" rather than "street" in "The animal didn't cross the street because it was too tired."<br><b>A.</b> "It"'s embedding is projected into a Query vector; every other token's embedding is projected into Key vectors; the dot product <code>Q_it · K_animal</code> is computed to be higher than <code>Q_it · K_street</code> because the learned Wq/Wk projections have, through training, positioned "tired" (a property statistically associated with animate things) to produce a Query/Key alignment favoring "animal" in this context; after scaling and softmax, "animal" receives a much higher attention weight, so the weighted sum over Values is dominated by <code>V_animal</code>, making "it"'s new representation carry animal-related semantic features.</div>
+    <div class="qa"><b>Q2.</b> Why does the KV cache only need to store K and V, not Q, across generation steps?<br><b>A.</b> Q represents "what am I looking for" for the current token being generated — it's only ever needed once, for the current step's attention computation, and then discarded; K and V represent "what do I contain" and "what do I offer" for every previously-generated token, and since those tokens and their embeddings never change, their K and V values are identical at every future step, making them exactly the values worth caching and reusing.</div>
+    <div class="qa"><b>Q3.</b> Why does splitting a 768-dimensional model into 8 heads of 96 dimensions each (rather than keeping one 768-dim attention computation) actually help, given the total dimensionality is unchanged?<br><b>A.</b> Keeping one 768-dim Q/K/V forces a single dot-product similarity computation to capture every type of relationship simultaneously within one shared representation space; splitting into 8 independently-learned, smaller subspaces lets each head specialize — empirically, different heads tend to learn different relationship types (e.g., syntactic subject-verb links vs. coreference links) because each has its own dedicated Wq/Wk/Wv and isn't forced to compromise across all relationship types in one shared space, even though the combined output dimensionality is the same.</div>
+    <div class="qa"><b>Q4.</b> How does KV cache memory scale, and why does this make very long context windows hard to serve?<br><b>A.</b> KV cache memory scales with sequence length × number of layers × number of KV heads × head dimension (× 2 for both K and V) — for a large model with ~100+ layers, even a moderate per-token cache footprint multiplies into very large total memory at long context lengths (e.g., 100K+ tokens), which is why long-context serving is fundamentally memory-bound rather than compute-bound, and why techniques reducing the KV footprint (GQA, cache quantization, cache eviction strategies) are active areas of production LLM engineering.</div>
+    <div class="qa"><b>Q5.</b> What's the trade-off in choosing the number of attention heads?<br><b>A.</b> More heads give the model more distinct "perspectives" to learn different relationship types in parallel, but since total model dimension is typically fixed, more heads means a smaller per-head dimension — too many heads leaves each head without enough dimensional capacity to represent a meaningful relationship pattern, while too few heads forces the model to compress multiple relationship types into fewer, larger (but less specialized) attention computations; 8–32 heads is the typical practical range balancing these forces.</div>
+
+    <h2 id="interview-a">29. Interview Questions — Advanced</h2>
+    <div class="qa"><b>Q1.</b> Explain precisely why attention's compute cost is O(n²) in sequence length, and what architectural techniques exist to address this.<br><b>A.</b> The core <code>Q @ K.T</code> operation computes a similarity score between every pair of tokens in the sequence, producing an n×n attention matrix — for a sequence of length n, this requires n² dot-product computations (each of cost proportional to the head dimension), making both compute and the resulting attention matrix's memory footprint quadratic in sequence length. Techniques addressing this include: sparse attention patterns (restricting which token pairs actually compute attention, e.g., local windows + occasional global tokens), linear attention approximations (reformulating the softmax computation to avoid materializing the full n×n matrix), Flash Attention (an IO-aware exact-attention implementation that avoids the memory bottleneck without changing the math, by fusing operations and avoiding writing the full attention matrix to slower GPU memory), and at the KV-cache level, GQA/MQA (reducing cache size, though not the O(n²) compute of the initial prompt pass itself).</div>
+    <div class="qa"><b>Q2.</b> Multi-head attention empirically tends to produce heads that specialize (syntax, coreference, etc.) without being explicitly trained to do so. Why does this specialization emerge, and is it guaranteed?<br><b>A.</b> Specialization emerges because each head has independently-initialized, independently-learned Wq/Wk/Wv weights, and gradient descent naturally tends toward a lower overall loss by having different heads capture different, complementary patterns rather than redundantly all learning the same pattern — redundant heads provide no additional loss-reduction benefit, so there's implicit pressure toward differentiation during training. However, it is not a guaranteed or architecturally enforced outcome — empirical studies have found significant redundancy among heads in some trained models (some heads can be pruned post-training with minimal performance loss), meaning specialization is an emergent tendency under typical training dynamics and model/data scale, not a mathematical guarantee of the architecture itself.</div>
+
+    <h2 id="interview-s">30. Interview Questions — Senior/Architect</h2>
+    <div class="qa"><b>Q1.</b> You're designing an LLM serving infrastructure that must support both very low-latency short conversations and occasional very long-context (100K+ token) requests cost-effectively. How do the concepts in this material (KV cache, multi-head attention) inform your architecture?<br><b>A.</b> KV cache memory is the dominant constraint at long context, so I'd prioritize: (1) using a model architecture with GQA or MQA rather than full multi-head attention with separate KV heads per Q head, directly shrinking the per-token cache footprint that multiplies across potentially 100+ layers; (2) implementing prefix/prompt caching at the serving layer, so requests sharing a common prompt prefix (e.g., a shared system prompt or document context) reuse an already-computed KV cache rather than recomputing it, directly reducing time-to-first-token for repeated-context workloads; (3) considering cache eviction or quantization strategies (storing KV cache in lower precision) to reduce memory footprint for very long contexts, accepting a controlled quality/memory trade-off; (4) separating short-conversation and long-context request routing/batching so long-context requests' large memory footprint doesn't degrade short-conversation latency by contending for the same GPU memory pool. Each of these directly targets the quadratic attention compute and linear KV-cache memory bottlenecks this material identifies as the fundamental cost drivers.</div>
+
+    <h2 id="interview-sc">31. Scenario-Based Questions</h2>
+    <div class="qa"><b>Scenario 1.</b> Your team's custom LLM serving stack shows "time to first token" growing proportionally with prompt length, but "tokens per second" staying roughly constant regardless of prompt length. Is this expected, and why?<br><b>A.</b> Yes, this is expected behavior per the KV cache mechanics covered here — time to first token scales with prompt length because the entire prompt's K/V must be computed and cached before generation can start (an O(n²)-ish cost in attention over the growing prompt); tokens per second stays roughly constant because, once the cache is filled, each subsequent token only requires computing Q, K, V for that one new token and reusing the cache, independent of how long the original prompt was.</div>
+    <div class="qa"><b>Scenario 2.</b> A teammate proposes removing the KV cache from your inference pipeline to "simplify the code," arguing modern GPUs are fast enough to recompute attention from scratch each step. What's your response?<br><b>A.</b> Push back — recomputing K and V for the entire growing sequence at every single generation step means total generation cost grows roughly quadratically in output length (step n recomputes work for all n prior tokens), rather than the KV-cached linear cost; even with fast GPUs, this becomes prohibitively slow and expensive for any non-trivial generation length, and is precisely the "wasted work" problem the KV cache exists to solve — recommend keeping the cache and addressing complexity concerns through better abstraction/testing rather than removing a performance-critical mechanism.</div>
+    <div class="qa"><b>Scenario 3.</b> After adding more attention heads to a custom model (going from 8 heads to 64 heads, same total model dimension), performance gets worse, not better. What's the likely explanation?<br><b>A.</b> With total model dimension fixed, going from 8 to 64 heads shrinks per-head dimension by 8x (e.g., from 96 to 12), likely leaving each head with too little representational capacity to capture a meaningful relationship pattern — this matches the deck's explicit trade-off ("too many heads → each is too small to capture anything"); the fix is reducing head count back toward the 8–32 typical range, or increasing total model dimension if more heads are genuinely needed.</div>
+
+    <h2 id="revision">32. Quick revision notes</h2>
+    <ul>
+      <li>Self-attention lets every token dynamically attend to every other token — solves the "static embedding" context-blindness problem.</li>
+      <li>Q = what I'm looking for. K = what I contain. V = what I offer.</li>
+      <li>Formula: <code>Attention(Q,K,V) = softmax(QKᵀ/√dₖ)V</code>.</li>
+      <li>Scaling by <code>√dₖ</code> prevents softmax saturation/unstable gradients.</li>
+      <li>Attention = "soft" database lookup: weighted blend, not exact match.</li>
+      <li>KV cache: store K,V once computed per token, reuse across generation steps — only new token's Q,K,V computed each step.</li>
+      <li>Explains TTFT (slow, scales with prompt length) vs TPS (fast, roughly constant).</li>
+      <li>KV cache memory scales with seq_len × layers × KV heads — the long-context bottleneck.</li>
+      <li>Multi-head attention: split into N heads with independent Q/K/V weights, each capturing different relationship types (syntax, coreference, position, topic).</li>
+      <li>Head count trade-off: too many heads = too small per-head dimension; too few = not enough perspectives. Typical: 8–32.</li>
+    </ul>
+
+    <h2 id="cheat">33. Cheat sheet</h2>
+    <div class="callout">Q=search, K=label, V=content. Attention = softmax(QKᵀ/√dₖ)V. Scale prevents softmax saturation. Soft lookup = weighted blend, not exact match. KV cache: compute K,V once, reuse forever per token → fast TPS after slow TTFT. Multi-head: N parallel attention "perspectives," each own Q/K/V, concat + project back. 8-32 heads typical.</div>
+
+    <h2 id="further">34. Further topics to learn</h2>
+    <p><a href="building-training-modern-llm-from-scratch.html">Building & Training a Modern LLM from Scratch (RMSNorm, RoPE, GQA, SwiGLU)</a> → Week 6: What Changed Since 2017 → <a href="../28-LLM-Inference/">LLM Inference</a> → Flash Attention, sparse/linear attention variants, prompt/prefix caching in production serving.</p>
+
+    <div class="prevnext">
+      <a href="tensors-and-pytorch.html">← Tensors, Matrices & PyTorch</a>
+      <a href="what-changed-since-2017-modern-transformer-upgrades.html">Next: What Changed Since 2017 →</a>
+    </div>
+  </main>
+</div>
+<script src="../assets/app.js"></script>
+</body>
+</html>

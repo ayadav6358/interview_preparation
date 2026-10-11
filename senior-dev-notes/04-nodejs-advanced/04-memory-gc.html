@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Memory Management & Garbage Collection — Node.js Advanced — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">Node.js Advanced</a><span class="sep">›</span>Memory Management & GC</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>Memory Management &amp; Garbage Collection</h1>
+      <p class="meta-line"><span>⏱ 2.5 hrs</span><span>📍 Chapter 4 of 9</span></p>
+      <p><strong>One-line summary:</strong> V8's generational garbage collector is tuned for short-lived objects and
+      punishes long-lived growing heaps with expensive full-heap pauses — knowing the generations, when GC pauses
+      actually block your event loop, and how to read a heap snapshot is what turns "we have a memory leak" into
+      "line 247 of the cache module never evicts."</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>Memory leaks in long-running Node processes are one of the most common senior-level production debugging
+      scenarios — unlike a crash, a leak looks fine for hours or days, then OOM-kills under exactly the traffic
+      pattern that matters most. Senior engineers are expected to recognize the leak <em>shape</em> (steadily
+      climbing RSS/heap that never comes back down after GC) versus normal sawtooth GC behavior, and to actually
+      use heap snapshots and allocation profiling to find root causes rather than guessing and restarting pods on a
+      schedule as a "fix."</p>
+      <div class="box why"><h4>Why</h4><p>A service that "needs restarting every 6 hours" because of a slow leak is
+      a ticking production risk disguised as a workaround — it fails exactly when traffic is highest (the leak
+      accumulates faster) or when a deploy/restart is delayed. Interviewers ask about memory leaks specifically to
+      see whether you reach for tooling (heap snapshots, --inspect, clinic.js) or just guess.</p></div>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>Basic understanding of references and closures in JS. Related:
+      <a href="02-streams-buffers.html">Streams & Buffers</a>, <a href="01-event-loop.html">Event Loop Internals</a>.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="basics">V8's heap structure</h3>
+      <p>V8 divides the managed heap into <strong>new space</strong> (young generation — small, fast to collect,
+      where almost all objects are initially allocated) and <strong>old space</strong> (old generation — objects
+      that survive multiple young-generation collections get "promoted" here). There's also large object space
+      (big objects allocated directly, bypassing new space), code space, and map space (hidden class metadata) —
+      but new/old generation is what matters for GC behavior reasoning. Separately, Buffers and TypedArrays backed
+      by large allocations live largely off this managed heap (in what Node calls "external" memory), visible in
+      `process.memoryUsage().external` and RSS but not in `heapUsed`.</p>
+
+      <h3 id="internals">Scavenge (minor GC) vs Mark-Sweep-Compact (major GC)</h3>
+      <p>Young generation collection is called <strong>Scavenge</strong>: new space is split into two halves; live
+      objects are copied from the active half to the other half (and anything surviving a second Scavenge gets
+      promoted to old space), then the original half is wholesale cleared — fast because it only has to touch live
+      objects, not scan the whole space for garbage, and new space is kept small specifically so this is cheap and
+      frequent. Old generation collection is <strong>Mark-Sweep-Compact</strong> (major GC): mark all reachable
+      objects from GC roots, sweep unreachable ones, and periodically compact to reduce fragmentation. This is
+      fundamentally more expensive because old space is large and the full mark phase must traverse the live
+      object graph — in V8 this is incremental and partially concurrent/parallel (to minimize how much runs
+      "stop-the-world" on the main thread) but a sufficiently large old-generation heap still produces
+      measurable main-thread GC pauses, which show up directly as event-loop lag spikes.</p>
+
+      <h3 id="advanced">What actually causes a leak, and heap snapshot methodology</h3>
+      <p>A leak is simply: objects kept reachable (via some retained reference) long after they're logically no
+      longer needed, so GC correctly never collects them — GC only collects <em>unreachable</em> garbage, it has no
+      concept of "logically done with this." Classic retained-reference leak sources: event listeners added but
+      never removed (each holds a closure over its context), timers/intervals never cleared, closures capturing
+      large objects unintentionally, global/module-level caches or Maps with no eviction policy, and detached DOM-
+      like patterns in server contexts (e.g., retaining full request/response objects in a long-lived log buffer).</p>
+      <p>Methodology: take a heap snapshot (via `--inspect` + Chrome DevTools, or `node --heapsnapshot-signal` /
+      the `v8` module's `writeHeapSnapshot()`), compare two snapshots taken minutes apart under steady load — the
+      "Comparison" view in DevTools shows objects that grew in count/retained size between snapshots. For each
+      suspicious growing type, use "Retainers" to trace the actual reference chain keeping it alive back to a GC
+      root — this chain is almost always the direct answer to "what line of code causes this."</p>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p><code>--max-old-space-size</code> sets the ceiling for old-generation heap size (default scales with
+      available system memory, but in containers it's critical to set explicitly — V8 historically could
+      misdetect available memory in a cgroup-limited container and allow the heap to grow past the container's
+      actual memory limit, triggering an OOM kill from the OS/kubelet rather than a clean V8 "out of memory"
+      error with a stack trace). As old space approaches this limit, V8 runs GC more aggressively and eventually
+      synchronously/more disruptively, which is why climbing memory pressure often correlates with climbing
+      latency before the eventual crash — GC isn't free, and a near-full heap means GC runs more often and does
+      more work per run (since there's less slack to find garbage quickly).</p>
+      <p><code>process.memoryUsage()</code> fields, precisely: <code>heapUsed</code>/<code>heapTotal</code> are
+      V8's managed JS heap; <code>external</code> is memory for objects bound to JS but managed outside V8 (most
+      Buffers); <code>arrayBuffers</code> is a subset of external specifically for ArrayBuffer/SharedArrayBuffer;
+      <code>rss</code> (resident set size) is the actual physical memory the OS has allocated to the whole process
+      — the number that matters for OOM kills, and it includes heap + external + the V8 engine's own overhead +
+      native module memory. A leak purely in Buffers can grow RSS steadily while `heapUsed` looks perfectly flat —
+      checking only `heapUsed` is a common mistake that hides exactly this class of leak.</p>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+flowchart TB
+  subgraph "V8 Heap"
+    NS[New Space / Young Gen] -->|survives 2 scavenges| OS[Old Space / Old Gen]
+    OS -->|Mark-Sweep-Compact, major GC, expensive| OS
+    NS -->|Scavenge, minor GC, cheap/frequent| NS
+  end
+  EXT["External memory (Buffers, TypedArrays)<br/>NOT in V8 heap, shows in RSS"]
+  RSS["Process RSS = V8 heap + external + engine overhead"]
+  NS --> RSS
+  OS --> RSS
+  EXT --> RSS
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-typescript">// Classic leak #1: listener never removed, closure retains large context
+class RequestLogger {
+  private buffer: any[] = [];
+  constructor(private emitter: EventEmitter) {
+    // BAD: this listener is added once per RequestLogger instance but
+    // never removed. If a new RequestLogger is created per-request,
+    // every one of them (and everything they close over) leaks forever.
+    emitter.on('log', (entry) => this.buffer.push(entry));
+  }
+}
+
+// GOOD: explicit cleanup, or use a shared singleton instead of per-request instances
+class RequestLoggerFixed {
+  private buffer: any[] = [];
+  private handler = (entry: any) => this.buffer.push(entry);
+  constructor(private emitter: EventEmitter) {
+    emitter.on('log', this.handler);
+  }
+  dispose() {
+    this.emitter.off('log', this.handler); // breaks the retaining reference
+  }
+}
+
+
+// Classic leak #2: unbounded cache, no eviction
+const cache = new Map<string, Buffer>(); // BAD: grows forever, never evicted
+function getCached(key: string, compute: () => Buffer) {
+  if (!cache.has(key)) cache.set(key, compute());
+  return cache.get(key)!;
+}
+
+// GOOD: bounded with an LRU eviction policy (e.g., using `lru-cache`)
+import { LRUCache } from 'lru-cache';
+const boundedCache = new LRUCache<string, Buffer>({ max: 500, ttl: 1000 * 60 * 10 });
+
+
+// Classic leak #3: timer never cleared, keeps a per-request closure alive
+app.get('/poll-status', (req, res) => {
+  // BAD: if the client disconnects, this interval and its closure
+  // (capturing req/res) keeps running and leaking forever.
+  const interval = setInterval(() => checkStatus(req.query.id), 1000);
+});
+
+// GOOD: tied to the request lifecycle explicitly
+app.get('/poll-status', (req, res) => {
+  const interval = setInterval(() => checkStatus(req.query.id), 1000);
+  req.on('close', () => clearInterval(interval));
+});
+
+
+// Taking a heap snapshot programmatically for later analysis in DevTools
+import { writeHeapSnapshot } from 'node:v8';
+process.on('SIGUSR2', () => {
+  const filename = writeHeapSnapshot();
+  console.log(`heap snapshot written to ${filename}`);
+});
+// trigger in prod with: kill -USR2 &lt;pid&gt;, then load the .heapsnapshot
+// file into Chrome DevTools Memory tab for Comparison analysis.
+
+
+// Correct container memory configuration — avoid V8 overshooting cgroup limits
+// package.json / Dockerfile CMD:
+// node --max-old-space-size=1536 server.js   (for a 2GB container, leaving headroom
+// for external/RSS overhead beyond just the old-space JS heap)
+</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4><p>An API's memory climbed steadily over about 18 hours before every
+      OOM-restart, heapUsed looked almost flat the whole time, but RSS grew linearly. The team initially chased a
+      JS-level leak (checked heap snapshots, found nothing growing meaningfully) before realizing the issue was in
+      `external` memory: a websocket library buffered unacknowledged outgoing messages per-connection in a plain
+      array with no cap, and a subset of mobile clients on flaky connections never acked fast enough, so their
+      buffers grew unbounded — each held as Buffer-backed chunks, invisible to heap snapshots which only see the
+      managed JS heap. The fix was a per-connection buffer cap with a disconnect-and-drop policy once exceeded, plus
+      adding `external` and `rss` (not just `heapUsed`) to the standard memory dashboard going forward.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Monitoring only `heapUsed` for "is there a leak" — this misses any
+      leak in Buffers/external memory entirely, which is extremely common in I/O-heavy services (websockets,
+      streaming, native modules). Always track `rss` as the primary OOM-risk signal, and `external` separately
+      when heapUsed looks healthy but RSS doesn't.</p></div>
+      <ul>
+        <li>A sawtooth memory graph (climbs, drops sharply on major GC, repeats) is normal and healthy — a leak looks like the sawtooth's <em>floor</em> (post-GC baseline) steadily rising over time, never returning to its earlier low.</li>
+        <li>Always set `--max-old-space-size` explicitly in containers, sized with real headroom below the container memory limit for external/RSS overhead, not equal to it.</li>
+        <li>Event listeners, timers, and module-level caches are the three most common real-world leak sources — audit these first.</li>
+        <li>Use heap snapshot comparison (two snapshots under steady load, minutes apart), not a single snapshot — a single snapshot can't show you what's growing.</li>
+        <li>`global.gc()` (only available with `--expose-gc`) can be useful for isolating leak investigation (force a collection, then snapshot) but should never be called in normal production code paths.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>Unbounded in-memory cache</td><td>Working set is provably small and bounded by design (e.g., a fixed config set)</td><td>Cache key space scales with user/request volume</td><td>LRU cache with max size + TTL</td></tr>
+        <tr><td>Scheduled process restarts as a "fix" for slow leaks</td><td>Never, as a permanent fix — only as a stopgap while root-causing</td><td>As a long-term strategy — it masks the bug and fails at the worst time (peak traffic)</td><td>Heap snapshot root-cause analysis</td></tr>
+        <tr><td>Raising --max-old-space-size to "fix" OOMs</td><td>You've confirmed real working-set memory need genuinely exceeds current limit, not a leak</td><td>As a first response without profiling — can just delay a crash from a real leak</td><td>Profile first, fix the leak, then size the limit correctly</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic"><h4>Basic</h4>
+      <details class="qa"><summary>What's the difference between new space and old space in V8's heap?</summary><div class="answer"><p>New space (young generation) holds newly allocated, mostly short-lived objects and is collected frequently via a cheap Scavenge algorithm. Old space holds objects that survived multiple young-gen collections (promoted/"tenured") and is collected less often via the more expensive Mark-Sweep-Compact.</p></div><div class="followup">Follow-up: why is new space kept deliberately small?</div></details>
+      <details class="qa"><summary>What causes a memory leak in a garbage-collected language like JavaScript?</summary><div class="answer"><p>An object remains reachable (some live reference chain leads to it from a GC root) long after it's logically no longer needed — GC only reclaims unreachable memory, so a forgotten reference (listener, timer, cache entry) prevents collection indefinitely.</p></div><div class="followup">Follow-up: name three common real-world sources of such lingering references.</div></details>
+      <details class="qa"><summary>What does heapUsed vs rss tell you differently in process.memoryUsage()?</summary><div class="answer"><p>heapUsed is memory within V8's managed JS heap; rss is total physical memory the OS has allocated to the whole process, including the JS heap, external/Buffer memory, and engine overhead — rss is what actually triggers an OOM kill.</p></div><div class="followup">Follow-up: can heapUsed look flat while rss grows? How?</div></details>
+      <details class="qa"><summary>What's a healthy memory usage graph supposed to look like over time, vs a leak?</summary><div class="answer"><p>Healthy: a sawtooth pattern — memory climbs as objects allocate, drops sharply when major GC runs, and the post-GC floor stays roughly constant over time. A leak: the same sawtooth pattern, but the floor itself steadily climbs over time and never returns to earlier lows.</p></div><div class="followup">Follow-up: how would you distinguish a slow leak from legitimately growing cache/working-set size?</div></details>
+      <details class="qa"><summary>What tool would you reach for first to investigate a suspected Node memory leak?</summary><div class="answer"><p>Heap snapshots via --inspect and Chrome DevTools' Memory tab (or node:v8's writeHeapSnapshot), comparing two snapshots taken minutes apart under steady load to see what object types/counts grew.</p></div><div class="followup">Follow-up: why is comparing two snapshots more useful than examining a single one?</div></details>
+      </div>
+      <div class="qa-level medium"><h4>Medium</h4>
+      <details class="qa"><summary>Why is Mark-Sweep-Compact (major GC) more likely to cause a visible latency spike than Scavenge (minor GC)?</summary><div class="answer"><p>Scavenge only has to copy the (usually small) set of live objects in new space, proportional to live data, not total space size, so it's fast and frequent. Mark-Sweep-Compact must traverse the full reachable object graph in old space to mark live objects and sweep the rest, work that scales with old-generation heap size, and even with V8's incremental/concurrent optimizations, a large or fragmented old generation can still produce a measurable main-thread pause.</p></div><div class="followup">Follow-up: how would this pause show up in your production monitoring?</div></details>
+      <details class="qa"><summary>Explain how a leak purely in Buffer/external memory could evade a heap-snapshot-based investigation that only looks at the JS heap.</summary><div class="answer"><p>Buffers and other large typed-array-backed allocations are tracked outside V8's managed heap (in Node's "external" memory), so a Chrome DevTools heap snapshot — which captures the managed JS object graph — will show the small JS wrapper object referencing the Buffer, but won't necessarily make the scale of the retained external memory obvious the way it highlights growing plain-object counts; you need to separately track process.memoryUsage().external/arrayBuffers over time to catch this class of leak.</p></div><div class="followup">Follow-up: what server-side pattern (hint: websockets) commonly causes exactly this kind of leak?</div></details>
+      <details class="qa"><summary>Why should you set --max-old-space-size explicitly inside a container rather than relying on V8's default detection?</summary><div class="answer"><p>V8's default heap size heuristics are based on detecting total system memory, which in a cgroup-limited container can historically diverge from the container's actual memory limit — V8 might allow the heap to grow toward a default sized for the host's full memory, well past what the container is permitted, resulting in the OS/kubelet OOM-killing the process abruptly rather than V8 hitting its own limit and failing more predictably/with a stack trace.</p></div><div class="followup">Follow-up: how would you size the value relative to the container's memory limit, and why leave headroom?</div></details>
+      <details class="qa"><summary>You find a Map used as a cache that's growing without bound. Walk through root-causing it with heap snapshots before just adding an LRU wrapper.</summary><div class="answer"><p>Take two heap snapshots minutes apart under steady traffic, use DevTools' Comparison view to confirm the Map (or its entries' types) are what's growing in count. Use Retainers on a sample growing entry to trace the reference chain back to confirm it really is this Map (not, say, closures capturing request objects that happen to also reference the Map) and understand why entries never get removed — e.g., no eviction logic was ever written, or eviction logic has a bug (wrong key comparison, TTL never actually checked).</p></div><div class="followup">Follow-up: after adding an LRU cap, how would you verify the fix actually worked under the same load pattern?</div></details>
+      <details class="qa"><summary>Why can raising --max-old-space-size make a real leak's symptoms worse, not better, in production?</summary><div class="answer"><p>It doesn't stop the leak — it just delays the crash and lets more memory accumulate before OOM, meaning when it does eventually hit the limit (or when the container's absolute memory ceiling is hit first), GC pressure and pause times will have been climbing for longer and be worse at the point of failure, and you've bought a longer but still-inevitable failure window instead of fixing the underlying unbounded retention.</p></div><div class="followup">Follow-up: when IS raising this value the correct fix rather than a leak workaround?</div></details>
+      </div>
+      <div class="qa-level advanced"><h4>Advanced</h4>
+      <details class="qa"><summary>Design a production memory-health monitoring and alerting strategy for a fleet of Node services, covering what to track and what thresholds to alert on.</summary><div class="answer"><p>Track rss, heapUsed/heapTotal, and external/arrayBuffers per instance over time (not just instantaneous values — the trend/slope matters more than any single point). Alert on: (1) rss as a percentage of container memory limit sustained above a threshold (e.g., 80% for 10+ minutes) as an imminent-OOM signal, (2) the post-major-GC floor of heapUsed trending upward over a multi-hour window (the leak signature) rather than alerting on raw heapUsed which naturally saws. Correlate with deploy timestamps to catch leaks introduced by a specific release quickly, and keep automated heap-snapshot capture triggered by the rss threshold so you have a snapshot from near the actual incident, not from a cold/healthy state.</p></div><div class="followup">Follow-up: how would you avoid snapshot capture itself (which pauses the process) making an already-struggling instance worse?</div></details>
+      <details class="qa"><summary>A heap snapshot comparison shows a specific Closure type growing by thousands between snapshots, but you can't find an obvious module-level cache. What's your next investigative step?</summary><div class="answer"><p>Use DevTools' Retainers panel on a sample of the growing closures to trace the actual reference chain to a GC root — this will typically reveal something non-obvious holding them, like an EventEmitter's internal listener array (if listeners are added per-request and never removed), a Promise chain that never resolves/rejects (each pending .then() closure stays retained), or a timer that's never cleared. The retainer chain is the ground truth; guessing based on code review alone misses leaks caused by third-party library internals.</p></div><div class="followup">Follow-up: how would async_hooks or a Promise-tracking tool help confirm the "never-resolving Promise" hypothesis specifically?</div></details>
+      <details class="qa"><summary>Explain the tradeoff a team faces choosing between "restart pods on a memory threshold" (a common K8s liveness-probe pattern) as a standing mitigation versus treating every leak as a must-fix bug.</summary><div class="answer"><p>A memory-threshold restart is a legitimate safety net for resilience (any process can leak unexpectedly, and automatic recycling bounds the blast radius) but becomes dangerous if relied on as the primary fix: it masks the leak's existence from normal monitoring, risks restarting mid-request (dropping in-flight work if graceful shutdown isn't correctly wired — see Chapter 9), and the leak's growth rate may outpace the probe's check interval under a traffic spike, OOM-killing before the probe acts. The right posture: keep the safety net, but treat any newly observed leak as a tracked bug with a root cause, not accept "it just restarts" as the resolution.</p></div><div class="followup">Follow-up: how does this interact with graceful shutdown handling covered in the scaling chapter?</div></details>
+      <details class="qa"><summary>How would you profile and reduce GC pause impact for a service with a legitimately large, long-lived old-generation heap (e.g., a large in-memory index/cache by design, not a leak)?</summary><div class="answer"><p>Use `--trace-gc` / Chrome DevTools Performance recording to measure actual major-GC pause durations and frequency; consider reducing allocation churn in hot paths (object pooling, avoiding needless intermediate allocations in request handling) since GC cost correlates with how much garbage must be scanned/collected, not just total live-heap size. If the large structure is genuinely static/long-lived (not garbage, never needs collecting), consider moving it off the V8 managed heap entirely (e.g., a native-backed structure, or an external cache like Redis) so V8's GC doesn't need to repeatedly scan it as part of mark phases.</p></div><div class="followup">Follow-up: why would moving a large static structure off-heap reduce GC pause time even though it was never going to be collected anyway?</div></details>
+      <details class="qa"><summary>Two services show identical heapUsed growth curves, but only one is a real leak — the other is a legitimately growing cache that will plateau. How do you distinguish them with evidence, not assumption, before paging anyone?</summary><div class="answer"><p>Extend the observation window and correlate growth with known bounding logic — a legitimate cache plateaus once its key space is exhausted or its TTL/LRU eviction reaches steady state (growth rate should visibly decelerate and flatten); a real leak continues climbing linearly or accelerates regardless of traffic pattern changes, and typically correlates with request volume in a way that never saturates (e.g., scales with total requests served, not with distinct cache keys). Pull two heap snapshots a few hours apart during the growth and check whether the growing object types match the cache's expected key/value shape and whether the count is bounded by a known business quantity (e.g., number of active users) — if growth exceeds that bound, it's a leak.</p></div><div class="followup">Follow-up: what's a case where a "legitimate cache" turns out to actually be an unintentional leak because its supposed bound was never actually enforced in code?</div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment"><span class="level-tag">Beginner (30-60 min)</span>
+      <h4>Create and observe a deliberate leak</h4>
+      <p>Write a small server with an endpoint that adds an item to a module-level array on every call and never
+      removes anything. Hit it in a loop with 10,000 requests, logging `process.memoryUsage()` every 500 requests.</p>
+      <ul><li>Must show heapUsed and rss climbing together.</li><li>Must log at regular intervals, not just before/after.</li></ul>
+      <p><strong>Acceptance criteria:</strong> A clear, logged, monotonically climbing memory trend with no GC-driven drops returning to baseline.</p>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>Push plain objects with a moderately sized string/array payload so the growth is visible within a reasonable request count.</p></div></details>
+      <p><strong>Bonus:</strong> Fix the leak with a bounded array (cap size, drop oldest) and show memory stabilizing.</p>
+      </div>
+      <div class="assignment"><span class="level-tag">Intermediate (2-4 hrs)</span>
+      <h4>Diagnose a hidden leak using heap snapshots</h4>
+      <p>Build a server with one of the three classic leak patterns from this chapter (listener, timer, or cache)
+      hidden somewhere in a moderately-sized set of modules (at least 5 files, only one containing the actual bug).
+      Without looking at the source first, use `--inspect` + Chrome DevTools heap snapshot comparison to find and
+      fix it.</p>
+      <ul><li>Diagnosis must be snapshot-driven (screenshot/description of the Comparison + Retainers view), not source-reading.</li><li>Must identify the exact retaining reference chain.</li></ul>
+      <p><strong>Acceptance criteria:</strong> Can show the specific growing object type in the Comparison view and trace its Retainers chain to the exact line of code responsible.</p>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>Generate load with autocannon between the two snapshots to make the leak's growth clearly visible in the comparison.</p></div></details>
+      <p><strong>Bonus:</strong> Reproduce the same investigation using the `v8` module's writeHeapSnapshot() triggered by a SIGUSR2 signal instead of the inspector UI, simulating a real production capture.</p>
+      </div>
+      <div class="assignment"><span class="level-tag">Advanced (1-2 days)</span>
+      <h4>Build a memory-health monitoring harness</h4>
+      <p>Build a monitoring module for a Node service that tracks rss/heapUsed/external over time, computes a
+      rolling "post-GC floor" trend (e.g., sample memory right after you detect a drop, indicating a GC just ran),
+      and triggers an automatic heap snapshot write when the floor's slope over the last N minutes exceeds a
+      threshold. Validate it against both a healthy service (plateauing cache) and a leaking one, showing it
+      correctly distinguishes the two.</p>
+      <ul><li>Must distinguish "legitimate growth that plateaus" from "leak that keeps climbing" with a concrete, justified heuristic.</li><li>Must trigger an actual heap snapshot write, not just an alert log.</li></ul>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>Detect GC events heuristically by watching for memory drops of a meaningful size, or use the `perf_hooks` GC performance observer to detect actual major GC events directly rather than inferring them.</p></div></details>
+      <p><strong>Bonus:</strong> Wire the snapshot trigger to also capture a CPU profile simultaneously, to correlate memory pressure with any GC-induced latency spike at the same moment.</p>
+      </div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet"><ul>
+        <li>New space (young gen): small, frequent, cheap Scavenge collection. Old space (old gen): large, expensive Mark-Sweep-Compact.</li>
+        <li>Objects surviving ~2 Scavenges get promoted ("tenured") to old space.</li>
+        <li>Buffers/large TypedArrays live in "external" memory, outside the managed JS heap — invisible to heapUsed, visible in RSS.</li>
+        <li>RSS is what actually gets OOM-killed by the OS/kubelet — monitor it, not just heapUsed.</li>
+        <li>Healthy memory = sawtooth with a flat floor; a leak = sawtooth with a climbing floor.</li>
+        <li>Top 3 real-world leak sources: unremoved event listeners, uncleared timers, unbounded caches.</li>
+        <li>Always set --max-old-space-size explicitly in containers, with headroom below the container's hard memory limit.</li>
+        <li>Diagnose with heap snapshot Comparison (two snapshots under load) + Retainers, not single snapshots or guessing.</li>
+        <li>GC pauses show up directly as event-loop lag spikes — correlate the two metrics during an incident.</li>
+      </ul></div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://v8.dev/blog/trash-talk">V8 blog: Trash Talk — the Orinoco garbage collector</a></li>
+        <li><a href="https://nodejs.org/en/learn/diagnostics/memory/using-heap-snapshot">Node.js docs: Using Heap Snapshots</a></li>
+        <li><a href="https://nodejs.org/api/v8.html">Node.js docs: v8 module (writeHeapSnapshot, getHeapStatistics)</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="03-worker-threads.html"><span class="dir">← Previous</span>Worker Threads & Clustering</a>
+        <a class="next" href="05-error-handling.html"><span class="dir">Next →</span>Error Handling Strategy</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · Node.js Advanced</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-typescript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "04-nodejs-advanced", chapterKey: "04-memory-gc" });</script>
+</body>
+</html>

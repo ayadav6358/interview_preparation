@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Networking Basics — System Design — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">System Design</a><span class="sep">›</span>Networking Basics</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>Networking Basics: DNS, HTTP/1.1 vs 2 vs 3, TCP vs UDP, WebSockets vs SSE</h1>
+      <p class="meta-line"><span>⏱ 2.5 hrs</span><span>📍 Chapter 2 of 14</span></p>
+      <p><strong>One-line summary:</strong> Every system design diagram has arrows between boxes — those arrows are real protocols with real latency and failure costs, and a senior engineer must know what happens on the wire before claiming a design "will be fast" or "will scale."</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>You've built REST APIs and maybe a WebSocket chat feature, but interviewers at Staff/Tech Lead level probe whether you understand <em>why</em> a design choice works — "why did you pick HTTP/2 here," "why not just poll every second," "why does this mobile app feel slow on 4G but fine on wifi." Those questions are answered at the transport and application-protocol layer, not the business logic layer. This chapter gives you the vocabulary to reason about connection setup cost, head-of-line blocking, and the real tradeoffs between push-based and pull-based communication — concepts that resurface in load balancing (Chapter 3), caching (Chapter 4), and every HLD case study (Chapter 13).</p>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>Read <a href="01-fundamentals.html">Fundamentals</a> first — latency/throughput vocabulary and the tail-at-scale problem are used throughout this chapter. This chapter feeds directly into <a href="03-load-balancing.html">Load Balancing & Reverse Proxies</a>, where these protocols get distributed across many servers.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="dns">DNS resolution: recursive vs authoritative, TTL, caching</h3>
+      <p>DNS translates a hostname into an IP address through a chain of lookups. When your laptop resolves <code>api.example.com</code>, it typically asks a <strong>recursive resolver</strong> (your ISP's, or a public one like 8.8.8.8 / 1.1.1.1) to do the full chain on its behalf: root servers → TLD servers (<code>.com</code>) → the domain's <strong>authoritative nameserver</strong>, which holds the actual records. The recursive resolver caches the answer according to the record's <strong>TTL</strong> (time-to-live, in seconds) so subsequent lookups from other clients don't repeat the chain.</p>
+      <p><strong>Authoritative</strong> servers are the source of truth for a zone — they answer definitively, not from cache. A recursive resolver is a middleman that caches to save round trips; it never "owns" the data.</p>
+      <p><strong>TTL tradeoffs:</strong> a low TTL (e.g., 30–60s) lets you redirect traffic quickly (useful for blue-green deploys, failover, or canary rollouts) but increases load on authoritative servers and adds resolution latency variance since caches expire often. A high TTL (hours/days) is cheap and fast but means a bad record change (or a failover) takes a long time to propagate — this is why many outage postmortems mention "stale DNS cached on client devices" as an amplifying factor. Senior-level practice: lower your TTL *before* a planned migration, wait for the old TTL to fully expire everywhere, then cut over.</p>
+      <p><strong>DNS caching layers</strong> stack: browser DNS cache → OS resolver cache → router → ISP recursive resolver → authoritative. A `dig` or `nslookup` from your laptop often returns a cached answer that's several hops removed from the authoritative truth, which is why "I updated the DNS record and it's not working" is almost always a caching/TTL issue, not a propagation failure.</p>
+
+      <h3 id="http-versions">HTTP/1.1 vs HTTP/2 vs HTTP/3</h3>
+      <p><strong>HTTP/1.1</strong> is text-based, one request per TCP connection waits for its response before the next can be sent on that connection (unless you open multiple parallel TCP connections — browsers historically capped this at 6 per host). This causes <strong>head-of-line (HOL) blocking</strong> at the application layer: a slow response blocks everything queued behind it on that connection.</p>
+      <p><strong>HTTP/2</strong> introduces <strong>multiplexing</strong>: a single TCP connection carries multiple concurrent "streams," each request/response broken into frames that interleave on the wire. This removes application-layer HOL blocking — many requests are genuinely in flight on one connection. It also adds <strong>HPACK header compression</strong> (headers are repetitive across requests — cookies, user-agent — so HPACK maintains a shared compression table between client and server rather than re-sending full header text every time) and binary framing instead of text parsing. <strong>Server push</strong> (server proactively sends resources it predicts the client needs) was part of HTTP/2 but is now deprecated/removed from Chrome and most browsers — in practice it caused cache-coherency problems and was rarely a net win over simply inlining critical resources or using `<link rel="preload">`.</p>
+      <p>HTTP/2's remaining weakness: it still multiplexes over a single <strong>TCP</strong> connection, so if a single TCP packet is lost, TCP's in-order delivery guarantee blocks *all* streams until that packet is retransmitted — this is <strong>transport-layer HOL blocking</strong>, and HTTP/2 cannot fix it because it's baked into TCP itself.</p>
+      <p><strong>HTTP/3</strong> solves this by replacing TCP with <strong>QUIC</strong>, a transport protocol built on top of UDP. QUIC implements its own reliability and congestion control per-stream, so a lost packet on one stream only blocks that stream, not the others — true elimination of HOL blocking at both layers. QUIC also supports <strong>0-RTT connection resumption</strong>: if a client has previously connected to a server, it can cache cryptographic parameters and send application data on the very first packet of a reconnection, skipping the handshake round trip entirely (with some replay-attack caveats that limit which requests are safe to send 0-RTT, e.g., only idempotent ones). Because QUIC is UDP-based, middleboxes/firewalls that don't understand it can block or throttle it, which is why HTTP/3 deployments always fall back to HTTP/2 gracefully (advertised via the `Alt-Svc` header).</p>
+
+      <h3 id="tcp-udp">TCP vs UDP, and when UDP wins</h3>
+      <p><strong>TCP</strong> is connection-oriented and reliable: it guarantees ordered, complete delivery via the <strong>three-way handshake</strong> (SYN → SYN-ACK → ACK) to establish a connection, sequence numbers to reorder/detect loss, and retransmission on missing ACKs. <strong>Congestion control</strong> (e.g., TCP Cubic, BBR) ramps the send rate up slowly (slow start), backs off sharply on detected loss, and probes for available bandwidth continuously — this is why a fresh TCP connection on a high-latency link takes a few round trips before it reaches full throughput ("TCP slow start penalty"), a real cost for short-lived connections.</p>
+      <p><strong>UDP</strong> is connectionless and makes no delivery guarantees — no handshake, no retransmission, no ordering. <strong>UDP wins</strong> when: (1) you need minimum latency and can tolerate loss (live video/audio, multiplayer game state — a dropped frame is better than waiting for a retransmit of a now-stale frame); (2) you're building your own reliability semantics tuned to your use case (QUIC does exactly this — it's UDP with custom reliability on top, giving more control than TCP's one-size-fits-all); (3) simple request-response where the cost of retry-at-the-application-layer is cheaper than a stateful connection (DNS queries are UDP for this reason, falling back to TCP only for large responses).</p>
+      <p>Senior framing: "TCP vs UDP" is really "do you need the kernel's generic reliability, or do you need custom reliability tuned to your data's actual tolerance for loss/reordering." QUIC is proof that the answer is increasingly "build custom reliability on UDP."</p>
+
+      <h3 id="realtime">WebSockets vs SSE vs long-polling</h3>
+      <p><strong>Long-polling</strong>: client sends a request, server holds it open until there's data (or a timeout), responds, client immediately re-requests. Simple, works over plain HTTP/infra everyone already supports, but each cycle pays connection/header overhead and there's inherent latency between a timeout-close and the next request.</p>
+      <p><strong>Server-Sent Events (SSE)</strong>: a single long-lived HTTP connection where the server streams a sequence of text events (`text/event-stream`) to the client; it's <strong>one-way</strong> (server → client only). Built-in <strong>auto-reconnect</strong> with a `Last-Event-ID` header lets the client resume from where it left off after a drop — this is handled natively by `EventSource` in the browser, no custom reconnection logic needed. Infra-wise, SSE is just HTTP — it works through standard proxies, load balancers, and CDNs without special configuration, which is a huge operational win over WebSockets.</p>
+      <p><strong>WebSockets</strong>: start as an HTTP request with an `Upgrade: websocket` header; the server responds `101 Switching Protocols` and from then on the same TCP connection carries a different framing protocol entirely — <strong>full-duplex</strong>, either side can send at any time, binary or text. Needed when the client must push frequent data to the server too (chat, collaborative editing, multiplayer) — SSE/long-polling can't do that without a second channel. Cost: WebSocket connections are stateful and sticky, don't play as nicely with plain HTTP load balancers (need L4/L7 awareness, see Chapter 3), and don't automatically reconnect — you must implement your own backoff/retry and resume logic.</p>
+      <p>Decision rule: need bidirectional, high-frequency, low-latency → WebSockets. Need server-to-client streaming only (notifications, live scores, LLM token streaming) → SSE, simpler infra wins. Need occasional updates and can't use either (old infra, strict corporate proxies) → long-polling as the fallback.</p>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>Before any HTTP request flows, three things typically happen in sequence for a fresh HTTPS connection: DNS resolution, TCP three-way handshake, then TLS handshake (certificate exchange + key agreement). On a cold connection with TLS 1.2 this is 3 full round trips before the first byte of actual data moves; TLS 1.3 cuts this to effectively 1-RTT (and QUIC/HTTP3's 0-RTT resumption can cut it further on reconnect). This is why connection reuse (HTTP keep-alive, HTTP/2 multiplexing over one connection) matters so much at scale — paying the handshake cost once and amortizing it over many requests beats paying it per-request.</p>
+      <p>For HTTP/2's multiplexing specifically: the server assigns each request a stream ID, breaks the response into frames tagged with that stream ID, and interleaves frames from different streams on the wire. The client's HTTP/2 layer reassembles frames by stream ID. This is why one slow backend response doesn't block a fast one on the same connection — they're genuinely concurrent at the framing level, not just logically concurrent.</p>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+sequenceDiagram
+    participant C as Client
+    participant S as Server
+    Note over C,S: TCP three-way handshake
+    C->>S: SYN
+    S->>C: SYN-ACK
+    C->>S: ACK
+    Note over C,S: TLS 1.3 handshake (1-RTT)
+    C->>S: ClientHello + key share
+    S->>C: ServerHello + cert + Finished
+    C->>S: Finished
+    Note over C,S: Connection established — app data now flows
+    C->>S: HTTP GET /api/resource
+    S->>C: 200 OK + payload
+      </div>
+      <div class="mermaid">
+flowchart TD
+    subgraph HTTP1["HTTP/1.1 — one connection, serial"]
+    A1["Req 1"] --> A2["Wait..."] --> A3["Resp 1"] --> A4["Req 2"] --> A5["Resp 2"]
+    end
+    subgraph HTTP2["HTTP/2 — one connection, multiplexed"]
+    B1["Req 1 (stream 1)"] -.-> B3["Resp 1 frames"]
+    B2["Req 2 (stream 2)"] -.-> B4["Resp 2 frames"]
+    B1 & B2 --> B5["Interleaved on same TCP connection,<br/>reassembled by stream ID"]
+    end
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <p>SSE server (Node/Express) with reconnect-friendly event IDs, vs a naive WebSocket server for comparison:</p>
+      <pre><code class="language-typescript">// SSE endpoint — simple, one-way, auto-reconnect handled by the browser's EventSource
+import { Request, Response } from "express";
+
+let lastEventId = 0;
+
+export function sseHandler(req: Request, res: Response) {
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+
+  // Resume support: client sends Last-Event-ID header after a dropped connection
+  const resumeFrom = Number(req.headers["last-event-id"] ?? 0);
+  console.log(`client resuming from event ${resumeFrom}`);
+
+  const interval = setInterval(() => {
+    lastEventId++;
+    const payload = JSON.stringify({ price: (Math.random() * 100).toFixed(2) });
+    // id: field is what enables auto-resume — EventSource tracks it automatically
+    res.write(`id: ${lastEventId}\ndata: ${payload}\n\n`);
+  }, 1000);
+
+  req.on("close", () => clearInterval(interval));
+}
+
+// Client side — zero custom reconnect logic needed:
+// const es = new EventSource("/stream");
+// es.onmessage = (e) => console.log(JSON.parse(e.data));
+// Browser automatically reconnects with Last-Event-ID on drop.
+</code></pre>
+      <pre><code class="language-typescript">// WebSocket server — full duplex, but YOU own reconnect/backoff logic on the client
+import { WebSocketServer } from "ws";
+
+const wss = new WebSocketServer({ port: 8080 });
+
+wss.on("connection", (ws) => {
+  ws.on("message", (data) => {
+    // Client can push at any time — this is the capability SSE doesn't have
+    console.log("received from client:", data.toString());
+    ws.send(JSON.stringify({ ack: true }));
+  });
+});
+
+// Client must implement its own reconnect-with-backoff — nothing automatic:
+// function connect() {
+//   const ws = new WebSocket("wss://example.com");
+//   ws.onclose = () => setTimeout(connect, backoffMs()); // you write backoffMs()
+// }
+</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4><p>A trading dashboard streaming live prices to 200,000 concurrent browser tabs initially used WebSockets for "future-proofing," even though data only flows server→client. At that scale, WebSocket connections required sticky sessions at the load balancer (each connection pinned to one backend instance for its lifetime), which made rolling deploys painful — every deploy had to either forcibly drop connections (causing a visible reconnect storm) or wait out long-lived connections before rotating instances. Switching to SSE let the team drop sticky-session requirements (SSE still benefits from affinity but tolerates reconnects to a different instance gracefully via Last-Event-ID), simplified the load balancer config to standard HTTP/2 multiplexing, and let CDN edge nodes terminate and buffer-forward the stream in some regions — something that doesn't work cleanly with WebSockets. The lesson: don't reach for full-duplex infrastructure complexity when your actual data flow is one-way.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Assuming HTTP/2 multiplexing eliminates all head-of-line blocking. It only fixes the application-layer HOL blocking; a single lost TCP packet still blocks every stream on that connection until retransmitted — only HTTP/3 (QUIC/UDP) fixes transport-layer HOL blocking.</p></div>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Setting a DNS TTL of several hours "for performance" right before a planned migration, then being surprised that a meaningful fraction of traffic is still hitting the old IP a day later. Lower TTL well ahead of any planned cutover.</p></div>
+      <ul>
+        <li>Reuse connections aggressively (HTTP keep-alive, connection pooling) — the handshake + TLS cost dwarfs most individual request processing time on fast endpoints.</li>
+        <li>Default to SSE over WebSockets unless you specifically need client→server push on the same channel — simpler infra, automatic reconnect, works through existing proxies.</li>
+        <li>Don't treat UDP as "unreliable and therefore unusable" — QUIC/HTTP3 proves custom reliability on UDP can beat generic TCP reliability for web traffic.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs: When to Use vs When NOT To</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>HTTP/2</td><td>Many small concurrent resources over one connection, modern infra</td><td>Lossy/high-latency mobile networks (transport HOL blocking hurts)</td><td>HTTP/3 (QUIC)</td></tr>
+        <tr><td>HTTP/3 (QUIC)</td><td>Mobile, lossy networks, need fast reconnect (0-RTT)</td><td>Strict corporate firewalls that block UDP</td><td>HTTP/2 fallback via Alt-Svc</td></tr>
+        <tr><td>WebSockets</td><td>True bidirectional, high-frequency push both ways</td><td>Server-only push, need simple infra/CDN compatibility</td><td>SSE</td></tr>
+        <tr><td>SSE</td><td>Server→client streaming, want auto-reconnect for free</td><td>Need client→server push on the same channel</td><td>WebSockets, or SSE + separate REST calls</td></tr>
+        <tr><td>Long-polling</td><td>Legacy infra that can't support SSE/WebSockets</td><td>High-frequency updates (overhead per cycle adds up)</td><td>SSE</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic"><h4>Basic</h4>
+        <details class="qa"><summary>What's the difference between a recursive resolver and an authoritative nameserver?</summary><div class="answer"><p>The recursive resolver does the lookup chain on the client's behalf and caches results by TTL. The authoritative nameserver is the source of truth for a domain's records and answers definitively, not from cache.</p></div></details>
+        <details class="qa"><summary>What problem does HTTP/2 multiplexing solve?</summary><div class="answer"><p>It removes application-layer head-of-line blocking by letting multiple request/response streams share one TCP connection concurrently, instead of HTTP/1.1's one-at-a-time-per-connection model.</p></div></details>
+        <details class="qa"><summary>What does the TCP three-way handshake accomplish?</summary><div class="answer"><p>It synchronizes initial sequence numbers and confirms both sides can send and receive before any application data is exchanged: SYN, SYN-ACK, ACK.</p></div></details>
+        <details class="qa"><summary>Name one scenario where UDP is preferable to TCP.</summary><div class="answer"><p>Live video/audio or multiplayer game state, where a dropped packet is better handled by skipping to the next update than waiting for retransmission of now-stale data.</p></div></details>
+        <details class="qa"><summary>What is SSE and how does it differ from a WebSocket?</summary><div class="answer"><p>SSE is a one-way, server-to-client stream over a plain long-lived HTTP connection with built-in auto-reconnect. WebSockets are full-duplex and require custom reconnect logic but allow the client to push too.</p></div></details>
+        <details class="qa"><summary>What is DNS TTL and what's the tradeoff of setting it very low?</summary><div class="answer"><p>TTL is how long a resolver may cache a record. Low TTL enables fast failover/cutover but increases load on authoritative servers and adds resolution overhead since caches expire frequently.</p></div></details>
+        <details class="qa"><summary>What HTTP header initiates a WebSocket connection?</summary><div class="answer"><p>The client sends `Upgrade: websocket` (with `Connection: Upgrade`); the server responds `101 Switching Protocols` and the same TCP connection switches framing protocols.</p></div></details>
+      </div>
+      <div class="qa-level medium"><h4>Medium</h4>
+        <details class="qa"><summary>Explain why HTTP/2 doesn't fully eliminate head-of-line blocking, and what does.</summary><div class="answer"><p>HTTP/2 multiplexes at the application layer, but all streams still ride one TCP connection; a lost packet forces TCP to block all streams until retransmission (transport-layer HOL blocking). HTTP/3's QUIC, built on UDP with independent per-stream reliability, eliminates this because loss on one stream doesn't block others.</p></div><div class="followup">Follow-up: why can't you just fix this by patching TCP itself?</div></details>
+        <details class="qa"><summary>What is HPACK and why does it matter at scale?</summary><div class="answer"><p>HPACK is HTTP/2's header compression scheme using a shared dynamic table between client and server so repetitive header fields (cookies, user-agent) aren't fully retransmitted on every request. At scale with many small requests, header overhead can dominate payload size, so this meaningfully reduces bandwidth and latency.</p></div></details>
+        <details class="qa"><summary>Why is QUIC's 0-RTT resumption powerful, and what's the security caveat?</summary><div class="answer"><p>A returning client can send encrypted application data on the very first packet by reusing cached session parameters from a prior connection, skipping a full round trip. The caveat is replay risk — an attacker could resend the captured 0-RTT packet — so 0-RTT is generally limited to idempotent requests.</p></div></details>
+        <details class="qa"><summary>Why do WebSocket deployments typically need sticky sessions at the load balancer, and what operational problem does that cause?</summary><div class="answer"><p>A WebSocket connection is long-lived and stateful, pinned to one backend instance for its duration. This complicates rolling deploys/autoscaling since you either forcibly drop connections (reconnect storm) or must drain slowly, unlike stateless HTTP requests that any instance can serve.</p></div></details>
+        <details class="qa"><summary>Why does TCP slow start matter for short-lived connections specifically?</summary><div class="answer"><p>TCP ramps send rate up gradually over several round trips before reaching full available bandwidth. A connection that only lasts a few requests never gets to amortize past this ramp-up, so connection reuse (keep-alive, multiplexing) matters disproportionately for latency-sensitive, short-request workloads.</p></div></details>
+        <details class="qa"><summary>Why might a mobile app see worse performance on HTTP/2 than HTTP/3 on a lossy cellular network?</summary><div class="answer"><p>Packet loss is more common on cellular networks; with HTTP/2's single TCP connection, any loss blocks all multiplexed streams until retransmit. HTTP/3's QUIC isolates loss to the affected stream, so the rest of the page's requests keep flowing.</p></div></details>
+      </div>
+      <div class="qa-level advanced"><h4>Advanced</h4>
+        <details class="qa"><summary>Design the real-time layer for a live-auction platform where bids must be pushed to all watchers within 200ms and bidders must also submit bids over the same low-latency channel. Justify WebSockets vs SSE vs polling.</summary><div class="answer"><p>WebSockets, because bidders need low-latency client→server push (placing a bid) and all watchers need low-latency server→client push (updated price) — a genuinely bidirectional, high-frequency requirement that SSE can't satisfy on one channel. Mitigate the sticky-session/deploy pain with a pub-sub backplane (e.g., Redis) so any instance can broadcast bid updates regardless of which instance holds which connection, and implement explicit client-side reconnect-with-backoff plus a sequence number so a reconnecting client can detect and request missed updates.</p></div></details>
+        <details class="qa"><summary>A CDN wants to cache and accelerate SSE streams at the edge. What makes this hard compared to caching ordinary HTTP responses, and how could it still be done partially?</summary><div class="answer"><p>SSE responses never "complete" — there's no final Content-Length, so traditional whole-response caching doesn't apply. Partial acceleration is possible by having edge nodes terminate the TCP/TLS connection to the client and act as a fan-out proxy, maintaining one upstream connection to origin and streaming the same event sequence to many downstream clients — effectively a pub-sub relay rather than a cache in the traditional sense.</p></div></details>
+        <details class="qa"><summary>Why does QUIC implement congestion control and loss recovery itself instead of relying on the kernel's TCP stack, and what does this enable?</summary><div class="answer"><p>Building reliability in userspace (as part of the QUIC library) rather than the OS kernel's TCP stack means protocol improvements can ship with application/library updates instead of waiting on OS kernel upgrades across billions of devices. It also enables QUIC to multiplex independent streams with independent loss recovery, something impossible with TCP's single ordered byte stream.</p></div></details>
+        <details class="qa"><summary>Your API gateway terminates TLS and speaks HTTP/2 to clients but HTTP/1.1 to backend services. What problem could this architecture introduce, and how would you detect it?</summary><div class="answer"><p>The gateway must demultiplex HTTP/2 streams into separate HTTP/1.1 connections (or a connection pool) to backends — if the pool is undersized relative to concurrent multiplexed streams, requests queue at the gateway even though the client-facing connection looks fully parallel, creating a hidden bottleneck. Detect it via backend connection pool saturation metrics and comparing client-observed latency to backend-observed latency for the same request.</p></div></details>
+        <details class="qa"><summary>Explain why lowering DNS TTL alone is not sufficient to guarantee fast failover, and what else is required.</summary><div class="answer"><p>Many resolvers and client OS/browser caches don't strictly honor TTL (some apply minimums, some cache longer for performance), and some clients cache a resolved connection itself (keep-alive) independent of DNS, so they keep talking to an old IP even after DNS changes. Fast failover needs client-side retry/circuit-breaker logic, short-lived connections, or a layer (e.g., anycast IP, load balancer VIP) that doesn't require DNS propagation at all.</p></div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment"><span class="level-tag">Beginner (30-60 min)</span><h4>Measure the handshake cost</h4><p>Using your browser's DevTools Network tab, load a page over HTTPS and inspect the timing breakdown (DNS lookup, initial connection, TLS, waiting/TTFB) for the first request to a new host versus a subsequent request on a reused connection.</p><ul><li>Record both timing breakdowns.</li><li>Explain in 2-3 sentences why the second request's connection-related phases are near zero.</li></ul><p><strong>Acceptance criteria:</strong> Actual captured timings with a correct explanation referencing connection reuse.</p><details class="qa"><summary>Hints</summary><div class="answer"><p>Look at the "Connection," "SSL," and "TTFB" rows in Chrome DevTools' waterfall view; compare the very first request to the host against a later one.</p></div></details><p><strong>Bonus:</strong> Repeat on a page served over HTTP/2 vs one still on HTTP/1.1 and compare how many connections the browser opens to the same host.</p></div>
+      <div class="assignment"><span class="level-tag">Intermediate (2-4 hrs)</span><h4>Build an SSE price ticker with resume support</h4><p>Implement the SSE server from the Code Examples section (or similar) that streams incrementing events with IDs, plus a simple HTML page using `EventSource`. Kill the server mid-stream, restart it, and verify the client resumes correctly using `Last-Event-ID`.</p><ul><li>Demonstrate the resume behavior with logs showing the server reading the `Last-Event-ID` header.</li><li>Explain what would break if you used long-polling instead for this use case at 10,000 concurrent clients.</li></ul><p><strong>Acceptance criteria:</strong> Working resume demo plus a written comparison against long-polling at scale.</p><details class="qa"><summary>Hints</summary><div class="answer"><p>You'll need to persist a small ring buffer of recent events server-side keyed by ID so a resuming client can be replayed events it missed, not just future ones.</p></div></details><p><strong>Bonus:</strong> Add a Redis pub-sub backplane so the SSE endpoint can be served by multiple horizontally-scaled instances.</p></div>
+      <div class="assignment"><span class="level-tag">Advanced (1-2 days)</span><h4>Design the real-time layer for a multiplayer collaborative whiteboard</h4><p>50 users can simultaneously draw on a shared canvas; every stroke from any user must appear on every other user's screen within ~100ms. Design the protocol choice, connection topology, and conflict/ordering strategy.</p><ul><li>Justify your transport choice (WebSockets vs SSE vs something else) given the bidirectional, high-frequency requirement.</li><li>Address what happens when a user's connection drops mid-stroke and reconnects — how do they catch up without replaying the entire drawing history?</li><li>Address horizontal scaling: if whiteboard sessions are sharded across multiple server instances, how do strokes from a user on instance A reach a user on instance B watching the same board?</li></ul><p><strong>Acceptance criteria:</strong> A written design covering transport choice, reconnect/catch-up strategy, and cross-instance fan-out, with explicit tradeoffs stated for each decision.</p><details class="qa"><summary>Hints</summary><div class="answer"><p>Think WebSockets for the bidirectional low-latency stroke stream, a periodic snapshot/checkpoint of canvas state so a reconnecting client only needs the latest snapshot plus strokes since, and a pub-sub backplane (Redis/Kafka) keyed by board ID so any instance can broadcast to all connections subscribed to that board regardless of which instance holds them.</p></div></details><p><strong>Bonus:</strong> How would you handle two users drawing conflicting strokes in the exact same region at nearly the same time — does ordering matter, and how would you guarantee consistent ordering across instances?</p></div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet"><ul>
+        <li>DNS: recursive resolvers cache by TTL; authoritative servers are the source of truth. Lower TTL before planned cutovers.</li>
+        <li>HTTP/1.1: one request in flight per connection (serial). HTTP/2: multiplexed streams over one TCP connection, plus HPACK header compression.</li>
+        <li>HTTP/2 still has transport-layer HOL blocking because it rides one TCP connection — a lost packet blocks all streams.</li>
+        <li>HTTP/3 (QUIC over UDP) eliminates transport-layer HOL blocking with independent per-stream reliability, and supports 0-RTT resumption.</li>
+        <li>Server push (HTTP/2) is deprecated — use preload hints or inline critical resources instead.</li>
+        <li>TCP = reliable, ordered, handshake + congestion control overhead. UDP = no guarantees, minimal overhead — wins for loss-tolerant, latency-sensitive data.</li>
+        <li>WebSockets: full-duplex, no built-in reconnect, sticky-session friction. SSE: one-way, built-in auto-reconnect via Last-Event-ID, plain-HTTP-friendly infra.</li>
+        <li>Default to SSE unless you truly need client→server push on the same channel.</li>
+        <li>A fresh HTTPS connection pays DNS + TCP handshake + TLS handshake before any data — reuse connections to amortize this cost.</li>
+      </ul></div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://datatracker.ietf.org/doc/html/rfc9114">RFC 9114 — HTTP/3</a></li>
+        <li><a href="https://datatracker.ietf.org/doc/html/rfc9000">RFC 9000 — QUIC Transport Protocol</a></li>
+        <li><a href="https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events">MDN — Server-Sent Events</a></li>
+        <li><a href="https://httpwg.org/specs/rfc7541.html">RFC 7541 — HPACK Header Compression</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="01-fundamentals.html"><span class="dir">← Previous</span>Fundamentals</a>
+        <a class="next" href="03-load-balancing.html"><span class="dir">Next →</span>Load Balancing & Reverse Proxies</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · System Design</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-typescript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-sql.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-yaml.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "01-system-design", chapterKey: "02-networking" });</script>
+</body>
+</html>

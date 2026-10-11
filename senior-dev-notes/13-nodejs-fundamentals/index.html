@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Node.js Fundamentals — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span>Node.js Fundamentals</div>
+      <div class="topbar-actions"><button id="theme-toggle" class="icon-btn">🌙</button></div>
+    </div>
+    <div class="content">
+      <h1>Node.js Fundamentals</h1>
+      <p class="meta-line"><span>📚 6 chapters</span><span>⏱ ~11–13 hrs total</span></p>
+      <p>A fast, crisp refresher of the fundamentals layer — runtime, modules, npm, core modules, raw HTTP servers,
+      Express, and REST basics — stated precisely and completely the way a senior developer should be able to
+      explain it in an interview. This is the on-ramp before <a href="../04-nodejs-advanced/index.html">Node.js
+      Advanced</a> (event loop internals, streams, worker threads, memory/GC, production APIs), not a beginner
+      tutorial. If you've been writing Node code for years but have never had to articulate "what exactly is
+      CommonJS vs ESM" or "why does npm ci exist" out loud in an interview, this is the topic that closes that gap.</p>
+
+      <h2 id="outcomes">Learning Outcomes</h2>
+      <ul>
+        <li>Explain precisely what the Node.js runtime is (V8 + libuv + Node APIs) and how CommonJS and ESM module resolution actually differ, not just "use import instead of require."</li>
+        <li>Read and reason about package.json, semantic versioning ranges, the lockfile, and the difference between npm install and npm ci in CI/CD.</li>
+        <li>Use fs, path, and os correctly across sync/async/promise-based APIs, and know when each is appropriate.</li>
+        <li>Build a working HTTP server from the raw http module — routing, parsing, and responding — before reaching for a framework.</li>
+        <li>Build the same API in Express, with correct middleware ordering, and explain why each layer exists.</li>
+        <li>Design a REST API surface (resource naming, HTTP method mapping, status codes, error shape) that a senior reviewer would approve without comments.</li>
+      </ul>
+
+      <h2 id="chapters">Chapters</h2>
+      <table>
+        <tr><th>#</th><th>Chapter</th><th>Time</th></tr>
+        <tr><td>01</td><td><a href="01-nodejs-basics-runtime-modules.html">Node.js Basics: Runtime &amp; Modules — V8, libuv, CommonJS vs ESM, require/import, module.exports</a></td><td>2 hrs</td></tr>
+        <tr><td>02</td><td><a href="02-npm-and-package-management.html">npm &amp; Package Management — package.json, semver, install vs ci, package-lock.json, scripts, npx</a></td><td>1.5 hrs</td></tr>
+        <tr><td>03</td><td><a href="03-fs-path-os-core-modules.html">Core Modules: fs, path, os — sync vs async vs promises API, files &amp; directories</a></td><td>2 hrs</td></tr>
+        <tr><td>04</td><td><a href="04-http-module-and-basic-servers.html">HTTP Module &amp; Basic Servers — raw http servers, req/res, manual routing, body parsing</a></td><td>2 hrs</td></tr>
+        <tr><td>05</td><td><a href="05-express-basics-routing-middleware.html">Express Basics: Routing &amp; Middleware — app, middleware chain, req/res/next, params, static files</a></td><td>2 hrs</td></tr>
+        <tr><td>06</td><td><a href="06-rest-api-fundamentals.html">REST API Fundamentals — resource naming, CRUD-to-HTTP mapping, status codes, validation, error shape</a></td><td>1.5–2 hrs</td></tr>
+      </table>
+
+      <div class="capstone">
+        <h3>🏆 Capstone Project: Build a "Bookmarks API" Twice — Raw Node, Then Express</h3>
+        <p><strong>Problem statement:</strong> Build a small CRUD API for managing bookmarks (url, title, tags,
+        createdAt) with file-based JSON storage. Build it <strong>twice</strong>: first with nothing but the raw
+        <code>http</code> module and the <code>fs</code> module (to prove you understand what a framework is doing
+        for you), then rebuild the exact same API surface in Express. Both versions must be functionally identical
+        from the client's point of view.</p>
+        <p><strong>Required features (both versions):</strong></p>
+        <ul>
+          <li><code>GET /bookmarks</code> — list all, with optional <code>?tag=</code> query filter.</li>
+          <li><code>GET /bookmarks/:id</code> — fetch one, 404 if missing.</li>
+          <li><code>POST /bookmarks</code> — create, validate body (url and title required), 201 with Location-style response.</li>
+          <li><code>PUT /bookmarks/:id</code> — full replace, 404 if missing, validation errors return 400.</li>
+          <li><code>DELETE /bookmarks/:id</code> — remove, 204 on success.</li>
+          <li>Storage: a single <code>bookmarks.json</code> file read/written via the fs module — no database.</li>
+          <li>Middleware/equivalent: request logging (method, path, status, duration) and centralized error handling that always returns a consistent JSON error shape.</li>
+          <li>npm scripts: <code>start</code>, <code>dev</code> (with <code>--watch</code>), and <code>test</code> (even a minimal smoke test).</li>
+        </ul>
+        <p><strong>Milestones:</strong></p>
+        <ol>
+          <li>Design the resource model and REST contract on paper first (endpoints, status codes, error shape) — see Chapter 6.</li>
+          <li>Build the raw <code>http</code> version: manual routing (method + URL parsing), manual body parsing/buffering, manual JSON read/write to disk.</li>
+          <li>Add request logging and centralized error handling to the raw version without a framework (you'll feel exactly why Express exists after this).</li>
+          <li>Rebuild in Express: convert manual routing to <code>app.get/post/put/delete</code>, convert body parsing to <code>express.json()</code>, convert logging/error handling to proper middleware with correct ordering.</li>
+          <li>Add npm scripts and a package.json with sane semver ranges for your two dependencies (express, maybe nodemon).</li>
+          <li>Write a short README comparing the two implementations: what Express saved you from writing by hand, line for line.</li>
+        </ol>
+        <p><strong>Evaluation checklist:</strong></p>
+        <ul>
+          <li>☐ Both versions pass the identical set of manual curl/Postman requests with identical status codes and bodies.</li>
+          <li>☐ Can explain exactly what <code>express.json()</code>, a router, and <code>next(err)</code> are doing under the hood because you wrote the raw equivalent by hand.</li>
+          <li>☐ Concurrent requests don't corrupt bookmarks.json (discuss the race condition even if you don't fully solve it).</li>
+          <li>☐ Every error path (bad JSON body, missing fields, not-found id) returns the same consistent error JSON shape.</li>
+          <li>☐ package.json scripts and dependency versions are deliberate choices, not defaults left untouched.</li>
+        </ul>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · Node.js Fundamentals</footer>
+  </main>
+</div>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "13-nodejs-fundamentals" });</script>
+</body>
+</html>

@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Advanced RAG Techniques</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <input class="searchbox" placeholder="Search topics..." />
+    <a href="../index.html">← Home</a>
+    <h3>13-Advanced-RAG</h3>
+    <a href="advanced-rag-techniques.html">Advanced RAG Techniques</a>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumbs"><a href="../index.html">Home</a> / 13-Advanced-RAG</div>
+      <button class="theme-toggle" onclick="toggleTheme()">🌓 Theme</button>
+    </div>
+    <h1>Advanced RAG: Reranking, Hybrid Search, Query Rewriting, Corrective/Agentic RAG</h1>
+    <span class="tag good">Stable</span><span class="tag">Last verified: 2026-10-06</span>
+
+    <div class="toc">
+      <b>On this page</b>
+      <a href="#what">1. What is this?</a>
+      <a href="#whyexist">2. Why does it exist?</a>
+      <a href="#whyimportant">3. Why is it important?</a>
+      <a href="#whereused">4. Where is it used?</a>
+      <a href="#prereq">5. Prerequisites</a>
+      <a href="#core">6. Core techniques</a>
+      <a href="#terms">7. Terminology</a>
+      <a href="#arch">8. Architecture</a>
+      <a href="#internal">9. How it works internally</a>
+      <a href="#steps">10. Step-by-step: diagnosing which technique to add</a>
+      <a href="#simple">11. Simple example</a>
+      <a href="#real">12. Real-world example</a>
+      <a href="#code">13. Code example</a>
+      <a href="#advanced">14. Advanced example (Corrective RAG)</a>
+      <a href="#mistakes">15. Common mistakes</a>
+      <a href="#best">16. Best practices</a>
+      <a href="#production">17. Production considerations</a>
+      <a href="#security">18. Security considerations</a>
+      <a href="#performance">19. Performance considerations</a>
+      <a href="#cost">20. Cost considerations</a>
+      <a href="#debug">21. Debugging/troubleshooting</a>
+      <a href="#related">22. Related concepts</a>
+      <a href="#comparison">23. Comparison table</a>
+      <a href="#exercise">24. Mini practical exercise</a>
+      <a href="#project">25. Practical project</a>
+      <a href="#projectarch">26. Project architecture</a>
+      <a href="#interview-b">27. Interview Questions — Beginner</a>
+      <a href="#interview-i">28. Interview Questions — Intermediate</a>
+      <a href="#interview-a">29. Interview Questions — Advanced</a>
+      <a href="#interview-s">30. Interview Questions — Senior/Architect</a>
+      <a href="#interview-sc">31. Scenario-Based Questions</a>
+      <a href="#revision">32. Quick revision notes</a>
+      <a href="#cheat">33. Cheat sheet</a>
+      <a href="#further">34. Further topics to learn</a>
+    </div>
+
+    <h2 id="what">1. What is this?</h2>
+    <p>Advanced RAG covers techniques that improve on naive "embed → retrieve top-k → generate" RAG: semantic/structure-aware chunking, parent-child retrieval, hybrid search (BM25 + vectors), reranking, query rewriting, multi-query retrieval, context compression, self-query retrieval, Corrective RAG, Adaptive RAG, Agentic RAG, Graph RAG, and Multimodal RAG.</p>
+
+    <h2 id="whyexist">2. Why does it exist?</h2>
+    <p>Naive RAG's weakest point is almost always retrieval precision/recall, not generation — these techniques exist because real-world retrieval is messy: queries are ambiguous, relevant information spans multiple chunks or document types, and embedding similarity alone doesn't capture every notion of relevance.</p>
+
+    <h2 id="whyimportant">3. Why is it important?</h2>
+    <p>Most production RAG quality problems are solved by one of these techniques, not by a bigger/better LLM — this is where senior AI engineers differentiate themselves from those who only know the basic RAG pattern.</p>
+
+    <h2 id="whereused">4. Where is it used?</h2>
+    <p>Any production RAG system that has moved past prototype stage and needs measurably better precision/recall, especially over large, heterogeneous, or complex document collections.</p>
+
+    <h2 id="prereq">5. Prerequisites</h2>
+    <p><a href="../12-RAG/rag-fundamentals.html">RAG Fundamentals</a>.</p>
+
+    <h2 id="core">6. Core techniques</h2>
+    <table>
+      <tr><th>Technique</th><th>Problem it solves</th></tr>
+      <tr><td>Semantic chunking</td><td>Fixed-size chunking breaks logical units; split at natural semantic boundaries instead.</td></tr>
+      <tr><td>Parent-child retrieval</td><td>Small chunks retrieve precisely but lack context; retrieve small chunks, return their larger parent chunk/document for generation.</td></tr>
+      <tr><td>Hybrid search (BM25 + vector)</td><td>Pure embedding search misses exact keyword/term matches; combine lexical and semantic signals.</td></tr>
+      <tr><td>Reranking</td><td>Initial retrieval (fast, approximate) over-fetches; a slower, more accurate reranker re-scores the top candidates for final precision.</td></tr>
+      <tr><td>Query rewriting</td><td>User queries are often ambiguous/colloquial; rewrite into a clearer retrieval-optimized query before embedding.</td></tr>
+      <tr><td>Multi-query retrieval</td><td>A single query embedding may miss relevant angles; generate multiple query variants and retrieve for each.</td></tr>
+      <tr><td>Context compression</td><td>Retrieved chunks contain irrelevant filler; compress/extract only the relevant sentences before passing to the LLM.</td></tr>
+      <tr><td>Self-query retrieval</td><td>Let the LLM translate a natural-language query into structured metadata filters + a semantic query automatically.</td></tr>
+      <tr><td>Corrective RAG (CRAG)</td><td>Detect poor/irrelevant retrieval and trigger a fallback (e.g., web search or query reformulation) before generating.</td></tr>
+      <tr><td>Adaptive RAG</td><td>Dynamically decide whether retrieval is even needed, and how much, based on query complexity.</td></tr>
+      <tr><td>Agentic RAG</td><td>Let an agent iteratively plan, retrieve, and refine across multiple steps rather than one-shot retrieval.</td></tr>
+      <tr><td>Graph RAG</td><td>Use a knowledge graph for retrieval/reasoning over entity relationships, not just vector similarity (see <a href="../31-Graph-RAG/">Graph RAG</a>).</td></tr>
+      <tr><td>Multimodal RAG</td><td>Retrieve and reason over images/tables/audio alongside text.</td></tr>
+    </table>
+
+    <h2 id="terms">7. Terminology</h2>
+    <table>
+      <tr><th>Term</th><th>Meaning</th></tr>
+      <tr><td>BM25</td><td>A classic lexical ranking algorithm scoring documents by term frequency/rarity — the standard keyword-search baseline.</td></tr>
+      <tr><td>Reranker / cross-encoder</td><td>A model that jointly scores a (query, document) pair for relevance, more accurate but slower than embedding similarity alone.</td></tr>
+      <tr><td>Reciprocal Rank Fusion (RRF)</td><td>A method for combining multiple ranked result lists (e.g., BM25 and vector search) into one fused ranking.</td></tr>
+      <tr><td>Query decomposition</td><td>Breaking a complex question into simpler sub-questions, each retrieved separately.</td></tr>
+    </table>
+
+    <h2 id="arch">8. Architecture</h2>
+    <pre><code>Query
+ → (optional) Query rewriting / decomposition
+ → Hybrid retrieval: BM25 + Vector search (over-fetch, e.g., top 20 each)
+ → Fusion (RRF) → candidate pool
+ → Reranker (cross-encoder) → top-k final (e.g., top 5)
+ → (optional) Context compression
+ → Prompt construction → LLM → Answer
+ → (Corrective RAG) if retrieval judged poor: fallback (web search / reformulate) before generating</code></pre>
+
+    <h2 id="internal">9. How it works internally</h2>
+    <p>Rerankers (cross-encoders) work differently from embedding similarity: instead of independently encoding query and document then comparing vectors, a cross-encoder processes the query and document <i>together</i> through a single model pass, letting it directly model fine-grained relevance interactions — more accurate but too slow to run over an entire corpus, hence the two-stage pattern (fast approximate retrieval, then precise reranking of a small candidate set).</p>
+
+    <h2 id="steps">10. Step-by-step: diagnosing which technique to add</h2>
+    <ol>
+      <li>If retrieval misses exact-term matches (product codes, names) → add hybrid search (BM25 + vector).</li>
+      <li>If top-k results are semantically related but not precisely relevant → add reranking.</li>
+      <li>If user queries are vague/colloquial → add query rewriting.</li>
+      <li>If questions require synthesizing multiple facts → add multi-query retrieval or query decomposition.</li>
+      <li>If retrieval sometimes returns clearly irrelevant results → add Corrective RAG with a relevance-check gate.</li>
+      <li>If some queries need retrieval and others don't (e.g., "hello" vs a factual question) → add Adaptive RAG routing.</li>
+    </ol>
+
+    <h2 id="simple">11. Simple example</h2>
+    <p>A user searches for "error code E402" — pure embedding search might miss this exact code if it's rare in training data, but BM25 (hybrid search) catches the exact term match reliably.</p>
+
+    <h2 id="real">12. Real-world example</h2>
+    <p>A legal-document RAG system reranks its top 20 vector-retrieved clauses using a cross-encoder fine-tuned on legal relevance judgments, reducing "semantically similar but legally irrelevant" clauses from the final context — directly improving the quality of legal Q&A answers.</p>
+
+    <h2 id="code">13. Code example</h2>
+    <pre><code class="language-python"># Hybrid search + reranking pipeline
+def hybrid_retrieve(query, k=20):
+    vector_results = vector_search(embed(query), top_k=k)
+    bm25_results = bm25_search(query, top_k=k)
+    return reciprocal_rank_fusion(vector_results, bm25_results)
+
+def rerank(query, candidates, final_k=5):
+    scores = cross_encoder.predict([(query, c.content) for c in candidates])
+    ranked = sorted(zip(candidates, scores), key=lambda x: -x[1])
+    return [c for c, _ in ranked[:final_k]]
+
+def rag_answer(query):
+    candidates = hybrid_retrieve(query)
+    top_chunks = rerank(query, candidates)
+    return generate(query, top_chunks)
+</code></pre>
+
+    <h2 id="advanced">14. Advanced example (Corrective RAG)</h2>
+    <pre><code class="language-python">def corrective_rag(query):
+    chunks = hybrid_retrieve(query)
+    relevance = judge_relevance(query, chunks)  # LLM-as-judge or classifier
+    if relevance == "low":
+        # Fallback: reformulate query or fall back to web search
+        reformulated = rewrite_query(query)
+        chunks = hybrid_retrieve(reformulated) or web_search(reformulated)
+    return generate(query, rerank(query, chunks))
+</code></pre>
+
+    <h2 id="mistakes">15. Common mistakes</h2>
+    <ul>
+      <li>Adding reranking without first over-fetching enough candidates for it to meaningfully re-sort.</li>
+      <li>Naively summing BM25 and vector scores without normalization (they're on incompatible scales) instead of using rank fusion.</li>
+      <li>Applying the same advanced technique universally without measuring whether it actually helps your specific corpus/query distribution.</li>
+      <li>Over-engineering with agentic multi-step retrieval for simple lookup queries that don't need it (added latency/cost for no benefit).</li>
+    </ul>
+
+    <h2 id="best">16. Best practices</h2>
+    <ul>
+      <li>Add techniques incrementally, measuring retrieval/answer quality improvement against a golden set after each addition.</li>
+      <li>Use Adaptive RAG routing so simple queries skip expensive techniques (reranking, multi-query) that complex queries need.</li>
+      <li>Prefer rank fusion (RRF) over naive score combination for hybrid search.</li>
+      <li>Fine-tune or carefully select a reranker matched to your domain if off-the-shelf rerankers underperform.</li>
+    </ul>
+
+    <h2 id="production">17. Production considerations</h2>
+    <p>Each added technique increases latency and/or cost — measure the marginal quality gain against the marginal cost for your specific use case, and consider Adaptive RAG to apply expensive techniques only when needed.</p>
+
+    <h2 id="security">18. Security considerations</h2>
+    <p>Corrective RAG's fallback to web search introduces untrusted external content into context — apply the same prompt-injection precautions as any externally-sourced content (see <a href="../38-AI-Security/">AI Security</a>).</p>
+
+    <h2 id="performance">19. Performance considerations</h2>
+    <p>Reranking adds latency proportional to candidate count × reranker inference time — tune the over-fetch count (e.g., retrieve 20, rerank to 5) to balance quality and speed; run reranking on GPU if volume justifies it.</p>
+
+    <h2 id="cost">20. Cost considerations</h2>
+    <p>Query rewriting, multi-query retrieval, and Corrective RAG's relevance judging each add extra LLM calls — quantify their cost multiplier and apply selectively (Adaptive RAG) rather than universally.</p>
+
+    <h2 id="debug">21. Debugging/troubleshooting</h2>
+    <ul>
+      <li><b>Reranking doesn't improve results:</b> check if the initial retrieval's candidate pool (before reranking) already excludes the truly relevant documents — reranking can't fix a recall problem, only a precision/ordering problem among what's already retrieved.</li>
+      <li><b>Hybrid search performs worse than vector-only:</b> check your score fusion method; naive score combination without normalization is a common culprit.</li>
+      <li><b>Corrective RAG's fallback triggers too often:</b> the relevance-judging threshold may be miscalibrated — tune against labeled examples.</li>
+    </ul>
+
+    <h2 id="related">22. Related concepts</h2>
+    <p><a href="../12-RAG/rag-fundamentals.html">RAG Fundamentals</a> · <a href="../31-Graph-RAG/">Graph RAG</a> · <a href="../25-Multimodal-AI/">Multimodal AI</a> · <a href="../19-Agentic-AI/">Agentic AI</a></p>
+
+    <h2 id="comparison">23. Comparison table</h2>
+    <table>
+      <tr><th>Technique</th><th>Added latency/cost</th><th>When worth it</th></tr>
+      <tr><td>Reranking</td><td>Moderate</td><td>Almost always, if precision matters</td></tr>
+      <tr><td>Hybrid search</td><td>Low-moderate</td><td>Corpus has important exact-term content (codes, names)</td></tr>
+      <tr><td>Query rewriting</td><td>One extra LLM call</td><td>Queries are often ambiguous/conversational</td></tr>
+      <tr><td>Multi-query retrieval</td><td>N× retrieval calls</td><td>Complex, multi-faceted questions</td></tr>
+      <tr><td>Corrective/Agentic RAG</td><td>High (multiple LLM calls)</td><td>High-stakes accuracy needs, complex reasoning</td></tr>
+    </table>
+
+    <h2 id="exercise">24. Mini practical exercise</h2>
+    <p>Add a simple reranking step (even a basic LLM-prompted relevance score) on top of an existing retrieval pipeline and compare the top-5 results before/after for a few test queries.</p>
+
+    <h2 id="project">25. Practical project</h2>
+    <p><b>Hybrid Search + Reranking Upgrade:</b> take the pgvector RAG project from <a href="../12-RAG/rag-project.html">12-RAG</a> and add BM25 hybrid search (via Postgres full-text search) plus a reranking step, then measure retrieval precision improvement on a golden set.</p>
+
+    <h2 id="projectarch">26. Project architecture</h2>
+    <pre><code>query → [vector search (pgvector) + BM25 search (Postgres tsvector)]
+ → reciprocal rank fusion → candidate pool (top 20)
+ → rerank (cross-encoder or LLM-prompted scoring) → top 5
+ → generate answer
+ → eval script compares precision@5 before/after against golden set</code></pre>
+
+    <h2 id="interview-b">27. Interview Questions — Beginner</h2>
+    <div class="qa"><b>Q1.</b> What is reranking?<br><b>A.</b> A second-stage step that re-scores an initial set of retrieved candidates more precisely, typically using a cross-encoder, to improve final ranking quality.</div>
+    <div class="qa"><b>Q2.</b> What is hybrid search?<br><b>A.</b> Combining lexical (keyword, e.g., BM25) search with semantic (vector embedding) search for better retrieval precision.</div>
+    <div class="qa"><b>Q3.</b> What is query rewriting?<br><b>A.</b> Reformulating an ambiguous or colloquial user query into a clearer form better suited for retrieval, before embedding it.</div>
+    <div class="qa"><b>Q4.</b> What is multi-query retrieval?<br><b>A.</b> Generating multiple variations of a query and retrieving for each, to capture different relevant angles a single query embedding might miss.</div>
+    <div class="qa"><b>Q5.</b> What is Corrective RAG?<br><b>A.</b> A pattern that detects poor/irrelevant retrieval results and triggers a fallback (like query reformulation or web search) before generating an answer.</div>
+    <div class="qa"><b>Q6.</b> What is parent-child retrieval?<br><b>A.</b> Retrieving small, precise chunks for matching, but returning their larger parent chunk/document to provide fuller context for generation.</div>
+    <div class="qa"><b>Q7.</b> Why would you need BM25 if embeddings already capture semantic meaning?<br><b>A.</b> Embeddings can under-weight exact term matches (like specific codes or names); BM25 excels at exact/rare term matching that embeddings sometimes miss.</div>
+    <div class="qa"><b>Q8.</b> What is Adaptive RAG?<br><b>A.</b> Dynamically deciding whether retrieval is needed at all, and how much, based on the complexity/nature of the query.</div>
+    <div class="qa"><b>Q9.</b> Is a reranker typically faster or slower than initial vector retrieval?<br><b>A.</b> Slower — it processes query and document jointly for higher accuracy, which is why it's only applied to a smaller candidate pool after initial fast retrieval.</div>
+    <div class="qa"><b>Q10.</b> What's a cross-encoder?<br><b>A.</b> A model that scores relevance by processing a query and document together in one pass, rather than comparing independently-computed embeddings.</div>
+
+    <h2 id="interview-i">28. Interview Questions — Intermediate</h2>
+    <div class="qa"><b>Q1.</b> Why can't reranking fix a retrieval recall problem?<br><b>A.</b> Reranking only reorders candidates already in the retrieved pool; if the truly relevant document was never retrieved into that pool in the first place, reranking has nothing to surface it from.</div>
+    <div class="qa"><b>Q2.</b> How does Reciprocal Rank Fusion combine BM25 and vector search results, and why is it preferred over naive score summation?<br><b>A.</b> RRF combines results based on each item's rank position in each list (e.g., 1/(rank+k)) rather than raw scores, avoiding the problem of BM25 and cosine similarity scores being on incompatible scales that naive summation would mishandle.</div>
+    <div class="qa"><b>Q3.</b> When would query decomposition (breaking a question into sub-questions) be more effective than multi-query retrieval (generating paraphrased variants)?<br><b>A.</b> When the question genuinely requires combining distinct pieces of information (e.g., "compare X's pricing to Y's pricing") — each sub-question targets a different information need, whereas multi-query variants are paraphrases of the same single need and wouldn't separately retrieve both pieces of information needed.</div>
+    <div class="qa"><b>Q4.</b> How would you implement Adaptive RAG's "does this query need retrieval at all" decision?<br><b>A.</b> Use a lightweight classifier or a quick LLM call to classify the query type (e.g., chit-chat vs. factual question vs. requires-specific-document-lookup), routing only queries that genuinely need grounding through the full retrieval pipeline, skipping it for conversational/greeting-type inputs.</div>
+    <div class="qa"><b>Q5.</b> Why might a fine-tuned domain-specific reranker outperform a general-purpose one significantly?<br><b>A.</b> General-purpose rerankers are trained on broad relevance judgments that may not reflect domain-specific notions of relevance (e.g., legal precedent relevance differs from general semantic similarity); fine-tuning on domain-labeled relevance data aligns the reranker's scoring with what actually matters for that domain.</div>
+
+    <h2 id="interview-a">29. Interview Questions — Advanced</h2>
+    <div class="qa"><b>Q1.</b> How would you design an evaluation framework to determine which advanced RAG technique(s) to invest in for a specific production system?<br><b>A.</b> Build a diagnostic golden set labeled by failure type (missed exact-term match, low-precision results, ambiguous query misinterpretation, multi-fact synthesis failure), run the current pipeline against it to identify which failure types dominate, then add and A/B test only the specific technique(s) targeting the actual observed failure modes — rather than adding techniques speculatively.</div>
+    <div class="qa"><b>Q2.</b> What's a risk of Corrective RAG's relevance-judging step becoming a new source of errors?<br><b>A.</b> The relevance judge (LLM-as-judge or classifier) itself can be miscalibrated — too permissive (letting genuinely poor retrieval through) or too strict (triggering unnecessary, costly fallbacks for actually-adequate retrieval) — requiring its own calibration and evaluation against labeled relevance judgments, not just trusting it blindly.</div>
+
+    <h2 id="interview-s">30. Interview Questions — Senior/Architect</h2>
+    <div class="qa"><b>Q1.</b> Design an Adaptive RAG architecture that routes queries through different pipelines (simple retrieval, hybrid+rerank, agentic multi-step) based on complexity, for a platform serving many different query types.<br><b>A.</b> Build a lightweight query classifier (rule-based or small model) estimating complexity/type upfront, route simple factual lookups through fast single-pass retrieval, route queries flagged as ambiguous through query rewriting + hybrid + rerank, and route queries requiring multi-document synthesis through an agentic decomposition pipeline — instrument each path with its own evaluation metrics and continuously tune routing thresholds based on observed outcomes per path.</div>
+
+    <h2 id="interview-sc">31. Scenario-Based Questions</h2>
+    <div class="qa"><b>Scenario 1.</b> Despite adding a reranker, a RAG system still misses clearly relevant documents for certain queries. What's the likely issue?<br><b>A.</b> The initial retrieval stage (before reranking) likely isn't returning the relevant documents into the candidate pool at all — investigate whether the embedding model or chunking strategy is failing at the recall stage, since reranking can only reorder what's already retrieved.</div>
+    <div class="qa"><b>Scenario 2.</b> A product team wants every query to go through the full agentic multi-step RAG pipeline "to maximize quality." What's your pushback?<br><b>A.</b> Point out the latency/cost multiplier applies even to simple queries that don't need it; propose Adaptive RAG routing so only genuinely complex queries incur that cost, informed by actual measured query complexity distribution in production traffic.</div>
+    <div class="qa"><b>Scenario 3.</b> Your hybrid search's results got worse after adding BM25 scoring. What do you check first?<br><b>A.</b> Check the score fusion method — naive summation of BM25 and cosine similarity scores (incompatible scales) is a very common bug; switch to rank-based fusion (RRF) instead of raw score combination.</div>
+
+    <h2 id="revision">32. Quick revision notes</h2>
+    <ul>
+      <li>Most RAG quality problems are retrieval problems, not generation problems.</li>
+      <li>Hybrid search (BM25 + vector) catches exact-term matches embeddings miss.</li>
+      <li>Reranking improves precision among already-retrieved candidates; can't fix recall.</li>
+      <li>Use RRF for combining ranked lists, not naive score summation.</li>
+      <li>Adaptive RAG applies expensive techniques only where needed.</li>
+    </ul>
+
+    <h2 id="cheat">33. Cheat sheet</h2>
+    <div class="callout">Problem → Solution: missing exact terms → hybrid search. Low precision → reranking. Ambiguous queries → query rewriting. Multi-fact questions → multi-query/decomposition. Bad retrieval detection → Corrective RAG. Query-dependent pipeline choice → Adaptive RAG.</div>
+
+    <h2 id="further">34. Further topics to learn</h2>
+    <p><a href="../31-Graph-RAG/">Graph RAG</a> → <a href="../19-Agentic-AI/">Agentic AI</a> → <a href="../25-Multimodal-AI/">Multimodal AI (multimodal RAG)</a> → <a href="../35-AI-Evaluation/">AI Evaluation</a></p>
+
+    <div class="prevnext">
+      <a href="../12-RAG/rag-project.html">← RAG Project</a>
+      <a href="../14-LlamaIndex/llamaindex-fundamentals.html">Next: LlamaIndex →</a>
+    </div>
+  </main>
+</div>
+<script src="../assets/app.js"></script>
+</body>
+</html>

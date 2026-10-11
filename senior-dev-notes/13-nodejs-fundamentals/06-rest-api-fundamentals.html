@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>REST API Fundamentals — Node.js Fundamentals — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">Node.js Fundamentals</a><span class="sep">›</span>REST API Fundamentals</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>REST API Fundamentals</h1>
+      <p class="meta-line"><span>⏱ 1.5–2 hrs</span><span>📍 Chapter 6 of 6</span></p>
+      <p><strong>One-line summary:</strong> REST is a small set of precise conventions — resources as nouns,
+      HTTP methods as the only verbs, status codes that mean something specific, consistent error shapes — and
+      a senior reviewer judges your API by how consistently you apply them, not by whether you can recite the
+      Fielding dissertation's six constraints.</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>You've built dozens of REST endpoints. The interview-relevant skill isn't "can you build a CRUD route,"
+      it's: can you design a resource model and status-code contract that a frontend team can integrate against
+      without asking clarifying questions, and can you defend specific choices (why 422 vs 400, why PUT vs PATCH,
+      why nested vs flat resource URLs) under pushback. This is also the chapter that connects most directly to
+      <a href="../01-system-design/10-api-design.html">System Design: API Design</a> — the fundamentals here are
+      exactly what that topic assumes you already have internalized before adding versioning, pagination, and
+      idempotency concerns at scale.</p>
+      <div class="box why"><h4>Why</h4><p>An inconsistent API (sometimes 200 with an error field in the body,
+      sometimes a proper 4xx; sometimes <code>/getUser</code>, sometimes <code>/users/:id</code>) forces every
+      consumer to write defensive, inconsistent client code and erodes trust in the API's contract — this is a
+      recurring, concrete source of integration bugs between frontend and backend teams, not a style nitpick.</p></div>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>Comfortable building routes in Express (Chapter 5) or raw http (Chapter 4). Related elsewhere:
+      <a href="../11-web-fundamentals/04-http-and-networking-basics.html">HTTP &amp; Networking Basics</a> for
+      the protocol-level status code and method semantics this chapter applies, and
+      <a href="../01-system-design/10-api-design.html">System Design: API Design</a> for the advanced follow-on
+      (versioning, pagination, idempotency, GraphQL/gRPC comparison) once these fundamentals are solid.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="resource-naming">Resource naming: nouns, not verbs</h3>
+      <p>A REST resource URL names a <em>thing</em>, plural, not an action: <code>/bookmarks</code> not
+      <code>/getBookmarks</code>; <code>/bookmarks/:id</code> not <code>/deleteBookmark?id=5</code>. The HTTP
+      method <em>is</em> the verb — <code>GET /bookmarks/:id</code> fetches, <code>DELETE /bookmarks/:id</code>
+      deletes; putting a verb in the path duplicates and often contradicts the method. Nest resources only when
+      there's a genuine ownership/containment relationship (<code>/users/:userId/bookmarks</code> for "this
+      user's bookmarks") — don't nest arbitrarily deep (<code>/users/:id/bookmarks/:id/tags/:id/...</code>
+      becomes unwieldy; consider a flatter resource with a filter query param instead past 2 levels).</p>
+
+      <h3 id="methods-to-crud">HTTP methods mapped to CRUD, precisely</h3>
+      <p><code>GET</code> — read, must be safe (no side effects) and idempotent (calling it N times has the same
+      effect as once). <code>POST</code> — create a new resource (or trigger a non-idempotent action); not
+      idempotent by default — calling it twice creates two resources unless you add explicit idempotency
+      handling. <code>PUT</code> — full replace of a resource at a known URL; idempotent — sending the same PUT
+      twice leaves the resource in the same end state. <code>PATCH</code> — partial update; not guaranteed
+      idempotent in general, though many practical implementations are. <code>DELETE</code> — remove a resource;
+      idempotent in the sense that deleting an already-deleted resource should still result in "it's gone"
+      (commonly implemented as returning 204 either way, or 404 on the second call — both are defensible, pick
+      one and document it).</p>
+
+      <h3 id="status-codes">Status codes that actually mean something</h3>
+      <p>Group by first digit, then pick precisely within the group: <strong>2xx</strong> — <code>200 OK</code>
+      (generic success with a body), <code>201 Created</code> (POST succeeded, include the created resource
+      and ideally a <code>Location</code> header), <code>204 No Content</code> (success, deliberately no body —
+      typical for DELETE). <strong>4xx</strong> (client's fault) — <code>400 Bad Request</code> (malformed
+      request, e.g. invalid JSON), <code>401 Unauthorized</code> (missing/invalid authentication — you don't know
+      who this is), <code>403 Forbidden</code> (authenticated, but not allowed to do this), <code>404 Not
+      Found</code> (resource doesn't exist), <code>409 Conflict</code> (request conflicts with current state,
+      e.g. a duplicate unique field), <code>422 Unprocessable Entity</code> (well-formed request, but semantically
+      invalid — e.g. valid JSON with a field failing business validation; many APIs use 400 for this too, pick
+      one convention and be consistent). <strong>5xx</strong> (server's fault) — <code>500 Internal Server
+      Error</code> (generic, unexpected failure), <code>503 Service Unavailable</code> (temporarily down,
+      typically with a Retry-After hint).</p>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>"RESTful" in the strict, original sense (Roy Fielding's dissertation) includes constraints most "REST
+      APIs" in production don't fully satisfy — notably HATEOAS (responses include hypermedia links describing
+      available next actions) is almost universally skipped in practice. What the industry actually means by
+      "REST API" in 2025-26 is closer to "a resource-oriented HTTP API using methods and status codes
+      conventionally" — understanding this gap matters for an interview: a senior answer acknowledges the
+      difference rather than conflating "RESTful" with "the thing everyone builds and calls REST."</p>
+      <p>A consistent error shape is a contract just like your success response shape. A common, defensible
+      convention: every error response is JSON with at minimum an <code>error</code> field (a human-readable
+      message) and ideally a machine-readable <code>code</code> field (e.g. <code>"VALIDATION_ERROR"</code>) and,
+      for validation failures, a <code>details</code> array of field-level issues
+      (<code>[{ field: 'url', message: 'must be a valid URL' }]</code>) — this lets a frontend render field-level
+      errors without string-parsing a human message.</p>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+flowchart LR
+  A["POST /bookmarks<br/>body: {url, title}"] --> B{Valid body?}
+  B -- no --> C["400/422<br/>{error, code, details}"]
+  B -- yes --> D[Create resource]
+  D --> E["201 Created<br/>body: full resource incl. id"]
+  F["GET /bookmarks/:id"] --> G{Exists?}
+  G -- no --> H["404<br/>{error, code}"]
+  G -- yes --> I["200 OK<br/>body: resource"]
+      </div>
+      <div class="mermaid">
+flowchart TD
+  A[Client request] --> B{Authenticated?}
+  B -- no --> C[401 Unauthorized]
+  B -- yes --> D{Authorized for this action?}
+  D -- no --> E[403 Forbidden]
+  D -- yes --> F{Resource exists?}
+  F -- no --> G[404 Not Found]
+  F -- yes --> H{Request body valid?}
+  H -- no --> I[400/422 + details]
+  H -- yes --> J[Perform action, 2xx response]
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-javascript">// ---- A consistent error shape used across every failure path ----
+class ApiError extends Error {
+  constructor(statusCode, code, message, details = null) {
+    super(message);
+    this.statusCode = statusCode;
+    this.code = code;
+    this.details = details;
+  }
+}
+
+function sendError(res, err) {
+  const statusCode = err.statusCode || 500;
+  const body = {
+    error: err.message || 'Internal Server Error',
+    code: err.code || 'INTERNAL_ERROR',
+  };
+  if (err.details) body.details = err.details;
+  res.status(statusCode).json(body);
+}
+
+// ---- Validation, returning field-level details ----
+function validateBookmarkInput(body) {
+  const details = [];
+  if (!body?.url || typeof body.url !== 'string') {
+    details.push({ field: 'url', message: 'url is required and must be a string' });
+  } else {
+    try { new URL(body.url); } catch { details.push({ field: 'url', message: 'url must be a valid URL' }); }
+  }
+  if (!body?.title || typeof body.title !== 'string') {
+    details.push({ field: 'title', message: 'title is required and must be a string' });
+  }
+  if (details.length) throw new ApiError(422, 'VALIDATION_ERROR', 'Invalid bookmark input', details);
+}
+
+// ---- Resource naming: nouns + methods, not verbs in the path ----
+// BAD:
+// app.post('/createBookmark', handler);
+// app.get('/getBookmarkById', handler);
+// app.post('/deleteBookmark', handler);   // using POST to delete — contradicts HTTP semantics
+
+// GOOD:
+app.get('/bookmarks', listBookmarks);               // read collection
+app.get('/bookmarks/:id', getBookmark);             // read one
+app.post('/bookmarks', createBookmark);             // create — 201 on success
+app.put('/bookmarks/:id', replaceBookmark);         // full replace — idempotent
+app.patch('/bookmarks/:id', updateBookmarkFields);  // partial update
+app.delete('/bookmarks/:id', deleteBookmark);       // delete — 204 on success
+
+async function createBookmark(req, res, next) {
+  try {
+    validateBookmarkInput(req.body);
+    const item = await bookmarksStore.create(req.body);
+    res.status(201).location(`/bookmarks/${item.id}`).json(item);
+  } catch (err) {
+    next(err);  // centralized error middleware (Chapter 5) calls sendError
+  }
+}
+
+async function getBookmark(req, res, next) {
+  const item = await bookmarksStore.findById(req.params.id);
+  if (!item) return next(new ApiError(404, 'NOT_FOUND', `Bookmark ${req.params.id} not found`));
+  res.json(item);
+}
+
+async function deleteBookmark(req, res, next) {
+  await bookmarksStore.delete(req.params.id);  // idempotent by convention: always 204, even if already gone
+  res.status(204).end();
+}
+
+// Centralized error middleware, registered last (Chapter 5)
+app.use((err, req, res, next) => sendError(res, err));
+</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4><p>A mobile team integrating against an internal API kept hitting
+      confusing bugs: some endpoints returned <code>200 OK</code> with <code>{ success: false, error: "..." }</code>
+      in the body on failure, while others correctly used 4xx status codes — because different endpoints had been
+      written by different engineers over 18 months with no documented convention. The mobile app's generic HTTP
+      client treated any 200 as success, silently swallowing real errors from the inconsistent endpoints, which
+      surfaced as "the save button does nothing" bug reports that took hours to trace because logs showed a
+      "successful" 200 response. The fix was a one-page internal API style guide (status codes mean what they
+      say, every error is a real non-2xx status with the agreed `{error, code, details}` shape), enforced going
+      forward via a shared Express error-middleware helper every new service imported, plus a backlog ticket to
+      migrate the legacy inconsistent endpoints — turning "everyone remembers the convention" into "the shared
+      code makes the convention the path of least resistance."</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Returning <code>200 OK</code> with an error flag in the body
+      instead of a real non-2xx status code. This breaks HTTP-level tooling (caching, monitoring, generic retry
+      logic, API gateways) that correctly assumes 2xx means success, and forces every client to parse the body
+      just to know if the call failed.</p></div>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Putting verbs in resource URLs (<code>/getUser</code>,
+      <code>/createOrder</code>) instead of letting the HTTP method be the verb. It's redundant at best
+      (<code>POST /createBookmark</code>) and contradictory at worst (<code>GET /deleteBookmark?id=5</code> —
+      GET is supposed to be safe/side-effect-free).</p></div>
+      <ul>
+        <li>Pick one convention for "validation failure" (400 or 422) and apply it consistently across every endpoint — the specific choice matters less than the consistency.</li>
+        <li>Never leak a stack trace or internal error message to the client in a 5xx response — log it server-side, return a generic message client-side.</li>
+        <li>Don't conflate 401 (who are you?) and 403 (I know who you are, but no) — they communicate genuinely different situations to the client.</li>
+        <li>Use PUT only when the client sends the resource's complete representation; if they send partial fields, that's PATCH semantics even if you implement it loosely.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>Strict REST conventions (this chapter)</td><td>Public/partner-facing APIs, multiple independent consumer teams, long-lived contracts</td><td>A tiny internal single-consumer script where the overhead of ceremony outweighs the benefit</td><td>A simpler RPC-style internal API</td></tr>
+        <tr><td>422 for validation errors</td><td>You want to distinguish "malformed request" from "well-formed but semantically invalid"</td><td>Team/ecosystem convention already firmly uses 400 for both — consistency beats theoretical purity</td><td>400 for all client input errors</td></tr>
+        <tr><td>REST overall</td><td>Resource-oriented CRUD-shaped domains, broad client compatibility (any HTTP client works)</td><td>Highly relational/flexible query needs (overfetching/underfetching pain), strict internal service-to-service performance needs</td><td>GraphQL (flexible queries), gRPC (internal high-performance RPC)</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic"><h4>Basic</h4>
+      <details class="qa"><summary>Why should resource URLs use nouns rather than verbs?</summary><div class="answer"><p>Because the HTTP method already is the verb (GET/POST/PUT/PATCH/DELETE) — putting a verb in the path duplicates or contradicts that, e.g. GET /deleteUser directly conflicts with GET's "safe, no side effects" expectation.</p></div><div class="followup">Follow-up: give an example of a bad URL and its corrected REST equivalent.</div></details>
+      <details class="qa"><summary>What's the difference between 401 and 403?</summary><div class="answer"><p>401 Unauthorized means the server doesn't know who you are (missing/invalid authentication); 403 Forbidden means it does know who you are, but you're not allowed to perform this action.</p></div><div class="followup">Follow-up: which one should a login endpoint return for wrong credentials?</div></details>
+      <details class="qa"><summary>What status code should a successful POST that creates a resource return?</summary><div class="answer"><p>201 Created, typically with the created resource in the response body and ideally a Location header pointing to its new URL.</p></div><div class="followup">Follow-up: what status code is conventional for a successful DELETE?</div></details>
+      <details class="qa"><summary>What does "idempotent" mean for an HTTP method, and which methods are idempotent?</summary><div class="answer"><p>Idempotent means calling the operation multiple times has the same effect as calling it once. GET, PUT, and DELETE are idempotent by convention; POST and (generally) PATCH are not.</p></div><div class="followup">Follow-up: why is POST not idempotent by default, with a concrete example?</div></details>
+      <details class="qa"><summary>What's the difference between PUT and PATCH?</summary><div class="answer"><p>PUT replaces the entire resource with the data provided (a full representation); PATCH applies a partial update, modifying only the fields included in the request.</p></div><div class="followup">Follow-up: what would happen if you sent a partial object to a strictly-implemented PUT endpoint?</div></details>
+      <details class="qa"><summary>Why is returning 200 OK with { success: false } in the body a bad practice?</summary><div class="answer"><p>It breaks the meaning of HTTP status codes for any tooling or client code that correctly assumes 2xx means success (caching layers, monitoring, generic retry/circuit-breaker logic, API gateways), forcing every consumer to parse the body just to know if a call actually succeeded.</p></div><div class="followup">Follow-up: what should this response use instead?</div></details>
+      </div>
+      <div class="qa-level medium"><h4>Medium</h4>
+      <details class="qa"><summary>When would you choose 422 over 400 for a validation failure, and does the distinction actually matter?</summary><div class="answer"><p>422 signals "the request was well-formed (valid JSON, correct types) but fails business/semantic validation" (e.g. a URL field that's a valid string but not a valid URL), while 400 is more general "malformed request" (e.g. invalid JSON syntax). The distinction is genuinely debated in the industry — many well-regarded APIs use 400 for both — so what matters most for an interview answer and for a real codebase is picking one convention deliberately and applying it consistently, not which specific code is "more correct."</p></div><div class="followup">Follow-up: what would you put in your team's API style guide to settle this definitively?</div></details>
+      <details class="qa"><summary>Design a consistent error response shape for an API and justify each field.</summary><div class="answer"><p>At minimum: an `error` field (human-readable message, safe to show in a generic UI toast), a `code` field (a stable machine-readable identifier like VALIDATION_ERROR, so client code can branch on it without string-matching the message), and for validation failures a `details` array of {field, message} objects so a frontend can render per-field errors. The code field matters because human-readable messages can change wording without warning and shouldn't be used as a program's branching logic.</p></div><div class="followup">Follow-up: should the error message field ever be localized/translated, and where should that happen?</div></details>
+      <details class="qa"><summary>How would you decide when to nest a resource URL (/users/:userId/bookmarks) versus keep it flat (/bookmarks?userId=X)?</summary><div class="answer"><p>Nest when there's a genuine ownership/containment relationship and the nested resource genuinely cannot exist independently of its parent in the domain model (a comment that only ever exists under a specific post). Prefer flat with a filter query param when the resource can be queried/accessed independently of any single parent, or when nesting would need to go more than 1-2 levels deep, since deeply nested URLs become unwieldy to construct and the "canonical" URL for a resource becomes ambiguous if it could be reached via multiple parent paths.</p></div><div class="followup">Follow-up: should a nested resource's "GET one" endpoint also be reachable via a flat /resources/:id URL? Why might you want both?</div></details>
+      <details class="qa"><summary>Is DELETE on an already-deleted resource idempotent? Walk through the nuance.</summary><div class="answer"><p>Idempotency means repeated calls produce the same end state (the resource is gone), which is true whether you return 204 both times or 404 on the second call — the end state is identical either way. The nuance is purely about response consistency, not idempotency itself: returning 204 both times treats "already gone" as success (simpler for clients that retry blindly), while 404 on the second call is more informative but means a naive retry-on-error client might incorrectly treat a successful retry as a failure. Pick one and document it; both are defensible idempotent designs.</p></div><div class="followup">Follow-up: which choice would you make for a payment-related DELETE endpoint specifically, and why?</div></details>
+      <details class="qa"><summary>Why is "strict REST" (Fielding's full definition, including HATEOAS) rarely what people mean by "REST API" in practice?</summary><div class="answer"><p>Fielding's dissertation defines REST via six architectural constraints, including hypermedia-driven navigation (HATEOAS) where responses include links describing available next actions/state transitions, letting clients navigate the API dynamically rather than hardcoding URL structures. Almost no production "REST API" implements this fully — most are better described as "resource-oriented HTTP APIs using conventional methods and status codes," a pragmatic subset the industry still calls REST.</p></div><div class="followup">Follow-up: what's one practical benefit HATEOAS would actually provide if implemented, and why do most teams decide it's not worth the complexity?</div></details>
+      <details class="qa"><summary>How should an API signal that a PATCH request partially succeeded (some fields updated, one failed validation)?</summary><div class="answer"><p>Most defensible approach: treat the entire PATCH as a single atomic operation — validate all fields first, and if any fail, reject the whole request with 422/400 and field-level details, applying no changes at all. Avoid a "partial success" response (e.g. 207 Multi-Status, borrowed from WebDAV) for a single-resource PATCH — it's confusing for clients and rarely worth the complexity outside of true batch/bulk operation endpoints where multiple independent sub-resources are being modified in one call.</p></div><div class="followup">Follow-up: when would 207 Multi-Status actually be the right tool, if ever, in a typical REST API?</div></details>
+      </div>
+      <div class="qa-level advanced"><h4>Advanced</h4>
+      <details class="qa"><summary>Design the full REST contract (endpoints, methods, status codes, error shape) for a "notes" API supporting soft-delete, and justify every status code choice.</summary><div class="answer"><p>GET /notes (200, list), GET /notes/:id (200, or 404 if not found or soft-deleted — treat soft-deleted as "not found" to external consumers), POST /notes (201 + Location header), PUT /notes/:id (200 with updated resource, full replace, 404 if missing), PATCH /notes/:id (200, partial update), DELETE /notes/:id (this is the interesting one for soft-delete: return 204 to the client — the external contract shouldn't leak the soft-delete implementation detail; internally it's a flag flip not a row deletion), and optionally POST /notes/:id/restore (200) as an explicit un-delete action if the product needs it, modeled as its own resource-action rather than overloading PUT. Every error path returns the shared {error, code, details} shape from this chapter regardless of which endpoint.</p></div><div class="followup">Follow-up: should a soft-deleted note be visible to a GET /notes list call for the owning user, with some kind of "deleted" flag, or fully invisible? What drives that product decision?</div></details>
+      <details class="qa"><summary>How would you version a REST API (URL path /v2/, header-based, or content negotiation) and what are the real tradeoffs senior engineers weigh?</summary><div class="answer"><p>URL path versioning (/v1/bookmarks, /v2/bookmarks) is the most explicit and cache-friendly (different URLs cache independently, easy to route at a load-balancer/gateway level, trivially visible in logs) but duplicates route definitions and can fragment documentation across versions. Header-based versioning (a custom Accept-Version header or content-type parameter) keeps URLs stable (better for REST's "resource has one canonical identity" principle, cleaner for hypermedia-style APIs) but is harder to test with a browser/curl casually, invisible in access logs without extra config, and less cache-friendly unless the cache key explicitly includes the header. Most teams pragmatically choose URL path versioning for its operational simplicity despite the theoretical purity argument against it — this is exactly the kind of "defend a specific choice" question senior interviews probe.</p></div><div class="followup">Follow-up: how do you handle a breaking change to a single field deep in a large response payload without bumping the entire API's major version?</div></details>
+      <details class="qa"><summary>A client team wants your DELETE endpoint to be "undo-able" for 30 seconds. How does this change your REST design, and does it compromise DELETE's idempotency semantics?</summary><div class="answer"><p>Implement it as a soft-delete with a `deletedAt` timestamp set by DELETE (still returns 204, still idempotent — re-deleting an already-soft-deleted resource is a no-op with the same end state), and a separate explicit POST /bookmarks/:id/restore endpoint that only succeeds within the 30-second window (409 Conflict or 404 after expiry, your call, documented). This doesn't compromise DELETE's idempotency at all — idempotency is about repeated identical requests producing the same end state, not about whether that state is "truly" permanent; a background job that hard-deletes after 30 seconds is an internal implementation detail invisible to the DELETE contract itself.</p></div><div class="followup">Follow-up: what HTTP status code should the restore endpoint return if called after the 30-second window has already expired, and why?</div></details>
+      <details class="qa"><summary>Explain the relationship (and the real tradeoffs) between choosing REST, GraphQL, and gRPC for a given API surface, beyond "REST is simple, GraphQL is flexible."</summary><div class="answer"><p>REST's resource-oriented, cacheable-by-URL model works well when access patterns map cleanly to CRUD-shaped resources and broad client compatibility (any HTTP client, browser-native fetch, simple caching at CDN/gateway level) matters — its weakness is over-fetching/under-fetching when a client needs a specific shape spanning multiple resources, often solved with ad hoc query params that erode REST's cleanliness over time. GraphQL solves exactly that over/under-fetching problem by letting clients specify exact field shapes in one round trip, at the cost of losing HTTP-level caching simplicity (a single POST /graphql endpoint means CDN/browser caching by URL no longer works out of the box) and added server-side complexity (resolver N+1 problems, query cost analysis to prevent abuse). gRPC trades human-readability and broad client compatibility for raw performance (binary protobuf serialization, HTTP/2 multiplexing, strongly-typed contracts) — ideal for internal service-to-service calls where you control both ends and need low latency/high throughput, poor for public-facing APIs needing broad, easy client adoption including from browsers (which need grpc-web, an extra translation layer).</p></div><div class="followup">Follow-up: would you ever expose the same backend logic through both a REST API (for public/partner consumers) and gRPC (for internal services)? What does that architecture look like?</div></details>
+      <details class="qa"><summary>How would you design rate limiting responses (429 Too Many Requests) to be genuinely useful to a well-behaved client, not just a bare status code?</summary><div class="answer"><p>Return 429 with a Retry-After header (seconds or an HTTP date) telling the client exactly when to retry, plus conventional rate-limit headers (X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset) on every response — not just the 429 — so well-behaved clients can proactively back off before hitting the limit at all, rather than discovering it only via repeated 429s. The error body itself should still follow your standard {error, code, details} shape (code: 'RATE_LIMITED') so generic error-handling client code doesn't need a special case just for this status.</p></div><div class="followup">Follow-up: should rate limit state be tracked per-API-key, per-IP, or per-authenticated-user, and what's the tradeoff of each for a public API with both authenticated and anonymous traffic?</div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment"><span class="level-tag">Beginner (30-60 min)</span>
+      <h4>Audit and fix a badly-designed API contract</h4>
+      <p>Given a list of 8 badly-designed endpoints (provided as a text list: things like `POST /getUser`, `GET
+      /deleteOrder?id=5`, a 200 response with `{success: false}`, inconsistent pluralization), rewrite each as a
+      properly REST-conventional endpoint with the correct method, URL, and status code, and write one sentence
+      justifying each fix.</p>
+      <ul><li>Must cover all 8 examples with a corrected version and justification.</li><li>Must use consistent resource naming (plural nouns) across all fixes.</li></ul>
+      <p><strong>Acceptance criteria:</strong> Every fix correctly maps an action to the right HTTP method and a real status code, with sound justification.</p>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>For each bad example, ask: "what is the resource (noun)?" and "what is the actual CRUD action?" — the method is always the second answer, never part of the URL.</p></div></details>
+      <p><strong>Bonus:</strong> Design the consistent error shape these endpoints should all share and show one example response in it.</p>
+      </div>
+      <div class="assignment"><span class="level-tag">Intermediate (2-4 hrs)</span>
+      <h4>Finish the capstone bookmarks API with full REST conventions</h4>
+      <p>Take your Express bookmarks API from Chapter 5 and apply this chapter's conventions rigorously: correct
+      status codes for every path (200/201/204/400/404/422), a consistent {error, code, details} shape on every
+      failure, proper validation with field-level details on POST/PUT, and a Location header on 201 responses.
+      Write a short API reference doc (a markdown table: method, path, description, success status, possible
+      error statuses) as if for another team to integrate against.</p>
+      <ul><li>Every endpoint documented with its exact success and possible error status codes.</li><li>Validation errors return field-level details, not just a generic message.</li></ul>
+      <p><strong>Acceptance criteria:</strong> A teammate could integrate against your API using only the reference doc, without reading your source code.</p>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>Reuse the ApiError class and sendError helper from this chapter's Code Examples section directly in your centralized error middleware.</p></div></details>
+      <p><strong>Bonus:</strong> Add a PATCH endpoint for partial updates (e.g. updating just the title) alongside the existing PUT, and document the semantic difference clearly in your reference doc.</p>
+      </div>
+      <div class="assignment"><span class="level-tag">Advanced (1-2 days)</span>
+      <h4>Design and defend a versioned, rate-limited REST API</h4>
+      <p>Design (on paper first, then implement) a /v1/ versioned bookmarks API with per-IP rate limiting
+      (429 + Retry-After + rate-limit headers), soft-delete with a 30-second undo window (a restore endpoint),
+      and a documented decision for URL-path vs header-based versioning with written justification for your
+      choice. Implement it fully in Express.</p>
+      <ul><li>Must include a written design doc justifying the versioning approach and the soft-delete/restore design.</li><li>Rate limiting must be demonstrated with a real test hitting the limit and receiving a correct 429.</li></ul>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>For the restore window, store a deletedAt timestamp rather than actually removing data, and check Date.now() - deletedAt against your 30-second threshold in the restore handler.</p></div></details>
+      <p><strong>Bonus:</strong> Add a background job (even a simple setInterval) that permanently purges soft-deleted bookmarks after the undo window expires, and document how that interacts with the restore endpoint's error responses after expiry.</p>
+      </div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet"><ul>
+        <li>Resource URLs are plural nouns; the HTTP method is the verb — never put a verb in the path.</li>
+        <li>GET/PUT/DELETE are idempotent by convention; POST and PATCH generally are not.</li>
+        <li>2xx: 200 generic success, 201 created (+ Location header), 204 success with no body.</li>
+        <li>4xx: 400 malformed request, 401 "who are you," 403 "I know who you are, but no," 404 not found, 409 conflict, 422 well-formed but semantically invalid (or use 400 for both — just be consistent).</li>
+        <li>5xx means the server's fault — never leak stack traces/internal messages to the client in a 5xx body.</li>
+        <li>Never return 200 with a success:false flag in the body — use the real status code.</li>
+        <li>A consistent error shape ({error, code, details}) across every endpoint is as much a contract as your success response shape.</li>
+        <li>Nest resource URLs only for genuine ownership/containment, and rarely past 2 levels deep.</li>
+        <li>"Strict REST" (HATEOAS included) is rarely what production APIs implement — most are "resource-oriented HTTP APIs," which is fine as long as you're consistent.</li>
+        <li>429 responses should include Retry-After and rate-limit headers, not just the bare status code.</li>
+      </ul></div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Status">MDN: HTTP response status codes</a></li>
+        <li><a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Methods">MDN: HTTP request methods</a></li>
+        <li><a href="https://expressjs.com/en/guide/routing.html">Express docs: Routing (building resource-oriented routes)</a></li>
+        <li><a href="https://www.rfc-editor.org/rfc/rfc9110.html">RFC 9110: HTTP Semantics (methods, status codes, idempotency defined precisely)</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="05-express-basics-routing-middleware.html"><span class="dir">← Previous</span>Express Basics: Routing &amp; Middleware</a>
+        <a class="next" href="../14-python-fundamentals/01-python-syntax-and-basics.html"><span class="dir">Next →</span>Python Fundamentals</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · Node.js Fundamentals</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-javascript.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "13-nodejs-fundamentals", chapterKey: "06-rest-api-fundamentals" });</script>
+</body>
+</html>

@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Serverless — Cloud, AWS, Docker &amp; K8s — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">Cloud, AWS, Docker &amp; K8s</a><span class="sep">›</span>Serverless</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>Serverless: Lambda, API Gateway</h1>
+      <p class="meta-line"><span>⏱ 2.5 hrs</span><span>📍 Chapter 5 of 7</span></p>
+      <p><strong>One-line summary:</strong> Serverless shifts the unit of billing and scaling from "a server
+      running" to "a request happening" — the real tradeoffs are cold starts, concurrency models, and whether
+      your workload's shape actually fits that billing model, not whether it's "modern."</p>
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>Every org has had the "should this be serverless" debate, usually decided on vibes. At senior level
+      you're expected to answer it with numbers: expected request volume and concurrency, latency tolerance for
+      cold starts, cost crossover point against an always-on container, and operational complexity of VPC
+      networking from Lambda. This chapter gives you the internals to make that call defensibly.</p>
+      <div class="box why"><h4>Why</h4><p>Picking serverless for the wrong workload (sustained high-throughput,
+      latency-critical, long-running) causes real production pain — cold start p99 spikes, concurrency
+      throttling, runaway cost at scale — that's entirely avoidable by understanding the execution model upfront.</p></div>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>Comfortable with building and deploying a basic HTTP API. Related: <a href="04-aws-core.html">AWS Core</a>,
+      <a href="06-infrastructure-as-code.html">Infrastructure as Code</a>.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="execution-model">Lambda's execution model</h3>
+      <p>A Lambda function has no persistent "server" — AWS maintains a pool of execution environments
+      (lightweight microVMs via Firecracker) and routes each incoming invocation to either a warm,
+      already-initialized environment (reusing the same process, memory, and any module-level state from a
+      previous invocation) or spins up a new one (a <strong>cold start</strong>). Within one execution
+      environment, invocations are strictly sequential by default — one environment never runs two invocations
+      concurrently (unless you opt into Lambda response streaming or provisioned concurrency doesn't change
+      this). Scaling to N concurrent requests means AWS cold-starting up to N separate execution environments,
+      not N threads sharing one.</p>
+
+      <h3 id="cold-starts">Cold starts: what actually happens</h3>
+      <p>A cold start includes: downloading/mounting the deployment package (or container image, which is
+      generally slower to cold start than a zip package), initializing the Firecracker microVM, starting the
+      language runtime, and running your module-level initialization code (anything outside the handler
+      function — DB connection setup, SDK client construction, large imports). This last part is the one
+      developers actually control: code at module scope runs once per cold start and is reused by every warm
+      invocation in that environment, so moving expensive setup (DB connection pools, config fetches) to module
+      scope instead of inside the handler is the single biggest cold-start-amortization lever available to you.
+      Runtime matters too — JVM and .NET cold starts are typically much heavier than Node.js or Python due to
+      runtime/JIT initialization, which is why Lambda SnapStart (pre-initialized, snapshotted execution
+      environments) exists specifically for JVM-based functions.</p>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Putting a DB connection inside the handler function means every
+      single invocation — warm or cold — pays the connection setup cost, and at high concurrency can exhaust
+      the database's max connections almost immediately since each concurrent Lambda environment opens its own
+      connection with no shared pool across environments.</p></div>
+
+      <h3 id="concurrency-throttling">Concurrency limits and throttling</h3>
+      <p>An AWS account has a regional concurrent execution limit (default starts in the low thousands, raisable
+      via support ticket); beyond that, new invocations are throttled (synchronous callers get a
+      <code>429 TooManyRequestsException</code>; async/event-source invocations are retried or sent to a
+      configured failure destination/DLQ). <strong>Reserved concurrency</strong> on a function sets both a
+      ceiling (never scales beyond it) and a guaranteed floor (capacity reserved from the account pool that
+      other functions can't consume) — useful to both protect a downstream dependency (e.g. a database that
+      can't handle unlimited concurrent connections) and to prevent one noisy function from starving every other
+      function's share of account-level concurrency. <strong>Provisioned concurrency</strong> keeps N
+      environments permanently warm and initialized, eliminating cold starts for that many concurrent
+      invocations at the cost of paying for that capacity whether or not it's used.</p>
+
+      <h3 id="api-gateway">API Gateway integration patterns</h3>
+      <p>API Gateway (REST or the cheaper, lower-latency HTTP API type) sits in front of Lambda as the HTTP
+      layer, handling routing, auth (IAM, Cognito, Lambda authorizers/JWT), request validation, and throttling
+      at the gateway level (separate from Lambda's own concurrency limits — a gateway-level throttle can reject
+      a request before it ever invokes the function). The Lambda proxy integration passes the full HTTP request
+      as an event object and expects a specific response shape back (statusCode, headers, body) — getting this
+      contract wrong is the most common "it works locally, 502s through the gateway" bug, since a malformed
+      response from the function is itself an error from API Gateway's perspective.</p>
+
+      <h3 id="when-serverless">When serverless actually wins, and when it doesn't</h3>
+      <p>Serverless wins on spiky, low-to-moderate average utilization workloads where you'd otherwise be paying
+      for idle always-on capacity — you pay per invocation + duration, not per hour of a running server. It
+      loses on sustained high-throughput workloads where the always-on utilization is high enough that a
+      correctly-sized container/EC2 fleet is simply cheaper per unit of work, and on latency-critical paths
+      that can't tolerate occasional cold-start tail latency (p99/p999 matters, not just average). It also adds
+      real operational complexity when a function needs VPC access (to reach an RDS instance in a private
+      subnet, for example) — a VPC-attached Lambda needs an ENI per concurrent execution environment, which
+      historically caused its own cold-start penalty (largely mitigated since 2019's Hyperplane ENI changes,
+      but still a networking dependency to reason about that a non-VPC function doesn't have).</p>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>On a cold invocation: API Gateway (or whatever event source) calls the Lambda control plane; the
+      control plane finds or provisions a Firecracker microVM, mounts the function's code, starts the runtime
+      process, and runs the <strong>Init phase</strong> (module-level code) before the <strong>Invoke phase</strong>
+      (your handler) ever runs — this split is why module-scope code amortizes across warm invocations but
+      handler-scope code pays its cost every single time. After the handler returns, the environment is frozen
+      (not destroyed) and held for a short, variable period waiting for another invocation to route to it
+      (warm reuse); AWS reclaims genuinely idle environments after a period of disuse, which is why
+      traffic with long gaps between requests sees cold starts more often than traffic with a steady trickle.
+      Any background work started after the handler's response is sent (e.g. a fire-and-forget async call with
+      no await) is not guaranteed to complete — the execution environment can be frozen the instant the handler
+      returns, which is a common source of "sometimes my cleanup code doesn't run" bugs.</p>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+graph TD
+  REQ[Request] --> APIGW[API Gateway]
+  APIGW -->|warm env available| WARM[Reuse existing execution env]
+  APIGW -->|no warm env| COLD[Cold start: new Firecracker microVM]
+  COLD --> INIT[Init phase: module-level code runs once]
+  INIT --> HANDLER[Invoke phase: handler runs]
+  WARM --> HANDLER
+  HANDLER --> RESP[Response returned]
+  RESP --> FREEZE[Environment frozen, held briefly for reuse]
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-yaml"># BAD: connection created per invocation — handler scope
+exports.handler = async (event) => {
+  const client = new DBClient(process.env.DATABASE_URL); // runs every invocation
+  await client.connect();
+  const row = await client.query("SELECT 1");
+  return { statusCode: 200, body: JSON.stringify(row) };
+};
+
+# GOOD: connection/client created once per cold start — module scope, reused warm
+const client = new DBClient(process.env.DATABASE_URL); // runs only on cold start
+let connected = false;
+
+exports.handler = async (event) => {
+  if (!connected) { await client.connect(); connected = true; }
+  const row = await client.query("SELECT 1");
+  return { statusCode: 200, body: JSON.stringify(row) };
+};
+</code></pre>
+      <pre><code class="language-hcl">resource "aws_lambda_function" "api" {
+  function_name = "api-handler"
+  runtime       = "nodejs20.x"
+  handler       = "index.handler"
+  filename      = "function.zip"
+  memory_size   = 512          # also scales proportional vCPU share
+  timeout       = 10
+  reserved_concurrent_executions = 50   # ceiling + floor, protects downstream DB
+
+  environment {
+    variables = { DATABASE_URL = var.database_url }
+  }
+}
+
+resource "aws_lambda_provisioned_concurrency_config" "api_warm" {
+  function_name                    = aws_lambda_function.api.function_name
+  qualifier                        = aws_lambda_function.api.version
+  provisioned_concurrent_executions = 5   # eliminates cold starts for first 5 concurrent reqs
+}
+</code></pre>
+      <pre><code class="language-bash"># Check current account-level concurrency usage vs limit
+aws lambda get-account-settings --query 'AccountLimit'
+
+# Tail a function's logs to spot cold starts (Init Duration present = cold start)
+aws logs tail /aws/lambda/api-handler --since 10m --follow
+</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4><p>A checkout API built on Lambda + API Gateway worked fine in
+      staging but saw p99 latency spike to 3+ seconds during a flash sale with a sudden 50x traffic burst.
+      Cause: the sudden burst forced a wave of simultaneous cold starts (each new concurrent execution
+      environment is a fresh cold start, regardless of how long the function had been "live" overall), and the
+      function's DB client was constructed inside the handler, so every one of those cold starts also paid a
+      full connection-establishment cost against RDS, compounding the latency and nearly exhausting RDS's max
+      connections simultaneously. Fix: moved the DB client to module scope, added a connection pooler (RDS
+      Proxy) in front of RDS to absorb the connection-count spike, and added provisioned concurrency sized to
+      the known pre-sale traffic floor so the predictable portion of the burst never cold-started at all.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Assuming "serverless scales infinitely" without setting reserved
+      concurrency on functions that talk to a connection-limited resource like RDS — a traffic spike can open
+      far more concurrent DB connections than the database can handle, taking the database down for every other
+      consumer too, not just the Lambda-based one.</p></div>
+      <ul>
+        <li>Always initialize SDK clients, DB connections, and config fetches at module scope, not handler scope.</li>
+        <li>Use RDS Proxy (or similar connection pooling) for any Lambda function that talks to a relational
+        database, since Lambda's per-environment connection model doesn't pool across invocations the way a
+        long-running server would.</li>
+        <li>Set function timeout deliberately short relative to what callers can tolerate — a hung Lambda
+        function still bills for its full configured timeout if it never returns.</li>
+        <li>Don't rely on code after the handler's return/await resolving — the execution environment can
+        freeze immediately after the response is sent.</li>
+        <li>For latency-critical, high-and-steady-throughput paths, benchmark against a plain container before
+        defaulting to Lambda — the cost/latency crossover is workload-specific, not a given.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>Lambda</td><td>Spiky/low-avg-utilization workloads, event-driven glue code</td>
+        <td>Sustained high throughput, strict low-latency tail requirements</td><td>ECS/EKS containers</td></tr>
+        <tr><td>Provisioned concurrency</td><td>Known traffic floor, latency-sensitive path</td>
+        <td>Unpredictable/bursty traffic with no reliable floor (pay for idle capacity)</td>
+        <td>Reserved concurrency only, accept some cold starts</td></tr>
+        <tr><td>HTTP API (API Gateway)</td><td>Simple proxy routing, lower cost/latency than REST API type</td>
+        <td>Need request/response validation, API keys, usage plans at the gateway</td><td>REST API type</td></tr>
+        <tr><td>Container image Lambda</td><td>Large dependencies, existing container tooling/CI</td>
+        <td>Cold-start-sensitive path (container images cold start slower than zip packages)</td>
+        <td>Zip deployment package</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic"><h4>Basic</h4>
+        <details class="qa"><summary>What is a cold start?</summary><div class="answer"><p>The latency incurred when Lambda has to provision a brand-new execution environment (new microVM, runtime start, module-level init) for an invocation instead of reusing an already-warm one.</p></div><div class="followup">Follow-up: does every invocation after the first ever cold start again?</div></details>
+        <details class="qa"><summary>What's the difference between reserved and provisioned concurrency?</summary><div class="answer"><p>Reserved concurrency sets a ceiling/floor on how many concurrent executions a function can use from the account pool, with no effect on cold starts. Provisioned concurrency keeps a set number of environments permanently warm, eliminating cold starts for that many concurrent invocations, at an always-on cost.</p></div><div class="followup">Follow-up: can you set both on the same function?</div></details>
+        <details class="qa"><summary>Why does code placed outside the handler function behave differently from code inside it?</summary><div class="answer"><p>Module-scope code runs once per cold start (during the Init phase) and its results (e.g. a constructed client) persist and are reused across subsequent warm invocations in that same environment; handler-scope code runs fresh on every single invocation.</p></div><div class="followup">Follow-up: what's a practical example of something that should go in module scope?</div></details>
+        <details class="qa"><summary>What's the main difference between API Gateway's REST API and HTTP API types?</summary><div class="answer"><p>HTTP API is a newer, cheaper, lower-latency, feature-reduced type (simple proxy routing, JWT auth); REST API has more features (request validation, usage plans, API keys, more auth options) at higher cost/latency.</p></div><div class="followup">Follow-up: which would you pick for a simple internal microservice proxy?</div></details>
+        <details class="qa"><summary>What happens to synchronous invocations when a function's concurrency limit is exceeded?</summary><div class="answer"><p>The caller receives a 429 TooManyRequestsException immediately; it's the caller's responsibility to retry, unlike async invocations which Lambda itself retries automatically.</p></div><div class="followup">Follow-up: how does this differ for an async (event source) invocation?</div></details>
+      </div>
+      <div class="qa-level medium"><h4>Medium</h4>
+        <details class="qa"><summary>Why does putting a DB connection inside the handler risk exhausting the database's connection limit under load, specifically because of Lambda's concurrency model?</summary><div class="answer"><p>Each concurrent Lambda execution environment is effectively an independent process with no shared state or connection pool across environments — a traffic spike that creates N concurrent cold starts, each opening its own DB connection, can open far more simultaneous connections than a traditional fixed-size connection pool on a small number of long-running servers ever would, overwhelming the database's max_connections.</p></div><div class="followup">Follow-up: how does RDS Proxy mitigate this specifically?</div></details>
+        <details class="qa"><summary>Why might a VPC-attached Lambda function have historically had worse cold start latency than a non-VPC function, and how was this addressed?</summary><div class="answer"><p>Historically, each execution environment needed its own ENI (elastic network interface) attached to the VPC, and ENI creation/attachment was slow, adding seconds to cold starts. AWS's 2019 Hyperplane-based networking change introduced shared, pre-created ENIs across environments in the same subnet/security-group combination, largely eliminating this penalty, though VPC attachment still adds some overhead versus no VPC at all.</p></div><div class="followup">Follow-up: why would a function need VPC access in the first place?</div></details>
+        <details class="qa"><summary>A fire-and-forget async call (no await) placed after the handler's main response logic sometimes doesn't complete. Why?</summary><div class="answer"><p>Lambda can freeze the execution environment the instant the handler's returned promise resolves/response is sent — any work still pending (not awaited) has no guarantee of running to completion, since the environment may be frozen or (less commonly) reclaimed before the event loop gets back to it.</p></div><div class="followup">Follow-up: what's the correct way to ensure that background work completes before the handler returns?</div></details>
+        <details class="qa"><summary>How would you build a cost model to decide between Lambda and a small ECS Fargate service for a moderate-traffic internal API?</summary><div class="answer"><p>Estimate requests/month and average duration to compute Lambda cost (invocation count + GB-seconds), compare against Fargate's always-on vCPU/memory cost for a minimally-sized task running 24/7, factoring in that Fargate cost is constant regardless of traffic while Lambda cost scales with it — the crossover point depends heavily on average utilization; a service idle most of the day favors Lambda, a service with consistently high request volume favors Fargate. Also factor in cold-start latency tolerance as a non-cost constraint that can rule out Lambda regardless of the cost comparison.</p></div><div class="followup">Follow-up: what traffic pattern would make this a close call either way?</div></details>
+      </div>
+      <div class="qa-level advanced"><h4>Advanced</h4>
+        <details class="qa"><summary>Design a Lambda-based ingestion pipeline that must never drop events even under a traffic spike that exceeds account concurrency limits.</summary><div class="answer"><p>Decouple ingestion from processing: have the ingestion path write to a durable, highly-available buffer first (SQS or Kinesis) rather than invoking a processing Lambda synchronously per event. SQS-triggered Lambda naturally backpressures — if concurrency is exhausted, messages simply wait in the queue rather than being dropped, and a dead-letter queue catches messages that fail processing repeatedly. Set reserved concurrency on the processing function to a safe ceiling relative to downstream dependency capacity, accepting that the queue absorbs burst rather than the function trying to scale unboundedly.</p></div><div class="followup">Follow-up: why is Kinesis a different backpressure model than SQS here?</div></details>
+        <details class="qa"><summary>Explain why SnapStart specifically targets JVM functions and what tradeoff it introduces.</summary><div class="answer"><p>JVM cold starts are dominated by class loading and JIT warmup, which is expensive and largely deterministic given the same code. SnapStart pre-initializes a function once, takes a full memory/execution snapshot after the Init phase, encrypts and caches it, and restores from that snapshot on subsequent cold starts instead of re-running Init from scratch — effectively amortizing the expensive JVM startup cost across all future cold starts. The tradeoff: any state captured in the snapshot (e.g. a seeded random value, an opened file descriptor, a cached timestamp) is now frozen at snapshot time, requiring careful handling (e.g. re-seeding randomness, re-establishing connections) via a runtime hook that fires on restore, not assuming Init always truly re-runs.</p></div><div class="followup">Follow-up: what's a concrete bug this uniqueness-at-snapshot-time issue causes if ignored?</div></details>
+        <details class="qa"><summary>A team argues "serverless is always cheaper because you don't pay for idle" — when is this false?</summary><div class="answer"><p>It's false whenever sustained utilization is high enough that the effective per-request cost of an appropriately-sized always-on container undercuts Lambda's per-invocation + duration pricing — Lambda's pricing model has no economy-of-scale discount the way a long-running reserved/sustained-use compute instance does at high, steady throughput. It's also false when you count total cost of ownership rather than raw compute cost: VPC networking, provisioned concurrency to hit latency SLAs, and the engineering cost of working around the execution model's constraints (connection pooling via RDS Proxy, cold-start mitigation) can offset the "no idle cost" benefit.</p></div><div class="followup">Follow-up: at what rough utilization level does the crossover typically favor containers in practice?</div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment"><span class="level-tag">Beginner (30-60 min)</span><h4>Measure cold start cost yourself</h4>
+      <p>Deploy a Lambda function with a deliberately heavy module-scope initialization (e.g. loading a large JSON file) behind API Gateway, and measure cold vs warm invocation latency.</p>
+      <ul><li>Trigger a guaranteed cold start (new version/config change) and capture Init Duration from logs</li><li>Compare to 10 consecutive warm invocations</li></ul>
+      <p><strong>Acceptance criteria:</strong> Documented latency delta between cold and warm with the actual numbers, not estimates.</p>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>CloudWatch Logs' REPORT line includes Init Duration only on cold starts — its absence confirms a warm invocation.</p></div></details>
+      <p><strong>Bonus:</strong> Move the heavy initialization to lazy-load only when first needed and remeasure.</p>
+      </div>
+      <div class="assignment"><span class="level-tag">Intermediate (2-4 hrs)</span><h4>Fix a connection-exhaustion bug under load</h4>
+      <p>Build a Lambda function with a handler-scope DB connection, load test it to a concurrency that exceeds the DB's max_connections, observe the failure, then fix it with module-scope connection + RDS Proxy (or a pooling shim) and retest.</p>
+      <ul><li>Reproduce the connection exhaustion under load</li><li>Fix with module-scope client + pooling</li><li>Retest at the same load with no failures</li></ul>
+      <p><strong>Acceptance criteria:</strong> Before/after load test results showing the fix actually resolves the failure, not just theoretically.</p>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>A simple local Postgres with max_connections set low is enough to reproduce this without needing real RDS.</p></div></details>
+      <p><strong>Bonus:</strong> Add reserved concurrency sized to a connection budget and prove it prevents the exhaustion even under an even larger load spike.</p>
+      </div>
+      <div class="assignment"><span class="level-tag">Advanced (1-2 days)</span><h4>Build a cost/latency decision model for Lambda vs Fargate for a real workload</h4>
+      <p>Take a real or realistic API workload profile (requests/day, duration distribution, latency SLA) and build both a Lambda deployment and a minimal Fargate deployment of the same API, load test both, and produce a cost-vs-latency comparison at three different traffic levels.</p>
+      <ul><li>Same API code running on both platforms</li><li>Load test at low, medium, and high traffic</li><li>Documented cost calculation for each platform at each level</li></ul>
+      <p><strong>Acceptance criteria:</strong> left as an exercise — think through where the crossover point falls for your specific workload shape and why.</p>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>AWS's own pricing calculator plus your load test's actual GB-seconds/duration numbers gets you a real, not estimated, comparison.</p></div></details>
+      </div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet"><ul>
+        <li>Cold start = new execution environment; module-scope code runs once per cold start, handler code every time.</li>
+        <li>Concurrency scales by spinning up more environments, not threading within one — N concurrent = up to N cold starts.</li>
+        <li>Reserved concurrency = ceiling + floor from account pool. Provisioned concurrency = pre-warmed, eliminates cold starts, costs even when idle.</li>
+        <li>Always init DB/SDK clients at module scope; use RDS Proxy for relational DB connection pooling.</li>
+        <li>Post-response background work isn't guaranteed to finish — the environment can freeze immediately.</li>
+        <li>HTTP API = cheaper/faster/simpler. REST API = more gateway-level features.</li>
+        <li>Serverless wins on spiky/low-avg-utilization; containers win on sustained high throughput or strict tail latency.</li>
+        <li>SnapStart amortizes JVM cold start cost via a pre-initialized snapshot — watch for state frozen at snapshot time.</li>
+      </ul></div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://docs.aws.amazon.com/lambda/latest/dg/lambda-concurrency.html">Lambda concurrency and scaling</a></li>
+        <li><a href="https://docs.aws.amazon.com/lambda/latest/dg/snapstart.html">Lambda SnapStart</a></li>
+        <li><a href="https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api-vs-rest.html">API Gateway: HTTP API vs REST API</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="04-aws-core.html"><span class="dir">← Previous</span>AWS Core (IAM/VPC/EC2/S3/RDS)</a>
+        <a class="next" href="06-infrastructure-as-code.html"><span class="dir">Next →</span>Infrastructure as Code (Terraform)</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · Cloud, AWS, Docker &amp; K8s</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-yaml.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-hcl.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-docker.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "06-cloud-aws-docker-k8s", chapterKey: "05-serverless" });</script>
+</body>
+</html>

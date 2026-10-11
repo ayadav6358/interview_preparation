@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LLM Inference Fundamentals</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <input class="searchbox" placeholder="Search topics..." />
+    <a href="../index.html">← Home</a>
+    <h3>28-LLM-Inference</h3>
+    <a href="llm-inference-fundamentals.html">LLM Inference Fundamentals</a>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumbs"><a href="../index.html">Home</a> / 28-LLM-Inference</div>
+      <button class="theme-toggle" onclick="toggleTheme()">🌓 Theme</button>
+    </div>
+    <h1>LLM Inference: vLLM, SGLang, Quantization, Batching</h1>
+    <span class="tag good">Stable</span><span class="tag">Last verified: 2026-10-06</span>
+
+    <div class="toc">
+      <b>On this page</b>
+      <a href="#what">1. What is this?</a>
+      <a href="#whyexist">2. Why does it exist?</a>
+      <a href="#whyimportant">3. Why is it important?</a>
+      <a href="#whereused">4. Where is it used?</a>
+      <a href="#prereq">5. Prerequisites</a>
+      <a href="#core">6. Core concepts</a>
+      <a href="#terms">7. Terminology</a>
+      <a href="#arch">8. Architecture</a>
+      <a href="#internal">9. How it works internally (continuous batching)</a>
+      <a href="#steps">10. Step-by-step: serving an open model efficiently</a>
+      <a href="#simple">11. Simple example</a>
+      <a href="#real">12. Real-world example</a>
+      <a href="#code">13. Code example</a>
+      <a href="#advanced">14. Advanced example</a>
+      <a href="#mistakes">15. Common mistakes</a>
+      <a href="#best">16. Best practices</a>
+      <a href="#production">17. Production considerations</a>
+      <a href="#security">18. Security considerations</a>
+      <a href="#performance">19. Performance considerations</a>
+      <a href="#cost">20. Cost considerations</a>
+      <a href="#debug">21. Debugging/troubleshooting</a>
+      <a href="#related">22. Related concepts</a>
+      <a href="#comparison">23. vLLM vs SGLang vs TGI</a>
+      <a href="#exercise">24. Mini practical exercise</a>
+      <a href="#project">25. Practical project</a>
+      <a href="#projectarch">26. Project architecture</a>
+      <a href="#interview-b">27. Interview Questions — Beginner</a>
+      <a href="#interview-i">28. Interview Questions — Intermediate</a>
+      <a href="#interview-a">29. Interview Questions — Advanced</a>
+      <a href="#interview-s">30. Interview Questions — Senior/Architect</a>
+      <a href="#interview-sc">31. Scenario-Based Questions</a>
+      <a href="#revision">32. Quick revision notes</a>
+      <a href="#cheat">33. Cheat sheet</a>
+      <a href="#further">34. Further topics to learn</a>
+    </div>
+
+    <h2 id="what">1. What is this?</h2>
+    <p>LLM inference serving engines (vLLM, SGLang, TGI, TensorRT-LLM) are specialized systems for running open-weight models efficiently at scale — optimizing GPU utilization, memory management (KV cache), and request batching to maximize throughput and minimize latency/cost per request.</p>
+
+    <h2 id="whyexist">2. Why does it exist?</h2>
+    <p>Naively running a model (e.g., directly via a basic Transformers library call) is extremely inefficient at scale — it wastes GPU memory and compute, especially under concurrent requests. These serving engines exist to apply systems-engineering optimizations specific to the autoregressive generation workload.</p>
+
+    <h2 id="whyimportant">3. Why is it important?</h2>
+    <p>If you self-host any open-weight model in production, the serving engine you choose is the single biggest lever on cost and latency — this is the deepest technical layer connecting the Transformer internals (04-Transformers) to real production performance.</p>
+
+    <h2 id="whereused">4. Where is it used?</h2>
+    <p>Any self-hosted open-weight model deployment at meaningful scale; also used internally by some API providers to serve their own models.</p>
+
+    <h2 id="prereq">5. Prerequisites</h2>
+    <p><a href="../04-Transformers/transformers-deep-dive.html">Transformers</a> (especially KV cache), <a href="../27-Local-LLMs/local-llms-fundamentals.html">Local LLMs</a>.</p>
+
+    <h2 id="core">6. Core concepts</h2>
+    <ul>
+      <li><b>Continuous batching:</b> dynamically adding new requests to an in-progress batch as earlier ones complete, rather than waiting for a fixed batch to fully finish.</li>
+      <li><b>PagedAttention (vLLM):</b> manages KV cache memory in non-contiguous "pages," similar to OS virtual memory, dramatically reducing memory waste from naive KV cache allocation.</li>
+      <li><b>Quantization:</b> reducing weight precision to shrink memory footprint and increase throughput.</li>
+      <li><b>Speculative decoding:</b> using a smaller draft model to propose tokens the larger model verifies in parallel, reducing sequential forward passes.</li>
+      <li><b>GPU utilization:</b> the percentage of available GPU compute actually being used — serving engines aim to maximize this under concurrent load.</li>
+    </ul>
+
+    <h2 id="terms">7. Terminology</h2>
+    <table>
+      <tr><th>Term</th><th>Meaning</th></tr>
+      <tr><td>Throughput</td><td>Total tokens/requests processed per unit time across all concurrent requests.</td></tr>
+      <tr><td>Latency (TTFT, TPOT)</td><td>Time-to-first-token and time-per-output-token — key per-request latency metrics.</td></tr>
+      <tr><td>KV cache</td><td>Cached attention keys/values avoiding recomputation during generation (see Transformers).</td></tr>
+      <tr><td>Batching</td><td>Processing multiple requests simultaneously to better utilize GPU parallelism.</td></tr>
+      <tr><td>Tensor parallelism</td><td>Splitting a single large model's computation across multiple GPUs.</td></tr>
+    </table>
+
+    <h2 id="arch">8. Architecture</h2>
+    <pre><code>Incoming requests (varying arrival times)
+ → Continuous batching scheduler
+ → GPU(s) running the model, with PagedAttention-managed KV cache
+ → Tokens streamed back per request as generated
+ → Request completes, its batch slot freed for a new incoming request</code></pre>
+
+    <h2 id="internal">9. How it works internally (continuous batching)</h2>
+    <p>Traditional static batching waits for a fixed group of requests to all arrive and processes them together, wasting GPU time when requests finish at different lengths (the batch is only as fast as its slowest member). Continuous batching instead treats the batch as a dynamic pool: as soon as one request finishes generating, a new waiting request is immediately added to the batch at the next generation step, keeping GPU utilization consistently high rather than idling or being blocked by a few long-running requests.</p>
+
+    <h2 id="steps">10. Step-by-step: serving an open model efficiently</h2>
+    <ol>
+      <li>Choose a serving engine (vLLM for general-purpose throughput, SGLang for structured generation performance, TensorRT-LLM for NVIDIA-specific maximum optimization).</li>
+      <li>Load the model (optionally quantized) with tensor parallelism across available GPUs if needed.</li>
+      <li>Configure batching and KV cache memory settings based on expected concurrency.</li>
+      <li>Expose an OpenAI-compatible API endpoint for application integration.</li>
+      <li>Load-test under realistic concurrent request patterns, tuning for your actual latency/throughput targets.</li>
+    </ol>
+
+    <h2 id="simple">11. Simple example</h2>
+    <pre><code class="language-bash">pip install vllm
+vllm serve meta-llama/Llama-3-8B-Instruct --port 8000
+</code></pre>
+
+    <h2 id="real">12. Real-world example</h2>
+    <p>A company self-hosting Llama for a high-volume internal tool uses vLLM specifically for its PagedAttention memory management, allowing significantly higher concurrent request throughput on the same GPU hardware compared to a naive Hugging Face Transformers serving setup — directly translating to lower cost per request at their production scale.</p>
+
+    <h2 id="code">13. Code example</h2>
+    <pre><code class="language-python">from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:8000/v1", api_key="not-needed")
+response = client.chat.completions.create(
+    model="meta-llama/Llama-3-8B-Instruct",
+    messages=[{"role": "user", "content": "Explain KV caching briefly."}],
+)
+print(response.choices[0].message.content)
+</code></pre>
+
+    <h2 id="advanced">14. Advanced example</h2>
+    <pre><code class="language-bash"># vLLM with tensor parallelism across 4 GPUs and quantization
+vllm serve meta-llama/Llama-3-70B-Instruct \
+  --tensor-parallel-size 4 \
+  --quantization awq \
+  --max-num-seqs 256 \
+  --gpu-memory-utilization 0.9
+</code></pre>
+
+    <h2 id="mistakes">15. Common mistakes</h2>
+    <ul>
+      <li>Using naive Hugging Face Transformers serving for production traffic instead of a purpose-built inference engine.</li>
+      <li>Not tuning batch size / concurrency settings for actual production traffic patterns.</li>
+      <li>Ignoring GPU memory utilization settings, leaving significant throughput on the table.</li>
+      <li>Choosing quantization aggressively without validating quality impact on the actual task.</li>
+    </ul>
+
+    <h2 id="best">16. Best practices</h2>
+    <ul>
+      <li>Use a dedicated serving engine (vLLM, SGLang, TensorRT-LLM) for any production self-hosted deployment.</li>
+      <li>Load-test under realistic concurrency before finalizing configuration.</li>
+      <li>Monitor GPU utilization, throughput, and per-request latency continuously in production.</li>
+      <li>Validate quantization's quality impact against your actual task before adopting it for cost savings.</li>
+    </ul>
+
+    <h2 id="production">17. Production considerations</h2>
+    <p>Treat the serving engine configuration as a first-class production concern — autoscaling, health checks, and request queuing behavior under load all need explicit design, not just default settings.</p>
+
+    <h2 id="security">18. Security considerations</h2>
+    <p>Self-hosted inference endpoints need the same API authentication/access control as any internal service — don't expose an unauthenticated inference endpoint on a reachable network.</p>
+
+    <h2 id="performance">19. Performance considerations</h2>
+    <p>Continuous batching + PagedAttention-style memory management are the primary levers for throughput at scale; speculative decoding can reduce latency for individual requests without sacrificing output distribution correctness.</p>
+
+    <h2 id="cost">20. Cost considerations</h2>
+    <p>Higher achievable throughput directly reduces cost-per-request by better amortizing fixed GPU costs across more served requests — the choice of serving engine can be a larger cost lever than the choice of GPU hardware itself.</p>
+
+    <h2 id="debug">21. Debugging/troubleshooting</h2>
+    <ul>
+      <li><b>Low GPU utilization despite high request volume:</b> check batching configuration and whether requests are being queued/blocked rather than continuously batched.</li>
+      <li><b>Out-of-memory errors under load:</b> tune `gpu-memory-utilization` and max concurrent sequence settings; consider more aggressive quantization.</li>
+      <li><b>High latency variance:</b> check for a few very long requests blocking shorter ones under a non-continuous-batching configuration.</li>
+    </ul>
+
+    <h2 id="related">22. Related concepts</h2>
+    <p><a href="../04-Transformers/transformers-deep-dive.html">Transformers</a> · <a href="../27-Local-LLMs/local-llms-fundamentals.html">Local LLMs</a> · <a href="../41-AI-Performance-and-Scaling/">Performance and Scaling</a></p>
+
+    <h2 id="comparison">23. vLLM vs SGLang vs TGI</h2>
+    <table>
+      <tr><th>Engine</th><th>Notable strength</th></tr>
+      <tr><td>vLLM</td><td>PagedAttention, widely adopted, strong general-purpose throughput</td></tr>
+      <tr><td>SGLang</td><td>Optimized for structured generation and complex prompting patterns</td></tr>
+      <tr><td>TGI (Hugging Face)</td><td>Tight Hugging Face ecosystem integration</td></tr>
+      <tr><td>TensorRT-LLM</td><td>Maximum performance specifically on NVIDIA hardware, more complex setup</td></tr>
+    </table>
+
+    <h2 id="exercise">24. Mini practical exercise</h2>
+    <p>Serve a small open model with vLLM locally and send 10 concurrent requests, observing throughput versus sending them sequentially.</p>
+
+    <h2 id="project">25. Practical project</h2>
+    <p><b>Throughput Benchmark:</b> compare serving the same model via naive Transformers `generate()` calls versus vLLM under identical concurrent load, measuring requests/second and GPU utilization for each.</p>
+
+    <h2 id="projectarch">26. Project architecture</h2>
+    <pre><code>load_test.py → fires N concurrent requests against:
+  (a) naive Transformers serving script
+  (b) vLLM server
+ → measure throughput, p50/p99 latency, GPU utilization for each
+ → comparison_report.md</code></pre>
+
+    <h2 id="interview-b">27. Interview Questions — Beginner</h2>
+    <div class="qa"><b>Q1.</b> What is vLLM?<br><b>A.</b> A specialized inference serving engine for LLMs, known for its PagedAttention memory management, optimized for throughput at scale.</div>
+    <div class="qa"><b>Q2.</b> What is continuous batching?<br><b>A.</b> Dynamically adding new requests to an in-progress batch as earlier ones complete, rather than waiting for a fixed batch to fully finish.</div>
+    <div class="qa"><b>Q3.</b> What is PagedAttention?<br><b>A.</b> vLLM's technique for managing KV cache memory in non-contiguous pages, reducing memory waste compared to naive allocation.</div>
+    <div class="qa"><b>Q4.</b> What does throughput measure in LLM serving?<br><b>A.</b> Total tokens/requests processed per unit time across all concurrent requests.</div>
+    <div class="qa"><b>Q5.</b> What does quantization do for inference serving?<br><b>A.</b> Reduces model weight precision, shrinking memory footprint and often increasing throughput, at some quality cost.</div>
+    <div class="qa"><b>Q6.</b> Why not just use basic Hugging Face Transformers `generate()` for production serving?<br><b>A.</b> It's not optimized for concurrent, high-throughput serving the way dedicated engines like vLLM are, leading to much lower GPU utilization and higher cost per request at scale.</div>
+    <div class="qa"><b>Q7.</b> What is tensor parallelism?<br><b>A.</b> Splitting a single large model's computation across multiple GPUs.</div>
+    <div class="qa"><b>Q8.</b> What is speculative decoding?<br><b>A.</b> Using a smaller draft model to propose tokens that the larger model verifies in parallel, reducing the number of expensive sequential forward passes.</div>
+    <div class="qa"><b>Q9.</b> Name two popular LLM serving engines besides vLLM.<br><b>A.</b> SGLang and TGI (or TensorRT-LLM).</div>
+    <div class="qa"><b>Q10.</b> Why does GPU utilization matter for cost?<br><b>A.</b> Higher utilization serves more requests per unit of (fixed) GPU cost, directly reducing cost per request.</div>
+
+    <h2 id="interview-i">28. Interview Questions — Intermediate</h2>
+    <div class="qa"><b>Q1.</b> Why does naive static batching underperform continuous batching for real-world traffic with varying request lengths?<br><b>A.</b> Static batching must wait for the entire batch's slowest-finishing request before processing a new batch, wasting GPU capacity on already-finished requests' slots; continuous batching immediately fills freed slots with new requests, maintaining high utilization regardless of individual request length variance.</div>
+    <div class="qa"><b>Q2.</b> How does PagedAttention's approach to KV cache memory differ from naive contiguous allocation, and why does that matter?<br><b>A.</b> Naive allocation reserves a large contiguous memory block per request sized for the maximum possible sequence length, wasting memory for shorter sequences; PagedAttention allocates memory in smaller, non-contiguous pages as needed, similar to OS virtual memory paging, dramatically reducing wasted memory and allowing more concurrent requests to fit in the same GPU memory.</div>
+    <div class="qa"><b>Q3.</b> Why might speculative decoding provide a larger latency benefit for some tasks than others?<br><b>A.</b> Its benefit depends on how often the draft model's proposed tokens match what the larger target model would have generated — for highly predictable continuations (common patterns, templated text), acceptance rates are high and speedup is large; for highly creative/unpredictable generation, acceptance rates drop and the benefit shrinks.</div>
+    <div class="qa"><b>Q4.</b> What's the trade-off of increasing `gpu-memory-utilization` settings in vLLM?<br><b>A.</b> Higher settings allow more KV cache memory (supporting more concurrent requests/longer contexts), but leave less safety margin, increasing risk of out-of-memory errors under unexpected load spikes — tuning requires balancing throughput against stability margin.</div>
+    <div class="qa"><b>Q5.</b> Why would tensor parallelism be necessary for serving a very large model even on a high-end single GPU?<br><b>A.</b> Very large models' weights (plus KV cache for concurrent requests) may simply not fit in a single GPU's memory regardless of how powerful that GPU is, requiring the model's computation to be split across multiple GPUs' combined memory.</div>
+
+    <h2 id="interview-a">29. Interview Questions — Advanced</h2>
+    <div class="qa"><b>Q1.</b> How would you diagnose whether a production inference deployment's bottleneck is compute-bound or memory-bound, and how would the fix differ?<br><b>A.</b> Profile GPU compute utilization and memory utilization separately under load; if compute is near 100% while memory has headroom, the bottleneck is compute (consider a faster GPU, quantization for faster compute, or speculative decoding); if memory is saturated while compute has headroom, the bottleneck is memory (consider PagedAttention-style memory management, more aggressive quantization to free memory, or more/larger-memory GPUs via tensor parallelism).</div>
+    <div class="qa"><b>Q2.</b> What's a subtle interaction between quantization and continuous batching that affects overall system throughput?<br><b>A.</b> Quantization reduces per-request memory footprint, which — combined with continuous batching — allows significantly more concurrent requests to fit in the same GPU memory simultaneously, compounding the throughput benefit beyond what either optimization would provide alone; the two techniques are complementary, not independent, levers.</div>
+
+    <h2 id="interview-s">30. Interview Questions — Senior/Architect</h2>
+    <div class="qa"><b>Q1.</b> Design a self-hosted LLM serving architecture for a product with highly variable traffic (10x spikes during peak hours), covering serving engine choice, scaling, and cost optimization.<br><b>A.</b> Use vLLM (or similar) with continuous batching and tuned memory utilization settings as the serving layer, deploy on an autoscaling GPU instance pool that scales out during peak and back during off-peak (accepting cold-start latency trade-offs), apply quantization validated against quality requirements to increase per-GPU throughput and reduce the scaling ceiling needed, and implement request queuing with backpressure (graceful degradation or overflow to a cloud API fallback) for traffic exceeding even the scaled capacity, rather than either over-provisioning for peak constantly or failing hard under spikes.</div>
+
+    <h2 id="interview-sc">31. Scenario-Based Questions</h2>
+    <div class="qa"><b>Scenario 1.</b> Your self-hosted model serving GPU utilization sits around 30% even under decent request volume. What do you investigate?<br><b>A.</b> Check whether continuous batching is actually enabled/configured correctly, whether requests are being artificially queued/limited before reaching the GPU, and whether `max-num-seqs`/concurrency settings are set too conservatively relative to actual available GPU memory.</div>
+    <div class="qa"><b>Scenario 2.</b> After switching from naive Transformers serving to vLLM, throughput improved but a few users report occasional request failures under peak load. What do you investigate?<br><b>A.</b> Check for out-of-memory errors in server logs during peak concurrency — likely the `gpu-memory-utilization` setting is too aggressive for actual peak load patterns; tune it down slightly or add request queuing/backpressure so excess requests wait rather than causing OOM failures.</div>
+
+    <h2 id="revision">32. Quick revision notes</h2>
+    <ul>
+      <li>vLLM/SGLang/TGI: purpose-built inference engines, far more efficient than naive Transformers serving.</li>
+      <li>Continuous batching + PagedAttention = the core throughput/memory optimizations.</li>
+      <li>Quantization and speculative decoding are complementary performance levers.</li>
+      <li>Serving engine choice is often a bigger cost lever than GPU hardware choice alone.</li>
+    </ul>
+
+    <h2 id="cheat">33. Cheat sheet</h2>
+    <div class="callout">vLLM/SGLang/TGI = purpose-built serving, far beyond naive Transformers calls. Continuous batching + PagedAttention = throughput + memory efficiency. Quantization + speculative decoding = complementary performance levers. Load-test under realistic concurrency before finalizing config.</div>
+
+    <h2 id="further">34. Further topics to learn</h2>
+    <p><a href="../41-AI-Performance-and-Scaling/">Performance and Scaling</a> → <a href="../29-Fine-Tuning/">Fine-Tuning</a> → <a href="../42-AI-Infrastructure/">AI Infrastructure</a></p>
+
+    <div class="prevnext">
+      <a href="../27-Local-LLMs/local-llms-fundamentals.html">← Local LLMs</a>
+      <a href="../29-Fine-Tuning/fine-tuning-fundamentals.html">Next: Fine-Tuning →</a>
+    </div>
+  </main>
+</div>
+<script src="../assets/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tool Calling Fundamentals</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <input class="searchbox" placeholder="Search topics..." />
+    <a href="../index.html">← Home</a>
+    <h3>16-Tool-Calling</h3>
+    <a href="tool-calling-fundamentals.html">Tool Calling Fundamentals</a>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumbs"><a href="../index.html">Home</a> / 16-Tool-Calling</div>
+      <button class="theme-toggle" onclick="toggleTheme()">🌓 Theme</button>
+    </div>
+    <h1>Tool Calling / Function Calling</h1>
+    <span class="tag good">Stable</span><span class="tag">Last verified: 2026-10-06</span>
+
+    <div class="toc">
+      <b>On this page</b>
+      <a href="#what">1. What is this?</a>
+      <a href="#whyexist">2. Why does it exist?</a>
+      <a href="#whyimportant">3. Why is it important?</a>
+      <a href="#whereused">4. Where is it used?</a>
+      <a href="#prereq">5. Prerequisites</a>
+      <a href="#core">6. Core concepts</a>
+      <a href="#terms">7. Terminology</a>
+      <a href="#arch">8. Architecture</a>
+      <a href="#internal">9. How it works internally</a>
+      <a href="#steps">10. Step-by-step: the full tool-call loop</a>
+      <a href="#simple">11. Simple example</a>
+      <a href="#real">12. Real-world example</a>
+      <a href="#code">13. Code example</a>
+      <a href="#advanced">14. Advanced example (parallel tools)</a>
+      <a href="#mistakes">15. Common mistakes</a>
+      <a href="#best">16. Best practices</a>
+      <a href="#production">17. Production considerations</a>
+      <a href="#security">18. Security considerations</a>
+      <a href="#performance">19. Performance considerations</a>
+      <a href="#cost">20. Cost considerations</a>
+      <a href="#debug">21. Debugging/troubleshooting</a>
+      <a href="#related">22. Related concepts</a>
+      <a href="#comparison">23. Comparison with alternatives</a>
+      <a href="#exercise">24. Mini practical exercise</a>
+      <a href="#project">25. Practical project</a>
+      <a href="#projectarch">26. Project architecture</a>
+      <a href="#interview-b">27. Interview Questions — Beginner</a>
+      <a href="#interview-i">28. Interview Questions — Intermediate</a>
+      <a href="#interview-a">29. Interview Questions — Advanced</a>
+      <a href="#interview-s">30. Interview Questions — Senior/Architect</a>
+      <a href="#interview-sc">31. Scenario-Based Questions</a>
+      <a href="#revision">32. Quick revision notes</a>
+      <a href="#cheat">33. Cheat sheet</a>
+      <a href="#further">34. Further topics to learn</a>
+    </div>
+
+    <h2 id="what">1. What is this?</h2>
+    <p>Tool calling (function calling) lets an LLM request that a specific, developer-defined function be executed with structured arguments, then incorporate that function's result into its response — the mechanism that turns a pure text generator into a system that can take real-world actions (look up data, call APIs, run calculations).</p>
+
+    <h2 id="whyexist">2. Why does it exist?</h2>
+    <p>LLMs can't directly access live data, execute code, or affect external systems — tool calling exists as the standardized interface letting the model request such actions from the surrounding application, which executes them and returns results, since the model itself has no execution environment.</p>
+
+    <h2 id="whyimportant">3. Why is it important?</h2>
+    <p>Tool calling is the foundation of every agent, every MCP integration, and every "AI that does things" product — understanding the full loop (decide → generate args → execute → return → incorporate) is essential before building any agentic system.</p>
+
+    <h2 id="whereused">4. Where is it used?</h2>
+    <p>Agents, coding assistants (file/shell tools), RAG systems (retrieval as a tool), customer support bots (order lookup, refund processing), MCP servers (tools are MCP's core primitive).</p>
+
+    <h2 id="prereq">5. Prerequisites</h2>
+    <p><a href="../09-Structured-Output/structured-output.html">Structured Output</a>.</p>
+
+    <h2 id="core">6. Core concepts</h2>
+    <ul>
+      <li><b>Tool schema:</b> a name, description, and structured argument schema (JSON Schema) defining a callable function.</li>
+      <li><b>Tool selection:</b> the model decides, based on the user's request and available tools' descriptions, whether and which tool to call.</li>
+      <li><b>Argument generation:</b> the model generates structured arguments matching the tool's schema.</li>
+      <li><b>Execution:</b> the application (not the model) actually runs the function with those arguments.</li>
+      <li><b>Result incorporation:</b> the tool's result is fed back to the model, which uses it to produce a final response or call another tool.</li>
+      <li><b>Parallel tool calls:</b> some providers support the model requesting multiple independent tool calls in one turn.</li>
+    </ul>
+
+    <h2 id="terms">7. Terminology</h2>
+    <table>
+      <tr><th>Term</th><th>Meaning</th></tr>
+      <tr><td>Tool/function schema</td><td>JSON Schema describing a tool's name, purpose, and expected arguments.</td></tr>
+      <tr><td>Tool call</td><td>The model's structured request to invoke a specific tool with specific arguments.</td></tr>
+      <tr><td>Tool result</td><td>The output returned by executing the tool, fed back into the conversation.</td></tr>
+      <tr><td>Tool permission</td><td>Application-level control over which tools a given context/user is allowed to invoke.</td></tr>
+      <tr><td>Tool error handling</td><td>Returning a structured error to the model when tool execution fails, enabling self-correction.</td></tr>
+    </table>
+
+    <h2 id="arch">8. Architecture</h2>
+    <pre><code>LLM
+ → decides tool
+ → generates arguments (structured output against tool schema)
+ → application executes tool (real code, not the model)
+ → tool returns result
+ → result appended to conversation
+ → LLM processes result
+ → final answer (or another tool call)</code></pre>
+
+    <h2 id="internal">9. How it works internally</h2>
+    <p>Tool definitions are included in the model's context as part of the request (not hidden infrastructure) — the model has learned, through training, to recognize when a user's request matches an available tool's description and to generate a structured tool-call response (special output format, often a dedicated content block) instead of or alongside free text, which the SDK/application parses and dispatches to the actual function implementation.</p>
+
+    <h2 id="steps">10. Step-by-step: the full tool-call loop</h2>
+    <ol>
+      <li>Define tools with clear names, descriptions, and argument schemas.</li>
+      <li>Send the user message along with available tool definitions.</li>
+      <li>Model responds with either text or a tool-call request (name + arguments).</li>
+      <li>Application validates arguments, executes the actual function.</li>
+      <li>Application appends the tool's result to the conversation and calls the model again.</li>
+      <li>Model incorporates the result into a final answer, or requests another tool call — repeat until done.</li>
+    </ol>
+
+    <h2 id="simple">11. Simple example</h2>
+    <p>User: "What's the weather in Paris?" The model recognizes it needs live data it doesn't have, calls a `get_weather(city="Paris")` tool, the application executes a real weather API call, returns the result, and the model phrases a natural-language answer using it.</p>
+
+    <h2 id="real">12. Real-world example</h2>
+    <p>Claude Code (this assistant) uses tool calling extensively: when you ask it to "fix this bug," it calls Read, Grep, Edit tools — each a defined function with a schema — executed by the harness, with results fed back so the model can decide its next action, forming the full agent loop.</p>
+
+    <h2 id="code">13. Code example</h2>
+    <pre><code class="language-python">from anthropic import Anthropic
+
+client = Anthropic()
+
+tools = [{
+    "name": "get_weather",
+    "description": "Get the current weather for a city.",
+    "input_schema": {
+        "type": "object",
+        "properties": {"city": {"type": "string"}},
+        "required": ["city"],
+    },
+}]
+
+def get_weather(city: str) -> str:
+    return f"Weather in {city}: 22C, sunny"
+
+messages = [{"role": "user", "content": "What's the weather in Tokyo?"}]
+response = client.messages.create(model="claude-sonnet-5", max_tokens=300, tools=tools, messages=messages)
+
+if response.stop_reason == "tool_use":
+    tool_use = next(b for b in response.content if b.type == "tool_use")
+    result = get_weather(**tool_use.input)
+    messages.append({"role": "assistant", "content": response.content})
+    messages.append({"role": "user", "content": [
+        {"type": "tool_result", "tool_use_id": tool_use.id, "content": result}
+    ]})
+    final = client.messages.create(model="claude-sonnet-5", max_tokens=300, tools=tools, messages=messages)
+    print(final.content[0].text)
+</code></pre>
+
+    <h2 id="advanced">14. Advanced example (parallel tools)</h2>
+    <pre><code class="language-python">def execute_tool_calls(response, tool_registry):
+    results = []
+    for block in response.content:
+        if block.type == "tool_use":
+            fn = tool_registry[block.name]
+            try:
+                result = fn(**block.input)
+            except Exception as e:
+                result = f"Error: {e}"  # structured error, lets model self-correct
+            results.append({"type": "tool_result", "tool_use_id": block.id, "content": str(result)})
+    return results
+# Supports multiple tool_use blocks in one response -> parallel execution
+</code></pre>
+
+    <h2 id="mistakes">15. Common mistakes</h2>
+    <ul>
+      <li>Vague tool descriptions, causing the model to misuse or never use a tool appropriately.</li>
+      <li>Executing tool arguments without validation, risking injection into shell commands, SQL, or file paths.</li>
+      <li>Not handling tool execution errors gracefully — crashing instead of returning a structured error the model can react to.</li>
+      <li>Giving the model overly broad tool permissions (e.g., unrestricted shell access) without scoping.</li>
+    </ul>
+
+    <h2 id="best">16. Best practices</h2>
+    <ul>
+      <li>Write clear, specific tool descriptions — the model relies entirely on them for correct selection.</li>
+      <li>Validate all tool arguments with a schema library before executing.</li>
+      <li>Return structured, informative errors on failure so the model can retry/adjust.</li>
+      <li>Scope tool permissions tightly (least privilege) per context/user.</li>
+      <li>Set limits on tool-call iterations to bound cost/risk of runaway loops.</li>
+    </ul>
+
+    <h2 id="production">17. Production considerations</h2>
+    <p>Log every tool call and its result for auditability; apply rate limiting/timeouts per tool execution; have a circuit breaker for tools that fail repeatedly (e.g., a flaky external API).</p>
+
+    <h2 id="security">18. Security considerations</h2>
+    <p>Treat tool arguments generated by the LLM as untrusted input requiring the same validation/sanitization as any external user input — never pass them directly into shell commands, SQL queries, or file paths without validation (see <a href="../38-AI-Security/">AI Security — excessive agency</a>).</p>
+
+    <h2 id="performance">19. Performance considerations</h2>
+    <p>Each tool-call round trip (model decides → execute → feed back → model continues) adds latency; parallel tool calls (when supported) reduce total round trips for independent actions.</p>
+
+    <h2 id="cost">20. Cost considerations</h2>
+    <p>Each round in the tool-call loop is a separate billed LLM call — complex multi-tool tasks can accumulate significant cost; set iteration limits and monitor average tool-calls-per-task.</p>
+
+    <h2 id="debug">21. Debugging/troubleshooting</h2>
+    <ul>
+      <li><b>Model never calls the expected tool:</b> improve the tool's description/examples; check if a competing tool's description is more appealing to the model for that query type.</li>
+      <li><b>Model calls a tool with malformed arguments:</b> add a few-shot example or tighten the schema (e.g., enums instead of free strings).</li>
+      <li><b>Infinite tool-call loop:</b> add a hard iteration limit and investigate whether the tool's result format is confusing the model about task completion.</li>
+    </ul>
+
+    <h2 id="related">22. Related concepts</h2>
+    <p><a href="../09-Structured-Output/structured-output.html">Structured Output</a> · <a href="../17-AI-Agents/">AI Agents</a> · <a href="../22-MCP/">MCP</a></p>
+
+    <h2 id="comparison">23. Comparison with alternatives</h2>
+    <table>
+      <tr><th>Approach</th><th>Notes</th></tr>
+      <tr><td>Native tool calling</td><td>Standardized, provider-supported, most reliable</td></tr>
+      <tr><td>Prompt-based "pseudo tool calling"</td><td>Asking the model to output a specific text pattern you parse manually — fragile, provider-independent but unreliable</td></tr>
+      <tr><td>MCP</td><td>A standardized protocol for exposing tools across different hosts/clients, built on the same underlying concept</td></tr>
+    </table>
+
+    <h2 id="exercise">24. Mini practical exercise</h2>
+    <p>Define a simple calculator tool (`add(a, b)`) and run the full tool-call loop manually, printing each step (tool decision, arguments, execution, final answer).</p>
+
+    <h2 id="project">25. Practical project</h2>
+    <p><b>Multi-Tool Assistant:</b> build an assistant with 3 tools (weather lookup, calculator, simple database query) and a full tool-call loop with error handling, argument validation, and an iteration limit.</p>
+
+    <h2 id="projectarch">26. Project architecture</h2>
+    <pre><code>tools = [get_weather, calculate, query_db]
+loop:
+  response = llm.create(messages, tools=tools)
+  if response has tool_use: validate args -> execute -> append result -> continue
+  else: return final text answer
+  stop if iteration > MAX_ITER</code></pre>
+
+    <h2 id="interview-b">27. Interview Questions — Beginner</h2>
+    <div class="qa"><b>Q1.</b> What is tool calling?<br><b>A.</b> A mechanism letting an LLM request that a defined function be executed with structured arguments, incorporating the result into its response.</div>
+    <div class="qa"><b>Q2.</b> Who actually executes the tool — the model or the application?<br><b>A.</b> The application — the model only requests the call; it has no execution environment of its own.</div>
+    <div class="qa"><b>Q3.</b> What does a tool schema define?<br><b>A.</b> The tool's name, description, and the structure/types of arguments it expects.</div>
+    <div class="qa"><b>Q4.</b> Why does the model need a clear tool description?<br><b>A.</b> It relies entirely on the description to decide whether and when that tool is appropriate for a given request.</div>
+    <div class="qa"><b>Q5.</b> What should happen if a tool execution fails?<br><b>A.</b> Return a structured error back to the model so it can react/retry/adjust, rather than crashing the application.</div>
+    <div class="qa"><b>Q6.</b> What is a parallel tool call?<br><b>A.</b> The model requesting multiple independent tool calls in a single turn, which can be executed concurrently.</div>
+    <div class="qa"><b>Q7.</b> Should you trust LLM-generated tool arguments without validation?<br><b>A.</b> No — validate them like any other untrusted input before executing, to prevent injection attacks.</div>
+    <div class="qa"><b>Q8.</b> What's tool permission scoping?<br><b>A.</b> Restricting which tools a given context/user is allowed to invoke, following least-privilege principles.</div>
+    <div class="qa"><b>Q9.</b> What happens after a tool returns a result?<br><b>A.</b> The result is fed back into the conversation, and the model processes it to produce a final answer or call another tool.</div>
+    <div class="qa"><b>Q10.</b> Is tool calling only used in "agents"?<br><b>A.</b> No — it's also used in simpler single-step integrations like RAG (retrieval as a tool) or structured data lookups, not only in multi-step agent loops.</div>
+
+    <h2 id="interview-i">28. Interview Questions — Intermediate</h2>
+    <div class="qa"><b>Q1.</b> Why is tool argument validation especially critical compared to validating typical user input?<br><b>A.</b> LLM-generated arguments can be subtly malformed or even adversarially influenced by injected content in context, and because they're generated by a probabilistic model rather than a predictable UI form, they need the same rigor as any untrusted input before touching sensitive operations (shell, SQL, file paths).</div>
+    <div class="qa"><b>Q2.</b> How would you design tool descriptions to minimize the model calling the wrong tool among several similar options?<br><b>A.</b> Make descriptions specific and mutually exclusive in scope, include example use cases in the description, and avoid overlapping functionality between tools — ambiguous or overlapping tool purposes are a common cause of misselection.</div>
+    <div class="qa"><b>Q3.</b> Why might you set a maximum iteration limit on a tool-calling loop even for a well-designed agent?<br><b>A.</b> To bound worst-case cost and latency in case of an edge case causing the model to loop (e.g., misinterpreting a tool result as incomplete) — a safety net against runaway execution regardless of how well-tuned the happy path is.</div>
+    <div class="qa"><b>Q4.</b> How does returning a structured error (vs. crashing) from a failed tool call improve agent reliability?<br><b>A.</b> It gives the model the information needed to adjust its approach (retry with different arguments, try a different tool, or inform the user of the limitation) rather than ending the interaction abruptly with an unhandled exception.</div>
+    <div class="qa"><b>Q5.</b> Why is "tool calling" considered the foundational mechanism underlying both agents and MCP?<br><b>A.</b> Both build on the same core loop (model decides action → structured request → execution → result fed back); agents apply this iteratively for complex tasks, and MCP standardizes how tools are discovered and exposed across different applications — but the fundamental mechanism is identical.</div>
+
+    <h2 id="interview-a">29. Interview Questions — Advanced</h2>
+    <div class="qa"><b>Q1.</b> How would you design a tool-calling system that safely allows a model to execute shell commands for a coding agent, without giving it unrestricted system access?<br><b>A.</b> Sandbox execution (containerized or restricted environment), maintain an allowlist of permitted commands/patterns rather than arbitrary execution, require explicit user approval for destructive operations, log every executed command, and apply resource/time limits per execution — treating the model's requests as suggestions requiring policy enforcement, not direct unchecked execution.</div>
+    <div class="qa"><b>Q2.</b> What's a subtle failure mode when a tool's result is very large (e.g., a huge database query result) and gets fed back into the conversation?<br><b>A.</b> It can consume a large portion of the context window, pushing out other important context (lost in the middle) or even exceeding the window; mitigate by truncating/summarizing large tool results before feeding them back, or having the tool itself return a paginated/filtered summary rather than raw full output.</div>
+
+    <h2 id="interview-s">30. Interview Questions — Senior/Architect</h2>
+    <div class="qa"><b>Q1.</b> Design a tool permission and audit system for an enterprise AI agent platform where different user roles should have access to different tools.<br><b>A.</b> Maintain a role-based tool registry mapping user/context roles to allowed tool sets, enforce this at the application layer before even presenting tools to the model (never rely on the model to self-restrict), log every tool call with user identity and arguments for audit, and require explicit human approval workflows for high-risk tools (e.g., financial transactions, data deletion) regardless of role.</div>
+
+    <h2 id="interview-sc">31. Scenario-Based Questions</h2>
+    <div class="qa"><b>Scenario 1.</b> A coding agent executed a destructive shell command it generated, deleting important files. How do you prevent this going forward?<br><b>A.</b> Require explicit user approval before executing any destructive/irreversible command, sandbox execution to limit blast radius, and maintain an allowlist/denylist of command patterns rather than permitting arbitrary shell execution.</div>
+    <div class="qa"><b>Scenario 2.</b> Your agent occasionally calls the same tool repeatedly with slightly different arguments, never converging on an answer. How do you debug and fix it?<br><b>A.</b> Inspect the tool's result format for clarity/completeness — the model may not be recognizing that it already has sufficient information; add a hard iteration limit as an immediate safeguard, and improve the tool description/result format to make task completion clearer to the model.</div>
+
+    <h2 id="revision">32. Quick revision notes</h2>
+    <ul>
+      <li>Tool calling: LLM decides → generates args → app executes → result fed back → LLM continues/answers.</li>
+      <li>Model never executes anything itself — the application does.</li>
+      <li>Always validate tool arguments; never trust them directly.</li>
+      <li>Scope permissions, set iteration limits, log everything.</li>
+    </ul>
+
+    <h2 id="cheat">33. Cheat sheet</h2>
+    <div class="callout">Tool calling loop: LLM decides tool → generates args → app validates + executes → result fed back → LLM continues. Always validate args, scope permissions (least privilege), handle errors gracefully, bound iterations.</div>
+
+    <h2 id="further">34. Further topics to learn</h2>
+    <p><a href="../17-AI-Agents/">AI Agents</a> → <a href="../22-MCP/">MCP</a> → <a href="../38-AI-Security/">AI Security (excessive agency)</a></p>
+
+    <div class="prevnext">
+      <a href="../15-LangChain/langchain-fundamentals.html">← LangChain</a>
+      <a href="../17-AI-Agents/ai-agents-fundamentals.html">Next: AI Agents →</a>
+    </div>
+  </main>
+</div>
+<script src="../assets/app.js"></script>
+</body>
+</html>

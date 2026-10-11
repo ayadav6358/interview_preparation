@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Logging & Centralized Logging — Observability & Security — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">Observability &amp; Security</a><span class="sep">›</span>Logging</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>Logging &amp; Centralized Logging</h1>
+      <p class="meta-line"><span>⏱ ~2.5 hrs</span><span>📍 Chapter 1 of 6</span></p>
+      <p><strong>One-line summary:</strong> Logs are the raw, unstructured truth of what happened — structured
+      logging plus correlation IDs plus centralized aggregation (ELK/Loki) turns that truth into something you
+      can actually query during an incident at 3am.</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>Every senior engineer has debugged a production issue with nothing but logs. The difference between a
+      junior and a senior response is speed: a junior greps through unstructured text across 12 pods; a senior
+      filters a structured query by <code>correlation_id</code> and has the full request lifecycle in 10 seconds.
+      Interviewers ask about logging because it reveals whether you've actually operated a distributed system
+      versus only built one. It also intersects with cost (log volume at scale is a real line item), security
+      (logs are a common place secrets leak), and compliance (PII in logs is a GDPR/SOC2 problem).</p>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>Comfortable with Node.js middleware, async context, and basic familiarity with a logging library
+      (console.log doesn't count). Related: <a href="02-metrics-monitoring.html">Metrics, Monitoring &amp; Alerting</a>,
+      <a href="03-distributed-tracing.html">Distributed Tracing</a>.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="log-levels">Log levels and when to use them</h3>
+      <p>Standard levels (most libraries, e.g. Pino, follow this): <code>fatal</code> (process about to die),
+      <code>error</code> (operation failed, needs attention), <code>warn</code> (unexpected but recovered),
+      <code>info</code> (business-relevant events: "order created", "user logged in"), <code>debug</code>
+      (developer detail, off in prod by default), <code>trace</code> (very verbose, rarely enabled). A senior
+      calibration rule: if an <code>error</code> log doesn't represent something a human needs to look at, it's
+      actually a <code>warn</code>. Alert fatigue is almost always caused by over-use of <code>error</code>.</p>
+
+      <h3 id="structured-logging">Structured (JSON) logging</h3>
+      <p>Plain-text logs like <code>"User 123 failed login from 1.2.3.4"</code> are human-friendly but
+      machine-hostile — you can't filter, aggregate, or alert on them reliably because the schema lives only in
+      someone's head. Structured logging emits each log line as a JSON object with consistent field names
+      (<code>level</code>, <code>time</code>, <code>msg</code>, <code>userId</code>, <code>ip</code>,
+      <code>correlationId</code>, <code>service</code>, <code>env</code>). This lets a log aggregator index and
+      query by field instead of doing full-text regex search over billions of lines. Pino is the standard choice
+      for Node in 2025–26 because it's asynchronous and extremely low-overhead (it offloads JSON serialization to
+      avoid blocking the event loop on hot paths), compared to Winston which is more flexible/plugin-rich but
+      slower under load.</p>
+
+      <h3 id="correlation-ids">Correlation IDs and request context propagation</h3>
+      <p>A correlation ID (a.k.a. request ID or trace ID in simpler setups) is generated once at the edge
+      (API gateway or the first service that receives the request) and threaded through every log line and every
+      downstream call for that request's entire lifecycle, including async work (queue jobs, background tasks).
+      Without it, finding all the log lines for one user's one request across 5 microservices and 3 async workers
+      is close to impossible under real traffic. The mechanics: generate a UUID/ULID per request if the caller
+      didn't supply one (respect an incoming <code>X-Request-Id</code> header if present — it lets a client or
+      upstream gateway control it), store it in a per-request context (Node's <code>AsyncLocalStorage</code> is the
+      correct primitive — it survives across <code>await</code> boundaries without manual threading), inject it
+      into every outbound HTTP header and every message queue payload, and have your logger auto-attach it from
+      that context to every log call so application code never has to pass it explicitly.</p>
+
+      <h3 id="pii-redaction">PII and secrets redaction</h3>
+      <p>Logging a full request body is a classic rookie mistake — passwords, credit card numbers, auth tokens,
+      and session cookies end up in plaintext in a log aggregator that dozens of engineers (and sometimes
+      third-party support vendors) can query. Pino supports a <code>redact</code> option that replaces configured
+      paths (<code>req.headers.authorization</code>, <code>req.body.password</code>) with <code>[Redacted]</code>
+      before serialization — this must happen before the log line leaves the process, not as a downstream
+      cleanup step, because once it's shipped to the aggregator it may already be replicated/backed up.</p>
+
+      <h3 id="log-sampling">Sampling and log volume at scale</h3>
+      <p>At high QPS, logging every request at <code>info</code> level is expensive (both in log-ingestion cost
+      and in signal-to-noise). Common senior-level patterns: always log 100% of <code>warn</code>/<code>error</code>,
+      but sample <code>info</code>-level success logs (e.g., log 1 in 100 successful health-check-adjacent requests),
+      and always log 100% of a request if it was slow (duration over some threshold) regardless of status — slow
+      successful requests are often the first signal of a brewing incident.</p>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>The ELK stack (Elasticsearch, Logstash, Kibana) — or its modern lighter-weight cousin, Grafana Loki +
+      Promtail/Fluent Bit + Grafana — works roughly like this: a log shipper (Filebeat, Fluent Bit, or Promtail)
+      runs as a sidecar or DaemonSet on each node/pod, tailing stdout/stderr or a log file. It batches and forwards
+      lines to an ingestion pipeline (Logstash does parsing/enrichment; Loki skips this and treats logs more like
+      Prometheus treats metrics — indexing only labels, not full text, which makes it dramatically cheaper to run
+      at scale). The ingested logs land in a storage/index layer (Elasticsearch's inverted index for full-text
+      search; Loki's chunked object storage keyed by label set). Kibana or Grafana then queries that layer.
+      The key architectural tradeoff: Elasticsearch gives you full-text search over any field at the cost of a much
+      larger storage/indexing footprint; Loki is far cheaper because it only indexes labels (like
+      <code>service</code>, <code>env</code>, <code>level</code>) and does a linear scan over compressed log chunks
+      for the actual text — fine at the query patterns most teams actually use ("show me logs for service X with
+      correlation ID Y"), bad if you need arbitrary full-text search across unindexed fields.</p>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+sequenceDiagram
+  participant Client
+  participant Gateway
+  participant SvcA as Service A
+  participant Queue
+  participant SvcB as Service B (worker)
+  Client->>Gateway: POST /orders (no X-Request-Id)
+  Gateway->>Gateway: generate correlationId = ulid()
+  Gateway->>SvcA: POST /orders (X-Request-Id: cid123)
+  SvcA->>SvcA: log.info({correlationId:"cid123"}, "order received")
+  SvcA->>Queue: publish job {correlationId:"cid123", orderId:42}
+  SvcA-->>Gateway: 202 Accepted
+  Queue->>SvcB: deliver job
+  SvcB->>SvcB: AsyncLocalStorage.run({correlationId:"cid123"}, process)
+  SvcB->>SvcB: log.info({correlationId:"cid123"}, "order fulfilled")
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-typescript">// -----------------------------------------------------------------------
+// 1. Pino structured logger with redaction, correlation ID via AsyncLocalStorage
+// -----------------------------------------------------------------------
+import pino from "pino";
+import { AsyncLocalStorage } from "node:async_hooks";
+import { randomUUID } from "node:crypto";
+import express, { NextFunction, Request, Response } from "express";
+
+type RequestContext = { correlationId: string; userId?: string };
+export const requestContext = new AsyncLocalStorage<RequestContext>();
+
+const baseLogger = pino({
+  level: process.env.LOG_LEVEL ?? "info",
+  redact: {
+    paths: [
+      "req.headers.authorization",
+      "req.headers.cookie",
+      "body.password",
+      "body.creditCard",
+      "*.apiKey",
+    ],
+    censor: "[Redacted]",
+  },
+  // mixin runs on every log call and merges in context without the caller
+  // having to pass correlationId explicitly every time.
+  mixin() {
+    const ctx = requestContext.getStore();
+    return ctx ? { correlationId: ctx.correlationId, userId: ctx.userId } : {};
+  },
+});
+
+export function correlationMiddleware(req: Request, res: Response, next: NextFunction) {
+  const incoming = req.header("x-request-id");
+  const correlationId = incoming && /^[\w-]{8,64}$/.test(incoming) ? incoming : randomUUID();
+  res.setHeader("x-request-id", correlationId);
+  requestContext.run({ correlationId }, () => next());
+}
+
+const app = express();
+app.use(correlationMiddleware);
+
+app.post("/orders", (req, res) => {
+  // No need to pass correlationId manually — mixin() injects it.
+  baseLogger.info({ orderTotal: req.body.total }, "order received");
+  res.status(202).json({ status: "queued" });
+});
+
+// -----------------------------------------------------------------------
+// 2. Propagating correlation ID downstream — over HTTP and over a queue
+// -----------------------------------------------------------------------
+import axios from "axios";
+
+async function callInventoryService(sku: string) {
+  const ctx = requestContext.getStore();
+  return axios.get(`http://inventory-svc/stock/${sku}`, {
+    headers: ctx ? { "x-request-id": ctx.correlationId } : {},
+  });
+}
+
+async function publishFulfillmentJob(orderId: string) {
+  const ctx = requestContext.getStore();
+  await queue.add("fulfill-order", {
+    orderId,
+    correlationId: ctx?.correlationId, // must be carried in the payload —
+                                        // the worker runs in a different process/tick.
+  });
+}
+
+// Worker side: re-establish the context from the job payload before doing
+// any work, so every log line inside the job handler is correlated too.
+queue.process("fulfill-order", async (job) => {
+  await requestContext.run({ correlationId: job.data.correlationId }, async () => {
+    baseLogger.info({ orderId: job.data.orderId }, "fulfillment started");
+    await doFulfillment(job.data.orderId);
+    baseLogger.info({ orderId: job.data.orderId }, "fulfillment complete");
+  });
+});
+
+// -----------------------------------------------------------------------
+// 3. BAD vs GOOD: logging sensitive data
+// -----------------------------------------------------------------------
+// BAD — logs the entire request body, including password, in plaintext.
+// This will be in Kibana/Loki, replicated, backed up, and queryable by
+// anyone with log access — including third-party support contractors.
+app.post("/login-bad", (req, res) => {
+  console.log("Login attempt:", JSON.stringify(req.body)); // { email, password }
+  // ...
+});
+
+// GOOD — redact() strips sensitive fields before the line is even serialized,
+// and we never log the raw body at all; we log only what's needed to debug.
+app.post("/login-good", (req, res) => {
+  baseLogger.info({ email: req.body.email, ip: req.ip }, "login attempt");
+  // password never touches a log line, redacted or not.
+});
+
+// -----------------------------------------------------------------------
+// 4. Sampling: log 100% of errors/slow requests, sample the rest
+// -----------------------------------------------------------------------
+app.use((req, res, next) => {
+  const start = Date.now();
+  res.on("finish", () => {
+    const durationMs = Date.now() - start;
+    const isSlow = durationMs > 500;
+    const isError = res.statusCode >= 500;
+    const sampled = Math.random() < 0.01; // 1% sample for routine success
+    if (isError || isSlow || sampled) {
+      baseLogger.info({ path: req.path, status: res.statusCode, durationMs }, "request completed");
+    }
+  });
+  next();
+});
+</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod">
+        <h4>At scale</h4>
+        <p>A payments company runs 40 microservices on Kubernetes, ~200k requests/min at peak. Logging every
+        request at <code>info</code> without sampling generated ~4TB/day into Elasticsearch, costing more in
+        storage/compute than the actual application infra. The fix: move to Loki (label-based indexing instead of
+        full-text), keep correlation IDs as a label on every stream, sample successful <code>info</code> logs at
+        1%, and log 100% of anything with <code>status >= 400</code> or <code>durationMs > p95</code>. Log volume
+        dropped ~85% with zero loss of incident-debugging capability, because the lines that actually get queried
+        during an incident are the error/slow ones, not the routine successes. The team also set a hard rule:
+        any PR that adds a new <code>log.info</code> call touching <code>req.body</code> or any field matching
+        <code>/token|password|secret|key/i</code> fails CI via a custom ESLint rule.</p>
+      </div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha">
+        <h4>Gotcha</h4>
+        <p>Using <code>console.log</code> in production code paths blocks the event loop synchronously on some
+        platforms/terminals and has no structure, level, or redaction — it's fine for a local script, never for a
+        service. Another common gotcha: forgetting that <code>AsyncLocalStorage</code> context is lost across a
+        message queue boundary (new process/tick) unless you explicitly serialize the correlation ID into the job
+        payload and re-establish the context on the consumer side — this is the #1 cause of "the logs just stop"
+        mid-request-lifecycle.</p>
+      </div>
+      <ul>
+        <li>Never log raw request/response bodies by default; log specific, intentional fields.</li>
+        <li>Always propagate (or generate) a correlation ID at the very first point of entry, before any other
+        middleware runs, so even early rejections (auth failures, rate limits) are correlated.</li>
+        <li>Set retention policy consciously — logs older than N days should be deleted or moved to cold storage,
+        not kept forever "just in case" (cost + compliance liability).</li>
+        <li>Timestamp every log line in UTC with milliseconds; never rely on the aggregator's ingestion time as
+        the event time — under backpressure, ingestion time can lag event time by minutes.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>ELK (Elasticsearch)</td><td>Need full-text search across arbitrary fields, complex ad-hoc queries, existing Elastic expertise</td><td>Cost-sensitive, high log volume, mostly label-based queries</td><td>Loki</td></tr>
+        <tr><td>Grafana Loki</td><td>High volume, cost-sensitive, queries are mostly "by service/correlationId/level"</td><td>Need deep full-text search over unindexed free-text fields</td><td>ELK</td></tr>
+        <tr><td>Pino</td><td>High-throughput Node services, performance-critical hot paths</td><td>Need rich transport plugins out of the box</td><td>Winston</td></tr>
+        <tr><td>Winston</td><td>Need many transports/formats, less throughput-sensitive</td><td>Very high QPS logging on the hot path</td><td>Pino</td></tr>
+        <tr><td>Log everything at info</td><td>Low traffic, early-stage product, debugging a new feature</td><td>High QPS production service with cost constraints</td><td>Sampling + always-log-errors/slow</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic">
+        <h4>Basic</h4>
+        <details class="qa"><summary>What's the difference between structured and unstructured logging?</summary><div class="answer"><p>Unstructured logging is free-text ("User 123 failed login"); structured logging emits each entry as a consistent object (usually JSON) with named fields, enabling filtering, aggregation, and alerting by field instead of regex over text.</p></div><div class="followup">Follow-up: why does this matter more at scale than for a single-server app?</div></details>
+        <details class="qa"><summary>What is a correlation ID and why do you need one?</summary><div class="answer"><p>A unique identifier generated per request (or per logical unit of work) and attached to every log line and downstream call it causes, so you can reconstruct the full lifecycle of one request across multiple services/processes.</p></div><div class="followup">Follow-up: where should it be generated if the client doesn't supply one?</div></details>
+        <details class="qa"><summary>Name the standard log levels and when you'd use each.</summary><div class="answer"><p>fatal (process dying), error (failed operation needing attention), warn (recovered but unexpected), info (business events), debug (dev detail), trace (very verbose). Calibration: if an "error" doesn't need human attention, it should be a warn.</p></div><div class="followup">Follow-up: what's alert fatigue and how does log-level discipline prevent it?</div></details>
+        <details class="qa"><summary>Why shouldn't you log a full request body by default?</summary><div class="answer"><p>It often contains PII or secrets (passwords, tokens, card numbers) that get replicated into log aggregators accessible to many people/vendors — a compliance and security risk.</p></div><div class="followup">Follow-up: how does Pino's redact option work mechanically?</div></details>
+        <details class="qa"><summary>What's the difference between Pino and Winston?</summary><div class="answer"><p>Pino is built for performance — low overhead, async-friendly serialization, good for high-throughput hot paths. Winston is more flexible with transports/formats but has higher overhead.</p></div><div class="followup">Follow-up: when would Winston's flexibility actually matter?</div></details>
+        <details class="qa"><summary>What is log sampling and why would you do it?</summary><div class="answer"><p>Logging only a fraction of routine/successful events (while always logging errors and slow requests) to control volume/cost without losing the signal that actually matters during an incident.</p></div><div class="followup">Follow-up: what types of events should never be sampled?</div></details>
+        <details class="qa"><summary>What is Elasticsearch/Logstash/Kibana (ELK) used for?</summary><div class="answer"><p>A stack for centralizing, indexing (full-text), and visually querying logs across many services/hosts instead of SSHing into each machine.</p></div><div class="followup">Follow-up: what's the main cost driver of running ELK at scale?</div></details>
+      </div>
+      <div class="qa-level medium">
+        <h4>Medium</h4>
+        <details class="qa"><summary>Walk through how a correlation ID survives a request that goes through an API gateway, a service, and a message queue job.</summary><div class="answer"><p>Gateway generates/forwards it as a header; the service reads it into an AsyncLocalStorage-like context for the synchronous request lifecycle; before publishing to the queue, the correlation ID is explicitly serialized into the job payload (context doesn't survive process boundaries); the worker re-establishes the context from the payload before processing, so its logs are still correlated.</p></div><div class="followup">Follow-up: what breaks if you forget the explicit serialization step?</div></details>
+        <details class="qa"><summary>Why does Node's AsyncLocalStorage matter here instead of just passing correlationId as a function parameter?</summary><div class="answer"><p>Threading an ID through every function signature across a deep call stack with many async boundaries is invasive and error-prone. AsyncLocalStorage attaches context to the async execution chain itself, so any code (including third-party middleware) can read it without being explicitly passed it, and it correctly survives awaits.</p></div><div class="followup">Follow-up: what's a limitation of AsyncLocalStorage under heavy load (perf overhead)?</div></details>
+        <details class="qa"><summary>Compare Loki vs Elasticsearch architecturally — why is Loki cheaper?</summary><div class="answer"><p>Elasticsearch builds a full inverted index over every field/token in every log line, which is powerful but storage/compute heavy. Loki only indexes a small set of labels (like Prometheus does for metrics) and stores the actual log text as compressed chunks, scanning them linearly at query time — cheap to ingest and store, as long as your queries are mostly label-filtered.</p></div><div class="followup">Follow-up: what query pattern would make Loki perform badly?</div></details>
+        <details class="qa"><summary>How would you design PII redaction so a bug in application code can't accidentally leak secrets into logs?</summary><div class="answer"><p>Configure redaction at the logger level (path-based, e.g. Pino's redact) so it's enforced centrally regardless of what fields a given call site passes, rather than relying on every developer to remember to scrub manually; back it up with a lint rule that flags logging of req.body/headers wholesale, and periodic audits of log samples.</p></div><div class="followup">Follow-up: what's a weakness of path-based redaction (e.g., dynamic/unknown field names)?</div></details>
+        <details class="qa"><summary>How do you decide log retention policy for a regulated (e.g., fintech) system?</summary><div class="answer"><p>Balance operational need (how far back do you realistically debug?) against compliance requirements (some regulations mandate minimum retention for audit trails) and cost; typically hot storage for 7–30 days, cold/archive storage for longer mandated retention, with PII-bearing logs having stricter/shorter retention or field-level encryption.</p></div><div class="followup">Follow-up: how do you handle a "right to be forgotten" request against logs you've already shipped?</div></details>
+        <details class="qa"><summary>Your logs show a spike in error rate but no clear pattern in the log messages. What's your next step?</summary><div class="answer"><p>Pivot to correlation IDs of a handful of the failing requests, pull their full cross-service log trail, and cross-reference with metrics/traces for the same time window to see if it's one downstream dependency, a deploy correlation, or a resource exhaustion issue.</p></div><div class="followup">Follow-up: what would make you suspect a deploy-caused regression versus an external dependency issue?</div></details>
+        <details class="qa"><summary>How would you prevent a new feature's logging from silently exploding log volume/cost in production?</summary><div class="answer"><p>Code review checklist for new log.info calls in hot paths, default to debug level for verbose new features until proven necessary at info, dashboard/alert on log ingestion volume itself, and load-test with logging enabled before shipping.</p></div><div class="followup">Follow-up: how would you detect this issue after the fact rather than prevent it?</div></details>
+      </div>
+      <div class="qa-level advanced">
+        <h4>Advanced</h4>
+        <details class="qa"><summary>Design a logging strategy for a system processing 500k events/sec where even 1% sampling is still too much volume.</summary><div class="answer"><p>Tiered approach: emit metrics (counters/histograms) for the high-volume hot path instead of per-event logs (metrics are pre-aggregated, far cheaper); log only exceptional events (errors, outliers by duration) at full fidelity; use adaptive/dynamic sampling that increases sample rate automatically when error rate rises, so you get more detail exactly when you need it; consider structured "wide events"/trace spans instead of logs for ultra-high-cardinality debugging needs (this is the core argument behind the observability 2.0 movement).</p></div><div class="followup">Follow-up: what's the tradeoff of dynamic/adaptive sampling vs fixed-rate sampling?</div></details>
+        <details class="qa"><summary>How would you detect and prevent secrets accidentally logged in production before they're exfiltrated by someone with log access?</summary><div class="answer"><p>Defense in depth: logger-level redaction by field path and by regex pattern-matching values that look like secrets (JWTs, AWS keys, high-entropy strings) as a catch-all; a log-ingestion-side scanner that flags/quarantines lines matching known secret patterns even if redaction was missed; automatic secret rotation triggered the moment a leak is confirmed; and restricting log access via RBAC so even a leak has limited blast radius.</p></div><div class="followup">Follow-up: why is regex-based secret detection on log values insufficient alone?</div></details>
+        <details class="qa"><summary>How does log correlation differ from distributed tracing, and when is logging alone insufficient?</summary><div class="answer"><p>Correlation IDs tie log lines together but give you no inherent sense of causality, parent/child relationships, or timing breakdown between spans — you have to manually reconstruct order from timestamps. Distributed tracing (OpenTelemetry) captures the causal tree explicitly (span parent/child, start/end times) so you can see exactly which hop in a multi-service call dominated latency without manual reconstruction.</p></div><div class="followup">Follow-up: can you get "good enough" causal visibility from logs alone with disciplined practices?</div></details>
+        <details class="qa"><summary>You're migrating 40 services from ELK to Loki to cut costs. What's your migration risk and how do you de-risk it?</summary><div class="answer"><p>Risk: losing full-text search capability teams depend on for ad-hoc debugging, and query pattern mismatches causing slow Loki queries. De-risk via dual-write/shadow period comparing query results and latency, auditing actual historical query patterns in Kibana to confirm they're mostly label-filterable, and keeping a short-retention ELK fallback for a transition window.</p></div><div class="followup">Follow-up: how would you quantify "cost savings" convincingly to justify the migration to leadership?</div></details>
+        <details class="qa"><summary>A log aggregator outage means you have zero logs during an active incident. What do you fall back on, and how do you architect against this recurring?</summary><div class="answer"><p>Fall back to metrics/dashboards (usually a separate system) and direct access to the affected hosts/pods (kubectl logs, SSH) for the most recent window. To architect against recurrence: decouple log shipping from the critical path (never block application logic on the aggregator being up), keep a local ring buffer/short retention on-host as a last resort, and ensure your metrics/alerting pipeline is on genuinely independent infrastructure from your logging pipeline.</p></div><div class="followup">Follow-up: why is it dangerous for metrics and logging to share the same underlying infrastructure?</div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment">
+        <span class="level-tag">Beginner (30-60 min)</span>
+        <h4>Structured request logger with correlation ID</h4>
+        <p>Build an Express app with two routes. Add middleware that generates (or forwards) a correlation ID
+        and logs every request/response with Pino in JSON, including the correlation ID on every line.</p>
+        <ul>
+          <li>Logger must use JSON output with level, time, msg, correlationId.</li>
+          <li>Correlation ID must be returned in the response header so a client can report it.</li>
+          <li>Incoming <code>X-Request-Id</code> header should be respected if present and valid.</li>
+        </ul>
+        <p><strong>Acceptance criteria:</strong> Hitting both routes produces log lines in Kibana/terminal that
+        share a correlation ID per request, and a malformed/missing header still produces a valid new ID.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>Use AsyncLocalStorage or a simple per-request object attached to <code>req</code>; validate the incoming header with a regex before trusting it (never trust client input blindly, even for an ID).</p></div></details>
+        <p><strong>Bonus:</strong> Add redaction for an <code>Authorization</code> header.</p>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Intermediate (2-4 hrs)</span>
+        <h4>Cross-service correlation through a queue</h4>
+        <p>Build two services: an API that accepts a job and pushes it to a queue (BullMQ + Redis, or an in-memory
+        queue if you want to skip infra), and a worker that processes it. Correlation ID must flow from the
+        original HTTP request into the worker's logs.</p>
+        <ul>
+          <li>API logs "job enqueued" with correlationId.</li>
+          <li>Worker logs "job started" and "job finished" with the same correlationId, re-established via AsyncLocalStorage from the job payload.</li>
+          <li>Simulate 50 concurrent requests and prove (via a script that greps logs by correlationId) that no IDs cross-contaminate between concurrent jobs.</li>
+        </ul>
+        <p><strong>Acceptance criteria:</strong> A script given one correlation ID can print the complete
+        cross-process lifecycle of that one request in order.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>The queue payload is the only thing that survives the process boundary — don't rely on in-memory context there. Watch for ID collisions under concurrency if you use a predictable (non-random) ID scheme.</p></div></details>
+        <p><strong>Bonus:</strong> Ship logs to a local Loki + Grafana stack via Docker Compose and query by correlationId in Grafana Explore.</p>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Advanced (1-2 days)</span>
+        <h4>Production-grade logging pipeline with sampling and cost controls</h4>
+        <p>Design and partially implement a logging pipeline for a simulated high-traffic service: adaptive
+        sampling (100% of errors/slow requests, 1% of routine success, bumped automatically to 100% for a
+        rolling window when error rate crosses a threshold), PII redaction, and a Loki + Promtail + Grafana
+        Docker Compose setup with a dashboard showing log volume over time.</p>
+        <ul>
+          <li>Load-test the service and demonstrate log volume reduction vs. unsampled baseline, with numbers.</li>
+          <li>Demonstrate the adaptive trigger: inject a burst of errors and show sampling rate increasing automatically, then decaying back down.</li>
+          <li>Write a one-page design doc justifying your retention policy and redaction field list.</li>
+        </ul>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>This is intentionally open-ended — think about where the sampling decision needs to live (must happen before the expensive serialization/IO, not after) and how you'd detect the error-rate trigger without adding significant overhead itself.</p></div></details>
+        <p><strong>Bonus:</strong> Add a CI lint rule (custom ESLint rule) that fails a PR if it detects a raw <code>req.body</code> or <code>req.headers</code> object passed directly into a log call.</p>
+      </div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet">
+        <ul>
+          <li>Structured (JSON) logs &gt; free text — enables filtering/alerting by field.</li>
+          <li>Generate/forward a correlation ID at the edge; propagate via headers (HTTP) and payload fields (queues) — context doesn't survive process boundaries automatically.</li>
+          <li>Use AsyncLocalStorage in Node to avoid manually threading correlationId through every function.</li>
+          <li>Redact secrets/PII at the logger level (path-based + pattern-based), before the line is serialized.</li>
+          <li>Log levels: fatal/error/warn/info/debug/trace — if an "error" doesn't need human attention, downgrade it.</li>
+          <li>Sample routine success logs; never sample errors or slow requests.</li>
+          <li>Pino for high-throughput Node services; Winston when you need more transport flexibility.</li>
+          <li>ELK = full-text search, expensive at scale; Loki = label-indexed, far cheaper, less flexible for free-text queries.</li>
+          <li>Set explicit log retention; it's a cost and compliance decision, not a default.</li>
+          <li>Decouple log shipping from the request's critical path — never block app logic on the log pipeline.</li>
+        </ul>
+      </div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://getpino.io/#/docs/api">Pino documentation</a></li>
+        <li><a href="https://grafana.com/docs/loki/latest/">Grafana Loki documentation</a></li>
+        <li><a href="https://www.elastic.co/guide/en/elasticsearch/reference/current/index.html">Elasticsearch reference guide</a></li>
+        <li><a href="https://nodejs.org/api/async_context.html">Node.js AsyncLocalStorage docs</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="index.html"><span class="dir">← Previous</span>Topic Overview</a>
+        <a class="next" href="02-metrics-monitoring.html"><span class="dir">Next →</span>Metrics, Monitoring &amp; Alerting</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · Observability &amp; Security</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-typescript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-yaml.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-sql.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "07-observability-security", chapterKey: "01-logging" });</script>
+</body>
+</html>

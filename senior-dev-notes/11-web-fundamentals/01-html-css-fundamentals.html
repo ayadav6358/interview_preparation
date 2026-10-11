@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HTML & CSS Fundamentals — Web Fundamentals — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">Web Fundamentals</a><span class="sep">›</span>HTML & CSS Fundamentals</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>HTML &amp; CSS Fundamentals: Semantic HTML, the Box Model, Flexbox, Grid, Specificity &amp; the Cascade</h1>
+      <p class="meta-line"><span>⏱ 2.5 hrs</span><span>📍 Chapter 1 of 6</span></p>
+      <p><strong>One-line summary:</strong> Semantic markup and a precise mental model of the box model, cascade and layout algorithms are what separate "I can build a page" from "I can explain exactly why this pixel is where it is" — the latter is what interviews and real debugging sessions actually test.</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>Ten years in, you don't need to be told what a `&lt;div&gt;` is. What you need is to be fast and precise under pressure: given a layout bug, can you name the exact cascade rule or box-model interaction causing it in under a minute? Interviewers at the senior level use CSS/HTML questions as a filter for "can this person debug production CSS without guessing and adding `!important`." It's also the literal foundation every React component you'll write renders down to — if you don't understand what the browser does with the DOM/CSSOM you produce, you can't reason about layout thrash, CLS (Cumulative Layout Shift), or why a component "just doesn't look right" at certain viewport widths.</p>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>None — this is the starting chapter of this topic. It feeds into <a href="03-dom-and-browser.html">The DOM &amp; Browser Environment</a> (rendering pipeline) and is assumed knowledge for <a href="../12-react-fundamentals/index.html">React Fundamentals</a> and <a href="../03-react-nextjs-advanced/index.html">React/Next.js Advanced</a>, where styling systems (CSS Modules, Tailwind, styled-components) all compile down to the same cascade rules covered here.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="semantic-html">Semantic HTML and why it's not just "accessibility theater"</h3>
+      <p>Semantic elements (<code>&lt;header&gt;</code>, <code>&lt;nav&gt;</code>, <code>&lt;main&gt;</code>, <code>&lt;article&gt;</code>, <code>&lt;section&gt;</code>, <code>&lt;aside&gt;</code>, <code>&lt;footer&gt;</code>, <code>&lt;figure&gt;</code>, <code>&lt;time&gt;</code>) exist because the browser, screen readers, and search engines build an accessibility tree and document outline from tag semantics, not from visual appearance. A `&lt;div&gt;` styled to look like a button conveys zero semantics to the accessibility tree — screen readers won't announce it as a button, it won't receive click via <kbd>Enter</kbd>/<kbd>Space</kbd> automatically, and it won't appear in the browser's native "landmarks" navigation. Senior-level distinction: `&lt;section&gt;` requires an accessible heading to be meaningful to the outline algorithm; a `&lt;section&gt;` with no heading is "generic" and should often just be a `&lt;div&gt;`. `&lt;article&gt;` means independently distributable/syndicatable content (a blog post, a card in a feed) — not "a box with a border."</p>
+      <p>ARIA rule of thumb (the "first rule of ARIA"): don't use an ARIA role if a native HTML element already gives you that role for free. `&lt;button&gt;` already has `role="button"`, focusability, keyboard activation, and disabled-state semantics built in — reimplementing all of that on a `&lt;div role="button"&gt;` is strictly worse and a common interview red flag.</p>
+
+      <h3 id="box-model">The box model, precisely</h3>
+      <p>Every element's rendered box = <code>content + padding + border + margin</code>. The critical interview detail is <strong>box-sizing</strong>: with the default <code>content-box</code>, setting <code>width: 200px</code> sets the content area's width only — padding and border add on top, so a `200px` box with `20px` padding and a `2px` border actually occupies `244px`. With <code>box-sizing: border-box</code>, `width` includes padding and border, so the box stays exactly `200px` regardless of padding. This is why nearly every production reset does <code>*, *::before, *::after { box-sizing: border-box; }</code> — it makes width math predictable.</p>
+      <p><strong>Margin collapsing</strong>: adjacent vertical margins between block-level siblings (and between a parent and its first/last child, under conditions) collapse to the larger of the two, not their sum — a classic "why is there less space than I expected" bug. Margins do <em>not</em> collapse: horizontally, with `display: flex`/`grid` children, or when a border/padding/BFC sits between the two margins.</p>
+      <p><strong>Block Formatting Context (BFC)</strong>: a BFC is a mini independent layout context. It's created by `overflow: hidden/auto`, `display: flow-root` (the clean modern way), `float`, `position: absolute/fixed`, or being a flex/grid container. A new BFC famously fixes the "float containment" / margin-collapse-escape problems, which is why `overflow: hidden` on a parent was the classic (if accidental) float-clearing hack — `display: flow-root` is the intentional, side-effect-free modern equivalent.</p>
+
+      <h3 id="flexbox-grid">Flexbox vs Grid — when each actually wins</h3>
+      <p><strong>Flexbox is one-dimensional</strong>: it distributes space along a single axis (row or column) and is built for content-driven sizing — items size based on their content unless told otherwise. Core properties: `justify-content` (main axis alignment), `align-items` (cross-axis alignment), `flex-grow`/`flex-shrink`/`flex-basis` (the shorthand `flex: 1 1 0` is "grow and shrink equally, start from zero basis" — the most common "equal columns" pattern). `flex-shrink` defaults to 1 (items shrink to fit) while `flex-grow` defaults to 0 (items don't expand to fill extra space unless told to).</p>
+      <p><strong>Grid is two-dimensional</strong>: rows and columns are defined explicitly up front (`grid-template-columns`/`rows`), and items are placed into cells by line number, name, or the `grid-auto-flow` algorithm. Grid wins whenever rows and columns both matter for alignment (dashboards, card galleries, page-level app shells) because it can align content across both axes simultaneously — something Flexbox structurally cannot do (Flexbox items in a wrapped row don't align into clean columns across rows; Grid items do). `fr` units (fractional remaining space) and `repeat(auto-fit, minmax(200px, 1fr))` are the modern idiom for "responsive grid with no media queries."</p>
+      <p>Senior rule of thumb: reach for Flexbox for components (navbars, button groups, card internals), Grid for page/section layout (the overall page skeleton, card galleries). Many real layouts nest both: a Grid-based page shell containing Flexbox-based components.</p>
+
+      <h3 id="specificity">Specificity and the cascade — the exact algorithm</h3>
+      <p>CSS specificity is a 4-part tuple, compared left-to-right, never "added up" across categories (common misconception): <code>(inline styles, IDs, classes/attributes/pseudo-classes, elements/pseudo-elements)</code>. E.g. `#nav .item.active` is specificity `(0, 1, 2, 0)`; `.item.active.active.active` is `(0, 0, 3, 0)` — three classes never beats one ID, no matter how many you stack. `!important` doesn't change specificity — it jumps the rule into a separate, higher-priority bucket entirely, compared only against other `!important` rules first.</p>
+      <p>Full cascade sort order (highest wins), as of the modern spec: (1) importance of the origin (user `!important` &gt; author `!important` &gt; author normal &gt; user-agent normal), (2) <strong>@layer</strong> order among normal author rules (later-declared layer wins; unlayered styles beat all layered ones), (3) specificity, (4) source order (later rule wins on a true tie). `@layer` (CSS Cascade Layers) is the modern answer to "reset vs component vs utility vs override" specificity wars — you declare layer order once (`@layer reset, base, components, utilities;`) and everything in `utilities` beats everything in `components` regardless of selector specificity, without a single `!important`.</p>
+      <p>Inherited values have the lowest possible priority — any explicit rule on an element, no matter how low its specificity, beats an inherited value from an ancestor.</p>
+
+      <h3 id="responsive">Responsive design: units, queries, and container queries</h3>
+      <p><code>rem</code> is relative to the root `&lt;html&gt;` font-size (predictable, doesn't compound) — prefer it for spacing/typography over `em` (relative to the parent's computed font-size, which compounds through nested elements and causes surprising scaling). <code>vw/vh</code> are relative to the viewport — useful for hero sections but dangerous for font-size alone (can become unreadably small/large without a `clamp()` floor/ceiling: `font-size: clamp(1rem, 2vw + 0.5rem, 2rem)` is the modern fluid-type idiom).</p>
+      <p><strong>Container queries</strong> (`@container`) are the senior-level 2024+ addition most people miss: a media query responds to the <em>viewport</em>, but a component dropped into a narrow sidebar vs a wide main area needs to respond to <em>its container's</em> size, not the viewport's. `container-type: inline-size` on a wrapper + `@container (min-width: 400px) { ... }` lets a card component restyle itself based on the space it's actually given — true component-level responsiveness, which media queries can never give you for a reusable component.</p>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>When the browser parses HTML it builds the DOM tree; parsing CSS builds the CSSOM (CSS Object Model) in parallel. The two are combined into the <strong>render tree</strong> — DOM nodes that are `display: none` (or otherwise not rendered, like `&lt;head&gt;` content) are excluded entirely; `visibility: hidden` nodes ARE in the render tree (they still take up space) but don't paint. The browser then runs <strong>layout</strong> (a.k.a. reflow — compute exact position/size of every render-tree node) and <strong>paint</strong> (fill in pixels: color, text, shadows, borders) and finally <strong>composite</strong> (combine painted layers, applying transforms, on the GPU where possible). This pipeline is why `transform`/`opacity` animations are cheap (composite-only, skip layout and paint) while animating `width`/`top`/`margin` is expensive (triggers layout for every frame) — the canonical "what makes CSS animations janky" interview answer.</p>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+flowchart TD
+    A["HTML source"] --> B["Parse → DOM tree"]
+    C["CSS source"] --> D["Parse → CSSOM"]
+    B --> E["Render Tree<br/>(DOM ∩ CSSOM, display:none excluded)"]
+    D --> E
+    E --> F["Layout / Reflow<br/>(compute geometry)"]
+    F --> G["Paint<br/>(pixels: color, text, shadow)"]
+    G --> H["Composite<br/>(GPU layers, transform/opacity)"]
+      </div>
+      <div class="mermaid">
+flowchart LR
+    subgraph Specificity Tuple comparison, left to right
+    A["Inline style<br/>(1,0,0,0 bucket)"] --> B["ID selectors<br/>#id"]
+    B --> C["Class / attribute /<br/>pseudo-class (.cls, [attr], :hover)"]
+    C --> D["Element / pseudo-element<br/>(div, ::before)"]
+    end
+    E["!important"] -. "separate priority bucket,<br/>compared first, bypasses tuple" .-> A
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-html">&lt;!-- BAD: div soup, zero semantics, keyboard trap --&gt;
+&lt;div class="navbar"&gt;
+  &lt;div class="nav-item" onclick="goHome()"&gt;Home&lt;/div&gt;
+  &lt;div class="nav-item" onclick="goAbout()"&gt;About&lt;/div&gt;
+&lt;/div&gt;
+
+&lt;!-- GOOD: semantic, keyboard-accessible for free --&gt;
+&lt;nav aria-label="Primary"&gt;
+  &lt;ul&gt;
+    &lt;li&gt;&lt;a href="/"&gt;Home&lt;/a&gt;&lt;/li&gt;
+    &lt;li&gt;&lt;a href="/about"&gt;About&lt;/a&gt;&lt;/li&gt;
+  &lt;/ul&gt;
+&lt;/nav&gt;
+</code></pre>
+      <pre><code class="language-css">/* Specificity math walkthrough */
+#sidebar .widget p { color: navy; }      /* (0,1,1,1) */
+.widget p.highlight { color: crimson; }  /* (0,0,2,1) — loses even though it looks "more specific" */
+
+/* Modern reset + predictable box model */
+*, *::before, *::after { box-sizing: border-box; }
+
+/* Cascade layers: ends the specificity arms race */
+@layer reset, base, components, utilities;
+
+@layer components {
+  .btn { background: var(--brand); padding: 0.5rem 1rem; }
+}
+@layer utilities {
+  .u-mt-0 { margin-top: 0; } /* wins over .btn's any margin, regardless of specificity, because layer order wins first */
+}
+
+/* Responsive grid with zero media queries */
+.card-gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 1rem;
+}
+
+/* Container query: component responds to ITS box, not viewport */
+.card-wrapper { container-type: inline-size; }
+@container (min-width: 400px) {
+  .card { grid-template-columns: 120px 1fr; display: grid; }
+}
+
+/* Fluid type with a safe floor/ceiling */
+h1 { font-size: clamp(1.5rem, 1rem + 2vw, 3rem); }
+</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4><p>A design system team ships a `.card` component used across 40 product teams. Each team's CSS build runs after the design system's, and teams keep fighting cascade battles by stacking `!important` and adding extra classes, bloating specificity to absurd levels (`.page .content .section .card.card.override`). The fix: migrate the design system's own styles into `@layer tokens, components;` while leaving consumer app styles unlayered. Because unlayered rules always beat layered ones regardless of specificity, every consuming team's styles now win automatically without touching a single selector or adding `!important` — the specificity war ends architecturally instead of by convention. This also makes the design system's internal refactors safe: consumers can no longer accidentally depend on internal specificity quirks since layers establish a hard boundary.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Assuming specificity "adds up" across categories, e.g. thinking three classes beat one ID. The tuple is compared left-to-right per category; IDs always beat any number of classes, full stop — the only things that can beat an ID are another ID, an inline style, or `!important`.</p></div>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Using `margin` for internal component spacing when you actually mean `padding`, then being surprised by margin collapsing between siblings. If spacing needs to be exact and non-collapsing, prefer `gap` on a flex/grid container over margins on children — `gap` never collapses and doesn't need `:last-child` exceptions.</p></div>
+      <ul>
+        <li>Default to `box-sizing: border-box` globally — it's the single highest-leverage reset rule for predictable width math.</li>
+        <li>Use `gap` instead of margin-based spacing hacks whenever the parent is already flex/grid.</li>
+        <li>Reach for `@layer` instead of `!important` the moment you're fighting a third-party or design-system stylesheet.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs: When to Use vs When NOT To</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>Flexbox</td><td>One-dimensional layout, content-driven sizing, components</td><td>Need row+column alignment together</td><td>CSS Grid</td></tr>
+        <tr><td>CSS Grid</td><td>Page/section layout, dashboards, card galleries</td><td>Simple single-axis row of buttons</td><td>Flexbox</td></tr>
+        <tr><td>Media queries</td><td>Layout depends on viewport size</td><td>A reusable component must adapt to its container, not the viewport</td><td>Container queries (`@container`)</td></tr>
+        <tr><td>`!important`</td><td>Truly last-resort override of uncontrollable third-party CSS</td><td>Fighting your own app's cascade</td><td>`@layer` ordering, lower-specificity selectors</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic"><h4>Basic</h4>
+        <details class="qa"><summary>What's the difference between `content-box` and `border-box`?</summary><div class="answer"><p>With `content-box` (default), `width`/`height` set only the content area — padding and border add on top. With `border-box`, `width`/`height` include padding and border, so the box's rendered size stays fixed regardless of padding.</p></div></details>
+        <details class="qa"><summary>Why prefer `&lt;button&gt;` over `&lt;div onclick&gt;`?</summary><div class="answer"><p>`&lt;button&gt;` gets keyboard focusability, Enter/Space activation, correct accessibility-tree role, and disabled-state handling for free. A styled `&lt;div&gt;` has none of that unless you manually reimplement it with tabindex/ARIA/keydown handlers.</p></div></details>
+        <details class="qa"><summary>Is Flexbox one-dimensional or two-dimensional? What about Grid?</summary><div class="answer"><p>Flexbox is one-dimensional (a single row or column axis). Grid is two-dimensional (rows and columns defined and aligned together).</p></div></details>
+        <details class="qa"><summary>What does `flex: 1` actually expand to?</summary><div class="answer"><p>Shorthand for `flex-grow: 1; flex-shrink: 1; flex-basis: 0%` — grow and shrink equally among siblings, starting from zero base size, so remaining space is split proportionally.</p></div></details>
+        <details class="qa"><summary>What's the difference between `rem` and `em`?</summary><div class="answer"><p>`rem` is always relative to the root element's font-size. `em` is relative to the current element's (or its parent's, for font-size itself) computed font-size, so nested `em` values compound.</p></div></details>
+        <details class="qa"><summary>Does `visibility: hidden` remove an element from layout?</summary><div class="answer"><p>No — it's still in the render tree and still occupies space, it just doesn't paint. `display: none` removes it from the render tree entirely and it takes no space.</p></div></details>
+        <details class="qa"><summary>What's the first rule of ARIA?</summary><div class="answer"><p>Don't use an ARIA role/attribute if a native HTML element already provides that semantic for free — native elements are more robust and have fewer edge cases than reimplementing behavior with ARIA + JS.</p></div></details>
+      </div>
+      <div class="qa-level medium"><h4>Medium</h4>
+        <details class="qa"><summary>Calculate the specificity of `#nav .item.active:hover` vs `.item.active.active.active`, and say which wins.</summary><div class="answer"><p>First: (0,1,2,0) — one ID, two classes/pseudo-classes (`.active`, `:hover` both count as the class category — actually `.item`, `.active`, `:hover` = 3 → (0,1,3,0)). Second: (0,0,4,0) with four class selectors. The ID in the first selector makes it win regardless of how many classes the second selector stacks, since IDs are compared before the class category.</p></div><div class="followup">Follow-up: How would `@layer` change this comparison?</div></details>
+        <details class="qa"><summary>Why does `transform`/`opacity` animate more smoothly than `width`/`top`?</summary><div class="answer"><p>`transform` and `opacity` can be handled entirely in the composite stage on the GPU without re-running layout or paint. Animating `width`, `top`, or `margin` forces layout recalculation (and usually paint) on every frame, which is far more expensive and causes jank on weaker devices.</p></div></details>
+        <details class="qa"><summary>Explain margin collapsing with a concrete example, and one way to prevent it.</summary><div class="answer"><p>Two vertically adjacent block siblings with margin-bottom: 20px and margin-top: 30px end up with 30px of space between them (the larger wins), not 50px. Preventing it: use `gap` on a flex/grid parent instead of margins, or establish a new BFC between them (e.g., `overflow: hidden`/`display: flow-root` on a wrapper).</p></div></details>
+        <details class="qa"><summary>What problem do CSS cascade layers (`@layer`) solve that specificity alone cannot?</summary><div class="answer"><p>Without layers, overriding a low-specificity selector from a third-party/design-system stylesheet forces you to either match or exceed its specificity (often via `!important` or selector bloat). Layers let you declare that an entire layer's rules always lose to another layer's, regardless of each rule's own specificity — ending the arms race architecturally.</p></div></details>
+        <details class="qa"><summary>When would you choose a container query over a media query?</summary><div class="answer"><p>When a reusable component (e.g., a card) needs to adapt its own layout based on the space its parent container gives it, not the overall viewport — e.g., the same card rendered in a wide main column vs a narrow sidebar. Media queries can't express "respond to my container," only "respond to the viewport."</p></div></details>
+        <details class="qa"><summary>Why might `.card .card.card { ... }` be considered a code smell even though it "works"?</summary><div class="answer"><p>It's artificially inflating specificity to win a cascade fight instead of addressing the actual conflicting rule or restructuring with layers/lower-specificity selectors — it's brittle, confusing to future maintainers, and the next override will just repeat the same escalation.</p></div></details>
+      </div>
+      <div class="qa-level advanced"><h4>Advanced</h4>
+        <details class="qa"><summary>Walk through the full cascade sort order the browser applies when two rules target the same property on the same element.</summary><div class="answer"><p>(1) Origin+importance: user-agent normal &lt; user normal &lt; author normal &lt; author !important &lt; user !important (user-agent !important is highest but rare); (2) among normal author rules, cascade layer order (later layer wins, unlayered beats all layered); (3) specificity tuple comparison; (4) source order as the final tiebreaker.</p></div></details>
+        <details class="qa"><summary>Design a CSS architecture for a large app using `@layer` that lets third-party library CSS, a design system, and app-specific overrides coexist without `!important`.</summary><div class="answer"><p>Declare `@layer reset, vendor, tokens, components, utilities;` up front. Import third-party CSS into the `vendor` layer, design-system tokens/components into `tokens`/`components`, and leave true app-level one-off overrides unlayered (or in a final `overrides` layer declared last) so they always win. This gives a predictable, declared win order independent of each stylesheet's internal specificity choices.</p></div></details>
+        <details class="qa"><summary>Explain why `display: flow-root` is preferred over the classic `overflow: hidden` float-containment hack.</summary><div class="answer"><p>Both establish a new Block Formatting Context, which contains floats and prevents margin-collapse escape. But `overflow: hidden` has the side effect of clipping any content that overflows the box (e.g., a dropdown shadow or tooltip), which `display: flow-root` does not — it creates a BFC with no visual side effects, making it the "intentional" tool rather than an accidental side effect being repurposed.</p></div></details>
+        <details class="qa"><summary>A component looks correct in isolation but breaks when embedded in a narrower sidebar elsewhere in the app. Diagnose using what you know about Flexbox vs Grid vs container queries.</summary><div class="answer"><p>Likely the component's internal layout (e.g., flex-basis assumptions or a fixed-width Grid track) assumes a minimum available width that the sidebar doesn't provide, causing wrapping or overflow. The fix is to make the component context-aware via container queries (restyle based on its own container's width) rather than hardcoding breakpoints tied to the viewport, which is what a media-query-only approach would incorrectly assume.</p></div></details>
+        <details class="qa"><summary>Why can three stacked classes never beat a single ID selector, and what are the only things that can?</summary><div class="answer"><p>Specificity is compared category-by-category left to right (inline, ID, class/attr/pseudo-class, element), never summed numerically across categories — so any non-zero count in a higher category (ID) wins before the lower category (class) is even considered, no matter how large that lower count is. Only inline styles, another equally-or-more-specific ID selector, or `!important` can override it.</p></div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment"><span class="level-tag">Beginner (30-60 min)</span><h4>Specificity speed drill</h4><p>Write out 8 CSS selector pairs of increasing trickiness (including at least one ID vs multi-class case, one `!important` case, and one `@layer` case) and compute each pair's winner by hand before checking in a browser devtools "computed" panel.</p><ul><li>Show the 4-part specificity tuple for each selector.</li><li>Note any pair where your intuition was wrong before computing the tuple.</li></ul><p><strong>Acceptance criteria:</strong> All 8 tuples computed correctly and verified against actual browser behavior.</p><details class="qa"><summary>Hints</summary><div class="answer"><p>Compare tuples left to right: inline &gt; ID &gt; class/attr/pseudo-class &gt; element. `!important` is a separate bucket compared first. Layers are compared before specificity for normal-origin rules.</p></div></details><p><strong>Bonus:</strong> Add one pair where a layered rule with high specificity loses to an unlayered rule with low specificity — explain why.</p></div>
+      <div class="assignment"><span class="level-tag">Intermediate (2-4 hrs)</span><h4>Build a responsive card gallery with zero media queries</h4><p>Build a gallery of 12 cards using CSS Grid's `repeat(auto-fit, minmax(...))` and a container query so each card internally reflows from a stacked layout to a side-by-side image+text layout once it has enough width — without a single `@media` rule.</p><ul><li>Gallery must reflow column count smoothly from 320px to 1600px viewport width.</li><li>Each card must independently restyle based on its own box width via `@container`.</li></ul><p><strong>Acceptance criteria:</strong> No horizontal scroll at any width 320–1600px; cards restyle based on container width, verifiable by placing one card in a narrow sidebar alongside the gallery.</p><details class="qa"><summary>Hints</summary><div class="answer"><p>Set `container-type: inline-size` on each card's wrapper, then use `@container (min-width: Npx)` inside that scope. For the gallery, `grid-template-columns: repeat(auto-fit, minmax(240px, 1fr))`.</p></div></details><p><strong>Bonus:</strong> Add a dark-mode variant using only `@media (prefers-color-scheme: dark)` and CSS custom properties, no JS.</p></div>
+      <div class="assignment"><span class="level-tag">Advanced (1-2 days)</span><h4>Design a layered CSS architecture for a multi-team app</h4><p>Simulate three "teams" worth of CSS (a vendor library's CSS, a shared design-system's component CSS, and one app team's override CSS) all targeting the same handful of components, with deliberately conflicting rules. Architect an `@layer` scheme that lets the app team's overrides always win without touching the vendor or design-system files.</p><ul><li>Document the declared layer order and why you chose it.</li><li>Show at least 3 conflicting rules resolved purely by layer order, with no `!important` anywhere.</li></ul><p><strong>Acceptance criteria:</strong> A working layered stylesheet where removing any single app-level selector's specificity advantage (e.g., reducing it to a single class) still results in the correct override, proving the win comes from layer order, not specificity.</p><details class="qa"><summary>Hints</summary><div class="answer"><p>`@layer vendor, tokens, components, app;` declared once at the top of your entry CSS; import each source into its matching layer with `@import url(...) layer(vendor);` or wrap `@layer app { ... }` around the override file's contents.</p></div></details><p><strong>Bonus:</strong> Add a BFC/float-containment case to the same project and solve it with `display: flow-root` instead of `overflow: hidden`, explaining the visual side-effect difference.</p></div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet"><ul>
+        <li>Specificity tuple (inline, ID, class/attr/pseudo-class, element) compared left-to-right, never summed across categories.</li>
+        <li>`!important` is a separate priority bucket, not an addition to specificity.</li>
+        <li>Cascade order: origin/importance → `@layer` order → specificity → source order.</li>
+        <li>`box-sizing: border-box` makes `width` include padding+border — default global reset.</li>
+        <li>Margins collapse vertically between block siblings (larger wins); `gap` on flex/grid never collapses.</li>
+        <li>Flexbox = one axis, content-driven; Grid = two axes, structure-driven. Nest both in real layouts.</li>
+        <li>Container queries (`@container`) respond to a component's own box, not the viewport — true component responsiveness.</li>
+        <li>`transform`/`opacity` animate on compositor only (cheap); `width`/`top`/`margin` trigger layout (expensive).</li>
+        <li>First rule of ARIA: don't reimplement semantics native HTML already gives you for free.</li>
+      </ul></div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://developer.mozilla.org/en-US/docs/Web/CSS/CSS_cascade/Cascade">MDN — Cascade, specificity and inheritance</a></li>
+        <li><a href="https://developer.mozilla.org/en-US/docs/Web/CSS/CSS_cascade/@layer">MDN — CSS Cascade Layers (@layer)</a></li>
+        <li><a href="https://developer.mozilla.org/en-US/docs/Web/CSS/CSS_container_queries">MDN — CSS Container Queries</a></li>
+        <li><a href="https://web.dev/articles/rendering-performance">web.dev — Rendering Performance</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="../10-soft-skills-leadership/index.html"><span class="dir">← Previous</span>Soft Skills & Leadership</a>
+        <a class="next" href="02-javascript-fundamentals.html"><span class="dir">Next →</span>JavaScript Fundamentals</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · Web Fundamentals</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-markup.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-css.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-javascript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "11-web-fundamentals", chapterKey: "01-html-css-fundamentals" });</script>
+</body>
+</html>

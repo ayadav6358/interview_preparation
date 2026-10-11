@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Lifecycle</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <input class="searchbox" placeholder="Search topics..." />
+    <a href="../index.html">← Home</a>
+    <h3>00-AI-Fundamentals</h3>
+    <a href="ai-vs-ml-vs-dl-genai.html">AI vs ML vs DL vs GenAI</a>
+    <a href="ai-lifecycle.html">AI Lifecycle</a>
+    <a href="generative-vs-discriminative.html">Generative vs Discriminative AI</a>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumbs"><a href="../index.html">Home</a> / 00-AI-Fundamentals / AI Lifecycle</div>
+      <button class="theme-toggle" onclick="toggleTheme()">🌓 Theme</button>
+    </div>
+    <h1>AI Lifecycle: Dataset → Training → Evaluation → Inference</h1>
+    <span class="tag good">Stable concept</span><span class="tag">Last verified: 2026-10-06</span>
+
+    <div class="toc">
+      <b>On this page</b>
+      <a href="#what">1. What is this?</a>
+      <a href="#whyexist">2. Why does it exist?</a>
+      <a href="#whyimportant">3. Why is it important?</a>
+      <a href="#whereused">4. Where is it used?</a>
+      <a href="#prereq">5. Prerequisites</a>
+      <a href="#core">6. Core concepts</a>
+      <a href="#terms">7. Terminology</a>
+      <a href="#arch">8. Architecture</a>
+      <a href="#internal">9. How it works internally</a>
+      <a href="#steps">10. Step-by-step explanation</a>
+      <a href="#simple">11. Simple example</a>
+      <a href="#real">12. Real-world example</a>
+      <a href="#code">13. Code example</a>
+      <a href="#advanced">14. Advanced example</a>
+      <a href="#mistakes">15. Common mistakes</a>
+      <a href="#best">16. Best practices</a>
+      <a href="#production">17. Production considerations</a>
+      <a href="#security">18. Security considerations</a>
+      <a href="#performance">19. Performance considerations</a>
+      <a href="#cost">20. Cost considerations</a>
+      <a href="#debug">21. Debugging/troubleshooting</a>
+      <a href="#related">22. Related concepts</a>
+      <a href="#comparison">23. Comparison with alternatives</a>
+      <a href="#exercise">24. Mini practical exercise</a>
+      <a href="#project">25. Practical project</a>
+      <a href="#projectarch">26. Project architecture</a>
+      <a href="#interview-b">27. Interview Questions — Beginner</a>
+      <a href="#interview-i">28. Interview Questions — Intermediate</a>
+      <a href="#interview-a">29. Interview Questions — Advanced</a>
+      <a href="#interview-s">30. Interview Questions — Senior/Architect</a>
+      <a href="#interview-sc">31. Scenario-Based Questions</a>
+      <a href="#revision">32. Quick revision notes</a>
+      <a href="#cheat">33. Cheat sheet</a>
+      <a href="#further">34. Further topics to learn</a>
+    </div>
+
+    <h2 id="what">1. What is this?</h2>
+    <p>The AI/ML lifecycle is the repeatable sequence every model-based system goes through: collect <b>data</b>, <b>train</b> a <b>model</b> by adjusting <b>parameters</b> to minimize a <b>loss function</b>, <b>evaluate</b> it on held-out data, then run <b>inference</b> in production, followed by monitoring and retraining.</p>
+
+    <h2 id="whyexist">2. Why does it exist?</h2>
+    <p>Models are statistical artifacts fit to a sample of data, not universal truths — the lifecycle exists to make that process rigorous and repeatable: separating "did the model learn the pattern" (training) from "does it generalize to new data" (evaluation) from "is it still correct months later in the real world" (monitoring/retraining) prevents silently shipping an overfit or stale model.</p>
+
+    <h2 id="whyimportant">3. Why is it important?</h2>
+    <p>Understanding the lifecycle lets you reason about why LLM APIs behave the way they do — you can't "fix" a hallucination by editing weights at inference time; you can only steer behavior via prompting, retrieval, or fine-tuning, each operating on a different lifecycle stage. It's also the backbone of every "how would you productionize this model" interview question.</p>
+
+    <h2 id="whereused">4. Where is it used?</h2>
+    <p>Every ML/DL/GenAI system in production follows this lifecycle in some form — from a simple regression model to training/aligning a frontier LLM (pretrain → SFT → RLHF) to a company fine-tuning a small model on its own support tickets.</p>
+
+    <h2 id="prereq">5. Prerequisites</h2>
+    <p><a href="ai-vs-ml-vs-dl-genai.html">AI vs ML vs DL vs GenAI</a> (helps to know which layer you're operating at before reasoning about its lifecycle).</p>
+
+    <h2 id="core">6. Core concepts</h2>
+    <ul>
+      <li>Training is offline/batch; inference is the online, per-request path — this asymmetry drives most infra decisions.</li>
+      <li>The validation set tunes hyperparameters; the test set gives an unbiased final estimate — mixing these up leaks information and overstates quality.</li>
+      <li>Production performance can silently degrade due to data/concept drift even if the model itself never changes.</li>
+    </ul>
+
+    <h2 id="terms">7. Terminology</h2>
+    <table>
+      <tr><th>Term</th><th>Meaning</th></tr>
+      <tr><td>Dataset</td><td>The collection of examples used to train/evaluate a model.</td></tr>
+      <tr><td>Model</td><td>A function with learnable parameters mapping inputs to outputs.</td></tr>
+      <tr><td>Parameters</td><td>The learned weights (e.g., an LLM like a 70B model has 70 billion parameters).</td></tr>
+      <tr><td>Hyperparameters</td><td>Settings chosen before training (learning rate, batch size, layer count) — not learned from data.</td></tr>
+      <tr><td>Loss function</td><td>A number quantifying how wrong predictions are; training minimizes this.</td></tr>
+      <tr><td>Optimization</td><td>The algorithm (gradient descent/Adam) that adjusts parameters to reduce loss.</td></tr>
+      <tr><td>Overfitting</td><td>Model memorizes training data but fails to generalize.</td></tr>
+      <tr><td>Underfitting</td><td>Model is too simple to capture patterns even in training data.</td></tr>
+      <tr><td>Training</td><td>The phase where parameters are learned from data.</td></tr>
+      <tr><td>Inference</td><td>Using a trained, frozen model to produce predictions on new input.</td></tr>
+      <tr><td>Evaluation</td><td>Measuring model quality on unseen data with task-relevant metrics.</td></tr>
+      <tr><td>Drift</td><td>Change in the real-world data/label distribution after deployment, degrading accuracy over time.</td></tr>
+    </table>
+
+    <h2 id="arch">8. Architecture</h2>
+    <pre><code>Raw Data
+  → Data Cleaning / Labeling
+  → Train / Validation / Test Split
+  → Training (optimize parameters against loss, guided by hyperparameters)
+  → Evaluation (on validation set, tune hyperparameters, repeat)
+  → Final Test Evaluation (held-out, unbiased)
+  → Deployment (serve frozen model)
+  → Inference (production requests)
+  → Monitoring (drift, errors, feedback) → back to Data collection</code></pre>
+
+    <h2 id="internal">9. How it works internally</h2>
+    <p>Training iterates: feed a batch of examples forward through the model, compute the loss (how wrong the predictions were), backpropagate gradients, and update parameters via an optimizer — repeated over many epochs until loss on the validation set stops improving (early stopping) or a budget is exhausted. Inference is just the forward pass, with parameters frozen, run once per request.</p>
+
+    <h2 id="steps">10. Step-by-step explanation</h2>
+    <ol>
+      <li>Collect and clean raw data; define/label the target outcome.</li>
+      <li>Split into train/validation/test sets (commonly 70/15/15 or similar).</li>
+      <li>Choose a model class and hyperparameters; train on the training set.</li>
+      <li>Evaluate on the validation set; adjust hyperparameters/model and retrain as needed.</li>
+      <li>Run a final unbiased evaluation on the untouched test set.</li>
+      <li>Deploy the frozen model; serve inference requests in production.</li>
+      <li>Monitor live performance/drift; collect new data and retrain periodically.</li>
+    </ol>
+
+    <h2 id="simple">11. Simple example</h2>
+    <p>Training a model to predict house prices: dataset = historical sales, model = linear regression, loss = mean squared error, training = gradient descent reduces error, evaluation = check error on unseen houses, inference = predict a new listing's price.</p>
+
+    <h2 id="real">12. Real-world example</h2>
+    <p>An LLM like Claude is pretrained on massive text (next-token loss), then instruction-tuned and aligned via RLHF/preference optimization — separate training phases, each with its own dataset and loss. Once released, weights are frozen; every API call you make is pure inference — no learning happens from your conversation.</p>
+
+    <h2 id="code">13. Code example</h2>
+    <pre><code class="language-python">from sklearn.linear_model import LinearRegression
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import mean_squared_error
+import numpy as np
+
+X = np.array([[1000],[1500],[2000],[2500],[3000]])  # sq ft
+y = np.array([200000, 280000, 360000, 430000, 500000])  # price
+
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+model = LinearRegression()
+model.fit(X_train, y_train)          # TRAINING: learns parameters (slope, intercept)
+
+preds = model.predict(X_test)        # INFERENCE on held-out data
+print("Test MSE (evaluation):", mean_squared_error(y_test, preds))
+
+new_house = np.array([[1800]])
+print("Predicted price (production inference):", model.predict(new_house))
+</code></pre>
+
+    <h2 id="advanced">14. Advanced example</h2>
+    <p>A production retraining loop: nightly job pulls new labeled feedback, retrains a candidate model, evaluates it against the current production model on a fixed held-out benchmark, and only promotes the candidate if it beats the incumbent by a statistically significant margin (shadow deployment / champion-challenger pattern) — avoiding silent regressions from automated retraining.</p>
+    <pre><code class="language-python">candidate = train_model(new_data)
+candidate_score = evaluate(candidate, benchmark_set)
+production_score = evaluate(current_model, benchmark_set)
+if candidate_score > production_score + SIGNIFICANCE_MARGIN:
+    promote_to_production(candidate)
+else:
+    log_and_discard(candidate)
+</code></pre>
+
+    <h2 id="mistakes">15. Common mistakes</h2>
+    <ul>
+      <li>Tuning hyperparameters against the test set (data leakage), inflating reported performance.</li>
+      <li>Assuming a deployed model keeps "learning" from production traffic without an explicit retraining pipeline.</li>
+      <li>Ignoring data drift until accuracy visibly collapses instead of monitoring proactively.</li>
+      <li>Conflating "fine-tuning" (training phase) with "RAG"/"prompting" (inference-time technique) when deciding how to fix a knowledge gap.</li>
+    </ul>
+
+    <h2 id="best">16. Best practices</h2>
+    <ul>
+      <li>Keep test data truly held out — never use it for any modeling decision.</li>
+      <li>Automate evaluation against a fixed benchmark before promoting any model/prompt change.</li>
+      <li>Monitor live input/output distributions, not just offline metrics.</li>
+      <li>For LLM-based products, treat prompt/RAG changes with the same evaluation rigor as model retraining.</li>
+    </ul>
+
+    <h2 id="production">17. Production considerations</h2>
+    <p>Training happens offline/rarely (hours–months); inference happens online, per-request, and must be fast and cheap — this asymmetry drives caching, batching, and quantization decisions, all targeting inference, not training. For LLM-based products, you rarely touch training — your lifecycle is usually: prompt engineering → RAG → evaluation (Ragas/LangSmith) → monitoring → occasionally fine-tuning.</p>
+
+    <h2 id="security">18. Security considerations</h2>
+    <p>Training data can be poisoned (adversarially injected examples that corrupt learned behavior); production inference inputs can contain adversarial/injection attempts. Validate data provenance at training time and sanitize/validate inputs at inference time.</p>
+
+    <h2 id="performance">19. Performance considerations</h2>
+    <p>Training throughput is measured in examples/sec on big hardware; inference latency is measured in milliseconds per request and must meet strict SLAs. Optimizations differ: training optimizes for total wall-clock/compute cost; inference optimizes for p50/p99 latency and cost-per-request at scale.</p>
+
+    <h2 id="cost">20. Cost considerations</h2>
+    <p>Training cost is typically a large one-time (or periodic) expense; inference cost is recurring and scales with traffic — at sufficient volume, cumulative inference cost usually dwarfs training cost, making inference efficiency the primary long-term cost lever.</p>
+
+    <h2 id="debug">21. Debugging/troubleshooting</h2>
+    <ul>
+      <li><b>Training loss drops but validation loss rises:</b> overfitting — add regularization, more data, or early stopping.</li>
+      <li><b>Both losses stay high:</b> underfitting — increase model capacity or feature quality.</li>
+      <li><b>Production accuracy worse than test accuracy:</b> likely data drift or a train/serve skew (features computed differently in production vs training).</li>
+    </ul>
+
+    <h2 id="related">22. Related concepts</h2>
+    <p><a href="ai-vs-ml-vs-dl-genai.html">AI vs ML vs DL vs GenAI</a> · <a href="../35-AI-Evaluation/">AI Evaluation</a> · <a href="../36-LLM-Observability/">LLM Observability</a></p>
+
+    <h2 id="comparison">23. Comparison with alternatives</h2>
+    <table>
+      <tr><th>Approach to "fix model behavior"</th><th>Lifecycle stage touched</th><th>When to use</th></tr>
+      <tr><td>Prompting</td><td>Inference-time only</td><td>Cheapest first lever; no training needed</td></tr>
+      <tr><td>RAG</td><td>Inference-time (adds context)</td><td>Needs fresh/verifiable knowledge, no weight changes</td></tr>
+      <tr><td>Fine-tuning</td><td>Training phase</td><td>Needs new behavior/format/style baked into weights</td></tr>
+      <tr><td>Full retraining</td><td>Full lifecycle from data collection</td><td>Fundamental drift or new capability needed</td></tr>
+    </table>
+
+    <h2 id="exercise">24. Mini practical exercise</h2>
+    <p>Using the code example above, change the train/test split ratio and random seed, and observe how the reported MSE changes — demonstrating why a single test-set number can be noisy with small data.</p>
+
+    <h2 id="project">25. Practical project</h2>
+    <p><b>Champion-Challenger Mini Pipeline:</b> build a script that trains a model on one dataset version, evaluates it against a fixed benchmark, and only "promotes" it if it beats a stored baseline score — logging decisions to a file.</p>
+
+    <h2 id="projectarch">26. Project architecture</h2>
+    <pre><code>new_data.csv → train_model() → candidate_model
+benchmark.csv → evaluate(candidate_model) → candidate_score
+stored_baseline_score.json → compare
+if candidate_score > baseline_score: promote() else: discard()</code></pre>
+
+    <h2 id="interview-b">27. Interview Questions — Beginner</h2>
+    <div class="qa"><b>Q1.</b> What's the difference between training and inference?<br><b>A.</b> Training adjusts model parameters to minimize loss on a dataset; inference uses the already-trained, frozen model to generate predictions, with no parameter updates.</div>
+    <div class="qa"><b>Q2.</b> Why split data into train/validation/test?<br><b>A.</b> The validation set tunes hyperparameters without leaking test information; the test set gives an unbiased final performance estimate.</div>
+    <div class="qa"><b>Q3.</b> What is a hyperparameter?<br><b>A.</b> A setting chosen before training (e.g., learning rate) that isn't learned from data, unlike parameters/weights.</div>
+    <div class="qa"><b>Q4.</b> What is overfitting?<br><b>A.</b> When a model memorizes training data patterns (including noise) but fails to generalize to new, unseen data.</div>
+    <div class="qa"><b>Q5.</b> What is a loss function?<br><b>A.</b> A number that quantifies how wrong the model's predictions are; training minimizes it.</div>
+    <div class="qa"><b>Q6.</b> Does calling an LLM API train the model?<br><b>A.</b> No — every API call is inference on an already-frozen model; no learning happens from that call.</div>
+    <div class="qa"><b>Q7.</b> What is model drift?<br><b>A.</b> A change in real-world input/label distributions after deployment that degrades a previously accurate model's performance over time.</div>
+    <div class="qa"><b>Q8.</b> Why is training usually offline and inference online?<br><b>A.</b> Training requires large batch compute over the full dataset and can run in the background; inference must respond to live requests quickly.</div>
+    <div class="qa"><b>Q9.</b> What's the purpose of monitoring after deployment?<br><b>A.</b> To detect drift, errors, or degraded quality in production so the model can be retrained or adjusted before it causes major business impact.</div>
+    <div class="qa"><b>Q10.</b> Is evaluation only done once, before deployment?<br><b>A.</b> No — evaluation should continue in production (online evaluation/monitoring) since real-world performance can diverge from offline test results.</div>
+
+    <h2 id="interview-i">28. Interview Questions — Intermediate</h2>
+    <div class="qa"><b>Q1.</b> What's data leakage in the context of train/val/test splitting, and how does it happen?<br><b>A.</b> Information from validation/test data inadvertently influencing training — e.g., tuning hyperparameters against test performance, or normalizing features using statistics computed over the full dataset including test rows — which inflates reported accuracy unrealistically.</div>
+    <div class="qa"><b>Q2.</b> How would you detect underfitting vs overfitting from training/validation loss curves?<br><b>A.</b> Underfitting: both training and validation loss stay high and close together. Overfitting: training loss keeps dropping while validation loss plateaus or rises — the growing gap is the signature.</div>
+    <div class="qa"><b>Q3.</b> Why can't you "patch" a factual error in an LLM's knowledge by editing its weights directly at inference time?<br><b>A.</b> Inference only runs a forward pass through frozen parameters; changing knowledge requires either retraining/fine-tuning (a training-phase operation) or providing corrected information via the prompt/context (RAG), which doesn't touch weights at all.</div>
+    <div class="qa"><b>Q4.</b> What's the champion-challenger (shadow deployment) pattern and why use it?<br><b>A.</b> Running a new candidate model alongside the current production model, comparing their outputs/scores on live or held-out data, and only promoting the candidate if it measurably outperforms the incumbent — prevents regressions from automated or routine retraining.</div>
+    <div class="qa"><b>Q5.</b> How does the lifecycle differ for a RAG-based LLM application compared to a traditionally trained ML model?<br><b>A.</b> RAG applications never retrain the base model — their "lifecycle" is centered on curating/updating the retrieval corpus, evaluating retrieval+generation quality, and iterating on prompts, while the underlying LLM's weights stay fixed.</div>
+    <div class="qa"><b>Q6.</b> What's a concrete example of train/serve skew and how do you prevent it?<br><b>A.</b> A feature computed differently in the training pipeline (e.g., batch SQL query) than in the real-time serving path (e.g., a different code path or stale cache) — prevent by sharing the same feature-computation code/library between training and serving.</div>
+    <div class="qa"><b>Q7.</b> Why might early stopping during training be considered a form of regularization?<br><b>A.</b> It halts training once validation loss stops improving, preventing the model from continuing to fit noise in the training data purely to keep reducing training loss — effectively limiting overfitting without changing model architecture.</div>
+    <div class="qa"><b>Q8.</b> How would you design an evaluation set for a frequently-changing production task (e.g., a chatbot answering about current promotions)?<br><b>A.</b> Maintain a living "golden set" refreshed regularly with representative, labeled examples reflecting current reality, version it, and re-run evaluation whenever the underlying data/prompt/retrieval corpus changes — stale eval sets give false confidence.</div>
+    <div class="qa"><b>Q9.</b> What's the difference between offline evaluation and online evaluation?<br><b>A.</b> Offline evaluation runs on a static, held-out dataset before deployment; online evaluation measures real production traffic/outcomes (e.g., user feedback, downstream business metrics) continuously after deployment, catching issues offline evaluation couldn't anticipate.</div>
+    <div class="qa"><b>Q10.</b> Why is "the model's accuracy was 95% in testing" not sufficient to greenlight production deployment?<br><b>A.</b> Test-set accuracy reflects historical, static data; it says nothing about robustness to drift, edge cases underrepresented in the test set, latency/cost at production scale, or failure modes under adversarial/unexpected inputs — those require additional production-readiness evaluation.</div>
+
+    <h2 id="interview-a">29. Interview Questions — Advanced</h2>
+    <div class="qa"><b>Q1.</b> How would you design a retraining cadence/policy for a model subject to gradual concept drift versus one subject to sudden drift (e.g., a market shock)?<br><b>A.</b> For gradual drift, a scheduled periodic retrain (e.g., weekly/monthly) with drift-metric monitoring to adjust cadence suffices; for sudden drift, you need real-time drift detection (statistical tests on live distributions) triggering an immediate retrain/rollback, since waiting for the next scheduled cycle could cause significant business damage.</div>
+    <div class="qa"><b>Q2.</b> Why is it risky to fully automate model promotion (champion-challenger) without human review for high-stakes domains?<br><b>A.</b> Automated metrics can miss subtle failure modes (fairness regressions, rare-but-severe error classes) that aggregate benchmark scores don't capture; high-stakes domains (credit, health, safety) warrant a human-in-the-loop gate even when automated metrics look favorable.</div>
+    <div class="qa"><b>Q3.</b> How does the AI lifecycle concept apply to prompt versioning in an LLM product, and what's the equivalent of "overfitting" there?<br><b>A.</b> Prompts should be versioned and evaluated against a golden set like a model; the equivalent of overfitting is tuning a prompt until it scores perfectly on your visible eval examples but fails to generalize to real user phrasing variety not represented in that small set.</div>
+
+    <h2 id="interview-s">30. Interview Questions — Senior/Architect</h2>
+    <div class="qa"><b>Q1.</b> Design a full production ML lifecycle platform (from data ingestion to monitoring) for a mid-size company with multiple models in production. What are the key components?<br><b>A.</b> Data ingestion/versioning (feature store), training pipeline with experiment tracking, automated evaluation against golden benchmarks, champion-challenger promotion gating, a model registry with rollback capability, a serving layer with monitoring (latency, drift, accuracy proxies), and alerting tied to retraining triggers — all tied together with CI/CD for models, not just code.</div>
+    <div class="qa"><b>Q2.</b> How would you convince a team shipping "quick LLM fixes via prompt tweaks" to adopt lifecycle discipline (versioning, evaluation) without slowing them down too much?<br><b>A.</b> Introduce a lightweight automated eval suite that runs in seconds/minutes on every prompt change (CI-integrated), version prompts in git alongside code, and demonstrate with a real regression case how skipping evaluation previously caused a production quality drop — making the discipline pay for itself rather than feeling like pure overhead.</div>
+    <div class="qa"><b>Q3.</b> Your production model's accuracy is degrading over 6 months. Walk through your diagnosis and fix using lifecycle thinking.<br><b>A.</b> Check for data drift (compare current vs training input distribution) and label/feedback drift, re-evaluate on freshly labeled recent data to confirm a real regression (not noise), and either retrain with updated data (training phase) or — for LLM systems — update retrieval sources/prompts rather than retraining the base model.</div>
+
+    <h2 id="interview-sc">31. Scenario-Based Questions</h2>
+    <div class="qa"><b>Scenario 1.</b> A model performs great in offline testing but poorly in production. What's your systematic debugging approach?<br><b>A.</b> Check train/serve skew first (are features computed identically in both paths), then check for data drift between training distribution and current production inputs, then verify the production evaluation metric actually matches the offline one (sometimes business definitions differ).</div>
+    <div class="qa"><b>Scenario 2.</b> Your team wants to retrain nightly on all newly collected production data automatically. What risk do you flag?<br><b>A.</b> Automated retraining on unvalidated/unreviewed data risks ingesting label noise, feedback loops (model's own predictions influencing future "ground truth"), or a single bad batch silently degrading the model — recommend a champion-challenger gate with automated evaluation before any promotion.</div>
+    <div class="qa"><b>Scenario 3.</b> Stakeholders ask "why does the chatbot still give outdated pricing after we updated our website?" How do you explain and fix it, using lifecycle terms?<br><b>A.</b> The LLM's parametric knowledge (from training) is frozen and doesn't reflect your website update; fix by updating the RAG retrieval corpus (inference-time knowledge source) rather than expecting the frozen model itself to "know" about the change.</div>
+
+    <h2 id="revision">32. Quick revision notes</h2>
+    <ul>
+      <li>Data → Train (minimize loss via optimization) → Evaluate (val/test) → Deploy → Infer (production) → Monitor → repeat.</li>
+      <li>Training = expensive & offline. Inference = cheap-per-call & online. LLM API calls are always inference.</li>
+      <li>Never let test data influence training decisions (leakage).</li>
+      <li>Drift monitoring is required even for a model that "worked" at launch.</li>
+    </ul>
+
+    <h2 id="cheat">33. Cheat sheet</h2>
+    <div class="callout">Data → Train (minimize loss via optimization) → Evaluate (val/test) → Deploy → Infer (production) → Monitor → repeat. Training = expensive & offline. Inference = cheap-per-call & online. LLM API calls are always inference.</div>
+
+    <h2 id="further">34. Further topics to learn</h2>
+    <p><a href="generative-vs-discriminative.html">Generative vs Discriminative AI</a> → <a href="../35-AI-Evaluation/">AI Evaluation</a> → <a href="../36-LLM-Observability/">LLM Observability</a> → <a href="../29-Fine-Tuning/">Fine-Tuning</a></p>
+
+    <div class="prevnext">
+      <a href="ai-vs-ml-vs-dl-genai.html">← AI vs ML vs DL vs GenAI</a>
+      <a href="generative-vs-discriminative.html">Next: Generative vs Discriminative AI →</a>
+    </div>
+  </main>
+</div>
+<script src="../assets/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tokens & Context Window</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <input class="searchbox" placeholder="Search topics..." />
+    <a href="../index.html">← Home</a>
+    <h3>05-LLM-Fundamentals</h3>
+    <a href="what-is-llm.html">What is an LLM</a>
+    <a href="tokens-and-context-window.html">Tokens & Context Window</a>
+    <a href="sampling-and-hallucination.html">Sampling & Hallucination</a>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumbs"><a href="../index.html">Home</a> / 05-LLM-Fundamentals / Tokens & Context Window</div>
+      <button class="theme-toggle" onclick="toggleTheme()">🌓 Theme</button>
+    </div>
+    <h1>Tokens, Context Window & Long Context</h1>
+    <span class="tag good">Stable</span><span class="tag">Last verified: 2026-10-06</span>
+
+    <div class="toc">
+      <b>On this page</b>
+      <a href="#what">1. What is this?</a>
+      <a href="#whyexist">2. Why does it exist?</a>
+      <a href="#whyimportant">3. Why is it important?</a>
+      <a href="#whereused">4. Where is it used?</a>
+      <a href="#prereq">5. Prerequisites</a>
+      <a href="#core">6. Core concepts</a>
+      <a href="#terms">7. Terminology</a>
+      <a href="#arch">8. Architecture</a>
+      <a href="#internal">9. How it works internally</a>
+      <a href="#steps">10. Step-by-step explanation</a>
+      <a href="#simple">11. Simple example</a>
+      <a href="#real">12. Real-world example</a>
+      <a href="#code">13. Code example</a>
+      <a href="#advanced">14. Advanced example</a>
+      <a href="#mistakes">15. Common mistakes</a>
+      <a href="#best">16. Best practices</a>
+      <a href="#production">17. Production considerations</a>
+      <a href="#security">18. Security considerations</a>
+      <a href="#performance">19. Performance considerations</a>
+      <a href="#cost">20. Cost considerations</a>
+      <a href="#debug">21. Debugging/troubleshooting</a>
+      <a href="#related">22. Related concepts</a>
+      <a href="#comparison">23. Comparison with alternatives</a>
+      <a href="#exercise">24. Mini practical exercise</a>
+      <a href="#project">25. Practical project</a>
+      <a href="#projectarch">26. Project architecture</a>
+      <a href="#interview-b">27. Interview Questions — Beginner</a>
+      <a href="#interview-i">28. Interview Questions — Intermediate</a>
+      <a href="#interview-a">29. Interview Questions — Advanced</a>
+      <a href="#interview-s">30. Interview Questions — Senior/Architect</a>
+      <a href="#interview-sc">31. Scenario-Based Questions</a>
+      <a href="#revision">32. Quick revision notes</a>
+      <a href="#cheat">33. Cheat sheet</a>
+      <a href="#further">34. Further topics to learn</a>
+    </div>
+
+    <h2 id="what">1. What is this?</h2>
+    <p>LLMs don't see raw characters — they see <b>tokens</b>, sub-word units produced by a tokenizer (e.g., byte-pair encoding / BPE). The <b>context window</b> is the hard limit on how many tokens (prompt + conversation history + retrieved docs + output) a single request can contain.</p>
+
+    <h2 id="whyexist">2. Why does it exist?</h2>
+    <p>Tokenization exists because a fixed-size vocabulary must represent arbitrary text (any word, rare terms, code, emoji, other languages) efficiently — sub-word units let the model handle unseen words by composing known pieces instead of needing every possible word pre-registered. The context window exists because transformer self-attention cost grows (quadratically, in the naive form) with sequence length — hardware and architecture limits translate directly into a maximum processable sequence length.</p>
+
+    <h2 id="whyimportant">3. Why is it important?</h2>
+    <p>Tokens are the literal unit of both cost and capacity — every pricing decision, truncation bug, and "why did my prompt get cut off" incident traces back to token counting. Understanding this is foundational to building any reliable, cost-aware LLM application.</p>
+
+    <h2 id="whereused">4. Where is it used?</h2>
+    <p>Every LLM API call, every RAG pipeline (context budget for retrieved chunks), every agent loop (tracking conversation + tool-output tokens), every cost-estimation and billing system.</p>
+
+    <h2 id="prereq">5. Prerequisites</h2>
+    <p><a href="what-is-llm.html">What is an LLM</a>.</p>
+
+    <h2 id="core">6. Core concepts</h2>
+    <ul>
+      <li>Tokenization is deterministic and reversible per model/tokenizer version — the same text always produces the same tokens for a given tokenizer.</li>
+      <li>The context window is shared between input and output — a large prompt leaves less room for the response.</li>
+      <li>"Lost in the middle": information buried deep in a huge context is statistically under-weighted by attention compared to content near the start/end.</li>
+    </ul>
+
+    <h2 id="terms">7. Terminology</h2>
+    <table>
+      <tr><th>Term</th><th>Meaning</th></tr>
+      <tr><td>Token</td><td>A sub-word unit produced by the tokenizer; the model's actual unit of processing.</td></tr>
+      <tr><td>BPE (Byte-Pair Encoding)</td><td>A common tokenization algorithm that iteratively merges frequent character/byte pairs into sub-word units.</td></tr>
+      <tr><td>Context window</td><td>Maximum tokens (input + output) a single request can contain.</td></tr>
+      <tr><td>Long context</td><td>Models supporting very large context windows (128K–1M+ tokens).</td></tr>
+      <tr><td>Context engineering</td><td>Deliberately curating/ordering what goes into the context window.</td></tr>
+      <tr><td>Lost in the middle</td><td>Degraded attention/recall for information placed in the middle of a long context.</td></tr>
+      <tr><td>Prompt/context caching</td><td>Reusing precomputed attention state for a repeated prefix (e.g., stable system prompt) to cut cost/latency.</td></tr>
+    </table>
+
+    <h2 id="arch">8. Architecture</h2>
+    <pre><code>Raw text
+ → Tokenizer (BPE/similar) → token IDs
+ → [ System prompt tokens | History tokens | Retrieved context tokens | User message tokens ]
+ → Total must be ≤ context window − reserved output tokens
+ → Model processes all input tokens, generates output tokens up to the remaining budget</code></pre>
+
+    <h2 id="internal">9. How it works internally</h2>
+    <p>A tokenizer is trained once (on a large corpus) to build a fixed vocabulary of the most useful sub-word units via frequency-based merging (BPE or similar). At inference time, tokenization is just a lookup/greedy-merge process — fast and deterministic. Common English words are often single tokens; rare words, code symbols, and non-English text often use more tokens per character because the vocabulary was optimized for the training corpus's distribution.</p>
+
+    <h2 id="steps">10. Step-by-step explanation</h2>
+    <ol>
+      <li>Raw input text is split into tokens by the tokenizer.</li>
+      <li>Token count is checked against the model's context window.</li>
+      <li>If under budget, all tokens (system + history + retrieved context + user message) are sent for processing.</li>
+      <li>The model reserves remaining window space for output generation (set via `max_tokens`).</li>
+      <li>If input would exceed the window, the application must truncate, summarize, or retrieve more selectively before sending.</li>
+    </ol>
+
+    <h2 id="simple">11. Simple example</h2>
+    <p>"unbelievable" might split into tokens like <code>un</code>, <code>believ</code>, <code>able</code>. Rule of thumb: ~4 characters ≈ 1 token in English prose; code and non-Latin scripts are typically less token-efficient.</p>
+
+    <h2 id="real">12. Real-world example</h2>
+    <p>A RAG chatbot with a 200K-token context window still can't just "retrieve everything" — stuffing in 150K tokens of marginally relevant documents dilutes attention and often produces worse answers than a well-ranked 10K-token context, despite technically fitting within the window.</p>
+
+    <h2 id="code">13. Code example</h2>
+    <pre><code class="language-python">import anthropic
+
+client = anthropic.Anthropic()
+
+# Count tokens before sending, to budget context usage
+count = client.messages.count_tokens(
+    model="claude-sonnet-5",
+    messages=[{"role": "user", "content": "How many tokens is this sentence?"}],
+)
+print("Input tokens:", count.input_tokens)
+
+response = client.messages.create(
+    model="claude-sonnet-5",
+    max_tokens=100,
+    messages=[{"role": "user", "content": "Summarize: " + "long document text..." }],
+)
+print("Output tokens used:", response.usage.output_tokens)
+</code></pre>
+
+    <h2 id="advanced">14. Advanced example</h2>
+    <p>A token-budget manager for a multi-turn chat app that reserves space for output, caps history, and summarizes overflow:</p>
+    <pre><code class="language-python">MAX_WINDOW = 200_000
+RESERVED_OUTPUT = 2_000
+
+def fit_to_budget(system_tokens, history, retrieved_tokens, count_fn):
+    budget = MAX_WINDOW - RESERVED_OUTPUT - system_tokens - retrieved_tokens
+    while count_fn(history) > budget:
+        history = summarize_oldest_turn(history)  # compact instead of hard-truncate
+    return history
+</code></pre>
+
+    <h2 id="mistakes">15. Common mistakes</h2>
+    <ul>
+      <li>Assuming "bigger context window" always improves answer quality — ignoring lost-in-the-middle effects.</li>
+      <li>Not reserving output token budget, causing responses to truncate mid-structure (e.g., incomplete JSON).</li>
+      <li>Estimating cost/length in "words" instead of actual tokens, leading to inaccurate budgeting.</li>
+      <li>Blindly concatenating full conversation history forever instead of summarizing/trimming it.</li>
+    </ul>
+
+    <h2 id="best">16. Best practices</h2>
+    <ul>
+      <li>Count tokens programmatically (API-provided counters) rather than estimating from character count for anything cost-sensitive.</li>
+      <li>Rank and trim retrieved context for relevance rather than maximizing recall by including everything that fits.</li>
+      <li>Place the most important instructions/content near the start or end of context, not buried in the middle.</li>
+      <li>Use prompt/context caching for stable, repeated prefixes (system prompts, static reference docs).</li>
+    </ul>
+
+    <h2 id="production">17. Production considerations</h2>
+    <p>Implement a token-budget check before every request with graceful truncation/summarization rather than runtime errors. Monitor average/peak token usage per request type to catch runaway context growth (e.g., unbounded chat history) before it becomes a cost or reliability incident.</p>
+
+    <h2 id="security">18. Security considerations</h2>
+    <p>Large contexts increase the attack surface for prompt injection — more room for an attacker to embed instructions in retrieved/pasted content. Also, verbose contexts can inadvertently leak sensitive data (e.g., full documents) to logs/providers if not scoped carefully.</p>
+
+    <h2 id="performance">19. Performance considerations</h2>
+    <p>Processing more input tokens increases latency (even though input is parallelized, more layers' worth of attention computation is needed); output token count dominates latency even more since generation is sequential. Prompt/context caching for repeated prefixes significantly reduces both latency and cost on subsequent calls.</p>
+
+    <h2 id="cost">20. Cost considerations</h2>
+    <p>Cost scales directly with total tokens (input often priced lower than output per token). Trimming unnecessary context, summarizing history, and using caching for repeated static content are the primary token-cost levers.</p>
+
+    <h2 id="debug">21. Debugging/troubleshooting</h2>
+    <ul>
+      <li><b>Request errors with "context length exceeded":</b> count tokens before sending and truncate/summarize proactively.</li>
+      <li><b>Response cuts off mid-sentence:</b> increase `max_tokens` or check if input consumed most of the window, leaving little room for output.</li>
+      <li><b>Model ignores instructions given early in a long context:</b> likely lost-in-the-middle or attention dilution — move critical instructions closer to the end, or shorten the context.</li>
+    </ul>
+
+    <h2 id="related">22. Related concepts</h2>
+    <p><a href="what-is-llm.html">What is an LLM</a> · <a href="sampling-and-hallucination.html">Sampling & Hallucination</a> · <a href="../12-RAG/">RAG</a> · <a href="../40-Cost-Optimization/">Cost Optimization</a></p>
+
+    <h2 id="comparison">23. Comparison with alternatives</h2>
+    <table>
+      <tr><th>Strategy</th><th>When to use</th><th>Trade-off</th></tr>
+      <tr><td>Hard truncation</td><td>Simple, low-stakes contexts</td><td>Can silently drop important information</td></tr>
+      <tr><td>Summarization/compaction</td><td>Long conversations needing continuity</td><td>Adds an extra LLM call; risk of losing nuance</td></tr>
+      <tr><td>Retrieval-based (RAG) instead of full-document stuffing</td><td>Large knowledge bases</td><td>Requires a retrieval/indexing pipeline, but scales far better than raw context stuffing</td></tr>
+    </table>
+
+    <h2 id="exercise">24. Mini practical exercise</h2>
+    <p>Count tokens for the same sentence in English vs. in a non-English language vs. as a code snippet, using the API's token counter. Compare the ratios.</p>
+
+    <h2 id="project">25. Practical project</h2>
+    <p><b>Token Budget Dashboard:</b> build a small tool that takes a conversation history + retrieved docs, reports total token count, warns when approaching the context limit, and auto-summarizes the oldest turns when over budget.</p>
+
+    <h2 id="projectarch">26. Project architecture</h2>
+    <pre><code>Conversation history + retrieved docs
+ → count_tokens()
+ → if over budget: summarize_oldest_turns()
+ → final context → LLM API call
+ → log token usage + cost per call</code></pre>
+
+    <h2 id="interview-b">27. Interview Questions — Beginner</h2>
+    <div class="qa"><b>Q1.</b> Is a token the same as a word?<br><b>A.</b> No — a token is a sub-word unit from the tokenizer's vocabulary; common words are often one token, but longer or rarer words split into multiple tokens.</div>
+    <div class="qa"><b>Q2.</b> What is the context window?<br><b>A.</b> The maximum number of tokens (input + output combined) a model can process in a single request.</div>
+    <div class="qa"><b>Q3.</b> Roughly how many characters is one token in English?<br><b>A.</b> About 4 characters per token, as a rough rule of thumb.</div>
+    <div class="qa"><b>Q4.</b> Does the context window apply only to input, or input and output combined?<br><b>A.</b> Both — input and output tokens share the same total context window budget.</div>
+    <div class="qa"><b>Q5.</b> What tokenization algorithm is commonly used by LLMs?<br><b>A.</b> Byte-Pair Encoding (BPE) or similar sub-word tokenization schemes.</div>
+    <div class="qa"><b>Q6.</b> Why might code use more tokens than the same length of English prose?<br><b>A.</b> Code symbols and formatting are often less common in the tokenizer's training distribution, so they split into more, smaller tokens.</div>
+    <div class="qa"><b>Q7.</b> What happens if your input + desired output exceeds the context window?<br><b>A.</b> The request can error out or the response gets truncated, depending on the API and settings.</div>
+    <div class="qa"><b>Q8.</b> What is "long context"?<br><b>A.</b> Models supporting very large context windows (128K to 1M+ tokens), enabling much more input text per request.</div>
+    <div class="qa"><b>Q9.</b> Is it always better to use the maximum context window available?<br><b>A.</b> No — larger contexts can dilute attention ("lost in the middle") and increase cost/latency; relevance matters more than raw size.</div>
+    <div class="qa"><b>Q10.</b> What is context engineering?<br><b>A.</b> Deliberately curating and ordering what content (instructions, history, retrieved docs) goes into the context window to get reliable model behavior.</div>
+
+    <h2 id="interview-i">28. Interview Questions — Intermediate</h2>
+    <div class="qa"><b>Q1.</b> Why does input context cost money even though you're not generating it?<br><b>A.</b> The model must process (attend over) every input token through all its layers, consuming compute just like generation — hence providers bill input and output tokens separately.</div>
+    <div class="qa"><b>Q2.</b> What's the "lost in the middle" phenomenon and why does it happen?<br><b>A.</b> Information placed in the middle of a long context tends to be recalled/attended to less reliably than information near the start or end — likely related to how attention patterns and positional encodings behave over long sequences during training.</div>
+    <div class="qa"><b>Q3.</b> Why can increasing retrieved chunks in RAG from 5 to 50 sometimes make answers worse despite more information being available?<br><b>A.</b> Adding many loosely relevant chunks introduces noise, dilutes attention on the truly relevant content, and can confuse answer synthesis — precision in retrieval often matters more than recall/volume.</div>
+    <div class="qa"><b>Q4.</b> What's prompt/context caching and when is it useful?<br><b>A.</b> Reusing precomputed attention state for a repeated prefix (e.g., a stable system prompt or static reference document) across multiple requests, reducing redundant computation and therefore cost and latency — useful whenever the same large prefix is reused frequently.</div>
+    <div class="qa"><b>Q5.</b> How would you design token-budget management for a multi-turn chat product with RAG and tool calls?<br><b>A.</b> Maintain a running token budget: reserve tokens for system prompt + expected output, summarize/compact older conversation turns, cap retrieved-context tokens with a reranker, and track real usage via the API's usage fields to catch budget overruns before they cause truncation or errors.</div>
+    <div class="qa"><b>Q6.</b> Why is "words per minute" or character count a poor proxy for cost estimation?<br><b>A.</b> Token-to-character ratio varies by language, content type (code vs prose), and tokenizer, so character-based estimates can be significantly off from actual billed token counts.</div>
+    <div class="qa"><b>Q7.</b> What's a practical reason to summarize conversation history rather than simply truncating the oldest messages?<br><b>A.</b> Truncation can silently drop important earlier context (e.g., a key constraint the user stated); summarization preserves the gist while reducing token count, maintaining more continuity.</div>
+    <div class="qa"><b>Q8.</b> How does context window size interact with KV-cache memory usage during serving?<br><b>A.</b> KV-cache size grows with sequence length (and batch size); longer contexts directly increase memory pressure on the serving infrastructure per concurrent request.</div>
+    <div class="qa"><b>Q9.</b> Why might two semantically identical prompts have different token counts?<br><b>A.</b> Different phrasing, word choice, or formatting (e.g., extra whitespace, different punctuation) can tokenize differently even if the meaning is equivalent.</div>
+    <div class="qa"><b>Q10.</b> What's the risk of not reserving output token budget separately from input budget?<br><b>A.</b> If input consumes nearly the entire context window, there may be too little room left for `max_tokens`, causing truncated or empty responses.</div>
+    <div class="qa"><b>Q11.</b> Why do some teams build a custom reranking step before stuffing retrieved chunks into context, rather than relying on the LLM to "figure out" what's relevant?<br><b>A.</b> Rerankers are cheaper and more precise at filtering relevance than relying on the LLM's attention over a noisy, over-stuffed context — it's more reliable to do relevance filtering explicitly before the expensive generation step.</div>
+    <div class="qa"><b>Q12.</b> How would you test whether your RAG system suffers from lost-in-the-middle effects?<br><b>A.</b> Construct eval cases where the correct answer's supporting chunk is deliberately placed at different positions (start, middle, end) within the retrieved context, and measure whether accuracy drops when it's in the middle.</div>
+    <div class="qa"><b>Q13.</b> What's a reasonable strategy when a single document is larger than the model's context window?<br><b>A.</b> Chunk the document and use retrieval (RAG) to select only relevant chunks, or use a map-reduce summarization approach (summarize chunks, then summarize the summaries) rather than attempting to fit the whole document at once.</div>
+    <div class="qa"><b>Q14.</b> Why is tokenization deterministic, and why does that matter for caching?<br><b>A.</b> The same text always maps to the same token sequence for a given tokenizer version, which is what makes prefix-based prompt caching reliable — the cached prefix's tokens are guaranteed identical across repeated calls as long as the text itself hasn't changed.</div>
+    <div class="qa"><b>Q15.</b> How does model provider tokenizer difference affect cross-provider cost comparison?<br><b>A.</b> The same text can tokenize into different counts across providers/tokenizers, so comparing "$ per token" alone across providers can be misleading — compare actual $ per request/task on representative content instead.</div>
+
+    <h2 id="interview-a">29. Interview Questions — Advanced</h2>
+    <div class="qa"><b>Q1.</b> Explain why self-attention's naive computational cost grows quadratically with sequence length, and how this bounds context window size.<br><b>A.</b> Standard self-attention computes pairwise interactions between every pair of tokens in the sequence (an N×N attention matrix for N tokens), so compute and memory scale roughly quadratically with N — this is the core architectural reason context windows have practical upper bounds, though techniques like sparse/linear attention and efficient KV-cache management push that bound higher.</div>
+    <div class="qa"><b>Q2.</b> How would you architect a system that needs to reason over a corpus far larger than any single context window (e.g., millions of documents)?<br><b>A.</b> Use retrieval (vector search + reranking) to select only the most relevant subset per query rather than attempting to fit the corpus into context at all; for tasks needing broader synthesis, use hierarchical/map-reduce summarization or an agentic multi-step retrieval loop that iteratively narrows down relevant content.</div>
+    <div class="qa"><b>Q3.</b> Why might increasing context window size alone not solve a RAG accuracy problem, even if the correct document is successfully retrieved?<br><b>A.</b> If the correct document's key passage lands in a "lost in the middle" position among many other retrieved chunks, the model may still fail to use it correctly — the fix is about retrieval precision and context ordering/ranking, not raw window capacity.</div>
+
+    <h2 id="interview-s">30. Interview Questions — Senior/Architect</h2>
+    <div class="qa"><b>Q1.</b> Design a context-budget management system for a production multi-agent platform with RAG, long conversation history, and tool outputs all competing for context space.<br><b>A.</b> Implement a central token-budget allocator that reserves fixed slices for system/tool instructions, dynamically ranks and caps retrieved RAG content via a reranker, summarizes/compacts conversation history beyond a turn threshold, logs real usage per component, and alerts when any component's typical usage approaches its allocated slice — treating context space like a scarce, explicitly managed resource rather than an afterthought.</div>
+    <div class="qa"><b>Q2.</b> How would you reconcile marketing claims of "1M token context windows" with your own production evaluation findings that quality degrades well before that limit?<br><b>A.</b> Treat the advertised window as a hard ceiling, not a target; run your own empirical evaluation (precision/recall on retrieval, task success rate) as a function of context size on your actual data, and set internal guidelines/limits based on measured quality degradation points rather than the provider's maximum.</div>
+
+    <h2 id="interview-sc">31. Scenario-Based Questions</h2>
+    <div class="qa"><b>Scenario 1.</b> Your RAG system's answers got worse after the team increased retrieved chunks from 5 to 50 to "be safe." How do you diagnose and fix it?<br><b>A.</b> Suspect attention dilution/lost-in-the-middle; run an eval comparing both configurations on a labeled set, and if confirmed, reduce chunk count but improve retrieval precision (better embeddings, reranking) instead of relying on volume.</div>
+    <div class="qa"><b>Scenario 2.</b> Users report the chat app "forgets" instructions given 20 messages ago. What's your fix?<br><b>A.</b> Diagnose whether this is lost-in-the-middle (long history diluting attention) or actual truncation (history exceeded context window); implement conversation summarization/compaction and consider re-stating critical constraints near the end of context on each turn.</div>
+    <div class="qa"><b>Scenario 3.</b> Finance flags unexpectedly high LLM costs this month. Token usage logs show average request size tripled. How do you investigate?<br><b>A.</b> Check whether conversation history is being capped/summarized as intended, check if retrieved-context size grew (e.g., a reranker was disabled or chunk size increased), and audit for any new feature sending redundant or oversized context.</div>
+
+    <h2 id="revision">32. Quick revision notes</h2>
+    <ul>
+      <li>Token ≈ sub-word unit (~4 chars/token in English).</li>
+      <li>Context window = shared budget for input+output.</li>
+      <li>Bigger window ≠ automatically better — use context engineering (rank, trim, place strategically) over "dump everything."</li>
+      <li>Prompt/context caching cuts cost/latency for repeated prefixes.</li>
+    </ul>
+
+    <h2 id="cheat">33. Cheat sheet</h2>
+    <div class="callout">Token ≈ sub-word unit (~4 chars/token in English). Context window = shared budget for input+output. Bigger window ≠ automatically better — use context engineering (rank, trim, place strategically) over "dump everything."</div>
+
+    <h2 id="further">34. Further topics to learn</h2>
+    <p><a href="sampling-and-hallucination.html">Sampling & Hallucination</a> → <a href="../12-RAG/">RAG</a> → <a href="../13-Advanced-RAG/">Advanced RAG (reranking, context compression)</a> → <a href="../40-Cost-Optimization/">Cost Optimization</a></p>
+
+    <div class="prevnext">
+      <a href="what-is-llm.html">← What is an LLM</a>
+      <a href="sampling-and-hallucination.html">Next: Sampling & Hallucination →</a>
+    </div>
+  </main>
+</div>
+<script src="../assets/app.js"></script>
+</body>
+</html>

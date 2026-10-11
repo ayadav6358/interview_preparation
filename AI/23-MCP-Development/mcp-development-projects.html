@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MCP Development Projects</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <input class="searchbox" placeholder="Search topics..." />
+    <a href="../index.html">← Home</a>
+    <h3>23-MCP-Development</h3>
+    <a href="mcp-development-projects.html">MCP Development Projects</a>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumbs"><a href="../index.html">Home</a> / 23-MCP-Development</div>
+      <button class="theme-toggle" onclick="toggleTheme()">🌓 Theme</button>
+    </div>
+    <h1>MCP Development: Building Servers, Tools, Resources, and Integrations</h1>
+    <span class="tag good">Production-ready, actively evolving</span><span class="tag">Last verified: 2026-10-06</span>
+
+    <div class="toc">
+      <b>On this page</b>
+      <a href="#what">1. What is this?</a>
+      <a href="#whyexist">2. Why build these projects?</a>
+      <a href="#whyimportant">3. Why is it important?</a>
+      <a href="#whereused">4. Where is it used?</a>
+      <a href="#prereq">5. Prerequisites</a>
+      <a href="#core">6. The 8 builds covered</a>
+      <a href="#terms">7. Terminology</a>
+      <a href="#arch">8. Architecture</a>
+      <a href="#internal">9. How it works internally</a>
+      <a href="#steps">10. Step-by-step: database-connected server</a>
+      <a href="#simple">11. Simple example (MCP tool)</a>
+      <a href="#real">12. Real-world example</a>
+      <a href="#code">13. Code example (DB + REST API servers)</a>
+      <a href="#advanced">14. Advanced example (LangGraph + MCP)</a>
+      <a href="#mistakes">15. Common mistakes</a>
+      <a href="#best">16. Best practices</a>
+      <a href="#production">17. Production considerations</a>
+      <a href="#security">18. Security considerations</a>
+      <a href="#performance">19. Performance considerations</a>
+      <a href="#cost">20. Cost considerations</a>
+      <a href="#debug">21. Debugging/troubleshooting</a>
+      <a href="#related">22. Related concepts</a>
+      <a href="#comparison">23. Comparison with alternatives</a>
+      <a href="#exercise">24. Mini practical exercise</a>
+      <a href="#project">25. Practical project</a>
+      <a href="#projectarch">26. Project architecture</a>
+      <a href="#interview-b">27. Interview Questions — Beginner</a>
+      <a href="#interview-i">28. Interview Questions — Intermediate</a>
+      <a href="#interview-a">29. Interview Questions — Advanced</a>
+      <a href="#interview-s">30. Interview Questions — Senior/Architect</a>
+      <a href="#interview-sc">31. Scenario-Based Questions</a>
+      <a href="#revision">32. Quick revision notes</a>
+      <a href="#cheat">33. Cheat sheet</a>
+      <a href="#further">34. Further topics to learn</a>
+    </div>
+
+    <h2 id="what">1. What is this?</h2>
+    <p>Hands-on MCP server development: building a simple server, defining tools/resources/prompts, connecting to a database and a REST API, and using an agent (including LangGraph) to consume MCP tools — progressing from the simplest possible server to realistic production integrations.</p>
+
+    <h2 id="whyexist">2. Why build these projects?</h2>
+    <p>Reading <a href="../22-MCP/mcp-fundamentals.html">MCP Fundamentals</a> explains the protocol; building servers surfaces the real engineering decisions — schema design, error handling, authentication, and how an agent framework actually consumes MCP tools in practice.</p>
+
+    <h2 id="whyimportant">3. Why is it important?</h2>
+    <p>Building MCP servers is now a commonly requested skill for AI engineering roles — companies increasingly want their internal systems exposed to AI tools via MCP rather than one-off integrations.</p>
+
+    <h2 id="whereused">4. Where is it used?</h2>
+    <p>Internal developer tooling, coding agent integrations, enterprise data/system connectors.</p>
+
+    <h2 id="prereq">5. Prerequisites</h2>
+    <p><a href="../22-MCP/mcp-fundamentals.html">MCP Fundamentals</a>, <a href="../01-Python-for-AI/python-for-ai-fundamentals.html">Python for AI</a>.</p>
+
+    <h2 id="core">6. The 8 builds covered</h2>
+    <ol>
+      <li>Simple MCP server (one tool, stdio transport)</li>
+      <li>MCP tool with structured input/output schema</li>
+      <li>MCP resource (exposing readable data)</li>
+      <li>MCP prompt (reusable prompt template)</li>
+      <li>MCP server connected to a database</li>
+      <li>MCP server connected to a REST API</li>
+      <li>An agent using MCP tools (via the official SDK or a host like Claude Code)</li>
+      <li>LangGraph + MCP integration project</li>
+    </ol>
+
+    <h2 id="terms">7. Terminology</h2>
+    <table>
+      <tr><th>Term</th><th>Meaning</th></tr>
+      <tr><td>FastMCP</td><td>A high-level Python SDK abstraction for building MCP servers with decorators.</td></tr>
+      <tr><td>Transport</td><td>stdio (local subprocess) or SSE/HTTP (remote network) — how client and server communicate.</td></tr>
+      <tr><td>Tool handler</td><td>The actual function executed when a tool is called.</td></tr>
+      <tr><td>Resource URI</td><td>An identifier (e.g., `config://settings`) a server uses to expose a readable resource.</td></tr>
+    </table>
+
+    <h2 id="arch">8. Architecture</h2>
+    <pre><code>Agent / Host
+ → MCP Client
+ → MCP Server (FastMCP app)
+     ├── Tools (callable functions)
+     ├── Resources (readable data: DB rows, files, API responses)
+     └── Prompts (reusable templates)
+ → Backend (Postgres / REST API / filesystem)</code></pre>
+
+    <h2 id="internal">9. How it works internally</h2>
+    <p>FastMCP (the common high-level SDK pattern) handles the protocol-level JSON-RPC handshake, discovery responses, and message routing automatically — developers just decorate plain Python functions with `@mcp.tool()`, `@mcp.resource()`, or `@mcp.prompt()`, and the SDK introspects their type hints/docstrings to generate the schema the client needs for discovery.</p>
+
+    <h2 id="steps">10. Step-by-step: database-connected server</h2>
+    <ol>
+      <li>Set up the database connection (e.g., Postgres via psycopg2).</li>
+      <li>Define tools wrapping specific, scoped queries (not a generic "run any SQL" tool).</li>
+      <li>Validate all tool arguments before building any SQL query (parameterized queries only).</li>
+      <li>Return structured results (not raw DB rows) matching a defined output schema.</li>
+      <li>Add error handling returning informative messages on query failure.</li>
+    </ol>
+
+    <h2 id="simple">11. Simple example (MCP tool)</h2>
+    <pre><code class="language-python">from mcp.server.fastmcp import FastMCP
+
+mcp = FastMCP("calculator")
+
+@mcp.tool()
+def add(a: float, b: float) -> float:
+    """Add two numbers."""
+    return a + b
+
+if __name__ == "__main__":
+    mcp.run(transport="stdio")
+</code></pre>
+
+    <h2 id="real">12. Real-world example</h2>
+    <p>A company builds an internal MCP server exposing scoped tools like `get_employee_pto_balance(employee_id)` (backed by their HR database) and `search_internal_docs(query)` (backed by their knowledge base), letting any MCP-compatible internal AI tool query these systems safely without direct database credentials.</p>
+
+    <h2 id="code">13. Code example (DB + REST API servers)</h2>
+    <pre><code class="language-python"># Database-connected MCP server
+from mcp.server.fastmcp import FastMCP
+import psycopg2
+
+mcp = FastMCP("db-server")
+conn = psycopg2.connect("dbname=company")
+
+@mcp.tool()
+def get_order_status(order_id: int) -> dict:
+    """Look up the status of an order by ID."""
+    cur = conn.cursor()
+    cur.execute("SELECT status, updated_at FROM orders WHERE id = %s", (order_id,))
+    row = cur.fetchone()
+    if not row:
+        return {"error": f"Order {order_id} not found"}
+    return {"status": row[0], "updated_at": str(row[1])}
+
+# REST-API-connected MCP server
+import httpx
+
+@mcp.tool()
+async def get_github_issue(repo: str, issue_number: int) -> dict:
+    """Fetch a GitHub issue's details."""
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(f"https://api.github.com/repos/{repo}/issues/{issue_number}")
+        resp.raise_for_status()
+        data = resp.json()
+        return {"title": data["title"], "state": data["state"], "body": data["body"][:500]}
+</code></pre>
+
+    <h2 id="advanced">14. Advanced example (LangGraph + MCP)</h2>
+    <pre><code class="language-python">from langchain_mcp_adapters.client import MultiServerMCPClient
+from langgraph.prebuilt import create_react_agent
+from langchain_anthropic import ChatAnthropic
+
+async def main():
+    client = MultiServerMCPClient({
+        "db-server": {"command": "python", "args": ["db_server.py"], "transport": "stdio"},
+    })
+    tools = await client.get_tools()
+    model = ChatAnthropic(model="claude-sonnet-5")
+    agent = create_react_agent(model, tools=tools)
+    result = await agent.ainvoke({"messages": [{"role": "user", "content": "What's the status of order 42?"}]})
+    print(result["messages"][-1].content)
+</code></pre>
+
+    <h2 id="mistakes">15. Common mistakes</h2>
+    <ul>
+      <li>Building a generic `run_sql(query)` tool instead of scoped, specific tools — a major SQL-injection and excessive-agency risk.</li>
+      <li>Not using parameterized queries, risking SQL injection from LLM-generated arguments.</li>
+      <li>Forgetting `async`/`await` consistency when wrapping async REST calls in tool handlers.</li>
+      <li>Returning huge, unstructured raw data (e.g., entire DB table dumps) instead of concise, relevant structured results.</li>
+    </ul>
+
+    <h2 id="best">16. Best practices</h2>
+    <ul>
+      <li>Expose narrow, purpose-specific tools, never generic query/execution primitives.</li>
+      <li>Always use parameterized queries for any database tool.</li>
+      <li>Return concise, structured results — summarize/filter rather than dumping raw data.</li>
+      <li>Add timeouts to any external API calls within tool handlers.</li>
+    </ul>
+
+    <h2 id="production">17. Production considerations</h2>
+    <p>Run database/API-connected MCP servers with connection pooling, proper error handling and logging, and monitoring for tool call latency/failure rates — they're production services, not scripts.</p>
+
+    <h2 id="security">18. Security considerations</h2>
+    <p>Parameterize all database queries; never construct SQL via string formatting with LLM-provided input. Validate and scope REST API calls (e.g., restrict which repos/resources are accessible). Apply the same excessive-agency caution as general tool calling.</p>
+
+    <h2 id="performance">19. Performance considerations</h2>
+    <p>Use connection pooling for database-connected servers; use async HTTP clients for REST-API-connected servers to avoid blocking; add caching for frequently-requested, slow-changing data.</p>
+
+    <h2 id="cost">20. Cost considerations</h2>
+    <p>MCP server infrastructure cost (hosting, database/API usage) is separate from LLM token cost — monitor both, especially for high-traffic remote MCP servers.</p>
+
+    <h2 id="debug">21. Debugging/troubleshooting</h2>
+    <ul>
+      <li><b>Tool call fails with a generic error:</b> add detailed server-side logging to capture the actual underlying exception (DB connection issue, API timeout, etc.).</li>
+      <li><b>Async tool handler hangs:</b> check for missing `await` or a blocking call inside an async function.</li>
+      <li><b>LangGraph agent doesn't see MCP tools:</b> verify `get_tools()` actually returned the expected tool list before passing to the agent.</li>
+    </ul>
+
+    <h2 id="related">22. Related concepts</h2>
+    <p><a href="../22-MCP/mcp-fundamentals.html">MCP Fundamentals</a> · <a href="../18-LangGraph/langgraph-fundamentals.html">LangGraph</a> · <a href="../38-AI-Security/">AI Security</a></p>
+
+    <h2 id="comparison">23. Comparison with alternatives</h2>
+    <table>
+      <tr><th>Approach</th><th>Notes</th></tr>
+      <tr><td>FastMCP (high-level SDK)</td><td>Fast to build, decorator-based, recommended for most servers</td></tr>
+      <tr><td>Low-level MCP SDK</td><td>More control, needed for advanced protocol features</td></tr>
+      <tr><td>Custom tool integration (no MCP)</td><td>No reusability across hosts; only use if MCP genuinely doesn't fit the use case</td></tr>
+    </table>
+
+    <h2 id="exercise">24. Mini practical exercise</h2>
+    <p>Build the database-connected `get_order_status` tool against a local SQLite database instead of Postgres, and verify it correctly handles both found and not-found order IDs.</p>
+
+    <h2 id="project">25. Practical project</h2>
+    <p><b>Full MCP Integration Suite:</b> build all 8 listed components — simple server, structured tool, resource, prompt, DB-connected server, REST-API-connected server, a consuming agent, and a LangGraph + MCP agent — as one cohesive repo.</p>
+
+    <h2 id="projectarch">26. Project architecture</h2>
+    <pre><code>mcp-project/
+ ├── servers/
+ │    ├── simple_server.py
+ │    ├── db_server.py
+ │    └── rest_api_server.py
+ ├── agent_client.py          (direct MCP SDK consumption)
+ ├── langgraph_agent.py       (LangGraph + MCP adapter)
+ └── tests/
+      └── test_tool_validation.py</code></pre>
+
+    <h2 id="interview-b">27. Interview Questions — Beginner</h2>
+    <div class="qa"><b>Q1.</b> What does FastMCP provide?<br><b>A.</b> A high-level Python SDK abstraction for building MCP servers using simple decorators like `@mcp.tool()`.</div>
+    <div class="qa"><b>Q2.</b> What transport does a local MCP server typically use?<br><b>A.</b> stdio (standard input/output of a local subprocess).</div>
+    <div class="qa"><b>Q3.</b> Why should a database-connected MCP tool use parameterized queries?<br><b>A.</b> To prevent SQL injection from LLM-generated or otherwise untrusted arguments.</div>
+    <div class="qa"><b>Q4.</b> Why shouldn't you expose a generic "run any SQL query" tool?<br><b>A.</b> It gives far too much unscoped capability/risk — a classic excessive-agency and injection vulnerability; expose narrow, purpose-specific tools instead.</div>
+    <div class="qa"><b>Q5.</b> What does `MultiServerMCPClient` do in the LangGraph + MCP integration?<br><b>A.</b> Connects to one or more MCP servers and exposes their tools in a format LangGraph/LangChain agents can use directly.</div>
+    <div class="qa"><b>Q6.</b> Why use async HTTP clients for REST-API-connected MCP tools?<br><b>A.</b> To avoid blocking the server while waiting on network I/O, especially under concurrent tool-call load.</div>
+    <div class="qa"><b>Q7.</b> What should a tool return when a requested resource (like an order) isn't found?<br><b>A.</b> A structured error/not-found response the model can understand and react to, not a crash or unclear exception.</div>
+    <div class="qa"><b>Q8.</b> What's the difference between a Tool and a Resource in MCP?<br><b>A.</b> A Tool is a callable function performing an action; a Resource is readable data/content the server provides.</div>
+    <div class="qa"><b>Q9.</b> Why add timeouts to external API calls inside tool handlers?<br><b>A.</b> To prevent a slow/unresponsive external service from hanging the entire tool call indefinitely.</div>
+    <div class="qa"><b>Q10.</b> What's the benefit of returning concise, structured results instead of raw data dumps from a tool?<br><b>A.</b> It keeps context usage efficient and makes the result easier for the model to correctly interpret and use.</div>
+
+    <h2 id="interview-i">28. Interview Questions — Intermediate</h2>
+    <div class="qa"><b>Q1.</b> How does FastMCP generate a tool's schema for discovery, and why does this matter for writing tool functions?<br><b>A.</b> It introspects the function's type hints and docstring to automatically generate the JSON schema clients see during discovery — meaning precise type hints and a clear docstring directly become the tool's documentation and validation contract, not just internal code style.</div>
+    <div class="qa"><b>Q2.</b> Why might you choose to expose `get_order_status(order_id)` rather than a more general `query_orders(filters)` tool?<br><b>A.</b> Narrow, specific tools are easier to validate, reason about, and secure (clear expected input/output, limited blast radius if misused) compared to general filter-based query tools, which risk becoming a backdoor for broader, less controlled database access.</div>
+    <div class="qa"><b>Q3.</b> What's a practical reason to add connection pooling to a database-connected MCP server rather than opening a new connection per tool call?<br><b>A.</b> Opening a new DB connection per call adds significant latency and resource overhead, especially under concurrent load; pooling reuses existing connections, improving throughput and reducing database load.</div>
+    <div class="qa"><b>Q4.</b> How would you test that your MCP server's tool argument validation actually prevents SQL injection attempts?<br><b>A.</b> Write a test case passing a malicious string (e.g., containing `'; DROP TABLE`) as a tool argument and verify the parameterized query handles it safely as literal data rather than executable SQL, and that the result is either a normal "not found" response or a validation error, never an actual injection effect.</div>
+    <div class="qa"><b>Q5.</b> Why does the LangGraph + MCP integration pattern (via `MultiServerMCPClient`) matter architecturally compared to writing custom LangChain tools directly?<br><b>A.</b> It lets the same MCP servers be reused across any MCP-compatible host or framework (not just LangGraph), preserving MCP's core reusability benefit, rather than locking the tool implementation into LangChain-specific tool definitions that wouldn't work with other hosts.</div>
+
+    <h2 id="interview-a">29. Interview Questions — Advanced</h2>
+    <div class="qa"><b>Q1.</b> How would you design an MCP server exposing a large internal database such that it's both useful and safely scoped, avoiding both a dangerously broad "run any query" tool and an overly narrow set of tools that can't handle real use cases?<br><b>A.</b> Start by cataloging the actual query patterns real use cases need, expose each as a dedicated, parameterized tool with validated inputs (e.g., `search_orders_by_customer`, `get_order_status`), and for genuinely flexible reporting needs, consider a constrained query builder tool that only allows selecting from an allowlisted set of columns/filters rather than arbitrary SQL — balancing flexibility against the injection/excessive-agency risk of unconstrained query construction.</div>
+    <div class="qa"><b>Q2.</b> What's a subtle reliability issue with async MCP tool handlers that make concurrent calls to the same external API, and how would you address it?<br><b>A.</b> Without care, concurrent tool calls could exceed the external API's own rate limits, causing cascading failures across multiple simultaneous agent tool calls; address with a shared rate-limiter/semaphore within the MCP server itself, ensuring the server as a whole respects the backend API's limits regardless of how many concurrent client requests arrive.</div>
+
+    <h2 id="interview-s">30. Interview Questions — Senior/Architect</h2>
+    <div class="qa"><b>Q1.</b> Design the rollout strategy for an organization building its first set of internal MCP servers across multiple teams, covering standards, review, and governance.<br><b>A.</b> Establish a shared internal library/template for MCP server scaffolding (consistent error handling, logging, auth patterns), require security review for any tool exposing write/destructive actions or sensitive data, mandate parameterized queries and input validation as a non-negotiable standard, set up centralized discovery/registry so teams can find existing servers before building duplicates, and require versioning discipline for any schema changes given downstream hosts depend on stability.</div>
+
+    <h2 id="interview-sc">31. Scenario-Based Questions</h2>
+    <div class="qa"><b>Scenario 1.</b> A newly built MCP server's `get_order_status` tool is occasionally returning results for the wrong order due to a race condition under concurrent calls. What's the likely cause?<br><b>A.</b> Likely a shared, non-thread-safe database connection or cursor being reused across concurrent requests without proper isolation — fix with connection pooling that provides each request its own connection/cursor, or ensure proper async-safe database access patterns.</div>
+    <div class="qa"><b>Scenario 2.</b> Your REST-API-connected MCP server starts failing intermittently under moderate load. What do you investigate?<br><b>A.</b> Check whether you're hitting the external API's rate limits (common cause under concurrent tool calls), verify timeout and retry/backoff logic exists for transient failures, and check for connection pool exhaustion in the async HTTP client under load.</div>
+
+    <h2 id="revision">32. Quick revision notes</h2>
+    <ul>
+      <li>FastMCP: decorator-based (`@mcp.tool()`, `@mcp.resource()`, `@mcp.prompt()`).</li>
+      <li>Expose narrow, specific tools; never generic query/execution primitives.</li>
+      <li>Always parameterize DB queries; always validate arguments server-side.</li>
+      <li>Use connection pooling and async clients for production-grade servers.</li>
+      <li>LangGraph + MCP via `MultiServerMCPClient` preserves cross-host reusability.</li>
+    </ul>
+
+    <h2 id="cheat">33. Cheat sheet</h2>
+    <div class="callout">FastMCP decorators build servers fast. Expose narrow, specific, parameterized tools — never generic SQL/execution primitives. Use connection pooling + async clients. Validate server-side always. LangGraph connects via MultiServerMCPClient, preserving MCP's cross-host reusability.</div>
+
+    <h2 id="further">34. Further topics to learn</h2>
+    <p><a href="../24-A2A/">A2A</a> → <a href="../38-AI-Security/">AI Security</a> → <a href="../34-Coding-Agents/">Coding Agents</a></p>
+
+    <div class="prevnext">
+      <a href="../22-MCP/mcp-fundamentals.html">← MCP Fundamentals</a>
+      <a href="../24-A2A/a2a-fundamentals.html">Next: A2A →</a>
+    </div>
+  </main>
+</div>
+<script src="../assets/app.js"></script>
+</body>
+</html>

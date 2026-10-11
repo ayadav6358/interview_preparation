@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Estimation, Planning & Risk — Soft Skills & Leadership — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">Soft Skills &amp; Leadership</a><span class="sep">›</span>Estimation, Planning &amp; Risk</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>Estimation, Planning &amp; Risk Communication</h1>
+      <p class="meta-line"><span>⏱ ~2.5 hrs</span><span>📍 Chapter 4 of 7</span></p>
+      <p><strong>One-line summary:</strong> An estimate's job isn't to be right — it's to give the business an
+      honest basis for decisions, which means a stated confidence range and early warning when reality diverges
+      matter more than hitting an arbitrary number.</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>Bad estimation is one of the most common reasons engineers lose trust with stakeholders, even when
+      their code is excellent — a team that's always "almost done" or blindsides leadership with a two-week
+      slip at the last minute burns credibility fast, regardless of how good the actual work is. Senior engineers
+      are expected to estimate larger, more ambiguous bodies of work, communicate uncertainty honestly instead of
+      false precision, and surface risk early enough that it's a manageable conversation instead of a surprise
+      fire.</p>
+      <div class="box why"><h4>Why</h4><p>A single-number estimate ("3 weeks") quietly implies 100% confidence
+      that doesn't exist. A range with a stated confidence level ("2-4 weeks, 80% confidence") gives the business
+      what it actually needs: enough information to plan around the uncertainty, not a fake guarantee.</p></div>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>No hard technical prerequisite. Related: <a href="01-design-docs-rfcs.html">Writing Design Docs &amp; RFCs</a>
+      (scope is usually clarified by the design process before estimation makes sense) and
+      <a href="05-stakeholder-communication.html">Stakeholder Communication</a> (for translating risk/slippage to non-technical audiences).</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="basics">Why single-point estimates fail</h3>
+      <p>"How long will this take?" answered with one number fails for a structural reason: software estimates
+      have a long right tail. Almost nothing finishes meaningfully earlier than expected, but things regularly
+      take 2-3x longer due to unknown unknowns (a library that doesn't do what the docs claimed, a data migration
+      that reveals dirty data, a dependency team that's slower to respond than assumed). A single number can't
+      represent a skewed distribution — you need a range, and ideally a distribution shape.</p>
+
+      <h3 id="technique">Three-point (PERT) estimation, worked example</h3>
+      <p>For each task, estimate three numbers: Optimistic (O, everything goes right), Most Likely (M, normal
+      friction), Pessimistic (P, real but plausible problems happen — not a worst-case asteroid strike). Compute
+      an expected value and a spread:</p>
+      <pre><code class="language-markdown">E = (O + 4M + P) / 6        (weighted toward "most likely")
+SD = (P - O) / 6            (standard deviation, rough estimate of spread)
+
+Example — "Add OAuth login to the API":
+  O (optimistic)  = 3 days   (library just works, no surprises)
+  M (most likely) = 5 days   (normal: some config fighting, one library quirk)
+  P (pessimistic) = 12 days  (token refresh edge cases + a security review
+                               round + an unexpected breaking change in the
+                               provider's SDK)
+
+  E  = (3 + 4*5 + 12) / 6 = (3 + 20 + 12) / 6 = 35 / 6 ≈ 5.8 days
+  SD = (12 - 3) / 6 ≈ 1.5 days
+
+  Communicate as: "~6 days, could range 4.5-7.5 days (~1 SD), with a
+  realistic worst case around 12 days if the security review finds
+  something or the provider SDK has issues."
+</code></pre>
+      <p>For a project made of several tasks, sum the E values for the total expected duration, and combine
+      variances (sum the squared SDs, then take the square root) rather than summing SDs directly — uncertainty
+      doesn't add linearly, it partially cancels out across independent tasks. This is why a project made of 10
+      tasks each estimated "±50%" doesn't actually have ±50% uncertainty overall; it's usually much tighter in
+      relative terms, which is a useful thing to know but shouldn't be used to pretend away genuinely correlated
+      risks (e.g., if the whole project depends on one external API, that risk doesn't diversify away).</p>
+
+      <h3 id="advanced">Risk communication and slippage</h3>
+      <p>The estimate is a prediction made with the information available at the time; the job isn't to defend
+      it when new information arrives, it's to update it and communicate the update immediately, not at the
+      deadline. A good rule: the moment you know something will slip, the stakeholder should know within the same
+      day, with three pieces of information — what changed, the new estimate, and what (if anything) you need
+      from them (a decision on scope cut, more time, or just awareness). Silently hoping to make up the time is
+      the single most common and most damaging estimation mistake at any seniority level.</p>
+
+      <h2 id="under-the-hood">How It Works in Practice</h2>
+      <p>A realistic planning cycle: break the work into tasks small enough that each one is estimable with real
+      confidence (if a task's pessimistic estimate is more than ~3x the optimistic, it's probably still too big
+      or too unknown — spike it first), three-point-estimate each, sum for a project total with a combined
+      confidence range, add explicit buffer for known risks (not padding every number individually — that hides
+      where the real risk actually is), and set a checkpoint partway through (e.g., 30-40% through the timeline)
+      to compare actual progress against the plan and re-forecast rather than waiting until the end to find out
+      you're behind.</p>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+flowchart TD
+  A[Break work into estimable tasks] --> B[3-point estimate each:<br/>Optimistic / Most Likely / Pessimistic]
+  B --> C[Compute E and SD per task]
+  C --> D[Sum E for total;<br/>combine variances for overall range]
+  D --> E[Add explicit buffer<br/>for named known risks]
+  E --> F[Checkpoint at 30-40% through timeline]
+  F --> G{On track vs plan?}
+  G -->|Yes| H[Continue, recheck at next milestone]
+  G -->|No| I[Re-forecast immediately,<br/>communicate same day:<br/>what changed / new estimate / what's needed]
+      </div>
+
+      <h2 id="code-examples">Templates / Example Scripts</h2>
+      <pre><code class="language-markdown"># Slippage communication template (send same-day, not at deadline)
+
+Subject: Heads up — [Feature X] timeline update
+
+What changed: [1-2 sentences, factual, no blame]
+  e.g. "The payment provider's sandbox doesn't support the webhook
+  retry scenario we need to test, so we can't validate the idempotency
+  logic until they provision a new test account — ETA from them is
+  3 business days."
+
+New estimate: [old estimate] -> [new estimate], [confidence note]
+  e.g. "Was Oct 10, now realistically Oct 15-17 (80% confidence).
+  Worst case Oct 22 if the provider's ETA itself slips."
+
+What I need from you: [a specific decision or just FYI]
+  e.g. "No action needed yet — flagging now so it's not a surprise.
+  If Oct 10 is truly hard, options are: ship without idempotency
+  double-checking (risk: rare duplicate charges) or slip the date."
+
+---
+
+# Bad vs good estimate framing
+
+## Bad: false precision, no range, no risk surfaced
+"This will take 2 weeks."
+
+## Good: range, confidence, named risk
+"Most likely 2 weeks (expected value from 3-point estimate), could
+ stretch to 3 weeks if the data migration finds inconsistent records
+ in the legacy table — I haven't fully audited that table yet, that's
+ the main unknown. I'll know more by Wednesday after I query it."
+</code></pre>
+
+      <h2 id="production-scenario">Real-World Scenario at Scale (large team / org)</h2>
+      <div class="box prod"><h4>At scale</h4><p>At a multi-team org, estimation failures compound across
+      dependencies: if Team A's task depends on Team B's API and Team B's estimate was a single optimistic
+      number with no buffer, Team A inherits that risk invisibly and their own estimate becomes fiction too.
+      The practical fix is to surface cross-team dependencies explicitly in planning (a simple dependency list:
+      "blocked on Team B's auth API, their stated ETA is X, confidence unknown") and push for the same
+      3-point/confidence-range discipline across team boundaries, not just within your own team — an estimate is
+      only as good as the least rigorous estimate it depends on.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Padding every individual task estimate "just in case" instead of
+      adding an explicit, named risk buffer at the project level. Padding everything hides where the real
+      uncertainty lives (now every task looks equally risky) and gets silently "optimized away" by management
+      pressure on each number individually, since there's no stated reason for any single pad to exist.</p></div>
+      <ul>
+        <li><strong>Mistake:</strong> estimating the happy path only and forgetting integration, testing, code
+        review cycles, and deployment — these routinely add 30-50% that get left out of a quick gut-feel number.</li>
+        <li><strong>Mistake:</strong> treating an estimate given under pressure ("just give me a number right now")
+        as a committed deadline later. If forced to answer on the spot, explicitly flag it as a rough, unverified
+        number and follow up with a real one within a day.</li>
+        <li><strong>Best practice:</strong> re-forecast at a checkpoint partway through, don't wait for the
+        deadline to discover you're behind — the earlier a slip is known, the more options exist to address it.</li>
+        <li><strong>Best practice:</strong> separate "I don't know yet" from "it will be late" — if a task is
+        genuinely unestimable (never-seen-before unknown), say so explicitly and propose a short timeboxed spike
+        to reduce the uncertainty before committing to a number.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>Single-number estimate</td><td>Truly trivial, well-understood, low-stakes task</td><td>Anything with real unknowns or stakeholder-visible deadlines</td><td>3-point range with stated confidence</td></tr>
+        <tr><td>3-point / PERT estimation</td><td>Medium-to-large tasks with some uncertainty, stakeholder needs a defensible number</td><td>Truly novel work with no comparable reference point</td><td>Timeboxed spike first, then estimate</td></tr>
+        <tr><td>Padding every task individually</td><td>Rarely a good default</td><td>Almost always</td><td>Named project-level risk buffer</td></tr>
+        <tr><td>Fixed deadline, flexible scope</td><td>Date is externally hard (e.g., a contractual or legal deadline)</td><td>Scope is actually fixed and non-negotiable too (worst combination)</td><td>Negotiate one of date/scope/quality to flex</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic">
+        <h4>Basic</h4>
+        <details class="qa"><summary>Why does a single-number estimate tend to be misleading?</summary><div class="answer"><p>Software task durations have a long right tail — almost nothing finishes much earlier than expected but things regularly take 2-3x longer due to unknown unknowns. A single number implies false precision and hides that skew.</p></div>
+        <div class="followup">Follow-up: what should you give instead?</div></details>
+        <details class="qa"><summary>Walk through the three-point (PERT) estimation formula.</summary><div class="answer"><p>E = (O + 4M + P) / 6, weighting the most-likely case heavily; SD ≈ (P - O) / 6 gives a rough spread. You estimate optimistic, most-likely, and pessimistic (plausible, not worst-case-ever) scenarios per task.</p></div>
+        <div class="followup">Follow-up: work through an example with O=2, M=4, P=10 days.</div></details>
+        <details class="qa"><summary>What should you do the moment you realize a task will slip?</summary><div class="answer"><p>Communicate the same day — what changed, the new estimate, and what (if anything) is needed from the stakeholder. Waiting until the deadline to reveal a slip is the single most damaging estimation mistake.</p></div>
+        <div class="followup">Follow-up: why is same-day communication so much better received than a last-minute surprise, even if the outcome is the same?</div></details>
+        <details class="qa"><summary>Why is it a mistake to pad every individual task estimate "just in case"?</summary><div class="answer"><p>It hides where the real uncertainty actually is (everything looks equally risky) and tends to get stripped out task-by-task under schedule pressure since no single pad has a stated reason. A named, project-level risk buffer is more honest and more defensible.</p></div>
+        <div class="followup">Follow-up: how do you defend a named risk buffer to a stakeholder who wants it removed?</div></details>
+        <details class="qa"><summary>What commonly gets left out of a "happy path only" estimate?</summary><div class="answer"><p>Integration work, testing, code review cycles, and deployment — these routinely add 30-50% beyond the core implementation time and get missed in a quick gut-feel number.</p></div>
+        <div class="followup">Follow-up: how do you build the habit of including these by default?</div></details>
+        <details class="qa"><summary>What's the right response when someone demands an estimate on the spot with no time to think?</summary><div class="answer"><p>Give a rough number but explicitly flag it as unverified ("off the top of my head, I'd guess X, let me confirm by tomorrow"), then follow up with a real estimate. Treating a forced snap answer as a firm commitment later is a common trap.</p></div>
+        <div class="followup">Follow-up: what if they try to hold you to the off-the-cuff number anyway?</div></details>
+      </div>
+      <div class="qa-level medium">
+        <h4>Medium</h4>
+        <details class="qa"><summary>How do you estimate a task that's genuinely novel, with no comparable past work to reference?</summary><div class="answer"><p>Don't force a confident number — explicitly say it's unestimable with current information, and propose a short timeboxed spike (e.g., 1-2 days) to investigate and reduce uncertainty before committing to a real estimate. Treat the spike's own time as the only thing you estimate initially.</p></div>
+        <div class="followup">Follow-up: what if the stakeholder pushes for a number anyway before the spike?</div></details>
+        <details class="qa"><summary>You're 30% through a project timeline and only 15% of the work is actually done. What do you do?</summary><div class="answer"><p>Re-forecast immediately using the actual velocity observed, don't assume you'll "catch up" without a specific reason to believe that. Identify why progress is behind (scope creep, underestimated complexity, external blockers) and communicate the updated estimate with that reasoning the same day you notice it, along with options if the date matters.</p></div>
+        <div class="followup">Follow-up: how do you distinguish "normal early-phase slowness that evens out" from a real trend?</div></details>
+        <details class="qa"><summary>How do combined variances work when summing estimates across multiple independent tasks, and why does it matter?</summary><div class="answer"><p>You don't sum standard deviations directly — you sum variances (SD squared) and take the square root of the total. This means the combined relative uncertainty of a multi-task project is often tighter than naively adding percentage uncertainties would suggest, because independent risks partially cancel out. It doesn't apply to correlated risks (e.g., one shared dependency that affects every task) — those should be called out separately, not diversified away.</p></div>
+        <div class="followup">Follow-up: give an example where tasks are NOT independent and this math breaks down.</div></details>
+        <details class="qa"><summary>A stakeholder wants a hard date for a project with significant technical unknowns. How do you handle the conversation?</summary><div class="answer"><p>Give the best available range with confidence levels and name the specific unknowns driving the uncertainty, rather than either refusing to commit to anything or caving to a fake precise date. Offer to timebox a spike to shrink the biggest unknown before locking the date if the business can tolerate a short delay in committing.</p></div>
+        <div class="followup">Follow-up: what if they insist on committing a specific date externally (e.g., to a customer) despite your range?</div></details>
+        <details class="qa"><summary>How do you estimate work for a team member whose pace and skill level you're less familiar with?</summary><div class="answer"><p>Don't just apply your own pace with a multiplier guessed from thin air — ask them to produce their own 3-point estimate (it also builds their estimation skill), and sanity-check it together against similar past work they've done. Over time, track actual-vs-estimated for that person to calibrate future estimates more accurately.</p></div>
+        <div class="followup">Follow-up: what if their self-estimate seems unrealistically optimistic?</div></details>
+      </div>
+      <div class="qa-level advanced">
+        <h4>Advanced</h4>
+        <details class="qa"><summary>Tell me about a time you had to deliver bad news about a project slipping. How did you handle it?</summary><div class="answer"><p>(Scenario-based — strong answers describe recognizing the slip early (not at the deadline), communicating the same day with the specific cause, a revised estimate, and concrete options rather than just an apology, and following through on whichever option was chosen. Bonus points for naming what changed in their own process afterward to catch similar slips earlier next time.)</p></div>
+        <div class="followup">Follow-up: how did the stakeholder's reaction differ from a time you (or someone else) delivered the same news late?</div></details>
+        <details class="qa"><summary>How would you fix an organization's planning process if every project estimate is consistently 2x too optimistic?</summary><div class="answer"><p>First check whether it's a systematic bias correctable with data: track actual-vs-estimated across past projects and apply a calibration factor, since consistent 2x suggests a measurable, fixable pattern (often missing integration/testing time, or chronic scope creep not re-estimated). Also examine incentives — if estimators are implicitly rewarded for optimistic numbers that win approval, fixing the math alone won't fix the behavior; the process needs psychological safety to give honest, larger numbers.</p></div>
+        <div class="followup">Follow-up: how do you roll this out without it reading as "engineering is bad at estimating, needs a watchdog"?</div></details>
+        <details class="qa"><summary>Describe a tough tradeoff you made under time pressure between shipping fast and shipping right. How did you decide, and how did you communicate the risk?</summary><div class="answer"><p>(Scenario-based — strong answers name the specific tradeoff considered (e.g., skipping a load test before a launch date, or shipping a feature without full edge-case handling), the reasoning used to decide (how reversible is it, what's the actual cost if the risk materializes, who bears that cost), and crucially how the accepted risk was communicated to stakeholders explicitly rather than silently absorbed — so the decision was visible and the business could veto it if the risk was unacceptable to them.)</p></div>
+        <div class="followup">Follow-up: if the accepted risk materialized, how did you handle that conversation — and if it didn't, did you still flag that you'd taken the risk?</div></details>
+        <details class="qa"><summary>How do you estimate and plan around a dependency on another team whose own estimates you don't trust?</summary><div class="answer"><p>Make the dependency and its uncertainty explicit in your own plan rather than inheriting their confidence level silently — add your own risk buffer specifically for that dependency, push for a documented commitment (even informal) from them with a named confidence level, and build a fallback plan (a degraded version that doesn't require their piece) if the dependency is truly high-risk and the date matters.</p></div>
+        <div class="followup">Follow-up: how do you raise concerns about another team's estimation discipline without it becoming interpersonal conflict?</div></details>
+        <details class="qa"><summary>Leadership asks you to commit to a date 2 weeks before your own best estimate would suggest is realistic, for a customer-facing launch already announced externally. What do you do?</summary><div class="answer"><p>Present the real estimate and the gap honestly, along with concrete options to close it (cut scope, add resources if that's even feasible/helpful at this stage, accept and communicate higher risk, or push the external date) — and make clear which option, if any, you'd recommend and why. Avoid both silently agreeing to an unrealistic date (sets up a worse surprise later) and flatly refusing without offering paths forward (unhelpful to a leader under real external pressure).</p></div>
+        <div class="followup">Follow-up: if leadership picks "accept higher risk and hit the date" against your recommendation, what do you do next?</div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment">
+        <span class="level-tag">Beginner (30-60 min)</span>
+        <h4>Three-point estimate 5 real tasks</h4>
+        <p>Pick 5 real tasks from your current work or backlog. For each, write O/M/P estimates and compute E
+        and SD using the formulas in this chapter.</p>
+        <ul>
+          <li>Each task's P should be a plausible real risk, not an absurd worst case.</li>
+          <li>Write one sentence per task naming the specific driver of the gap between O and P.</li>
+        </ul>
+        <p><strong>Acceptance criteria:</strong> For at least 2 tasks, your P estimate is grounded in a real,
+        named risk (a specific dependency, a specific unknown) rather than a generic "stuff might go wrong."</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>If you can't think of a plausible P beyond "2x the most-likely," you probably haven't actually thought about what could go wrong yet — spend 5 more minutes on it.</p></div></details>
+        <p><strong>Bonus:</strong> Track actual time spent and compare to your estimate after completing one of the tasks.</p>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Intermediate (2-4 hrs)</span>
+        <h4>Write a slippage communication for a realistic scenario</h4>
+        <p>Scenario: you committed to shipping a feature in 2 weeks. At the 1-week checkpoint, you've discovered
+        the third-party API you depend on doesn't support a required field, and a workaround will add 4-6 days.
+        Write the full slippage communication using the template in this chapter, plus a short plan for the
+        actual technical workaround (invent plausible details).</p>
+        <ul>
+          <li>Must name what changed factually, with no blame language.</li>
+          <li>Must give a new estimate with a confidence note.</li>
+          <li>Must give the stakeholder at least one real option/decision, not just an apology.</li>
+        </ul>
+        <p><strong>Acceptance criteria:</strong> A non-technical reader understands exactly what happened and what
+        their options are without needing to ask a follow-up question.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>Resist writing more than 150 words — a long, defensive explanation reads worse than a short, factual one.</p></div></details>
+        <p><strong>Bonus:</strong> Write the version of this message you'd send if this were the second time in a month this project has slipped.</p>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Advanced (1-2 days)</span>
+        <h4>Diagnose and fix a chronically-wrong estimation process</h4>
+        <p>A hypothetical 15-person team has shipped the last 6 quarterly roadmap items an average of 40% over
+        their original estimate. Diagnose likely root causes and design a fix for the estimation process.</p>
+        <ul>
+          <li>Identify at least 3 plausible distinct root causes (not just "bad estimating") and how you'd verify each with real data.</li>
+          <li>Propose a specific process change addressing the actual causes, not a generic "be more careful."</li>
+          <li>Propose how you'd measure, after 2 quarters, whether the fix actually worked.</li>
+        </ul>
+        <details class="qa"><summary>Hints (no full solution)</summary><div class="answer"><p>Consider that "40% over estimate" could come from genuinely bad estimation, or from scope creep that was never re-estimated, or from an incentive structure that rewards optimistic initial numbers — each has a different fix.</p></div></details>
+      </div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet">
+        <ul>
+          <li>Never give a single number for anything non-trivial — give a range with confidence.</li>
+          <li>PERT: E = (O + 4M + P) / 6, SD ≈ (P - O) / 6.</li>
+          <li>Sum E's for project total; combine variances (not SDs) for overall spread.</li>
+          <li>Add a named project-level risk buffer, not per-task padding.</li>
+          <li>Happy-path-only estimates miss integration, testing, review, deploy (~30-50%).</li>
+          <li>Communicate a slip the same day you know, not at the deadline.</li>
+          <li>Slippage message: what changed, new estimate, what's needed from them.</li>
+          <li>On-the-spot forced estimate: flag as rough, follow up with a real one.</li>
+          <li>Genuinely novel work: timebox a spike before committing to a number.</li>
+          <li>Re-forecast at a 30-40% checkpoint — don't wait for the deadline to find out you're behind.</li>
+        </ul>
+      </div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://en.wikipedia.org/wiki/Three-point_estimation">Three-point (PERT) estimation — overview</a></li>
+        <li><a href="https://blog.codinghorror.com/software-estimation-worse-than-you-think/">Software Estimation: Worse Than You Think — Coding Horror</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="03-mentoring.html"><span class="dir">← Previous</span>Mentoring Juniors</a>
+        <a class="next" href="05-stakeholder-communication.html"><span class="dir">Next →</span>Stakeholder Communication</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · Soft Skills &amp; Leadership</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-markdown.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "10-soft-skills-leadership", chapterKey: "04-estimation-planning" });</script>
+</body>
+</html>

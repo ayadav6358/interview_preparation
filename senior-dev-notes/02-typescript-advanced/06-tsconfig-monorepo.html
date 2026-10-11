@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>tsconfig, Strict Mode, Monorepos — TypeScript Advanced — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">TypeScript Advanced</a><span class="sep">›</span>tsconfig, Strict Mode, Monorepos</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>tsconfig, Strict Mode, Declaration Files, Monorepos</h1>
+      <p class="meta-line"><span>⏱ ~2 hrs</span><span>📍 Chapter 6 of 6</span></p>
+      <p><strong>One-line summary:</strong> Knowing the type system is half the job; a senior/lead is also expected
+      to own the compiler configuration that keeps a large codebase's type-checking correct, fast, and consistently
+      enforced across every package in a monorepo.</p>
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <div class="box why">
+        <h4>Why</h4>
+        <p>At staff/lead level you're expected to make and defend decisions like "should we enable
+        <code>noUncheckedIndexedAccess</code> on a 5-year-old codebase", "why is <code>tsc</code> taking 4 minutes on
+        every save", and "how do we share types between our frontend and backend packages without circular
+        dependency hell." These are exactly the kinds of pragmatic, infrastructure-shaped questions that distinguish a
+        senior interview from a mid-level one — type system trivia gets you in the door, but this chapter is what
+        gets you trusted to own a repo's TS setup.</p>
+      </div>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>Benefits from all prior chapters, especially <a href="01-type-system.html">Type System Deep Dive</a> for the strict-flag discussion. Related: <a href="../06-cloud-aws-docker-k8s/index.html">Cloud, AWS, Docker &amp; K8s</a> for CI/build pipeline context.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="strict-flags">Strict mode: what each flag actually does</h3>
+      <p><code>strict: true</code> is a bundle of individually-togglable flags. Knowing what each one actually
+      changes (not just "it makes things stricter") is a very common interview probe.</p>
+      <table>
+        <tr><th>Flag</th><th>What it actually does</th></tr>
+        <tr><td><code>strictNullChecks</code></td><td><code>null</code>/<code>undefined</code> are not implicitly part of every type; you must explicitly include them in a union to allow them. The single highest-impact flag.</td></tr>
+        <tr><td><code>noImplicitAny</code></td><td>Any value the compiler can't infer a type for and would otherwise default to <code>any</code> instead raises an error.</td></tr>
+        <tr><td><code>strictFunctionTypes</code></td><td>Function parameters are checked contravariantly instead of bivariantly for function-typed values (not method shorthand — see ch.1/2).</td></tr>
+        <tr><td><code>strictPropertyInitialization</code></td><td>Class properties without a default or constructor assignment must be explicitly typed as possibly <code>undefined</code> or marked definitely-assigned (<code>!</code>).</td></tr>
+        <tr><td><code>strictBindCallApply</code></td><td><code>.bind()</code>/<code>.call()</code>/<code>.apply()</code> are type-checked against the function's actual signature instead of returning <code>any</code>.</td></tr>
+        <tr><td><code>noImplicitThis</code></td><td><code>this</code> inside a function with no clear contextual type is an error instead of implicitly <code>any</code>.</td></tr>
+        <tr><td><code>alwaysStrict</code></td><td>Emits <code>"use strict"</code> and parses files in ECMAScript strict mode.</td></tr>
+        <tr><td><code>useUnknownInCatchVariables</code></td><td>(TS 4.4+) <code>catch (e)</code> types <code>e</code> as <code>unknown</code> instead of <code>any</code>, forcing you to narrow before use.</td></tr>
+      </table>
+      <p>Flags <strong>not</strong> included in <code>strict</code> but worth knowing: <code>noUncheckedIndexedAccess</code>
+      (index/Record lookups return <code>T | undefined</code>), <code>noPropertyAccessFromIndexSignature</code>
+      (forces bracket notation for index-signature-only properties, catching typos), and
+      <code>exactOptionalPropertyTypes</code> (an optional property's declared type cannot be explicitly assigned
+      <code>undefined</code> unless <code>undefined</code> is in the union — distinguishes "missing" from "present but undefined").</p>
+
+      <h3 id="project-references">Project references: the monorepo primitive</h3>
+      <p>TypeScript project references (<code>composite: true</code> + <code>references: [...]</code>) let you split
+      a large codebase into independently-buildable packages, where <code>tsc --build</code> only rechecks packages
+      whose dependencies actually changed, using cached <code>.tsbuildinfo</code> incremental state per package.</p>
+      <pre><code class="language-json">// packages/shared-types/tsconfig.json
+{
+  "compilerOptions": {
+    "composite": true,
+    "declaration": true,
+    "outDir": "dist",
+    "rootDir": "src"
+  },
+  "include": ["src"]
+}
+
+// packages/api/tsconfig.json
+{
+  "compilerOptions": {
+    "composite": true,
+    "outDir": "dist",
+    "rootDir": "src"
+  },
+  "references": [{ "path": "../shared-types" }],
+  "include": ["src"]
+}
+
+// Root orchestrating tsconfig (not usually compiled directly, just for `tsc --build`)
+{
+  "files": [],
+  "references": [
+    { "path": "packages/shared-types" },
+    { "path": "packages/api" },
+    { "path": "packages/web" }
+  ]
+}</code></pre>
+      <p>Without <code>composite</code>/<code>references</code>, a monorepo typically either (a) has every package
+      import every other package's raw <code>.ts</code> source, so the whole repo gets rechecked on every build with
+      no incrementality boundary, or (b) relies entirely on each package pre-building to JS + <code>.d.ts</code> and
+      consuming compiled output, which is correct but slow to iterate on locally (every tiny change needs a rebuild
+      step). Project references give you real incremental, dependency-aware builds without giving up the
+      "import source directly in dev" ergonomics most monorepo tooling (Turborepo, Nx) is built around.</p>
+
+      <h3 id="declaration-files">Declaration files: what <code>.d.ts</code> actually is and when you write one by hand</h3>
+      <pre><code class="language-typescript">// Auto-generated by `declaration: true` — don't hand-write these for your own TS code
+// dist/user.d.ts
+export interface User {
+    id: string;
+    name: string;
+}
+export declare function getUser(id: string): Promise&lt;User&gt;;
+
+// Hand-written — for a plain-JS dependency with no types, or to extend a global
+// types/legacy-lib.d.ts
+declare module "legacy-lib" {
+  export function doThing(x: number): string;
+}
+
+// Augmenting a global (e.g. extending Express's Request type with your auth middleware's field)
+// types/express.d.ts
+declare global {
+  namespace Express {
+    interface Request {
+      user?: { id: string; roles: string[] };
+    }
+  }
+}
+export {}; // needed to make this file a module, not a global script,
+            // while still allowing the `declare global` augmentation to apply</code></pre>
+      <p>That <code>export {}</code> at the bottom is a very common point of confusion: without at least one
+      top-level <code>import</code>/<code>export</code>, a <code>.d.ts</code> file is treated as a global script
+      (everything it declares pollutes the global scope directly) rather than a module — but once you add any
+      import/export, <code>declare global { ... }</code> becomes necessary specifically to escape back out to global
+      augmentation from within a module.</p>
+
+      <h3 id="monorepo-shared-types">Sharing types cleanly across monorepo packages</h3>
+      <p>The two dominant patterns: (1) a dedicated <code>@myorg/types</code> package other packages depend on
+      normally (clean, but adds a build step/dependency edge for every type change), or (2) generating types from a
+      single source of truth (an OpenAPI/GraphQL schema, or — matching this topic's capstone idea — a typed route
+      definition file) so frontend and backend both consume generated types rather than hand-syncing two separate
+      definitions. At scale, (2) is usually the senior-preferred answer for anything crossing a network boundary,
+      because hand-synced types between frontend and backend silently drift the moment someone forgets to update one side.</p>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p><code>tsc --build</code> with project references works by topologically ordering the reference graph,
+      building each dependency project to its declared <code>outDir</code> (emitting both JS and <code>.d.ts</code>)
+      before building anything that depends on it, and recording a content hash / timestamp fingerprint per project
+      in its <code>.tsbuildinfo</code> file. On a subsequent build, it compares each project's current inputs against
+      that fingerprint and skips re-checking/re-emitting any project whose inputs (and whose dependencies' outputs)
+      are unchanged — this is why composite projects MUST emit declaration files: a downstream project type-checks
+      against the upstream project's <code>.d.ts</code> output, not its <code>.ts</code> source, which is also what
+      enables the incrementality (re-checking downstream only needs to re-read a declaration file, not re-typecheck
+      the dependency's full implementation).</p>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+flowchart TD
+  A["tsc --build (root tsconfig)"] --> B["Topologically sort references"]
+  B --> C["Build shared-types first (composite, emits .d.ts)"]
+  C --> D["Build api (references shared-types, type-checks against its .d.ts)"]
+  C --> E["Build web (references shared-types, type-checks against its .d.ts)"]
+  D --> F["Write api/.tsbuildinfo fingerprint"]
+  E --> G["Write web/.tsbuildinfo fingerprint"]
+  F --> H["Next build: unchanged inputs → skip rebuild entirely"]
+  G --> H
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-typescript">// A realistic, defensible tsconfig.json base for a modern (2025-26) Node/React monorepo package
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",            // or "ESNext" + bundler moduleResolution for frontend packages
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2022"],                 // add "DOM" for frontend packages
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noPropertyAccessFromIndexSignature": true,
+    "exactOptionalPropertyTypes": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,              // don't re-check node_modules' own .d.ts files — big perf win
+    "forceConsistentCasingInFileNames": true,
+    "composite": true,
+    "declaration": true,
+    "declarationMap": true,            // lets "go to definition" jump to source, not just .d.ts
+    "sourceMap": true,
+    "incremental": true,
+    "outDir": "dist",
+    "rootDir": "src"
+  },
+  "include": ["src"],
+  "exclude": ["node_modules", "dist"]
+}</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod">
+        <h4>At scale</h4>
+        <p>A 25-package monorepo's <code>tsc --noEmit</code> CI check grew to ~6 minutes as the codebase grew, because
+        every package re-type-checked every other package's full source on every CI run with no incremental cache
+        persisted between runs, and <code>skipLibCheck</code> was off, meaning every dependency's own
+        <code>.d.ts</code> files (including deeply nested transitive ones) were re-verified every time too. Enabling
+        project references with real package boundaries, turning on <code>skipLibCheck</code>, and persisting each
+        package's <code>.tsbuildinfo</code> as a CI cache keyed on a lockfile hash brought full CI type-checking down
+        to under 90 seconds on a typical PR touching 2-3 packages, because unaffected packages' builds were skipped
+        entirely rather than re-verified from scratch.</p>
+      </div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha">
+        <h4>Gotcha</h4>
+        <p>Enabling <code>strict</code> (or any of its sub-flags) on a large existing codebase all at once typically
+        produces hundreds or thousands of new errors overnight, which teams either panic-revert or — worse — silence
+        wholesale with blanket <code>// @ts-ignore</code>. The standard mitigation is enabling strict flags
+        per-sub-flag, often per-directory via a tsconfig override or a tool like <code>ts-migrate</code>, landing them
+        incrementally with ownership assigned per area of the codebase, rather than attempting a single big-bang flip.</p>
+      </div>
+      <ul>
+        <li>Always set <code>skipLibCheck: true</code> in application code — re-checking dependencies' own type definitions is rarely worth the cost.</li>
+        <li>Use project references for any monorepo package that's imported by more than one other package.</li>
+        <li>Prefer generating shared types from a single source of truth (schema/route definitions) over hand-synced packages for anything crossing a network boundary.</li>
+        <li>Enable <code>noUncheckedIndexedAccess</code> and <code>exactOptionalPropertyTypes</code> on new projects from day one — retrofitting them later is painful but usually still worth doing.</li>
+        <li>Never hand-write a <code>.d.ts</code> for your own TypeScript source — only for untyped JS dependencies or global augmentation.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>Big-bang strict mode adoption</td><td>Small/new codebase, low existing error count</td><td>Large legacy codebase with thousands of existing violations</td><td>Incremental per-flag, per-directory rollout</td></tr>
+        <tr><td>Project references</td><td>Monorepo with real package boundaries and shared dependencies</td><td>Single-package repo, or a monorepo where everything imports everything (no real boundaries)</td><td>Single flat tsconfig for the whole repo</td></tr>
+        <tr><td>Generated shared types (schema-first)</td><td>Types cross a real network/process boundary (API contracts)</td><td>Purely internal, same-process shared utility types</td><td>Hand-written shared types package</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic">
+        <h4>Basic</h4>
+        <details class="qa"><summary>What does <code>strictNullChecks</code> actually change?</summary><div class="answer"><p>Without it, <code>null</code> and <code>undefined</code> are implicitly assignable to every type; with it, they must be explicitly included in a type's union for a value to legally be null/undefined.</p></div></details>
+        <details class="qa"><summary>What's the difference between <code>strict: true</code> and individually enabling flags?</summary><div class="answer"><p><code>strict: true</code> is shorthand for enabling a whole bundle of related flags (<code>strictNullChecks</code>, <code>noImplicitAny</code>, etc) at once; you can still override individual ones afterward if needed.</p></div></details>
+        <details class="qa"><summary>What is <code>skipLibCheck</code> and why is it almost always turned on?</summary><div class="answer"><p>It skips type-checking of <code>.d.ts</code> files, including those in node_modules. It's turned on because re-verifying third-party declaration files (which are assumed already correct) on every build is usually wasted compile time with little benefit.</p></div></details>
+        <details class="qa"><summary>What's the purpose of a <code>.d.ts</code> file?</summary><div class="answer"><p>It declares types for JavaScript code without containing any implementation — used for untyped JS dependencies, or auto-generated as the public type surface of your own compiled TypeScript package.</p></div></details>
+        <details class="qa"><summary>What does <code>noUncheckedIndexedAccess</code> do?</summary><div class="answer"><p>Makes any indexed access (array index, or a <code>Record</code>/index-signature lookup) return <code>T | undefined</code> instead of just <code>T</code>, since nothing actually guarantees the key/index exists.</p></div></details>
+      </div>
+      <div class="qa-level medium">
+        <h4>Medium</h4>
+        <details class="qa"><summary>Explain what <code>composite: true</code> requires and why.</summary><div class="answer"><p>It requires <code>declaration: true</code> (and implicitly sets some other constraints like disallowing certain unlisted includes) because composite projects are meant to be referenced by other projects, which type-check against their emitted <code>.d.ts</code> output rather than re-reading their raw source.</p></div></details>
+        <details class="qa"><summary>How does <code>tsc --build</code> decide whether to skip rebuilding a referenced project?</summary><div class="answer"><p>It compares the project's current source files and its dependencies' outputs against the fingerprint recorded in its <code>.tsbuildinfo</code> file from the last build; if nothing relevant changed, it skips both type-checking and re-emitting that project entirely.</p></div></details>
+        <details class="qa"><summary>Why would you choose to generate shared types from an OpenAPI/GraphQL schema instead of hand-writing a shared types package for an API contract?</summary><div class="answer"><p>Hand-synced types between two packages (e.g. frontend and backend) can silently drift whenever one side's types are updated without the other being updated to match, since nothing enforces the sync; generating both from one schema source of truth makes drift structurally impossible — a schema change regenerates both sides consistently or fails the generation step.</p></div></details>
+        <details class="qa"><summary>What's the risk of rolling out strict mode flags all at once on a large legacy codebase, and what's a safer rollout strategy?</summary><div class="answer"><p>It can produce an overwhelming number of new errors at once, leading teams to either revert strict mode entirely or mass-suppress errors with blanket ignores, defeating the purpose. A safer strategy enables flags incrementally (one sub-flag at a time, or scoped per-directory via tsconfig overrides), assigning ownership and fixing real issues gradually rather than suppressing them.</p></div></details>
+        <details class="qa"><summary>Why does a <code>.d.ts</code> file need at least one <code>import</code>/<code>export</code> to be treated as a module rather than a global script, and why does that matter for <code>declare global</code>?</summary><div class="answer"><p>TypeScript (matching JS module semantics) treats a file with no top-level import/export as a global script, where every declaration pollutes the global scope automatically — once you add any import/export, the file becomes a module with its own scope, and `declare global { ... }` is then required as the explicit escape hatch to still augment the global scope from within that module.</p></div></details>
+      </div>
+      <div class="qa-level advanced">
+        <h4>Advanced</h4>
+        <details class="qa"><summary>Design a strategy for incrementally rolling out <code>strict: true</code> across a 200k-line legacy codebase with an existing CI pipeline that must stay green throughout.</summary><div class="answer"><p>Enable strict flags one at a time, starting with the highest-value/lowest-noise ones (`noImplicitAny`, then `strictNullChecks` last since it's usually the biggest). For each flag, generate a baseline error count, suppress pre-existing errors with a tracked, dated `// @ts-expect-error` (or a per-file allowlist consumed by a custom lint rule) rather than blanket-ignoring, require all NEW code to be clean under the flag immediately, and track the suppressed-error count trending to zero over time as a team-visible metric, removing suppressions as files are touched for other reasons.</p></div></details>
+        <details class="qa"><summary>Explain exactly why composite project references require emitting declaration files rather than letting downstream projects read upstream `.ts` source directly, and what incrementality property this buys you.</summary><div class="answer"><p>If downstream projects read upstream raw source, type-checking downstream would require re-type-checking the entire upstream implementation transitively every time, defeating incrementality — there'd be no stable, cheap-to-read artifact representing "what upstream's public surface currently is." Requiring `.d.ts` emission gives a project-boundary-respecting contract: downstream only needs to read a (usually much smaller) declaration file and can skip re-verifying upstream's actual implementation logic, which is also why changing an upstream project's internal implementation without changing its public type signature doesn't force downstream rebuilds.</p></div></details>
+        <details class="qa"><summary>You need to share a validation schema (and its inferred types) between a Node backend and a React frontend in a monorepo, where the frontend bundler can't handle certain backend-only dependencies the schema file might accidentally pull in. How do you architect the shared package to avoid this?</summary><div class="answer"><p>Isolate the schema definitions (and only the schema definitions — no backend-specific logic like DB clients) into their own leaf package with zero backend-only dependencies, exporting both the schemas and their `Infer`-derived types; both frontend and backend depend on this leaf package, and any backend-only logic that uses those schemas lives in a separate package that the frontend never imports, keeping the dependency graph's "frontend-safe" boundary explicit and enforceable (optionally lint-enforced via import restrictions).</p></div></details>
+        <details class="qa"><summary>What causes `tsc --build` to sometimes rebuild more than expected even when `.tsbuildinfo` is present and seemingly valid, and how would you debug it?</summary><div class="answer"><p>Common causes: the `.tsbuildinfo` cache wasn't restored correctly in CI (wrong cache key, e.g. not including the TypeScript version or tsconfig hash), a referenced project's declaration output changed in a way that invalidates downstream fingerprints even if source didn't change meaningfully (e.g. formatting-only changes to emitted `.d.ts`), or `outDir`/`rootDir` misconfiguration causing paths to not match between builds. Debug with `tsc --build --verbose` (or `--explainFiles`), which reports exactly why each file was or wasn't rebuilt.</p></div></details>
+        <details class="qa"><summary>How would you enforce, at the CI level, that no new code in a large repo introduces an `any` or a suppressed strict-mode error, while still allowing a long tail of pre-existing suppressions to be paid down gradually?</summary><div class="answer"><p>Run a strict-mode-enabled `tsc --noEmit` pass and diff the resulting error list (or a tracked allowlist of known-pre-existing error locations, e.g. file+line) against a checked-in baseline file; CI fails only if the current error set contains anything NOT in the baseline, and passes (even celebrates) when the current set is a strict subset of the baseline as suppressions get fixed — this pattern (often implemented via a small custom script wrapping `tsc`'s JSON-ish diagnostic output) is the standard way to ratchet strictness without requiring a single all-at-once fix.</p></div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment">
+        <span class="level-tag">Beginner (30-60 min)</span>
+        <h4>Audit a tsconfig.json</h4>
+        <p>Given a 15-option <code>tsconfig.json</code> you write yourself (deliberately including some
+        questionable choices — e.g. <code>strict: false</code>, missing <code>skipLibCheck</code>, no
+        <code>target</code> set), write a short review listing which options you'd change and why, as if reviewing a
+        teammate's PR.</p>
+        <ul><li>Cover at least 5 specific options.</li><li>Justify each recommendation with a concrete reason, not just "best practice".</li></ul>
+        <p><strong>Acceptance criteria:</strong> each recommendation names the actual behavioral change the option causes.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>Use the strict-flags table in this chapter as your checklist.</p></div></details>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Intermediate (2-4 hrs)</span>
+        <h4>Set up a 3-package monorepo with project references</h4>
+        <p>Create <code>packages/shared-types</code>, <code>packages/api</code>, <code>packages/web</code> with real
+        <code>composite</code>/<code>references</code> wiring, where <code>api</code> and <code>web</code> both
+        depend on <code>shared-types</code>, and prove incremental builds actually skip unaffected packages.</p>
+        <ul><li>Running <code>tsc --build</code> twice with no changes must report nothing to rebuild.</li><li>Changing only <code>web</code>'s source must not trigger a rebuild of <code>api</code>.</li></ul>
+        <p><strong>Acceptance criteria:</strong> demonstrate the above with <code>tsc --build --verbose</code> output showing the skip behavior.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>Each package's own tsconfig needs `composite: true` AND `declaration: true`; the root orchestrating tsconfig just lists `references`, with `files: []` so it doesn't try to compile anything itself.</p></div></details>
+        <p><strong>Bonus:</strong> wire up a root-level `.tsbuildinfo`-aware CI cache config (even just describing the cache key strategy in comments if you don't have real CI to test against).</p>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Advanced (1-2 days)</span>
+        <h4>Incremental strict-mode rollout tool</h4>
+        <p>Write a small script that runs <code>tsc --noEmit</code> on a codebase, parses the diagnostic output,
+        compares it against a checked-in baseline file of known pre-existing errors (by file + rough location), and
+        exits non-zero only if NEW errors (not in the baseline) are introduced — implementing the "ratchet" pattern
+        described in the advanced interview questions.</p>
+        <ul><li>Must correctly distinguish a genuinely new error from a pre-existing one that merely shifted line numbers slightly.</li><li>Must support regenerating the baseline as a separate command once errors are intentionally fixed.</li></ul>
+        <p><strong>Acceptance criteria:</strong> demonstrate it passing on a seeded "has pre-existing errors" sample project, then failing when you introduce one new deliberate error, then passing again after regenerating the baseline.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>Match on file + rule/error code + a normalized version of the error message rather than exact line number, since line numbers shift constantly as unrelated code changes — exact line matching will produce constant false positives.</p></div></details>
+      </div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet"><ul>
+        <li><code>strict: true</code> bundles several flags — know each one individually (null checks, implicit any, function type variance, property init, bind/call/apply, implicit this).</li>
+        <li><code>noUncheckedIndexedAccess</code>, <code>exactOptionalPropertyTypes</code>, <code>noPropertyAccessFromIndexSignature</code> are NOT in <code>strict</code> but are high-value additions.</li>
+        <li>Always set <code>skipLibCheck: true</code> in app code for build performance.</li>
+        <li>Project references (<code>composite</code> + <code>references</code>) enable real incremental, dependency-aware monorepo builds.</li>
+        <li>Composite projects must emit declaration files — downstream type-checks against <code>.d.ts</code>, not source, which is what makes incrementality possible.</li>
+        <li>Hand-write <code>.d.ts</code> only for untyped JS deps or global augmentation — never for your own TS source.</li>
+        <li>A <code>.d.ts</code> needs an import/export to be a module; <code>declare global</code> is the escape hatch back to global scope from within one.</li>
+        <li>Prefer schema-generated shared types over hand-synced packages for anything crossing a real network boundary.</li>
+        <li>Roll out strict mode flags incrementally with a tracked baseline/ratchet, never as a single big-bang flip on a large legacy codebase.</li>
+      </ul></div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://www.typescriptlang.org/tsconfig">TS Handbook: tsconfig Reference</a></li>
+        <li><a href="https://www.typescriptlang.org/docs/handbook/project-references.html">TS Handbook: Project References</a></li>
+        <li><a href="https://www.typescriptlang.org/docs/handbook/declaration-files/introduction.html">TS Handbook: Declaration Files</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="05-type-safe-patterns.html"><span class="dir">← Previous</span>Type-Safe Patterns for React &amp; Node</a>
+        <a class="next" href="../03-react-nextjs-advanced/index.html"><span class="dir">Next →</span>React &amp; Next.js Advanced</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · TypeScript Advanced</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-typescript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-jsx.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "02-typescript-advanced", chapterKey: "06-tsconfig-monorepo" });</script>
+</body>
+</html>

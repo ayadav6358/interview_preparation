@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RAG Fundamentals</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <input class="searchbox" placeholder="Search topics..." />
+    <a href="../index.html">← Home</a>
+    <h3>12-RAG</h3>
+    <a href="rag-fundamentals.html">RAG Fundamentals</a>
+    <a href="rag-project.html">RAG Project (pgvector)</a>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumbs"><a href="../index.html">Home</a> / 12-RAG / Fundamentals</div>
+      <button class="theme-toggle" onclick="toggleTheme()">🌓 Theme</button>
+    </div>
+    <h1>RAG (Retrieval-Augmented Generation) Fundamentals</h1>
+    <span class="tag good">Stable</span><span class="tag">Last verified: 2026-10-06</span>
+
+    <div class="toc">
+      <b>On this page</b>
+      <a href="#what">1. What is this?</a>
+      <a href="#whyexist">2. Why does it exist?</a>
+      <a href="#whyimportant">3. Why is it important?</a>
+      <a href="#whereused">4. Where is it used?</a>
+      <a href="#prereq">5. Prerequisites</a>
+      <a href="#core">6. Core concepts</a>
+      <a href="#terms">7. Terminology</a>
+      <a href="#arch">8. Architecture</a>
+      <a href="#internal">9. How it works internally</a>
+      <a href="#steps">10. Step-by-step explanation</a>
+      <a href="#simple">11. Simple example</a>
+      <a href="#real">12. Real-world example</a>
+      <a href="#code">13. Code example</a>
+      <a href="#advanced">14. Advanced example</a>
+      <a href="#mistakes">15. Common mistakes</a>
+      <a href="#best">16. Best practices</a>
+      <a href="#production">17. Production considerations</a>
+      <a href="#security">18. Security considerations</a>
+      <a href="#performance">19. Performance considerations</a>
+      <a href="#cost">20. Cost considerations</a>
+      <a href="#debug">21. Debugging/troubleshooting</a>
+      <a href="#related">22. Related concepts</a>
+      <a href="#comparison">23. Comparison with alternatives</a>
+      <a href="#exercise">24. Mini practical exercise</a>
+      <a href="#project">25. Practical project</a>
+      <a href="#projectarch">26. Project architecture</a>
+      <a href="#interview-b">27. Interview Questions — Beginner</a>
+      <a href="#interview-i">28. Interview Questions — Intermediate</a>
+      <a href="#interview-a">29. Interview Questions — Advanced</a>
+      <a href="#interview-s">30. Interview Questions — Senior/Architect</a>
+      <a href="#interview-sc">31. Scenario-Based Questions</a>
+      <a href="#revision">32. Quick revision notes</a>
+      <a href="#cheat">33. Cheat sheet</a>
+      <a href="#further">34. Further topics to learn</a>
+    </div>
+
+    <h2 id="what">1. What is this?</h2>
+    <p>RAG (Retrieval-Augmented Generation) is an architecture pattern that retrieves relevant documents from an external knowledge source at query time and injects them into the LLM's prompt, so the model generates answers grounded in that retrieved content instead of relying solely on its frozen parametric (training-time) knowledge.</p>
+
+    <h2 id="whyexist">2. Why does it exist?</h2>
+    <p>LLMs have a training cutoff and fixed parametric knowledge — they can't know about your private documents, recent events, or frequently-changing information. Fine-tuning for every knowledge update is slow and expensive. RAG exists to inject fresh, verifiable, source-attributable knowledge into the model's context at inference time, without touching model weights.</p>
+
+    <h2 id="whyimportant">3. Why is it important?</h2>
+    <p>RAG is the single most common pattern for building production LLM applications over private/proprietary/frequently-changing data — virtually every "chat with your documents" or enterprise knowledge assistant product is fundamentally a RAG system, making it one of the highest-value skills for an AI engineer.</p>
+
+    <h2 id="whereused">4. Where is it used?</h2>
+    <p>Enterprise knowledge assistants, customer support bots, legal/medical document Q&A, code-base-aware coding assistants, internal documentation search, any chatbot needing to cite or ground answers in specific source material.</p>
+
+    <h2 id="prereq">5. Prerequisites</h2>
+    <p><a href="../10-Embeddings/embeddings-fundamentals.html">Embeddings</a>, <a href="../11-Vector-Databases/vector-databases.html">Vector Databases</a>.</p>
+
+    <h2 id="core">6. Core concepts</h2>
+    <ul>
+      <li><b>Document ingestion:</b> loading raw source documents (PDFs, web pages, databases) into the pipeline.</li>
+      <li><b>Chunking:</b> splitting documents into smaller pieces sized appropriately for embedding and retrieval.</li>
+      <li><b>Embedding + Indexing:</b> converting chunks to vectors and storing them in a vector database.</li>
+      <li><b>Retrieval:</b> finding the most relevant chunks for a given query.</li>
+      <li><b>Prompt construction:</b> assembling retrieved chunks + the user's question into a single prompt.</li>
+      <li><b>Generation:</b> the LLM produces an answer grounded in the provided context.</li>
+    </ul>
+
+    <h2 id="terms">7. Terminology</h2>
+    <table>
+      <tr><th>Term</th><th>Meaning</th></tr>
+      <tr><td>Loader</td><td>Component that reads raw documents (PDF, HTML, DB rows) into a usable text format.</td></tr>
+      <tr><td>Parser</td><td>Extracts clean, structured text from raw loaded content (e.g., stripping PDF formatting noise).</td></tr>
+      <tr><td>Chunker</td><td>Splits parsed text into smaller segments (chunks) for embedding.</td></tr>
+      <tr><td>Chunk size/overlap</td><td>How large each chunk is, and how much adjacent chunks overlap to preserve context across boundaries.</td></tr>
+      <tr><td>Retriever</td><td>Component that queries the vector DB (and/or lexical index) to fetch relevant chunks.</td></tr>
+      <tr><td>Grounding</td><td>Tying generated answers to retrieved source material, reducing hallucination risk.</td></tr>
+      <tr><td>Citation</td><td>Explicitly referencing which retrieved source supports a claim in the answer.</td></tr>
+    </table>
+
+    <h2 id="arch">8. Architecture</h2>
+    <pre><code>Documents
+ → Loader (read raw files)
+ → Parser (extract clean text)
+ → Chunker (split into retrievable segments)
+ → Embedding (convert chunks to vectors)
+ → Vector DB (store + index)
+
+Query time:
+ User question
+ → Embed question
+ → Retriever (vector DB similarity search, + optional metadata filter/rerank)
+ → Retrieved chunks → Context
+ → Prompt = Context + Question
+ → LLM → Answer (ideally with citations)</code></pre>
+
+    <h2 id="internal">9. How it works internally</h2>
+    <p>At ingestion time, documents are chunked and embedded once (offline/batch), stored with metadata in a vector DB. At query time, the user's question is embedded with the same model, and a similarity search retrieves the top-k most relevant chunks. These chunks are concatenated into the prompt's context section, and the LLM is instructed to answer based only on that context — shifting the task from "recall from training" to "read comprehension over provided text," which is both more accurate and auditable.</p>
+
+    <h2 id="steps">10. Step-by-step explanation</h2>
+    <ol>
+      <li>Load raw documents (PDFs, web pages, database exports).</li>
+      <li>Parse into clean text, removing formatting noise.</li>
+      <li>Chunk text into appropriately sized segments (with overlap).</li>
+      <li>Embed each chunk and store it with metadata in a vector DB.</li>
+      <li>At query time, embed the user's question.</li>
+      <li>Retrieve the top-k most similar chunks (optionally filtered/reranked).</li>
+      <li>Construct a prompt combining retrieved chunks and the question.</li>
+      <li>Generate the answer, instructing the model to cite sources and avoid unsupported claims.</li>
+    </ol>
+
+    <h2 id="simple">11. Simple example</h2>
+    <p>A user asks "What's our refund policy?" The system retrieves the "Refund Policy" document chunk, includes it in the prompt, and the LLM answers directly from that text rather than guessing from general knowledge.</p>
+
+    <h2 id="real">12. Real-world example</h2>
+    <p>An enterprise internal-docs assistant indexes thousands of Confluence pages; when an employee asks about VPN setup, it retrieves the specific IT documentation page, grounds the answer in it, and cites the source page so the employee can verify/read further — far more trustworthy than an ungrounded LLM guess.</p>
+
+    <h2 id="code">13. Code example</h2>
+    <pre><code class="language-python">from anthropic import Anthropic
+import psycopg2
+
+client = Anthropic()
+conn = psycopg2.connect("dbname=ragdb")
+
+def retrieve(query: str, k=3):
+    query_vec = embed(query)
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT content FROM documents ORDER BY embedding <=> %s LIMIT %s",
+        (query_vec, k),
+    )
+    return [row[0] for row in cur.fetchall()]
+
+def answer(question: str):
+    chunks = retrieve(question)
+    context = "\n\n".join(chunks)
+    prompt = f"""Answer the question using ONLY the context below. If the answer isn't in the context, say so.
+
+Context:
+{context}
+
+Question: {question}"""
+    resp = client.messages.create(
+        model="claude-sonnet-5", max_tokens=400,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    return resp.content[0].text
+</code></pre>
+
+    <h2 id="advanced">14. Advanced example</h2>
+    <p>Adding citation tracking so the answer references which chunk supported each claim:</p>
+    <pre><code class="language-python">def answer_with_citations(question: str):
+    chunks = retrieve(question, k=5)
+    numbered_context = "\n\n".join(f"[{i+1}] {c}" for i, c in enumerate(chunks))
+    prompt = f"""Context:
+{numbered_context}
+
+Question: {question}
+Answer using the context above. Cite sources like [1], [2] after each claim. If unsupported, say so."""
+    resp = client.messages.create(
+        model="claude-sonnet-5", max_tokens=500,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    return resp.content[0].text, chunks  # return sources for UI display
+</code></pre>
+
+    <h2 id="mistakes">15. Common mistakes</h2>
+    <ul>
+      <li>Chunking too large (dilutes relevance) or too small (loses context) without testing against real queries.</li>
+      <li>Not instructing the model to say "I don't know" when retrieved context doesn't cover the question.</li>
+      <li>Retrieving too many chunks "to be safe," diluting attention (lost in the middle).</li>
+      <li>Forgetting metadata filtering in multi-tenant RAG, risking cross-tenant data leakage.</li>
+      <li>Not re-indexing after source documents are updated/deleted, serving stale answers.</li>
+    </ul>
+
+    <h2 id="best">16. Best practices</h2>
+    <ul>
+      <li>Tune chunk size/overlap empirically against your actual query patterns and document structure.</li>
+      <li>Require citations and explicitly allow "I don't know" responses.</li>
+      <li>Add a reranking step for retrieval precision (see <a href="../13-Advanced-RAG/">Advanced RAG</a>).</li>
+      <li>Evaluate retrieval quality and answer faithfulness separately (see <a href="../35-AI-Evaluation/">AI Evaluation</a>).</li>
+      <li>Keep the ingestion pipeline idempotent and re-runnable for easy updates.</li>
+    </ul>
+
+    <h2 id="production">17. Production considerations</h2>
+    <p>Build an incremental ingestion pipeline (only re-process changed documents), monitor retrieval quality continuously (not just at launch), and have a defined process for removing/updating stale or deleted source documents from the index.</p>
+
+    <h2 id="security">18. Security considerations</h2>
+    <p>Enforce tenant/permission-scoped retrieval filtering rigorously — RAG systems are a common source of accidental data leaks when document-level access controls aren't mirrored in the retrieval filtering logic. Treat retrieved content as untrusted input for prompt-injection purposes if it includes user-generated or external content.</p>
+
+    <h2 id="performance">19. Performance considerations</h2>
+    <p>Retrieval latency (vector search + optional reranking) adds to total response time before generation even starts — profile and optimize this path separately from LLM generation latency; consider caching frequent queries' retrieval results.</p>
+
+    <h2 id="cost">20. Cost considerations</h2>
+    <p>Embedding costs are incurred at ingestion (once per document) and at query time (once per query) — much cheaper than LLM generation; the main RAG cost driver is usually the generation call's input tokens, which scale with how much retrieved context you include.</p>
+
+    <h2 id="debug">21. Debugging/troubleshooting</h2>
+    <ul>
+      <li><b>Answers ignore retrieved context:</b> check prompt construction — ensure context is clearly presented and the instruction to use it is explicit and prominent.</li>
+      <li><b>Wrong/irrelevant chunks retrieved:</b> check embedding model consistency, chunk size, and consider adding reranking.</li>
+      <li><b>Answers cite sources that don't actually support the claim:</b> the model may be fabricating citations — verify citation-claim alignment with an automated check.</li>
+    </ul>
+
+    <h2 id="related">22. Related concepts</h2>
+    <p><a href="../10-Embeddings/embeddings-fundamentals.html">Embeddings</a> · <a href="../11-Vector-Databases/vector-databases.html">Vector Databases</a> · <a href="../13-Advanced-RAG/">Advanced RAG</a> · <a href="../35-AI-Evaluation/">AI Evaluation</a></p>
+
+    <h2 id="comparison">23. Comparison with alternatives</h2>
+    <table>
+      <tr><th>Approach</th><th>When to use</th></tr>
+      <tr><td>RAG</td><td>Knowledge changes frequently, needs source attribution, large/private corpora</td></tr>
+      <tr><td>Fine-tuning</td><td>Need to change behavior/style/format, not primarily inject facts</td></tr>
+      <tr><td>Long context (stuff everything in)</td><td>Small, stable corpus that fits comfortably without lost-in-the-middle issues</td></tr>
+    </table>
+
+    <h2 id="exercise">24. Mini practical exercise</h2>
+    <p>Build a minimal RAG pipeline over 5 short text documents using an in-memory list (no vector DB needed), embedding each, and retrieving the most similar one for a test query.</p>
+
+    <h2 id="project">25. Practical project</h2>
+    <p>See <a href="rag-project.html">RAG Project (PostgreSQL + pgvector)</a> for the full end-to-end build.</p>
+
+    <h2 id="projectarch">26. Project architecture</h2>
+    <pre><code>docs/ → load → parse → chunk → embed → insert into pgvector
+query → embed → retrieve top-k (+ metadata filter)
+ → construct prompt → LLM → answer + citations</code></pre>
+
+    <h2 id="interview-b">27. Interview Questions — Beginner</h2>
+    <div class="qa"><b>Q1.</b> What does RAG stand for?<br><b>A.</b> Retrieval-Augmented Generation.</div>
+    <div class="qa"><b>Q2.</b> Why does RAG exist?<br><b>A.</b> To let an LLM answer using fresh, private, or frequently-changing knowledge not present in its frozen training data, without retraining the model.</div>
+    <div class="qa"><b>Q3.</b> What is chunking?<br><b>A.</b> Splitting documents into smaller segments sized appropriately for embedding and retrieval.</div>
+    <div class="qa"><b>Q4.</b> What's the difference between RAG and fine-tuning for adding new knowledge?<br><b>A.</b> RAG injects knowledge via retrieved context at inference time (no weight changes); fine-tuning bakes new behavior/knowledge into the model's weights through additional training.</div>
+    <div class="qa"><b>Q5.</b> What is a retriever?<br><b>A.</b> The component that finds and returns the most relevant document chunks for a given query, typically via vector similarity search.</div>
+    <div class="qa"><b>Q6.</b> Why should a RAG system be able to say "I don't know"?<br><b>A.</b> To avoid hallucinating an answer when the retrieved context doesn't actually contain relevant information.</div>
+    <div class="qa"><b>Q7.</b> What does "grounding" mean in RAG?<br><b>A.</b> Tying the generated answer to retrieved source material, reducing the risk of fabricated/unsupported claims.</div>
+    <div class="qa"><b>Q8.</b> What's a citation in a RAG answer?<br><b>A.</b> An explicit reference indicating which retrieved source supports a specific claim in the answer.</div>
+    <div class="qa"><b>Q9.</b> Does RAG change the LLM's weights?<br><b>A.</b> No — it only changes what's in the context/prompt at inference time.</div>
+    <div class="qa"><b>Q10.</b> Name one real-world RAG use case.<br><b>A.</b> An enterprise knowledge assistant answering questions from internal documentation.</div>
+
+    <h2 id="interview-i">28. Interview Questions — Intermediate</h2>
+    <div class="qa"><b>Q1.</b> Why might retrieving too many chunks hurt RAG answer quality despite providing more information?<br><b>A.</b> It dilutes attention across more (often less relevant) content, risking "lost in the middle" effects and confusing synthesis — precision of retrieval matters more than raw recall/volume.</div>
+    <div class="qa"><b>Q2.</b> How would you choose chunk size for a RAG pipeline over long legal documents versus short FAQ entries?<br><b>A.</b> Legal documents often need larger chunks (or overlap) to preserve clause-level context that spans sentences/paragraphs; FAQ entries are typically self-contained and can use smaller, tighter chunks — the right size should be validated empirically against real queries for each corpus type.</div>
+    <div class="qa"><b>Q3.</b> What's the risk of not instructing the model to only use the provided context?<br><b>A.</b> The model may blend its own parametric (training) knowledge with the retrieved context, producing answers that seem grounded but actually include unverified or outdated information not actually present in the retrieved sources.</div>
+    <div class="qa"><b>Q4.</b> How would you detect that your RAG system is hallucinating despite having correct retrieval?<br><b>A.</b> Run an automated faithfulness check (LLM-as-judge or rule-based) comparing each claim in the generated answer against the actual retrieved chunks, flagging any claim not supported by the retrieved content even when retrieval itself was accurate.</div>
+    <div class="qa"><b>Q5.</b> Why is RAG often preferred over fine-tuning for knowledge that changes frequently (e.g., current pricing)?<br><b>A.</b> Updating the retrieval corpus (adding/editing a document) is immediate and cheap; fine-tuning requires a full retraining cycle each time the knowledge changes, which is far slower and more expensive for frequently-updated information.</div>
+    <div class="qa"><b>Q6.</b> What's a practical reason to add overlap between chunks?<br><b>A.</b> Without overlap, information spanning a chunk boundary can be split across two chunks and lose coherence when retrieved individually; overlap helps preserve local context across boundaries.</div>
+    <div class="qa"><b>Q7.</b> How would you evaluate whether your RAG system's retrieval step itself is the bottleneck versus the generation step?<br><b>A.</b> Separately evaluate retrieval quality (e.g., recall@k against a labeled set of question-to-relevant-chunk mappings) and generation faithfulness (given correct retrieved chunks, does the answer accurately reflect them) — isolating each stage pinpoints where quality issues originate.</div>
+    <div class="qa"><b>Q8.</b> Why might a RAG system perform worse on questions requiring synthesis across multiple documents compared to single-document lookup questions?<br><b>A.</b> Multi-document synthesis requires the retriever to find and the model to correctly integrate information from several, possibly differently-worded chunks simultaneously — a harder retrieval and reasoning problem than matching a single clearly relevant chunk.</div>
+    <div class="qa"><b>Q9.</b> What's the role of metadata in a RAG system beyond access control?<br><b>A.</b> Metadata (e.g., document date, source type, section) enables filtering retrieval to more relevant subsets (e.g., "only the latest policy version") and can be surfaced to users as part of citations for trust/verification.</div>
+    <div class="qa"><b>Q10.</b> Why is RAG not a complete solution to hallucination, even with perfect retrieval?<br><b>A.</b> The generation step can still misinterpret, overgeneralize, or blend retrieved content with ungrounded parametric knowledge; perfect retrieval only ensures the right information is available, not that the model will use it faithfully.</div>
+
+    <h2 id="interview-a">29. Interview Questions — Advanced</h2>
+    <div class="qa"><b>Q1.</b> How would you architect a RAG system to handle both frequently-updated and rarely-updated document types with different freshness requirements?<br><b>A.</b> Separate ingestion pipelines/cadences per document type (e.g., real-time or near-real-time ingestion for frequently-updated sources, batch/scheduled for stable ones), tag chunks with freshness metadata, and potentially weight retrieval ranking by recency for time-sensitive queries.</div>
+    <div class="qa"><b>Q2.</b> Why might naive chunking by fixed character/token count underperform semantic or structure-aware chunking for technical documentation?<br><b>A.</b> Fixed-size chunking can split a logically coherent unit (a code example, a numbered procedure, a table) mid-way, destroying its meaning when retrieved in isolation; semantic/structure-aware chunking (splitting at natural boundaries like headers, paragraphs, or code blocks) preserves coherent units better, improving both retrieval relevance and generation quality.</div>
+    <div class="qa"><b>Q3.</b> How would you measure and improve the "faithfulness" metric for a production RAG system at scale?<br><b>A.</b> Use an automated LLM-as-judge pipeline that, for a sample of production answers, checks each claim against the actually-retrieved context and flags unsupported claims; track this metric over time, investigate spikes (often correlating with specific query types, prompt changes, or model updates), and use the flagged failures to refine prompting (e.g., stricter "only use context" instructions) or retrieval precision.</div>
+
+    <h2 id="interview-s">30. Interview Questions — Senior/Architect</h2>
+    <div class="qa"><b>Q1.</b> Design a production enterprise RAG system end to end, covering ingestion, retrieval, generation, security, and evaluation.<br><b>A.</b> Ingestion: incremental pipeline with loaders/parsers per document type, chunking tuned per content type, embedding with a consistent versioned model. Retrieval: vector DB with mandatory tenant/permission-scoped metadata filtering, hybrid search + reranking for precision. Generation: strict "answer only from context" prompting with mandatory citations and explicit "I don't know" fallback. Security: access control mirrored from source systems into retrieval filters, audit logging of all queries/retrievals. Evaluation: continuous automated faithfulness and retrieval-quality monitoring against a golden set, with alerting on regression.</div>
+    <div class="qa"><b>Q2.</b> How would you decide between RAG, fine-tuning, and long-context stuffing for a new enterprise knowledge product, and how might you combine them?<br><b>A.</b> Default to RAG for large/frequently-changing/private corpora needing source attribution; consider fine-tuning only for durable behavior/style/domain-reasoning adaptations, not primarily for facts; consider long-context stuffing only for genuinely small, stable corpora where lost-in-the-middle isn't a measured problem. In practice, combine: RAG for knowledge grounding, with a lightly fine-tuned model for domain-specific tone/format if justified by evaluation data.</div>
+
+    <h2 id="interview-sc">31. Scenario-Based Questions</h2>
+    <div class="qa"><b>Scenario 1.</b> Users report the RAG chatbot "lies confidently" about company policy despite having the correct documents indexed. How do you fix it?<br><b>A.</b> Tighten the generation prompt to strictly require answering only from provided context, add mandatory citations, instruct explicit "I don't know" when context is insufficient, and add an automated faithfulness check flagging unsupported claims for review.</div>
+    <div class="qa"><b>Scenario 2.</b> A security review finds that updating a source document doesn't remove the old version's content from search results. What's the fix?<br><b>A.</b> Implement a proper document lifecycle in the ingestion pipeline — deleting/invalidating old chunks associated with a document ID before or atomically with inserting new chunks on update, rather than purely additive ingestion.</div>
+    <div class="qa"><b>Scenario 3.</b> Your RAG system performs well on single-fact lookup questions but poorly on questions requiring combining information from 3 different documents. How do you improve this?<br><b>A.</b> Increase retrieved chunk diversity/count for complex queries (possibly via query decomposition — breaking the question into sub-questions each separately retrieved), improve reranking to ensure complementary (not redundant) chunks are selected, and consider an agentic multi-step retrieval pattern (see Agentic RAG) for genuinely complex synthesis questions.</div>
+
+    <h2 id="revision">32. Quick revision notes</h2>
+    <ul>
+      <li>RAG = retrieve relevant chunks + inject into prompt + generate grounded answer.</li>
+      <li>Pipeline: load → parse → chunk → embed → index → retrieve → prompt → generate.</li>
+      <li>Require citations and "I don't know" fallback to reduce hallucination.</li>
+      <li>Tune chunk size/overlap and retrieval precision (reranking) empirically.</li>
+      <li>Enforce tenant/permission-scoped filtering for security.</li>
+    </ul>
+
+    <h2 id="cheat">33. Cheat sheet</h2>
+    <div class="callout">RAG: Documents → Loader → Parser → Chunker → Embedding → Vector DB → Retriever → Context → LLM → Answer. Always require citations + "I don't know" fallback. Tune chunking and retrieval precision empirically. Enforce access-control-aware filtering.</div>
+
+    <h2 id="further">34. Further topics to learn</h2>
+    <p><a href="../13-Advanced-RAG/">Advanced RAG</a> → <a href="../14-LlamaIndex/">LlamaIndex</a> → <a href="../15-LangChain/">LangChain</a> → <a href="../35-AI-Evaluation/">AI Evaluation (RAG metrics)</a></p>
+
+    <div class="prevnext">
+      <a href="../11-Vector-Databases/vector-databases.html">← Vector Databases</a>
+      <a href="rag-project.html">Next: RAG Project →</a>
+    </div>
+  </main>
+</div>
+<script src="../assets/app.js"></script>
+</body>
+</html>

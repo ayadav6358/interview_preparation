@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Time & Space Complexity — DSA Trail</title>
+<style>
+  :root{
+    --ink:#12181B; --ink2:#1A2226; --ink3:#232C31;
+    --amber:#E8A33D; --amber-soft:#3A2E19;
+    --teal:#4FB3A9; --teal-soft:#12312D;
+    --rust:#D9695F; --rust-soft:#3A1F1C;
+    --slate:#8B9199;
+    --text:#E8E6E1; --text-dim:#A9AFAE;
+    --border: rgba(255,255,255,0.08);
+    --radius: 10px;
+    --mono: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{background:var(--ink); color:var(--text); font-family:var(--sans); line-height:1.65; font-size:16px;}
+  a{color:var(--amber); text-decoration:none;}
+  a:hover{text-decoration:underline;}
+  code, pre{font-family:var(--mono);}
+  #main{max-width:900px; margin:0 auto; padding:30px 24px 100px;}
+  h1{font-size:2rem; letter-spacing:-.01em; margin:14px 0 6px;}
+  h2{font-size:1.5rem; margin-top:52px; padding-top:14px; border-top:1px solid var(--border); letter-spacing:-.01em;}
+  h2:first-of-type{border-top:none; margin-top:20px;}
+  h3{font-size:1.15rem; margin-top:30px; color:var(--amber);}
+  h4{font-size:1rem; margin-top:22px;}
+  .eyebrow{font-size:11px; text-transform:uppercase; letter-spacing:.12em; color:var(--teal); font-weight:700; margin-bottom:4px;}
+  .subtitle{color:var(--text-dim); font-size:15px; margin-bottom:28px;}
+  .callout{border-radius:var(--radius); padding:14px 16px; margin:18px 0; border:1px solid var(--border); font-size:14.5px;}
+  .callout .ctitle{font-weight:700; margin-bottom:4px; display:flex; gap:8px; align-items:center;}
+  .callout.concept{background:var(--teal-soft); border-color:var(--teal);}
+  .callout.concept .ctitle{color:var(--teal);}
+  .callout.example{background:var(--ink3);}
+  .callout.mistake{background:var(--rust-soft); border-color:var(--rust);}
+  .callout.mistake .ctitle{color:var(--rust);}
+  .callout.tip{background:var(--amber-soft); border-color:var(--amber);}
+  .callout.tip .ctitle{color:var(--amber);}
+  .codewrap{position:relative; margin:14px 0;}
+  pre{background:var(--ink3); border:1px solid var(--border); border-radius:var(--radius); padding:16px 18px; overflow-x:auto; font-size:13.5px; line-height:1.6;}
+  .lang-tag{font-size:10px; text-transform:uppercase; letter-spacing:.08em; color:var(--slate); margin-bottom:-4px; display:block;}
+  :not(pre) > code{background:var(--ink3); padding:2px 6px; border-radius:4px; font-size:.88em;}
+  table{width:100%; border-collapse:collapse; margin:16px 0; font-size:14px;}
+  th,td{border:1px solid var(--border); padding:9px 12px; text-align:left;}
+  th{background:var(--ink3); font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:var(--slate);}
+  .badge{display:inline-block; font-size:11px; font-weight:700; padding:3px 9px; border-radius:20px; text-transform:uppercase; letter-spacing:.03em;}
+  .badge.easy{background:var(--teal-soft); color:var(--teal);}
+  .badge.medium{background:var(--amber-soft); color:var(--amber);}
+  .badge.hard{background:var(--rust-soft); color:var(--rust);}
+  .qcard{border:1px solid var(--border); border-radius:var(--radius); padding:16px 18px; margin:14px 0; background:var(--ink2);}
+  .qcard .qhead{display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; gap:10px;}
+  .qcard .qhead b{font-size:14.5px;}
+  .qcard .ex{background:var(--ink3); border-radius:8px; padding:8px 12px; margin:8px 0; font-size:13.5px;}
+  .qcard .hint{color:var(--amber); font-size:13.5px; margin-top:8px;}
+  hr.div{border:none; border-top:1px solid var(--border); margin:40px 0;}
+  .navlinks{display:flex; justify-content:space-between; gap:12px; font-size:14px; margin:18px 0; flex-wrap:wrap;}
+  .navlinks a{background:var(--ink2); border:1px solid var(--border); padding:8px 14px; border-radius:8px;}
+  .navlinks a:hover{border-color:var(--amber);}
+  .index-link{font-size:13px; color:var(--text-dim);}
+</style>
+</head>
+<body>
+<div id="main">
+
+  <p class="index-link"><a href="../index.html">&larr; Back to Index</a></p>
+  <div class="eyebrow">Phase 1 · Fundamentals</div>
+  <h1>Time & Space Complexity <span class="badge medium">Core Topic</span></h1>
+  <p class="subtitle">Big O notation, growth rates, aur complexity analyze karne ka tarika — Hinglish mein.</p>
+
+  <div class="navlinks">
+    <a href="01-what-is-dsa.html">&larr; Prev: What is DSA?</a>
+    <a href="../Phase-02-Arrays-Patterns/01-arrays-basics.html">Next: Arrays Basics &rarr;</a>
+  </div>
+
+  <hr class="div">
+  <h2>1. What is it?</h2>
+  <p><b>Time Complexity</b> batata hai algorithm ko chalane mein kitna "kaam" (operations) lagega jab input size badhta hai. <b>Space Complexity</b> batata hai kitni extra memory lagegi.</p>
+  <p>Hum inhe seconds ya bytes mein nahi, balki <b>Big O notation</b> mein measure karte hain — kyunki hume ye jaanna hai ki input badhne par algorithm kitna "scale" karta hai, actual machine speed se independent.</p>
+
+  <h2>2. Why do we need it?</h2>
+  <p>Do alag codes same output de sakte hain, lekin ek 1 second mein chale aur dusra 1 ghanta le. Interviews mein aur real systems mein <b>sirf correct hona kaafi nahi hai — fast bhi hona zaroori hai.</b> Complexity analysis se hum bina code run kiye hi bata sakte hain ki kaunsa approach better hai.</p>
+
+  <h2>3. Real-Life Analogy</h2>
+  <div class="callout example">
+    <div class="ctitle">📝 Phonebook Analogy</div>
+    Agar tumhe ek naam dhundhna hai unsorted 1000 logo ki list mein, tumhe pura list check karna padega (slow). Lekin agar list sorted hai (jaise phonebook), tum beech se start kar sakte ho aur half-half elimination kar sakte ho (Binary Search — bahut fast). Yehi "complexity" ka farak hai.
+  </div>
+
+  <h2>4. How Does It Work? — Big O Notation</h2>
+  <p>Big O sirf ye batata hai ki <b>worst case mein operations input size (n) ke saath kaise badhte hain.</b> Constants aur chhote terms ignore kiye jate hain — sirf growth rate matter karta hai.</p>
+
+  <table>
+    <tr><th>Notation</th><th>Name</th><th>Example</th></tr>
+    <tr><td>O(1)</td><td>Constant</td><td>Array index access <code>arr[5]</code></td></tr>
+    <tr><td>O(log n)</td><td>Logarithmic</td><td>Binary Search</td></tr>
+    <tr><td>O(n)</td><td>Linear</td><td>Single loop through array</td></tr>
+    <tr><td>O(n log n)</td><td>Linearithmic</td><td>Merge Sort, Quick Sort</td></tr>
+    <tr><td>O(n²)</td><td>Quadratic</td><td>Nested loops (brute force pairs)</td></tr>
+    <tr><td>O(2ⁿ)</td><td>Exponential</td><td>Generating all subsets</td></tr>
+    <tr><td>O(n!)</td><td>Factorial</td><td>Generating all permutations</td></tr>
+  </table>
+
+  <h3>Best, Average, and Worst Case</h3>
+  <ul>
+    <li><b>Best Case</b> — sabse favorable input (jaise element pehli hi jagah mil jaye).</li>
+    <li><b>Average Case</b> — typical/random input ke liye.</li>
+    <li><b>Worst Case</b> — sabse unfavorable input (jo hum usually Big O mein report karte hain, kyunki ye guarantee deta hai).</li>
+  </ul>
+  <div class="callout example">
+    <div class="ctitle">📝 Example: Linear Search for value 7</div>
+    <code>[7, 2, 3, 4]</code> → Best Case: O(1) (mil gaya pehle hi)<br>
+    <code>[2, 3, 4, 7]</code> → Worst Case: O(n) (last mein mila)<br>
+    <code>[2, 3, 4, 5]</code> (7 nahi hai) → Worst Case bhi O(n) (pura array check karna pada)
+  </div>
+
+  <h2>5. Visual Diagram — Growth Rate Comparison</h2>
+  <pre><code>Operations needed as n grows (approx, for intuition):
+
+n = 10:
+O(log n)  ≈ 3
+O(n)      ≈ 10
+O(n log n)≈ 33
+O(n²)     ≈ 100
+O(2ⁿ)     ≈ 1,024
+
+n = 20:
+O(log n)  ≈ 4
+O(n)      ≈ 20
+O(n log n)≈ 86
+O(n²)     ≈ 400
+O(2ⁿ)     ≈ 1,048,576   ← already exploding!
+
+Growth order (slowest to fastest growing):
+O(1) < O(log n) < O(n) < O(n log n) < O(n²) < O(2ⁿ) < O(n!)</code></pre>
+
+  <h2>6. Code Examples with Explanation</h2>
+
+  <div class="lang-tag">O(1) — Constant Time</div>
+  <div class="codewrap"><pre><code>function getFirst(arr) {
+  return arr[0]; // no matter how big arr is, this is ONE operation
+}</code></pre></div>
+  <p>Chahe array mein 10 elements ho ya 10 crore, <code>arr[0]</code> hamesha same time lega — index se direct access.</p>
+
+  <div class="lang-tag">O(log n) — Logarithmic Time</div>
+  <div class="codewrap"><pre><code>function binarySearch(arr, target) {
+  let low = 0, high = arr.length - 1;
+  while (low <= high) {
+    const mid = Math.floor((low + high) / 2);
+    if (arr[mid] === target) return mid;
+    else if (arr[mid] < target) low = mid + 1;
+    else high = mid - 1;
+  }
+  return -1;
+}</code></pre></div>
+  <p>Har step par hum search space ko <b>aadha</b> kar dete hain. 1000 elements → 500 → 250 → ... → sirf ~10 steps mein khatam. Isiliye O(log n).</p>
+
+  <div class="lang-tag">O(n) — Linear Time</div>
+  <div class="codewrap"><pre><code>function sumArray(arr) {
+  let sum = 0;
+  for (let i = 0; i < arr.length; i++) {
+    sum += arr[i]; // runs n times
+  }
+  return sum;
+}</code></pre></div>
+
+  <div class="lang-tag">O(n log n) — Linearithmic Time</div>
+  <div class="codewrap"><pre><code>function mergeSort(arr) {
+  if (arr.length <= 1) return arr;
+  const mid = Math.floor(arr.length / 2);
+  const left = mergeSort(arr.slice(0, mid));   // splitting: log n levels
+  const right = mergeSort(arr.slice(mid));
+  return merge(left, right);                   // merging: n work per level
+}
+function merge(a, b) {
+  const res = [];
+  let i = 0, j = 0;
+  while (i < a.length && j < b.length) {
+    res.push(a[i] <= b[j] ? a[i++] : b[j++]);
+  }
+  return [...res, ...a.slice(i), ...b.slice(j)];
+}</code></pre></div>
+  <p>Array ko baar-baar aadha karte hain (log n levels), aur har level par pure n elements merge karte hain → n × log n.</p>
+
+  <div class="lang-tag">O(n²) — Quadratic Time</div>
+  <div class="codewrap"><pre><code>function hasDuplicateBrute(arr) {
+  for (let i = 0; i < arr.length; i++) {
+    for (let j = i + 1; j < arr.length; j++) {
+      if (arr[i] === arr[j]) return true; // n * n comparisons
+    }
+  }
+  return false;
+}</code></pre></div>
+
+  <div class="lang-tag">O(2ⁿ) — Exponential Time</div>
+  <div class="codewrap"><pre><code>function generateSubsets(arr, index = 0, current = []) {
+  if (index === arr.length) {
+    console.log(current);
+    return;
+  }
+  generateSubsets(arr, index + 1, current);                 // exclude
+  generateSubsets(arr, index + 1, [...current, arr[index]]); // include
+}</code></pre></div>
+  <p>Har element ke liye 2 choices hain (include / exclude), aur n elements hain → 2 × 2 × ... (n times) = 2ⁿ total subsets.</p>
+
+  <div class="lang-tag">O(n!) — Factorial Time</div>
+  <div class="codewrap"><pre><code>function permute(arr, current = [], used = []) {
+  if (current.length === arr.length) {
+    console.log(current);
+    return;
+  }
+  for (let i = 0; i < arr.length; i++) {
+    if (used[i]) continue;
+    used[i] = true;
+    permute(arr, [...current, arr[i]], used);
+    used[i] = false; // backtrack
+  }
+}</code></pre></div>
+  <p>Pehli position ke liye n choices, dusri ke liye n-1, teesri ke liye n-2 ... = n × (n-1) × (n-2) × ... × 1 = n!</p>
+
+  <h3>How to Calculate Complexity — Quick Rules</h3>
+  <div class="callout concept">
+    <div class="ctitle">💡 Rules of Thumb</div>
+    <ul>
+      <li><b>Single loop</b> over n elements → O(n)</li>
+      <li><b>Nested loop</b> (both over n) → O(n²)</li>
+      <li><b>Loop that halves</b> each time → O(log n)</li>
+      <li><b>Two separate loops (not nested)</b> → O(n) + O(n) = O(2n) → simplify to O(n) (drop constants)</li>
+      <li><b>Recursion that splits into 2 + does O(n) work</b> (like merge sort) → O(n log n)</li>
+      <li><b>Recursion that branches into 2 without reducing much</b> (like naive Fibonacci) → O(2ⁿ)</li>
+      <li>Drop constants and lower-order terms: O(2n + 100) → O(n). O(n² + n) → O(n²).</li>
+    </ul>
+  </div>
+
+  <h2>7. Space Complexity — Explained</h2>
+  <p>Space complexity mein hum count karte hain <b>extra memory</b> jo algorithm apne input ke alawa use karta hai:</p>
+  <ul>
+    <li>Extra arrays/objects banaye gaye</li>
+    <li>Recursion ka <b>call stack</b> (har recursive call thoda stack memory leti hai — ye bhi count hota hai!)</li>
+  </ul>
+  <div class="callout example">
+    <div class="ctitle">📝 Recursion Space Example</div>
+    <code>factorial(5)</code> function 5 baar khud ko call karega before returning — matlab call stack mein ek waqt par 5 frames honge → O(n) space, chahe koi extra array na bhi banayi ho.
+  </div>
+
+  <h2>8. When Should I Use Which? — Checklist</h2>
+  <div class="callout tip">
+    <div class="ctitle">🎯 Interviewer's Expectation</div>
+    <ul>
+      <li>Hamesha apna approach batane ke baad, uski Time & Space Complexity boldo — bina poochhe bhi.</li>
+      <li>Agar tumhara solution O(n²) hai aur constraints n = 10^5 hai, turant bolo "ye TLE (Time Limit Exceeded) dega, mujhe optimize karna hoga."</li>
+      <li>Space-Time tradeoff samjho: HashMap se O(n) time milta hai lekin O(n) extra space lagta hai. Ye tradeoff bolna interview mein achha impression deta hai.</li>
+    </ul>
+  </div>
+
+  <h2>9. Common Mistakes</h2>
+  <div class="callout mistake">
+    <div class="ctitle">⚠️ Beginners Often Do This</div>
+    <ul>
+      <li>Constants ko bhi count karna: <code>O(2n)</code> ko simplify na karna — ye bas <code>O(n)</code> hi hai.</li>
+      <li>String concatenation ko O(1) samajhna — actually strings immutable hoti hain (JS mein), so building a string in a loop can be O(n²) in the worst case for naive approaches.</li>
+      <li>Recursive functions ki space complexity bhool jaana (call stack ko ignore karna).</li>
+      <li>"Average case" aur "worst case" ko confuse karna — interviews mein hamesha worst case poocha jata hai jab tak specify na ho.</li>
+    </ul>
+  </div>
+
+  <h2>10. Interview Tips</h2>
+  <div class="callout tip">
+    <div class="ctitle">🎯 What Interviewers Actually Want</div>
+    Interviewer sirf ye nahi dekhta ki code kaam kar raha hai. Wo dekhta hai ki tum <b>apne approach ki complexity samajhte ho ya nahi.</b> Har solution ke baad khud se bolo: "Iska time complexity O(...) hai kyunki..." — ye habit banao abhi se.
+  </div>
+
+  <hr class="div">
+  <h2>Interview Questions</h2>
+
+  <h3><span class="badge easy">Easy</span> Section</h3>
+
+  <div class="qcard">
+    <div class="qhead"><b>Q1. Find the complexity of a single loop</b><span class="badge easy">Easy</span></div>
+    <div class="ex"><pre><code>for (let i = 0; i < n; i++) {
+  console.log(i);
+}</code></pre></div>
+    <div class="hint">Hint: Loop kitni baar chal raha hai n ke reference mein?</div>
+  </div>
+
+  <div class="qcard">
+    <div class="qhead"><b>Q2. Nested loop complexity</b><span class="badge easy">Easy</span></div>
+    <div class="ex"><pre><code>for (let i = 0; i < n; i++) {
+  for (let j = 0; j < n; j++) {
+    console.log(i, j);
+  }
+}</code></pre></div>
+    <div class="hint">Hint: Har i ke liye poora j loop chal raha hai — total operations socho.</div>
+  </div>
+
+  <div class="qcard">
+    <div class="qhead"><b>Q3. Two separate (non-nested) loops</b><span class="badge easy">Easy</span></div>
+    <div class="ex"><pre><code>for (let i = 0; i < n; i++) { console.log(i); }
+for (let j = 0; j < n; j++) { console.log(j); }</code></pre></div>
+    <div class="hint">Hint: Ye nested nahi hain, back to back chal rahe hain — Big-O mein constants drop hote hain.</div>
+  </div>
+
+  <div class="qcard">
+    <div class="qhead"><b>Q4. Space complexity of a copy function</b><span class="badge easy">Easy</span></div>
+    <div class="ex"><pre><code>function copyArray(arr) {
+  const newArr = [];
+  for (let i = 0; i < arr.length; i++) newArr.push(arr[i]);
+  return newArr;
+}</code></pre></div>
+    <div class="hint">Hint: Ek naya array bana rahe ho jitna bada input hai — extra space kitna laga?</div>
+  </div>
+
+  <div class="qcard">
+    <div class="qhead"><b>Q5. Halving loop complexity</b><span class="badge easy">Easy</span></div>
+    <div class="ex"><pre><code>let i = n;
+while (i > 1) {
+  i = Math.floor(i / 2);
+  console.log(i);
+}</code></pre></div>
+    <div class="hint">Hint: Har iteration mein i aadha ho raha hai — jaise binary search.</div>
+  </div>
+
+  <h3><span class="badge medium">Medium</span> Section</h3>
+
+  <div class="qcard">
+    <div class="qhead"><b>Q6. Triangular nested loop</b><span class="badge medium">Medium</span></div>
+    <div class="ex"><pre><code>for (let i = 0; i < n; i++) {
+  for (let j = i; j < n; j++) {
+    console.log(i, j);
+  }
+}</code></pre></div>
+    <div class="hint">Hint: Andar wala loop har baar chhota ho raha hai — total operations count karke socho (n + (n-1) + (n-2) + ...).</div>
+  </div>
+
+  <div class="qcard">
+    <div class="qhead"><b>Q7. Recursive Fibonacci complexity</b><span class="badge medium">Medium</span></div>
+    <div class="ex"><pre><code>function fib(n) {
+  if (n <= 1) return n;
+  return fib(n - 1) + fib(n - 2);
+}</code></pre></div>
+    <div class="hint">Hint: Har call 2 further calls banati hai — recursion tree draw karo aur socho time aur space alag alag kaise nikalte hain.</div>
+  </div>
+
+  <div class="qcard">
+    <div class="qhead"><b>Q8. Hidden complexity in string building</b><span class="badge medium">Medium</span></div>
+    <div class="ex"><pre><code>let result = "";
+for (let i = 0; i < n; i++) {
+  result += "a";
+}</code></pre></div>
+    <div class="hint">Hint: Strings JavaScript mein immutable hain — har <code>+=</code> ek naya string bana sakta hai. Iska worst-case time socho.</div>
+  </div>
+
+  <div class="qcard">
+    <div class="qhead"><b>Q9. Amortized complexity</b><span class="badge medium">Medium</span></div>
+    <p>JavaScript array ka <code>push()</code> ko amortized O(1) kyu bola jata hai jabki kabhi kabhi resize bhi hota hai?</p>
+    <div class="ex"><b>Example:</b> Array capacity 4 hai aur 5th element push ho raha hai — resize trigger hota hai.</div>
+    <div class="hint">Hint: Resize rarely hota hai (doubling strategy) — cost ko sab calls mein average karo.</div>
+  </div>
+
+  <div class="qcard">
+    <div class="qhead"><b>Q10. Compare two algorithms given constraints</b><span class="badge medium">Medium</span></div>
+    <p>n = 10^6 hai, ek approach O(n²) hai, dusra O(n log n). 1-second time limit mein kaunsa chalega?</p>
+    <div class="ex"><b>Input:</b> n = 10^6, time limit = 1s</div>
+    <div class="hint">Hint: Rough operation counts nikaalo dono approaches ke liye aur compare karo modern CPU speed (~10^8-10^9 ops/sec) se.</div>
+  </div>
+
+  <h3><span class="badge hard">Hard</span> Section</h3>
+
+  <div class="qcard">
+    <div class="qhead"><b>Q11. Merge Sort space complexity deep-dive</b><span class="badge hard">Hard</span></div>
+    <p>Merge Sort ki space complexity O(n) kyun hoti hai, jab ki wo sirf array ko halves mein split karta hai (jo O(log n) depth hai)?</p>
+    <div class="ex"><b>Input:</b> arr of size n, recursion depth = log n</div>
+    <div class="hint">Hint: Call stack depth O(log n) hai, lekin merge step mein temporary arrays har level par milakar O(n) space lete hain.</div>
+  </div>
+
+  <div class="qcard">
+    <div class="qhead"><b>Q12. Analyze complexity of a recursive divide-and-conquer with unequal splits</b><span class="badge hard">Hard</span></div>
+    <p>Ek recursion har call mein problem ko n/3 aur 2n/3 mein split karta hai, aur O(n) work karta hai combine karne mein. Overall time complexity kya hogi?</p>
+    <div class="ex"><b>Example:</b> T(n) = T(n/3) + T(2n/3) + O(n)</div>
+    <div class="hint">Hint: Recursion tree draw karo — har level total work O(n) hota hai; depth kitni hai socho (unbalanced but still O(log n)).</div>
+  </div>
+
+  <div class="qcard">
+    <div class="qhead"><b>Q13. Memoization impact on exponential recursion</b><span class="badge hard">Hard</span></div>
+    <p>Naive Fibonacci O(2ⁿ) hai. Agar memoization add kar do (results cache karo), naya time aur space complexity kya hoga?</p>
+    <div class="ex"><b>Input:</b> fib(40) with and without memoization.</div>
+    <div class="hint">Hint: Har unique subproblem (0 to n) sirf ek baar solve hota hai — socho ye time ko O(n) tak kaise le aata hai, but extra space bhi lagta hai cache ke liye.</div>
+  </div>
+
+  <hr class="div">
+  <div class="navlinks">
+    <a href="01-what-is-dsa.html">&larr; Prev: What is DSA?</a>
+    <a href="../Phase-02-Arrays-Patterns/01-arrays-basics.html">Next: Arrays Basics &rarr;</a>
+  </div>
+  <p class="index-link"><a href="../index.html">&larr; Back to Index</a></p>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HLD Case Studies — System Design — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">System Design</a><span class="sep">›</span>HLD Case Studies</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>HLD Case Studies</h1>
+      <p class="meta-line"><span>⏱ 4 hrs</span><span>📍 Chapter 13 of 14</span></p>
+      <p><strong>One-line summary:</strong> Seven worked high-level design case studies — URL shortener, chat, notifications, news feed, file storage, ride booking, e-commerce checkout — each taken through requirements, capacity math, API, data model, components, and the one or two tradeoffs that actually separate a senior answer from a junior one.</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>Every system design interview loop eventually asks you to design something close to one of these seven systems — they're not arbitrary, they're chosen because each one forces a specific, well-known tradeoff that doesn't show up anywhere else (hash collisions, fanout strategy, geospatial indexing, idempotent payments). Memorizing a generic "clarify, estimate, design" template (covered in <a href="14-interview-framework.html">Chapter 14</a>) gets you through the first five minutes; what actually earns a strong hire signal is recognizing which specific tradeoff this particular system is testing and discussing it with real numbers and real alternatives, not generic boxes-and-arrows.</p>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>This chapter assumes you've read <a href="06-database-scaling.html">Chapter 6: Database Scaling</a> (sharding, replication), <a href="07-transactions.html">Chapter 7: Transactions</a> (the Saga pattern is reused directly in the e-commerce case study), and <a href="04-caching.html">Chapter 4: Caching</a>. It's the longest chapter in this topic by design — treat each case study as its own mini design doc.</p>
+
+      <h2 id="case-url-shortener">Case Study 1: URL Shortener</h2>
+      <h3>Requirements</h3>
+      <p><strong>Functional:</strong> shorten a long URL to a short code, redirect short code → long URL, optional custom aliases and expiry. <strong>Non-functional:</strong> redirects must be low-latency (&lt;50ms p99) and highly available (redirects are on the critical path of other people's content); writes (shortening) can tolerate slightly higher latency than reads.</p>
+      <h3>Capacity estimation</h3>
+      <p>Assume 100M new URLs/day shortened, and a 100:1 read:write ratio typical for link redirect services (links get clicked far more than created) → 10B redirects/day ≈ 115K reads/sec average, ~350K/sec at 3x peak. Writes: 100M/86,400 ≈ 1,160/sec average. Storage: 100M URLs/day × ~500 bytes (long URL + metadata) × 365 × 5 years ≈ 90TB — easily fits a sharded relational store or key-value store.</p>
+      <h3>API design</h3>
+      <pre><code class="language-typescript">POST /api/v1/shorten   { longUrl: string; customAlias?: string; expiresAt?: string }
+                        -> { shortUrl: string; code: string }
+GET  /{code}           -> 302 redirect to long URL (or 410 Gone if expired)
+</code></pre>
+      <h3>Data model</h3>
+      <p><code>urls(code VARCHAR(8) PK, long_url TEXT, created_at, expires_at, owner_id, click_count)</code> — code is the primary key, so lookups are O(1) on an index without needing a separate ID column.</p>
+      <h3>Component diagram</h3>
+      <div class="mermaid">
+flowchart LR
+    C[Client] --> LB[Load Balancer]
+    LB --> API[Shortener API servers]
+    API --> Cache[(Redis cache:<br/>code -&gt; long URL)]
+    API --> DB[(Sharded KV/SQL store)]
+    API --> IDGen[Distributed ID/<br/>Base62 encoder]
+    Cache -.miss.-> DB
+      </div>
+      <h3>Key tradeoff: generating the short code</h3>
+      <p><strong>Option A — hash + collision handling:</strong> MD5/SHA256 the long URL, take the first 6-8 chars base62-encoded. Fast, deterministic (same URL always maps to the same code, which can be a feature), but collisions are possible (two different long URLs hashing to the same prefix) — must check the DB on write and retry with a different salt/suffix on collision. <strong>Option B — counter + base62 encoding:</strong> a distributed counter (e.g., a range of IDs pre-allocated per app server, or Snowflake-style ID generation) assigns a strictly increasing integer ID, base62-encoded to a short string. No collisions possible by construction, but codes are sequential/guessable (minor information leak — competitors can estimate your link volume) unless you add a deterministic shuffle/bit-mix step. Most production systems (Bitly-style) use Option B for its collision-free simplicity, with a bit-mixing step to avoid obviously sequential codes. Redirect caching (Option discussion): cache hot codes in Redis with a TTL, and consider a CDN edge cache for extremely hot links (viral tweets) since a redirect response is cacheable and doesn't require hitting your origin at all.</p>
+
+      <h2 id="case-chat">Case Study 2: Chat Application</h2>
+      <h3>Requirements</h3>
+      <p><strong>Functional:</strong> 1:1 and group messaging, delivery and read receipts, online presence, message history. <strong>Non-functional:</strong> low-latency delivery (&lt;200ms for online recipients), messages must not be lost (durability), ordering must be consistent per-conversation.</p>
+      <h3>Capacity estimation</h3>
+      <p>50M DAU, 40 messages/user/day average → 2B messages/day ≈ 23K messages/sec average, ~70K/sec peak. Each message ~1KB (text + metadata) → ~2TB/day raw, requiring tiered storage (hot recent messages in a fast store, older history archived).</p>
+      <h3>API / protocol design</h3>
+      <p>WebSocket for real-time bidirectional delivery (not polling — polling at this message rate would be prohibitively expensive and still add latency); REST/HTTP for history fetch and non-realtime operations (fetch older messages, search).</p>
+      <h3>Data model</h3>
+      <p><code>messages(message_id, conversation_id, sender_id, content, sent_at, seq_no)</code> partitioned by conversation_id so a conversation's messages are co-located and can be fetched/ordered cheaply; <code>receipts(message_id, user_id, status, timestamp)</code> for delivered/read tracking.</p>
+      <h3>Component diagram</h3>
+      <div class="mermaid">
+flowchart TD
+    U1[User A] -- WebSocket --> GW1[Gateway/Connection server 1]
+    U2[User B] -- WebSocket --> GW2[Gateway/Connection server 2]
+    GW1 --> MQ[(Message Queue)]
+    MQ --> Router[Message Router /<br/>Fanout service]
+    Router --> GW2
+    Router --> Store[(Message store,<br/>partitioned by conversation)]
+    Router --> Presence[(Presence service)]
+      </div>
+      <h3>Key tradeoffs: connection management, ordering, group fanout</h3>
+      <p><strong>WebSocket connection management:</strong> each gateway server holds a long-lived connection per online user; since a single server can hold maybe 50-100K concurrent WebSocket connections, 50M DAU with even 10% concurrently online (5M) needs ~50-100 gateway servers, with a presence/connection-registry service (often Redis) mapping user_id → which gateway server holds their connection, since messages must be routed to the specific server holding the recipient's socket. <strong>Ordering:</strong> use a per-conversation monotonic sequence number (not wall-clock timestamp, which can skew across servers) so clients can detect and request missing/out-of-order messages. <strong>Read receipts:</strong> must not block message delivery — write the receipt asynchronously and let the sender's client poll/subscribe for receipt updates separately from the message stream itself. <strong>Group fanout:</strong> for a group of N members, one sent message must be delivered to N-1 others — for small groups this is cheap fanout-on-write (push to each online member's gateway immediately), but for very large groups (broadcast channels, thousands of members) fanout-on-write at send time becomes expensive, so large-group/broadcast-style chat often switches to a fanout-on-read model (the news feed case study below covers this exact tradeoff in depth).</p>
+
+      <h2 id="case-notifications">Case Study 3: Notification System</h2>
+      <h3>Requirements</h3>
+      <p><strong>Functional:</strong> send notifications across multiple channels (push, email, SMS, in-app) triggered by application events, with templating and per-user channel preferences. <strong>Non-functional:</strong> must not overwhelm users (rate limiting per channel/user) or third-party providers (rate limiting per provider), must tolerate provider outages without losing notifications.</p>
+      <h3>Capacity estimation</h3>
+      <p>200M notification events/day from upstream services → ~2,300/sec average, with sharp bursts around specific triggers (e.g., a flash sale notifying 10M users within minutes) — burst handling, not average throughput, is the real design driver here.</p>
+      <h3>API design</h3>
+      <pre><code class="language-typescript">POST /api/v1/notifications
+  { userId: string; templateId: string; data: object; channels?: ("push"|"email"|"sms")[] }
+  -> { notificationId: string; status: "queued" }
+</code></pre>
+      <h3>Data model</h3>
+      <p><code>notification_templates(template_id, channel, subject, body_template)</code>; <code>user_preferences(user_id, channel, opted_in)</code>; <code>notification_log(notification_id, user_id, channel, status, sent_at)</code> for delivery tracking and dedup/idempotency.</p>
+      <h3>Component diagram</h3>
+      <div class="mermaid">
+flowchart LR
+    App[Upstream services] --> API[Notification API]
+    API --> Q[(Event Queue)]
+    Q --> Worker[Fanout Worker]
+    Worker --> Pref[(User preference<br/>+ template store)]
+    Worker --> RL1{Rate limiter:<br/>per-channel/provider}
+    RL1 --> Push[Push provider]
+    RL1 --> Email[Email provider]
+    RL1 --> SMS[SMS provider]
+      </div>
+      <h3>Key tradeoff: multi-channel fanout and per-channel rate limiting</h3>
+      <p>A single trigger event (e.g., "order shipped") fans out to multiple channels per user based on preference — this must happen asynchronously via a queue, not synchronously in the triggering request path, both because channel delivery (especially SMS/email, which call third-party APIs) is slow and unreliable, and because a burst trigger (flash sale to 10M users) would otherwise overwhelm the triggering service itself. Each channel needs its own rate limiter (token bucket per provider, see <a href="11-resilience.html">Chapter 11</a>) because providers like Twilio/SendGrid impose their own hard rate caps and will throttle or ban you for bursting past them — the queue + per-channel-worker-pool architecture naturally smooths bursts into each provider's sustainable rate (this is leaky-bucket-style smoothing in practice). Templating should render server-side at send time (not pre-rendered and stored) so a template fix doesn't require re-sending already-queued notifications.</p>
+
+      <h2 id="case-newsfeed">Case Study 4: News Feed</h2>
+      <h3>Requirements</h3>
+      <p><strong>Functional:</strong> users see a reverse-chronological or ranked feed of posts from people/pages they follow. <strong>Non-functional:</strong> feed load must be fast (&lt;500ms) even for users following thousands of accounts; must handle highly skewed follower distributions (celebrities with 100M followers posting).</p>
+      <h3>Capacity estimation</h3>
+      <p>500M DAU, average 300 follows/user, 100M posts/day → at naive full fanout, one post from an average user generates 300 feed-insert operations, but one post from a celebrity with 50M followers generates 50M feed-insert operations — this asymmetry is the entire design problem.</p>
+      <h3>Component diagram</h3>
+      <div class="mermaid">
+flowchart TD
+    Post[User posts] --> Decide{Follower count<br/>above threshold?}
+    Decide -- No, normal user --> FanoutWrite[Fanout-on-write:<br/>push post ID to each<br/>follower's feed cache]
+    Decide -- Yes, celebrity --> SkipFanout[Skip fanout;<br/>store post only]
+    FanoutWrite --> FeedCache[(Per-user feed cache,<br/>list of post IDs)]
+    Read[User opens feed] --> Merge[Merge: feed cache<br/>+ live pull from<br/>followed celebrities]
+    FeedCache --> Merge
+    SkipFanout --> Merge
+      </div>
+      <h3>Key tradeoff: fanout-on-write vs fanout-on-read, and the celebrity problem</h3>
+      <p><strong>Fanout-on-write:</strong> when a user posts, immediately push the post ID into every follower's precomputed feed list (cached). Reads are then extremely fast (just read your own precomputed list). But write cost scales with follower count — a celebrity post triggers millions of writes, and if a follower is inactive for weeks, all that fanout work was wasted on someone who may never see it. <strong>Fanout-on-read:</strong> store posts normally; at read time, pull recent posts from everyone the user follows and merge them on the fly. Write cost is trivial (O(1) per post regardless of follower count), but read cost scales with how many accounts you follow, and reads are slower/more expensive since they happen on every single feed load rather than once per post. <strong>The hybrid used by essentially every major platform at scale:</strong> fanout-on-write for normal users (most posts, most followers — keeps reads fast for the common case), fanout-on-read (pull-based) specifically for celebrity/high-follower-count accounts above a threshold, merged at read time with the precomputed feed. This caps worst-case write amplification while keeping typical reads fast.</p>
+
+      <h2 id="case-filestorage">Case Study 5: File Storage/Sharing (Dropbox-style)</h2>
+      <h3>Requirements</h3>
+      <p><strong>Functional:</strong> upload/download files, sync across devices, share with other users, versioning. <strong>Non-functional:</strong> must handle large files efficiently (resumable uploads), must minimize storage cost via deduplication, must scale to billions of files.</p>
+      <h3>Capacity estimation</h3>
+      <p>500M users, average 10GB stored/user → 5 exabytes total — this is why metadata and blob storage must be split: metadata (file names, folder structure, permissions, version pointers) is small and needs transactional/relational semantics, while the actual file bytes are enormous and need cheap, horizontally-scalable blob storage (S3-style object storage), not a traditional database.</p>
+      <h3>Data model</h3>
+      <p><code>files(file_id, owner_id, name, folder_id, current_version_id)</code>; <code>file_versions(version_id, file_id, content_hash, size, created_at)</code>; <code>blocks(content_hash PK, storage_url, ref_count)</code> — the <code>blocks</code> table is the dedup layer.</p>
+      <h3>Component diagram</h3>
+      <div class="mermaid">
+flowchart LR
+    Client -- chunk + hash --> API[Upload API]
+    API --> Dedup{Hash already<br/>in blocks table?}
+    Dedup -- Yes --> Ref[Increment ref_count,<br/>point version at<br/>existing block]
+    Dedup -- No --> Blob[(Blob storage, e.g. S3)]
+    Blob --> Register[Register new block<br/>+ hash in metadata DB]
+    Ref --> Meta[(Metadata DB)]
+    Register --> Meta
+      </div>
+      <h3>Key tradeoff: chunking, content-hash dedup, metadata/blob split</h3>
+      <p>Large files are split into fixed or content-defined chunks (e.g., 4MB blocks); each chunk is hashed (SHA-256), and before uploading a chunk's bytes, the client/server checks whether that hash already exists in the blocks table — if so, only a reference is created (no bytes re-uploaded or re-stored), which is what makes storing "the same stock photo uploaded by 10,000 users" cost roughly 1x instead of 10,000x. Content-defined chunking (splitting on content boundaries rather than fixed byte offsets) is what lets dedup work even when a file is slightly edited — a fixed-offset chunker would shift every subsequent chunk's boundary after an insertion, destroying dedup for the whole rest of the file, while content-defined chunking (rolling hash boundary detection) keeps unchanged regions aligned to the same chunk boundaries. The metadata/blob split matters because the two have wildly different scaling and consistency needs: metadata needs strong consistency (you don't want two devices to both think they have the "current" version after a conflicting edit) and is small enough for a traditional sharded relational store, while blobs are append-only, enormous, and best served by purpose-built object storage with its own replication/durability guarantees.</p>
+
+      <h2 id="case-ridebooking">Case Study 6: Ride Booking (Uber-style)</h2>
+      <h3>Requirements</h3>
+      <p><strong>Functional:</strong> rider requests a ride, system matches to a nearby available driver, real-time location tracking during the trip. <strong>Non-functional:</strong> matching must happen in seconds, location updates must be near-real-time (few seconds staleness acceptable), must scale to dense urban areas with thousands of drivers per square km.</p>
+      <h3>Capacity estimation</h3>
+      <p>5M active drivers sending location updates every 4 seconds → ~1.25M location writes/sec globally; a single dense city might have 50K drivers each updating every 4s → 12,500 writes/sec for that city's geo-index alone — this is why geospatial indexing must be regionally partitioned, not a single global structure.</p>
+      <h3>Component diagram</h3>
+      <div class="mermaid">
+flowchart TD
+    Driver[Driver app] -- location every 4s --> LocSvc[Location Ingest Service]
+    LocSvc --> GeoIndex[(Geospatial index,<br/>sharded by region,<br/>geohash/quadtree)]
+    Rider[Rider requests ride] --> MatchSvc[Matching Service]
+    MatchSvc --> GeoIndex
+    MatchSvc --> Driver
+    MatchSvc --> TripSvc[Trip Service]
+      </div>
+      <h3>Key tradeoff: geospatial indexing and driver matching</h3>
+      <p><strong>Geohash:</strong> encodes a lat/lng pair into a short string where nearby locations share string prefixes — makes "find all drivers near me" a prefix-range query on a sorted structure (e.g., a Redis sorted set or a DB index on the geohash string), which is simple to shard (shard by geohash prefix, naturally keeping nearby points co-located) but has an edge-case problem: two points can be geographically very close but fall on opposite sides of a geohash cell boundary and share no prefix, so a real implementation must check neighboring cells too. <strong>Quadtree:</strong> recursively subdivides space into quadrants, with denser regions (city centers) subdivided more finely than sparse ones — gives more uniform query cost regardless of density but is a tree structure that's harder to shard cleanly across machines than a flat geohash string. In practice, Uber's own published H3 (hexagonal hierarchical index) addresses geohash's boundary problem by using hexagonal cells (which have uniform adjacency, unlike geohash's rectangular cells where corner-adjacency is awkward). <strong>Matching:</strong> given a candidate set of nearby available drivers, the matching service scores by distance/ETA, driver rating, and current driver utilization (don't always send requests to the same top-rated driver — this is itself a small instance of the "hot node" / load distribution problem), then dispatches and waits for accept/reject with a timeout before trying the next candidate. Location updates are deliberately not strongly consistent — a few seconds of staleness is an acceptable tradeoff (PACELC's Latency-over-Consistency choice) given how much cheaper eventually-consistent location propagation is versus synchronizing every driver's position everywhere instantly.</p>
+
+      <h2 id="case-ecommerce">Case Study 7: E-commerce Checkout</h2>
+      <h3>Requirements</h3>
+      <p><strong>Functional:</strong> add to cart, checkout (reserve inventory, charge payment, create order), order status tracking. <strong>Non-functional:</strong> must never oversell inventory beyond acceptable business tolerance, must never double-charge a customer, must handle partial failures (payment succeeds but order creation fails) without leaving the system in an inconsistent state.</p>
+      <h3>Capacity estimation</h3>
+      <p>Flash-sale scenario: 1M concurrent users competing for 10,000 units of a limited item in a 10-minute window — peak checkout attempt rate can hit tens of thousands/sec against a single hot inventory row, which is a concurrency/contention problem, not just a throughput problem.</p>
+      <h3>Component diagram</h3>
+      <div class="mermaid">
+flowchart TD
+    Checkout[Checkout request] --> Saga[Order Saga Orchestrator]
+    Saga --> Inv[Inventory Service:<br/>reserve stock]
+    Saga --> Pay[Payment Service:<br/>charge, idempotency key]
+    Saga --> Order[Order Service:<br/>create order record]
+    Inv -. compensate: release .-> Saga
+    Pay -. compensate: refund .-> Saga
+    Order -. compensate: cancel .-> Saga
+      </div>
+      <h3>Key tradeoff: inventory consistency, payment idempotency, order saga</h3>
+      <p><strong>Inventory consistency:</strong> a single global strongly-consistent counter avoids overselling but becomes a severe contention bottleneck under flash-sale load (every request serializes on one row/lock); a common mitigation is reserving stock with a short-lived hold (decrement optimistically with a conditional update, e.g. <code>UPDATE inventory SET stock = stock - 1 WHERE stock > 0</code>, which atomically fails once stock hits zero) combined with a hold/expiry so abandoned checkouts release stock back automatically rather than requiring a background sweep alone. <strong>Payment idempotency:</strong> every charge request carries a client-generated idempotency key; the payment service persists (key → result) and, on a retried request with the same key (due to a network blip or client retry), returns the original result instead of charging again — this is the direct, concrete application of the idempotency discussion in <a href="11-resilience.html">Chapter 11</a> to the single most consequence-heavy place it matters. <strong>Order saga:</strong> checkout spans three independent services (inventory, payment, order) that can't be wrapped in a single ACID transaction because they're separate systems — the Saga pattern (detailed in <a href="07-transactions.html">Chapter 7</a>) sequences them with compensating actions: if payment fails after inventory was reserved, the saga triggers a compensating "release reservation" action; if order creation fails after payment succeeded, the saga triggers a compensating refund. The orchestrator-based saga (a central coordinator explicitly driving each step and its compensation) is generally preferred over a choreography-based saga (each service reacting to the previous one's event) for checkout specifically, because the business logic ("what counts as a successful checkout, and in what order do compensations happen") is complex enough to want centralized visibility rather than being implicit across many independently-reacting services.</p>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-typescript">// Geohash encoding (simplified) — interleaves lat/lng bits to produce a prefix-sortable string
+const BASE32 = "0123456789bcdefghjkmnpqrstuvwxyz";
+function encodeGeohash(lat: number, lng: number, precision = 8): string {
+  let latRange: [number, number] = [-90, 90];
+  let lngRange: [number, number] = [-180, 180];
+  let isEven = true;
+  let bit = 0, ch = 0;
+  let hash = "";
+  while (hash.length < precision) {
+    if (isEven) {
+      const mid = (lngRange[0] + lngRange[1]) / 2;
+      if (lng > mid) { ch |= (1 << (4 - bit)); lngRange[0] = mid; } else { lngRange[1] = mid; }
+    } else {
+      const mid = (latRange[0] + latRange[1]) / 2;
+      if (lat > mid) { ch |= (1 << (4 - bit)); latRange[0] = mid; } else { latRange[1] = mid; }
+    }
+    isEven = !isEven;
+    if (bit < 4) bit++; else { hash += BASE32[ch]; bit = 0; ch = 0; }
+  }
+  return hash;
+}
+// encodeGeohash(37.7749, -122.4194) -> roughly "9q8yyk2z" (San Francisco) — nearby points share prefixes
+</code></pre>
+      <pre><code class="language-typescript">// Idempotent payment charge — the core correctness mechanism for case study 7
+interface ChargeResult { transactionId: string; status: "succeeded" | "failed"; }
+class PaymentService {
+  constructor(private db: { getByIdempotencyKey(k: string): Promise&lt;ChargeResult | null&gt;;
+                             saveResult(k: string, r: ChargeResult): Promise&lt;void&gt; }) {}
+
+  async charge(amount: number, idempotencyKey: string): Promise&lt;ChargeResult&gt; {
+    const existing = await this.db.getByIdempotencyKey(idempotencyKey);
+    if (existing) return existing; // retried request — return original result, do NOT charge again
+
+    const result = await this.callPaymentProvider(amount); // real charge happens exactly once
+    await this.db.saveResult(idempotencyKey, result);
+    return result;
+  }
+  private async callPaymentProvider(amount: number): Promise&lt;ChargeResult&gt; {
+    return { transactionId: crypto.randomUUID(), status: "succeeded" };
+  }
+}
+</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4><p>A mid-size e-commerce platform ran a flash sale on a limited-edition item (10,000 units) and saw their naive "SELECT stock, then UPDATE if available" checkout flow oversell by 400 units within the first 90 seconds — a classic check-then-act race condition under extreme concurrency, since many requests read the same "stock available" value before any of them had committed their decrement. The fix combined two case-study patterns from this chapter: an atomic conditional decrement (<code>UPDATE inventory SET stock = stock - 1 WHERE item_id = ? AND stock > 0</code>, checked via affected-row-count rather than a separate read) to eliminate the race at the database level, and a short-lived reservation hold (60 seconds) so a user who reserved stock but abandoned checkout didn't permanently lock it away — on expiry, a background job released unconfirmed holds back to available stock. Post-fix, the same sale pattern oversold by zero units while keeping checkout latency under 300ms p99, because the contention was resolved at the database's own atomic-operation level rather than via a slower distributed lock.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Designing fanout-on-write for every account uniformly, without a celebrity-threshold exception — this is the single most common "sounds fine until you do the follower-count math" mistake candidates make in feed design interviews.</p></div>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Treating payment idempotency as "just retry carefully on the client" instead of a server-side guarantee keyed by a client-generated idempotency key — client-side carefulness alone cannot prevent double charges across genuinely independent retry attempts (e.g., a mobile app retry after an ambiguous network timeout where the first request actually succeeded server-side).</p></div>
+      <ul>
+        <li>For every case study, state explicitly which component is CP and which is AP — interviewers want to hear the justification tied to business cost, not a default guess.</li>
+        <li>Always separate "hot path" (needs to be fast, simple, synchronous) from "cold path" (can be async, batched, eventually consistent) within a single system — most of these case studies are really about drawing that line correctly.</li>
+        <li>Quote real numbers (QPS, storage, follower-count skew) even if approximate — a design justified by "because it's a lot of users" is weaker than one justified by "500M DAU times 300 follows means naive fanout averages 150B feed-inserts/day."</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs: Fanout and Consistency Strategies Compared</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>Fanout-on-write (feed/chat)</td><td>Normal follower/member counts, read-heavy access pattern</td><td>Extreme follower counts (celebrities, broadcast channels)</td><td>Fanout-on-read, or hybrid threshold-based</td></tr>
+        <tr><td>Fanout-on-read (feed/chat)</td><td>Very high follower/member counts, or write-rarely accounts</td><td>User follows thousands of accounts (read becomes expensive)</td><td>Fanout-on-write, or hybrid</td></tr>
+        <tr><td>Strong consistency on inventory</td><td>Zero oversell tolerance (e.g., exact ticketed seats)</td><td>High-contention flash sale with tolerance for rare, compensable oversell</td><td>Optimistic atomic decrement + reservation hold</td></tr>
+        <tr><td>Geohash</td><td>Simple sharding, prefix-range queries sufficient</td><td>Need uniform adjacency / no boundary edge cases</td><td>Quadtree or H3 hexagonal index</td></tr>
+        <tr><td>Hash-based short code (URL shortener)</td><td>Want deterministic same-input-same-code behavior</td><td>Collision handling complexity isn't worth it</td><td>Counter + base62 encoding</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic"><h4>Basic</h4>
+        <details class="qa"><summary>Why would a URL shortener prefer a counter + base62 encoding over hashing the long URL?</summary><div class="answer"><p>Counter-based IDs are collision-free by construction, avoiding the need to detect and retry on hash collisions; hashing requires a collision-check-and-retry step on every write.</p></div></details>
+        <details class="qa"><summary>Why does a chat app use WebSockets instead of HTTP polling?</summary><div class="answer"><p>Polling at a scale of tens of thousands of messages/sec would require constant request overhead and still introduce latency equal to the poll interval; WebSockets give a persistent bidirectional connection enabling true low-latency push delivery.</p></div></details>
+        <details class="qa"><summary>What is the "celebrity problem" in news feed design?</summary><div class="answer"><p>A small number of accounts with extremely high follower counts make fanout-on-write prohibitively expensive for their posts (millions of feed-insert operations per post), requiring a different strategy (fanout-on-read) specifically for those accounts.</p></div></details>
+        <details class="qa"><summary>Why does Dropbox-style file storage split metadata from blob storage?</summary><div class="answer"><p>Metadata is small and needs strong consistency/transactional semantics; blob data is enormous and needs cheap, horizontally-scalable object storage — the two have fundamentally different scaling and consistency requirements.</p></div></details>
+        <details class="qa"><summary>What does an idempotency key prevent in a payment flow?</summary><div class="answer"><p>It prevents a retried charge request (due to network blips or client retry logic) from actually charging the customer twice, by letting the server recognize the retry and return the original result instead of processing a new charge.</p></div></details>
+        <details class="qa"><summary>Why is a geohash's prefix property useful for finding nearby drivers?</summary><div class="answer"><p>Nearby locations tend to share string prefixes, so a range/prefix query on sorted geohash strings efficiently returns points in roughly the same area without scanning the whole dataset.</p></div></details>
+      </div>
+      <div class="qa-level medium"><h4>Medium</h4>
+        <details class="qa"><summary>Design the reservation-hold mechanism for flash-sale inventory and explain what happens if the hold expires mid-checkout.</summary><div class="answer"><p>On "add to checkout," atomically decrement available stock and create a reservation row with an expiry (e.g., 60-120s). If the user completes payment before expiry, convert the reservation to a confirmed order. If it expires first, a background sweep (or lazy check on next access) releases the held stock back to available — if the user's payment then succeeds after expiry, the saga's compensating action must handle the now-invalid reservation (refund and apologize, or attempt re-reservation if stock still exists).</p></div></details>
+        <details class="qa"><summary>Why might a chat app's group fanout threshold differ from a news feed's celebrity threshold?</summary><div class="answer"><p>Chat fanout targets must all receive the message in near-real-time with delivery guarantees (it's a conversation), so even moderately large groups may still warrant push-based fanout up to a higher member count than you'd tolerate for feed fanout, where feed consumers tolerate eventual/pull-based delivery much more readily; the exact threshold is a product decision balancing latency needs against fanout cost for each system separately.</p></div></details>
+        <details class="qa"><summary>How would you detect and handle a corrupted/incomplete file chunk in the Dropbox-style dedup design?</summary><div class="answer"><p>Verify the uploaded chunk's bytes against its claimed content hash server-side before registering it in the blocks table (reject on mismatch); since blocks are reference-counted and shared, never allow a client to overwrite an existing hash's stored bytes — a hash collision or corruption must be treated as upload failure, not an in-place fix, to protect every other file referencing that block.</p></div></details>
+        <details class="qa"><summary>In the ride-booking case study, why is driver location data eventually consistent rather than strongly consistent, and what would strong consistency cost here?</summary><div class="answer"><p>Strong consistency would require synchronizing every driver's position across all replicas/services before any read, adding significant latency and coordination overhead for data that's inherently stale within seconds anyway (drivers keep moving) — the business cost of a few seconds of staleness is negligible compared to the latency cost of strict consistency, so PACELC's Else-Latency choice is the right one.</p></div></details>
+        <details class="qa"><summary>Why does the e-commerce case study use an orchestrator-based saga rather than choreography?</summary><div class="answer"><p>Checkout's compensation logic (what to do if payment fails after inventory reservation, what to do if order creation fails after payment) is complex enough that centralizing the sequencing and failure handling in one orchestrator keeps the business logic visible and testable in one place, versus choreography's implicit cross-service event reactions which get harder to reason about as the number of compensating cases grows.</p></div></details>
+      </div>
+      <div class="qa-level advanced"><h4>Advanced</h4>
+        <details class="qa"><summary>Design a hybrid fanout threshold policy for news feed that adapts dynamically rather than using a single fixed follower-count cutoff.</summary><div class="answer"><p>Instead of a static threshold, factor in posting frequency (a celebrity who posts rarely is cheaper to fanout-on-write despite high follower count) and follower activity (fanning out to followers who haven't opened the app in weeks wastes writes) — a dynamic score combining follower count × posting frequency × follower activity rate can decide per-account whether to eagerly fan out, with a periodic re-evaluation as these factors change, rather than a single fixed number chosen once.</p></div></details>
+        <details class="qa"><summary>How would you extend the URL shortener's design to support analytics (click counts, referrer tracking) without adding write latency to the redirect path?</summary><div class="answer"><p>Log the redirect event to an async queue immediately after serving the 302 (fire-and-forget from the redirect's perspective — the user's redirect isn't blocked waiting for analytics to persist), and have a separate consumer aggregate click counts/referrer data into an analytics store; this keeps the hot redirect path's latency unaffected by analytics write volume or any analytics-store slowness.</p></div></details>
+        <details class="qa"><summary>In the ride-booking system, how would you handle a region boundary problem where a rider and the nearest available driver are geographically close but fall into different geospatial shard partitions?</summary><div class="answer"><p>Query not just the rider's own shard/cell but also neighboring cells (a standard geohash/H3 technique — check the 8 neighboring cells around the rider's cell in addition to the rider's own cell) before considering the match complete; this adds a small constant number of extra lookups but correctly handles drivers just across a partition boundary.</p></div></details>
+        <details class="qa"><summary>Critique the saga pattern's weakness in the e-commerce checkout case: what happens if a compensating action itself fails (e.g., the refund call to the payment provider times out)?</summary><div class="answer"><p>Compensating actions must themselves be retried with their own idempotency guarantees and backoff, and if they persistently fail, the saga needs a dead-letter/manual-intervention path rather than silently giving up — this is why production saga implementations track saga state explicitly (e.g., "compensation pending," "compensation failed — needs ops review") rather than assuming compensations always succeed on the first attempt.</p></div></details>
+        <details class="qa"><summary>How would the notification system's design change if a single event needed to notify 50M users within a 2-minute SLA (e.g., a critical security alert)?</summary><div class="answer"><p>This requires massively parallelizing the fanout worker pool (horizontal scale-out proportional to the volume/SLA, likely with dedicated capacity reserved for this priority class) and prioritizing this event ahead of routine notification traffic in the queue (priority queues or a separate high-priority topic), while accepting that per-channel provider rate limits (SMS/push providers' own caps) may become the hard bottleneck regardless of your own infrastructure capacity — at that point the design conversation shifts to negotiating higher rate limits with providers or using multiple provider accounts/providers in parallel to fan the load out across independent rate-limit buckets.</p></div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment"><span class="level-tag">Beginner (30-60 min)</span><h4>Capacity estimation for a polling/voting system</h4><p>Design is not required — just do the capacity math (QPS, storage) for a real-time polling system (like Twitter polls) with 20M DAU where 5% of users vote on an average of 3 polls/day, each vote being a tiny (50 byte) write, with a 5x peak multiplier around major live events.</p><ul><li>State average and peak QPS, and yearly storage.</li><li>State one architectural implication (e.g., does this need sharding, or is it small enough for a single well-indexed table with a cache in front?).</li></ul><p><strong>Acceptance criteria:</strong> Correct arithmetic and a one-sentence architectural takeaway.</p><details class="qa"><summary>Hints</summary><div class="answer"><p>Votes/day = DAU × 0.05 × 3. QPS = votes/day ÷ 86,400. This volume is almost certainly small enough that the real design challenge is the read side (showing live-updating aggregate counts), not the write side.</p></div></details><p><strong>Bonus:</strong> How would your answer change for live aggregate count display under high read concurrency during a viral poll?</p></div>
+      <div class="assignment"><span class="level-tag">Intermediate (2-4 hrs)</span><h4>Full mini design doc: design a URL shortener with custom aliases and analytics</h4><p>Produce a complete mini design doc (requirements, capacity estimate, API, data model, component diagram, and tradeoff discussion) for a URL shortener that additionally supports user-chosen custom aliases and per-link click analytics, following the exact structure used in Case Study 1 of this chapter.</p><ul><li>Address the specific new conflict custom aliases introduce with collision handling (a user-chosen alias can collide with an existing one — unlike generated codes, you can't just retry with a different random value, you must reject and ask the user to pick another).</li><li>Design the analytics write path so it doesn't add latency to the redirect path (see the Advanced Q&amp;A above for a hint on direction).</li></ul><p><strong>Acceptance criteria:</strong> All 6 sections present and substantive, matching the chapter's format.</p><details class="qa"><summary>Hints</summary><div class="answer"><p>Custom alias collision handling: check availability synchronously on request (unique constraint on the alias column), return a clear conflict error rather than silently falling back to a generated code.</p></div></details><p><strong>Bonus:</strong> Add link expiry and discuss how you'd efficiently find and purge expired links at scale without a full table scan.</p></div>
+      <div class="assignment"><span class="level-tag">Advanced (1-2 days)</span><h4>Design a system not covered in this chapter: a collaborative document editor (Google Docs-style)</h4><p>Produce a full mini design doc for a collaborative real-time document editor supporting multiple simultaneous editors per document, following this chapter's 6-part structure (requirements, capacity estimate, API, data model, component diagram, key tradeoff discussion).</p><ul><li>Address concurrent edit conflict resolution explicitly — this is the system's defining tradeoff, analogous to fanout strategy for feeds or geospatial indexing for ride booking.</li><li>Discuss what CAP/PACELC choice you're making for the live-editing path versus the "save to permanent storage" path, and why they might differ.</li></ul><p><strong>Acceptance criteria:</strong> All 6 sections present, with the conflict-resolution tradeoff discussed with the same depth as the fanout-on-write/read discussion in Case Study 4.</p><details class="qa"><summary>Hints (direction only, not a full solution)</summary><div class="answer"><p>Research Operational Transform (OT) and CRDTs (Conflict-free Replicated Data Types) as the two dominant approaches — OT requires a central server to sequence operations, CRDTs allow fully peer-to-peer merge without a central sequencer but have higher per-edit metadata overhead. The live-editing path favors availability/low-latency (AP/EL); the periodic persisted-save path can afford to be strongly consistent since it's infrequent and not on the interactive critical path.</p></div></details></div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet"><ul>
+        <li>URL shortener: counter + base62 avoids collisions; hashing needs collision-check-and-retry. Cache hot redirects aggressively, even at CDN edge.</li>
+        <li>Chat: WebSockets for push delivery; per-conversation sequence numbers for ordering, not wall-clock time; presence registry maps user → gateway server.</li>
+        <li>Notifications: always async via queue; per-channel/provider rate limiting is mandatory, not optional, because providers enforce their own hard caps.</li>
+        <li>News feed: fanout-on-write for normal accounts, fanout-on-read for celebrities/high-follower accounts — hybrid by threshold, not a single global strategy.</li>
+        <li>File storage: content-hash dedup + content-defined chunking; split metadata (strong consistency, small) from blobs (cheap object storage, huge).</li>
+        <li>Ride booking: geohash/quadtree/H3 for spatial indexing, sharded regionally; location data is intentionally eventually consistent (PACELC Latency choice).</li>
+        <li>E-commerce checkout: atomic conditional inventory decrement + reservation hold prevents overselling under contention; idempotency keys prevent double charges; Saga pattern (orchestrator-based) sequences cross-service steps with compensations.</li>
+        <li>Every case study's real test: identify the hot path vs cold path, and the one tradeoff (fanout strategy, consistency model, indexing structure) that defines the system.</li>
+      </ul></div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://eng.uber.com/h3/">Uber Engineering — H3: Uber's Hexagonal Hierarchical Spatial Index</a></li>
+        <li><a href="https://highscalability.com/">High Scalability — real-world architecture case studies</a></li>
+        <li><a href="https://aws.amazon.com/builders-library/">Amazon Builders' Library</a></li>
+        <li><a href="https://github.com/donnemartin/system-design-primer">System Design Primer (GitHub)</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="12-lld-design-patterns.html"><span class="dir">← Previous</span>LLD: SOLID &amp; Design Patterns</a>
+        <a class="next" href="14-interview-framework.html"><span class="dir">Next →</span>Interview Framework</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · System Design</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-typescript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-sql.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-yaml.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "01-system-design", chapterKey: "13-hld-case-studies" });</script>
+</body>
+</html>

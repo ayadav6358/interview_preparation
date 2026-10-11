@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RAG Project: PostgreSQL + pgvector</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <input class="searchbox" placeholder="Search topics..." />
+    <a href="../index.html">← Home</a>
+    <h3>12-RAG</h3>
+    <a href="rag-fundamentals.html">RAG Fundamentals</a>
+    <a href="rag-project.html">RAG Project (pgvector)</a>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumbs"><a href="../index.html">Home</a> / 12-RAG / Project</div>
+      <button class="theme-toggle" onclick="toggleTheme()">🌓 Theme</button>
+    </div>
+    <h1>Complete RAG Project: PostgreSQL + pgvector Document Q&A</h1>
+    <span class="tag good">Stable</span><span class="tag">Last verified: 2026-10-06</span>
+
+    <div class="toc">
+      <b>On this page</b>
+      <a href="#what">1. What is this?</a>
+      <a href="#whyexist">2. Why build this project?</a>
+      <a href="#whyimportant">3. Why is it important?</a>
+      <a href="#whereused">4. Where would this be used?</a>
+      <a href="#prereq">5. Prerequisites</a>
+      <a href="#core">6. Requirements</a>
+      <a href="#terms">7. Tech stack</a>
+      <a href="#arch">8. Architecture</a>
+      <a href="#internal">9. Database design</a>
+      <a href="#steps">10. Implementation steps</a>
+      <a href="#simple">11. Environment variables</a>
+      <a href="#real">12. API design</a>
+      <a href="#code">13. Code example (full pipeline)</a>
+      <a href="#advanced">14. Advanced example (reranking add-on)</a>
+      <a href="#mistakes">15. Common mistakes</a>
+      <a href="#best">16. Best practices</a>
+      <a href="#production">17. Production considerations / deployment</a>
+      <a href="#security">18. Security considerations</a>
+      <a href="#performance">19. Performance considerations</a>
+      <a href="#cost">20. Cost considerations</a>
+      <a href="#debug">21. Testing & debugging</a>
+      <a href="#related">22. Related concepts</a>
+      <a href="#comparison">23. Possible improvements</a>
+      <a href="#exercise">24. Mini practical exercise</a>
+      <a href="#project">25. Extension project ideas</a>
+      <a href="#projectarch">26. Folder structure</a>
+      <a href="#interview-b">27. Interview Questions — Beginner</a>
+      <a href="#interview-i">28. Interview Questions — Intermediate</a>
+      <a href="#interview-a">29. Interview Questions — Advanced</a>
+      <a href="#interview-s">30. Interview Questions — Senior/Architect</a>
+      <a href="#interview-sc">31. Scenario-Based Questions</a>
+      <a href="#revision">32. Quick revision notes</a>
+      <a href="#cheat">33. Cheat sheet</a>
+      <a href="#further">34. Further topics to learn</a>
+    </div>
+
+    <h2 id="what">1. What is this?</h2>
+    <p>A complete, buildable RAG document Q&A system using PostgreSQL with the pgvector extension as the vector store — chosen specifically because it requires no new infrastructure beyond Postgres, making it the most practical first production RAG implementation for a typical software engineering team.</p>
+
+    <h2 id="whyexist">2. Why build this project?</h2>
+    <p>Reading about RAG concepts (<a href="rag-fundamentals.html">RAG Fundamentals</a>) doesn't build the muscle memory of handling real issues: PDF parsing quirks, chunk boundary decisions, embedding batch management, and prompt construction under token budgets. This project forces those decisions.</p>
+
+    <h2 id="whyimportant">3. Why is it important?</h2>
+    <p>This is the single most commonly requested "build me an AI feature" project in real companies — a document Q&A assistant over internal docs, contracts, or support articles — making it one of the highest-leverage projects for both interviews and real work.</p>
+
+    <h2 id="whereused">4. Where would this be used?</h2>
+    <p>Internal documentation assistants, customer support knowledge bases, contract/policy Q&A tools, onboarding assistants.</p>
+
+    <h2 id="prereq">5. Prerequisites</h2>
+    <p><a href="rag-fundamentals.html">RAG Fundamentals</a>, <a href="../11-Vector-Databases/vector-databases.html">Vector Databases</a>, basic SQL and Python.</p>
+
+    <h2 id="core">6. Requirements</h2>
+    <ul>
+      <li><b>Functional:</b> ingest PDF/text documents; answer natural-language questions grounded in those documents with citations; support incremental document updates.</li>
+      <li><b>Non-functional:</b> p95 query latency under 3 seconds; graceful "I don't know" for unsupported questions; no cross-tenant data leakage if multi-tenant.</li>
+    </ul>
+
+    <h2 id="terms">7. Tech stack</h2>
+    <table>
+      <tr><th>Layer</th><th>Choice</th></tr>
+      <tr><td>Database + vector store</td><td>PostgreSQL + pgvector</td></tr>
+      <tr><td>Embedding model</td><td>Any text embedding API (provider-agnostic in examples)</td></tr>
+      <tr><td>LLM</td><td>Claude (Anthropic API)</td></tr>
+      <tr><td>API layer</td><td>FastAPI (Python)</td></tr>
+      <tr><td>PDF parsing</td><td>pypdf / unstructured</td></tr>
+    </table>
+
+    <h2 id="arch">8. Architecture</h2>
+    <pre><code>Ingestion:
+ PDF/text files → pypdf loader → text cleanup
+  → chunker (800 tokens, 100 overlap)
+  → embed each chunk → INSERT INTO chunks (content, embedding, doc_id, metadata)
+
+Query:
+ FastAPI /ask {question, tenant_id}
+  → embed question
+  → SELECT ... WHERE tenant_id = $1 ORDER BY embedding <=> $2 LIMIT 5
+  → construct prompt with numbered context
+  → Claude API call
+  → return {answer, sources}</code></pre>
+
+    <h2 id="internal">9. Database design</h2>
+    <pre><code class="language-sql">CREATE EXTENSION IF NOT EXISTS vector;
+
+CREATE TABLE documents (
+    id SERIAL PRIMARY KEY,
+    title TEXT,
+    tenant_id INT,
+    uploaded_at TIMESTAMP DEFAULT now()
+);
+
+CREATE TABLE chunks (
+    id SERIAL PRIMARY KEY,
+    document_id INT REFERENCES documents(id) ON DELETE CASCADE,
+    tenant_id INT,
+    content TEXT,
+    embedding VECTOR(1536),
+    chunk_index INT
+);
+
+CREATE INDEX ON chunks USING hnsw (embedding vector_cosine_ops);
+CREATE INDEX ON chunks (tenant_id);
+</code></pre>
+
+    <h2 id="steps">10. Implementation steps</h2>
+    <ol>
+      <li>Set up PostgreSQL with pgvector extension enabled.</li>
+      <li>Build the ingestion script: load PDF → parse → chunk → embed → insert.</li>
+      <li>Build the FastAPI `/ask` endpoint: embed query → retrieve → construct prompt → call LLM → return answer + sources.</li>
+      <li>Add tenant-scoped filtering to every retrieval query.</li>
+      <li>Add an evaluation script testing retrieval + answer quality against a small golden set.</li>
+      <li>Add logging of token usage, latency, and retrieval results per request.</li>
+    </ol>
+
+    <h2 id="simple">11. Environment variables</h2>
+    <pre><code class="language-bash">DATABASE_URL=postgresql://user:pass@localhost:5432/ragdb
+ANTHROPIC_API_KEY=sk-...
+EMBEDDING_API_KEY=...
+CHUNK_SIZE=800
+CHUNK_OVERLAP=100
+</code></pre>
+
+    <h2 id="real">12. API design</h2>
+    <pre><code class="language-json">POST /ingest
+{ "tenant_id": 42, "title": "Refund Policy", "file_path": "refund_policy.pdf" }
+
+POST /ask
+{ "tenant_id": 42, "question": "How long do refunds take?" }
+
+Response:
+{ "answer": "Refunds take 5-7 business days according to [1].",
+  "sources": [{"id": 1, "content": "...", "document": "Refund Policy"}] }
+</code></pre>
+
+    <h2 id="code">13. Code example (full pipeline)</h2>
+    <pre><code class="language-python">import psycopg2, os
+from anthropic import Anthropic
+from pypdf import PdfReader
+
+conn = psycopg2.connect(os.environ["DATABASE_URL"])
+client = Anthropic()
+
+def chunk_text(text, size=800, overlap=100):
+    words = text.split()
+    chunks = []
+    for i in range(0, len(words), size - overlap):
+        chunks.append(" ".join(words[i:i+size]))
+    return chunks
+
+def ingest(tenant_id, title, file_path):
+    reader = PdfReader(file_path)
+    full_text = "\n".join(page.extract_text() for page in reader.pages)
+    cur = conn.cursor()
+    cur.execute("INSERT INTO documents (title, tenant_id) VALUES (%s, %s) RETURNING id",
+                (title, tenant_id))
+    doc_id = cur.fetchone()[0]
+    for i, chunk in enumerate(chunk_text(full_text)):
+        vec = embed(chunk)
+        cur.execute(
+            "INSERT INTO chunks (document_id, tenant_id, content, embedding, chunk_index) VALUES (%s,%s,%s,%s,%s)",
+            (doc_id, tenant_id, chunk, vec, i),
+        )
+    conn.commit()
+
+def ask(tenant_id, question, k=5):
+    q_vec = embed(question)
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT id, content FROM chunks WHERE tenant_id = %s ORDER BY embedding <=> %s LIMIT %s",
+        (tenant_id, q_vec, k),
+    )
+    results = cur.fetchall()
+    context = "\n\n".join(f"[{i+1}] {c}" for i, (_, c) in enumerate(results))
+    prompt = f"""Context:\n{context}\n\nQuestion: {question}
+Answer only from context above, citing [1], [2] etc. If not covered, say so."""
+    resp = client.messages.create(
+        model="claude-sonnet-5", max_tokens=400,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    return {"answer": resp.content[0].text,
+            "sources": [{"id": r[0], "content": r[1]} for r in results]}
+</code></pre>
+
+    <h2 id="advanced">14. Advanced example (reranking add-on)</h2>
+    <pre><code class="language-python">def ask_with_rerank(tenant_id, question, k=10, final_k=4):
+    candidates = retrieve_raw(tenant_id, question, k=k)  # over-fetch
+    reranked = rerank(question, candidates)  # cross-encoder or LLM-based rerank
+    top = reranked[:final_k]
+    return generate_answer(question, top)
+</code></pre>
+
+    <h2 id="mistakes">15. Common mistakes</h2>
+    <ul>
+      <li>Forgetting the `tenant_id` filter on the retrieval query — a critical security bug.</li>
+      <li>Not cleaning up old chunks when a document is re-ingested/updated, leaving stale duplicates.</li>
+      <li>Chunking by raw character count without respecting word/sentence boundaries, producing broken mid-word chunks.</li>
+      <li>No evaluation set — shipping without ever measuring retrieval/answer quality.</li>
+    </ul>
+
+    <h2 id="best">16. Best practices</h2>
+    <ul>
+      <li>Always filter by tenant_id (or equivalent) at the SQL level, never only in application code.</li>
+      <li>Delete old chunks for a document before re-inserting updated ones (`DELETE FROM chunks WHERE document_id = ...`).</li>
+      <li>Log every retrieval's chunk IDs and scores for debugging and evaluation.</li>
+      <li>Build a golden evaluation set early, even just 20 question/answer pairs.</li>
+    </ul>
+
+    <h2 id="production">17. Production considerations / deployment</h2>
+    <p>Run ingestion as an idempotent batch job (safe to re-run); deploy the API behind the same resilience patterns as any LLM API integration (timeouts, retries, fallback — see <a href="../07-LLM-APIs-and-SDKs/llm-apis-and-sdks.html">LLM APIs and SDKs</a>); monitor retrieval latency and LLM latency separately.</p>
+
+    <h2 id="security">18. Security considerations</h2>
+    <p>Tenant isolation must be enforced at the SQL query level (`WHERE tenant_id = $1`), never trusted to application-layer filtering alone; sanitize any user-uploaded document content before display to prevent stored XSS if rendered in a web UI.</p>
+
+    <h2 id="performance">19. Performance considerations</h2>
+    <p>The HNSW index on `embedding` is critical at scale — without it, `ORDER BY embedding <=> $1` falls back to a full scan; monitor `EXPLAIN ANALYZE` on retrieval queries as data grows.</p>
+
+    <h2 id="cost">20. Cost considerations</h2>
+    <p>Embedding cost is incurred once per chunk at ingestion and once per query; generation cost scales with context size (number of retrieved chunks × their length) and output length — the dominant cost driver at scale.</p>
+
+    <h2 id="debug">21. Testing & debugging</h2>
+    <ul>
+      <li>Unit test chunking logic for boundary correctness.</li>
+      <li>Integration test tenant isolation explicitly (insert data for 2 tenants, verify no cross-contamination in results).</li>
+      <li>Evaluate against a golden set of Q&A pairs, tracking retrieval recall and answer faithfulness over time.</li>
+    </ul>
+
+    <h2 id="related">22. Related concepts</h2>
+    <p><a href="rag-fundamentals.html">RAG Fundamentals</a> · <a href="../13-Advanced-RAG/">Advanced RAG</a> · <a href="../35-AI-Evaluation/">AI Evaluation</a></p>
+
+    <h2 id="comparison">23. Possible improvements</h2>
+    <ul>
+      <li>Add hybrid search (BM25 + vector) for better precision.</li>
+      <li>Add a reranking step (see Advanced RAG).</li>
+      <li>Add query rewriting for ambiguous/conversational questions.</li>
+      <li>Add streaming responses for better perceived latency.</li>
+      <li>Add an automated evaluation pipeline running on every ingestion pipeline change.</li>
+    </ul>
+
+    <h2 id="exercise">24. Mini practical exercise</h2>
+    <p>Implement the `chunk_text` function's overlap logic and write a test verifying consecutive chunks share the expected overlapping words.</p>
+
+    <h2 id="project">25. Extension project ideas</h2>
+    <p>Add citation-click-through (clicking [1] highlights the source chunk in a UI), add a feedback button (thumbs up/down) logging to improve future retrieval tuning, or add multi-document comparison questions ("how does policy A differ from policy B").</p>
+
+    <h2 id="projectarch">26. Folder structure</h2>
+    <pre><code>rag-project/
+ ├── ingest.py
+ ├── api.py (FastAPI app)
+ ├── db.py (connection + queries)
+ ├── embeddings.py
+ ├── eval/
+ │    ├── golden_set.json
+ │    └── run_eval.py
+ └── tests/
+      ├── test_chunking.py
+      └── test_tenant_isolation.py</code></pre>
+
+    <h2 id="interview-b">27. Interview Questions — Beginner</h2>
+    <div class="qa"><b>Q1.</b> Why was PostgreSQL + pgvector chosen for this project instead of a dedicated vector DB?<br><b>A.</b> It avoids introducing new infrastructure when the team already runs Postgres, while still providing adequate vector similarity search via the pgvector extension.</div>
+    <div class="qa"><b>Q2.</b> What does the `tenant_id` column protect against?<br><b>A.</b> Cross-tenant data leakage — ensuring one tenant's query never retrieves another tenant's documents.</div>
+    <div class="qa"><b>Q3.</b> Why do we delete old chunks before re-inserting updated document chunks?<br><b>A.</b> To avoid stale, duplicate, or outdated chunks remaining searchable after a document update.</div>
+    <div class="qa"><b>Q4.</b> What's the purpose of the HNSW index in this schema?<br><b>A.</b> It enables fast approximate nearest-neighbor search instead of a slow full table scan for similarity queries.</div>
+    <div class="qa"><b>Q5.</b> Why does the prompt include numbered context like [1], [2]?<br><b>A.</b> To enable the model to cite specific sources, making answers verifiable and traceable back to source chunks.</div>
+    <div class="qa"><b>Q6.</b> What happens if a question isn't covered by any retrieved chunk?<br><b>A.</b> The prompt instructs the model to say so rather than fabricate an answer.</div>
+    <div class="qa"><b>Q7.</b> Why chunk a PDF instead of embedding the whole document as one vector?<br><b>A.</b> Whole-document embeddings lose fine-grained relevance signal and often exceed context/embedding size limits; chunking enables precise retrieval of just the relevant portion.</div>
+    <div class="qa"><b>Q8.</b> What's the role of the FastAPI layer in this architecture?<br><b>A.</b> It exposes the ingestion and query logic as HTTP endpoints that other applications/UIs can call.</div>
+    <div class="qa"><b>Q9.</b> Why test tenant isolation explicitly rather than assuming the filter works?<br><b>A.</b> Because a missing or buggy filter is a security-critical failure mode that's easy to introduce accidentally (e.g., during refactoring) and must be caught by automated tests, not just code review.</div>
+    <div class="qa"><b>Q10.</b> What's a golden evaluation set used for in this project?<br><b>A.</b> A curated set of question/answer pairs used to measure and track retrieval and answer quality over time, catching regressions.</div>
+
+    <h2 id="interview-i">28. Interview Questions — Intermediate</h2>
+    <div class="qa"><b>Q1.</b> How would you modify this project's ingestion pipeline to support incremental updates efficiently for a large, frequently-changing document set?<br><b>A.</b> Track a content hash or last-modified timestamp per document, skip re-processing unchanged documents, and only delete+re-insert chunks for documents that actually changed, rather than re-ingesting the entire corpus each run.</div>
+    <div class="qa"><b>Q2.</b> Why might `chunk_text`'s simple word-count-based splitting be suboptimal for this project, and what would you improve?<br><b>A.</b> It can split mid-sentence or across logical sections (like a heading from its content), hurting chunk coherence; improve by splitting at natural boundaries (paragraphs, sentences, or markdown headers) while still respecting an approximate token budget.</div>
+    <div class="qa"><b>Q3.</b> How would you add observability to this project to debug a specific user's "wrong answer" complaint?<br><b>A.</b> Log the full request (question, tenant_id), the retrieved chunk IDs and similarity scores, the exact prompt sent to the LLM, and the raw response — enabling you to replay and inspect exactly what context the model saw for that specific answer.</div>
+    <div class="qa"><b>Q4.</b> Why is `EXPLAIN ANALYZE` useful when the retrieval query starts slowing down as data grows?<br><b>A.</b> It reveals whether PostgreSQL is actually using the HNSW index for the similarity search or falling back to a sequential scan, which is the most common cause of unexpected vector-query slowdowns at scale.</div>
+    <div class="qa"><b>Q5.</b> How would you extend the `/ask` endpoint to support conversational follow-up questions (e.g., "what about international orders?" referring to a previous question about refunds)?<br><b>A.</b> Include recent conversation history in the retrieval query construction (e.g., rewrite the follow-up into a standalone query using the LLM, or concatenate recent context before embedding) so the retriever has enough context to find relevant chunks for an otherwise ambiguous follow-up.</div>
+
+    <h2 id="interview-a">29. Interview Questions — Advanced</h2>
+    <div class="qa"><b>Q1.</b> How would you redesign this project's schema and ingestion to support versioned documents, where users can ask questions against a specific historical version?<br><b>A.</b> Add a `version` column to both `documents` and `chunks`, never delete old versions' chunks (mark them inactive instead), and include a version filter in retrieval queries alongside tenant_id — allowing both "latest" queries (filter to active version) and historical queries (filter to a specific version) from the same schema.</div>
+    <div class="qa"><b>Q2.</b> What's a subtle data-leak risk if tenant_id filtering is applied only in the embedding/retrieval step but the LLM is also given tool access to a general document-search function?<br><b>A.</b> If the LLM can independently invoke a search tool without the application enforcing the same tenant scoping on that tool's execution, it could retrieve or be influenced by cross-tenant data through that side channel — every tool/function the model can call must independently enforce the same access-control boundaries as the primary retrieval path.</div>
+
+    <h2 id="interview-s">30. Interview Questions — Senior/Architect</h2>
+    <div class="qa"><b>Q1.</b> This project currently uses synchronous embedding calls during ingestion. How would you redesign it to ingest 100,000 documents efficiently?<br><b>A.</b> Batch embedding API calls where the provider supports it, parallelize across async workers with rate-limit-aware concurrency control, use a job queue (e.g., for retries on individual document failures without restarting the whole batch), and stream progress/status to allow monitoring and resumability on failure.</div>
+
+    <h2 id="interview-sc">31. Scenario-Based Questions</h2>
+    <div class="qa"><b>Scenario 1.</b> A customer reports seeing another company's refund policy in their chatbot's answer. How do you respond and what's the root-cause investigation?<br><b>A.</b> Immediately audit the retrieval query for missing/broken tenant_id filtering — this is a critical security incident requiring immediate patch and incident disclosure; verify via logs which specific request leaked data and to what extent, and add a regression test ensuring this specific failure mode is covered going forward.</div>
+    <div class="qa"><b>Scenario 2.</b> After re-ingesting an updated policy document, the chatbot still answers using the old policy content. What's wrong?<br><b>A.</b> The ingestion pipeline likely didn't delete the old chunks before/during re-insertion, so both old and new chunks are in the index and the old ones are still being retrieved — fix by deleting existing chunks for that document_id before inserting the updated ones.</div>
+    <div class="qa"><b>Scenario 3.</b> Query latency has crept up from 200ms to 3 seconds over 6 months as the document corpus grew. What do you investigate first?<br><b>A.</b> Run EXPLAIN ANALYZE on the retrieval query to check if the HNSW index is still being used effectively, verify index maintenance/health hasn't degraded, and check if the growing corpus size now needs index parameter tuning or a different indexing/sharding strategy for the new scale.</div>
+
+    <h2 id="revision">32. Quick revision notes</h2>
+    <ul>
+      <li>pgvector = no new infra if already using Postgres.</li>
+      <li>Always filter by tenant_id at the SQL level.</li>
+      <li>Delete old chunks before re-inserting updated document chunks.</li>
+      <li>HNSW index is critical for retrieval performance at scale.</li>
+      <li>Build a golden eval set early; log full request/retrieval/response for debugging.</li>
+    </ul>
+
+    <h2 id="cheat">33. Cheat sheet</h2>
+    <div class="callout">pgvector RAG: documents + chunks tables, HNSW index, mandatory tenant_id filter, numbered-context prompt with citation instructions and "I don't know" fallback. Delete-then-reinsert on document updates. Log everything for debugging/eval.</div>
+
+    <h2 id="further">34. Further topics to learn</h2>
+    <p><a href="../13-Advanced-RAG/">Advanced RAG</a> → <a href="../35-AI-Evaluation/">AI Evaluation</a> → <a href="../36-LLM-Observability/">LLM Observability</a></p>
+
+    <div class="prevnext">
+      <a href="rag-fundamentals.html">← RAG Fundamentals</a>
+      <a href="../13-Advanced-RAG/advanced-rag-techniques.html">Next: Advanced RAG →</a>
+    </div>
+  </main>
+</div>
+<script src="../assets/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OOP, Dataclasses, Type Hints — Python Intermediate — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">Python Intermediate</a><span class="sep">›</span>OOP, Dataclasses, Type Hints</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>OOP, Dataclasses, Type Hints</h1>
+      <p class="meta-line"><span>⏱ ~2.5 hrs</span><span>📍 Chapter 3 of 6</span></p>
+      <p><strong>One-line summary:</strong> Python classes are closer to JS classes than you'd expect, but
+      <code>@dataclass</code> and the descriptor protocol behind <code>@property</code> give you boilerplate-free
+      value objects and computed-property mechanics that have no exact JS equivalent.</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>Every real Python codebase you'll touch in an AI/backend-adjacent role uses dataclasses or Pydantic
+      models as its domain layer. Interviewers test whether you understand what a dataclass actually
+      generates (not just "it's like an interface with less typing") and whether you know the descriptor
+      protocol underneath <code>@property</code> — that's the mechanism that makes computed attributes,
+      validators, and even ORMs' field access work, and it's a legitimate "do you actually understand Python
+      objects" probe at senior level.</p>
+      <div class="box why"><h4>Why</h4><p>Type hints plus dataclasses are how modern Python gets some of
+      TypeScript's safety back — understanding exactly where that safety is real (static analysis) vs
+      illusory (no runtime enforcement without a validation layer) is a recurring theme across this topic.</p></div>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>Related: <a href="01-python-for-js-devs.html">Python for JS Developers</a>,
+      <a href="05-fastapi.html">FastAPI</a> (Pydantic models build on these same ideas with runtime validation added).</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="classes-basics">Classes (bridge from JS)</h3>
+      <table>
+        <tr><th>JS</th><th>Python</th><th>Notes</th></tr>
+        <tr><td><code>constructor(a, b) { this.a = a; }</code></td><td><code>def __init__(self, a, b): self.a = a</code></td><td><code>self</code> is explicit, always the first param — not implicit like JS's <code>this</code>.</td></tr>
+        <tr><td><code>class B extends A</code></td><td><code>class B(A):</code></td><td>Multiple inheritance IS allowed in Python: <code>class C(A, B):</code> — resolved via MRO (C3 linearization), unlike JS's single-prototype-chain inheritance.</td></tr>
+        <tr><td><code>super.method()</code></td><td><code>super().method()</code></td><td>Python's <code>super()</code> follows the MRO, not just "the direct parent" — matters for multiple inheritance.</td></tr>
+        <tr><td><code>static method()</code></td><td><code>@staticmethod</code> / <code>@classmethod</code></td><td><code>@classmethod</code> receives the class itself (<code>cls</code>) — commonly used for alternate constructors, e.g. <code>User.from_json(data)</code>.</td></tr>
+        <tr><td><code>get prop() {}</code></td><td><code>@property</code></td><td>Computed attribute accessed without parens — see descriptor protocol below.</td></tr>
+        <tr><td><code>#privateField</code></td><td><code>_leading_underscore</code> (convention only)</td><td>Python has no true private fields — <code>_name</code> is "don't touch, but you can"; <code>__name</code> triggers name-mangling, still not truly private.</td></tr>
+      </table>
+
+      <h3 id="dataclasses">Dataclasses</h3>
+      <p><code>@dataclass</code> is a class decorator that inspects your class's type-hinted attributes and
+      auto-generates <code>__init__</code>, <code>__repr__</code>, and <code>__eq__</code> for you — the
+      exact boilerplate you'd otherwise hand-write for a value object. It's the closest thing Python has to a
+      TypeScript <code>interface</code> + constructor combined, except it's a real runtime class, not erased.</p>
+      <ul>
+        <li><code>@dataclass</code> plain — mutable, auto <code>__init__</code>/<code>__repr__</code>/<code>__eq__</code>.</li>
+        <li><code>@dataclass(frozen=True)</code> — immutable after construction (assignment raises
+        <code>FrozenInstanceError</code>), and becomes hashable by default — this is your closest match to a
+        JS <code>Object.freeze()</code>'d object, but enforced structurally, not just at the top level (nested
+        mutable fields can still be mutated — freezing is shallow, same caveat as <code>Object.freeze</code>).</li>
+        <li><code>field(default_factory=list)</code> — the dataclass-safe way to give a field a mutable
+        default (solves the exact mutable-default-argument trap from chapter 1, but for class fields).</li>
+        <li><code>__post_init__</code> — runs right after the generated <code>__init__</code>, the natural
+        place for validation/derived-field computation.</li>
+      </ul>
+
+      <h3 id="descriptor-protocol">The descriptor protocol (what's actually behind <code>@property</code>)</h3>
+      <p>This is the internals question that separates "I use <code>@property</code>" from "I understand
+      Python's object model." A <strong>descriptor</strong> is any object implementing <code>__get__</code>,
+      <code>__set__</code>, and/or <code>__delete__</code>, placed as a <em>class</em> attribute. When you
+      access <code>instance.attr</code>, Python doesn't just look in <code>instance.__dict__</code> — it
+      checks whether the class-level attribute is a descriptor, and if so, calls its <code>__get__</code>
+      instead of returning it directly.</p>
+      <p><code>@property</code> is just a built-in descriptor class: <code>@property</code> above a method
+      wraps it in a <code>property</code> object (which implements <code>__get__</code>) and binds it to the
+      class attribute of that name. That's the entire mechanism — no special-casing in the interpreter beyond
+      "check for a descriptor before falling back to instance <code>__dict__</code>." This same protocol is
+      what powers <code>@staticmethod</code>, <code>@classmethod</code>, bound methods themselves (functions
+      are descriptors too — that's literally how <code>self</code> gets bound), and ORM field access in
+      libraries like SQLAlchemy and Django.</p>
+
+      <h3 id="type-hints-depth">Type hints, generics, and <code>Protocol</code></h3>
+      <p>Beyond simple hints (<code>x: int</code>), Python's typing module gives you generics
+      (<code>list[int]</code>, <code>dict[str, User]</code> — built-in generic syntax since 3.9, no
+      <code>typing.List</code> needed anymore), <code>Optional[X]</code> / <code>X | None</code> (3.10+ union
+      syntax), and <code>Protocol</code> — structural typing, Python's actual equivalent of a TypeScript
+      interface: any class with matching method signatures satisfies a <code>Protocol</code> without
+      explicitly inheriting from it, exactly like TS's "if it has the shape, it fits."</p>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>Every Python object has a <code>__dict__</code> (unless it defines <code>__slots__</code>) storing
+      its instance attributes — conceptually like a plain JS object's own properties. Attribute lookup on
+      <code>obj.x</code> follows a defined order: first check the type's <code>__mro__</code> for a data
+      descriptor (has both <code>__get__</code> and <code>__set__</code> — these win even over instance
+      <code>__dict__</code>), then check <code>instance.__dict__</code>, then fall back to a non-data
+      descriptor or plain class attribute. This is why <code>@property</code> (a data descriptor) always
+      "wins" even if something tried to stuff a same-named key into <code>instance.__dict__</code> — the
+      descriptor intercepts first.</p>
+      <p><code>@dataclass</code> does none of this magic at the attribute-access level — it operates purely
+      at class-definition time, reading <code>__annotations__</code> (the dict of name→type hints you wrote)
+      and generating real Python source for <code>__init__</code> etc., then <code>exec</code>-ing it into the
+      class. There's no runtime overhead or interception on each attribute access the way descriptors add —
+      a dataclass instance's fields are plain instance attributes once constructed.</p>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+flowchart TD
+  A["obj.x lookup"] --> B{"type(obj).__mro__ has x as a DATA descriptor?\n(__get__ AND __set__)"}
+  B -->|yes| C["call descriptor.__get__(obj, type)\n— e.g. @property getter"]
+  B -->|no| D{"x in instance.__dict__?"}
+  D -->|yes| E["return instance.__dict__[x]"]
+  D -->|no| F{"x is a non-data descriptor\nor plain class attr?"}
+  F -->|descriptor| G["call descriptor.__get__\n— e.g. a bound method"]
+  F -->|plain attr| H["return class attribute directly"]
+  F -->|none found| I["raise AttributeError"]
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-python">
+from dataclasses import dataclass, field
+from typing import Protocol
+
+# ---- BAD: hand-written value object, lots of boilerplate ----
+class UserManual:
+    def __init__(self, id: int, email: str, tags: list[str] | None = None):
+        self.id = id
+        self.email = email
+        self.tags = tags if tags is not None else []
+
+    def __repr__(self):
+        return f"UserManual(id={self.id!r}, email={self.email!r}, tags={self.tags!r})"
+
+    def __eq__(self, other):
+        if not isinstance(other, UserManual):
+            return NotImplemented
+        return (self.id, self.email, self.tags) == (other.id, other.email, other.tags)
+
+# ---- GOOD: dataclass generates all of the above ----
+@dataclass(frozen=True)
+class User:
+    id: int
+    email: str
+    tags: list[str] = field(default_factory=list)  # safe mutable default
+
+    def __post_init__(self):
+        if "@" not in self.email:
+            raise ValueError(f"invalid email: {self.email!r}")
+
+u1 = User(id=1, email="a@x.com")
+u2 = User(id=1, email="a@x.com")
+print(u1 == u2)        # True -- generated __eq__ compares field values
+# u1.email = "new@x.com"  # raises FrozenInstanceError
+
+# ---- The descriptor protocol behind @property ----
+class Celsius:
+    def __init__(self, value: float = 0.0):
+        self._value = value
+
+    @property
+    def fahrenheit(self) -> float:
+        return self._value * 9 / 5 + 32
+
+    @fahrenheit.setter
+    def fahrenheit(self, f: float) -> None:
+        self._value = (f - 32) * 5 / 9
+
+c = Celsius(100)
+print(c.fahrenheit)    # 212.0 -- looks like an attribute, calls __get__
+c.fahrenheit = 32      # calls the setter's __set__, no parens, feels like assignment
+print(c._value)        # 0.0
+
+# A minimal hand-rolled descriptor -- this is ALL @property does for you
+class TypedField:
+    def __init__(self, expected_type):
+        self.expected_type = expected_type
+
+    def __set_name__(self, owner, name):
+        self.name = "_" + name
+
+    def __get__(self, instance, owner):
+        return getattr(instance, self.name, None)
+
+    def __set__(self, instance, value):
+        if not isinstance(value, self.expected_type):
+            raise TypeError(f"{value!r} is not {self.expected_type}")
+        setattr(instance, self.name, value)
+
+class Point:
+    x = TypedField(int)
+    y = TypedField(int)
+    def __init__(self, x: int, y: int):
+        self.x = x   # triggers TypedField.__set__
+        self.y = y
+
+p = Point(1, 2)
+# p.x = "oops"       # raises TypeError via TypedField.__set__
+
+# ---- Protocol: structural typing, Python's "interface" ----
+class SupportsSave(Protocol):
+    def save(self) -> None: ...
+
+class FileLogger:
+    def save(self) -> None:
+        print("saved to file")
+
+def persist(obj: SupportsSave) -> None:
+    obj.save()
+
+persist(FileLogger())   # works -- FileLogger never inherits SupportsSave, just matches shape
+</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4><p>A team building an internal feature store represents each
+      feature definition as a frozen dataclass (immutable, hashable, safe to use as a dict key and to cache).
+      A later requirement needs computed/derived fields (e.g., a feature's "staleness" based on a timestamp
+      field) without breaking immutability or the generated <code>__eq__</code>/hashing. The right tool is a
+      <code>@property</code> (computed from existing frozen fields, not stored state) rather than adding a
+      mutable field — this keeps the object's identity/equality semantics intact (equality still only
+      compares the real stored fields) while giving callers a clean computed attribute, the same tradeoff as
+      choosing a getter over a stored, potentially-stale cached field in a JS class.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4><p><code>frozen=True</code> only prevents reassigning the
+      dataclass's own fields — it does not make nested mutable objects immutable. <code>@dataclass(frozen=True)
+      class Order: items: list</code> still lets you call <code>order.items.append(x)</code>, silently
+      mutating "immutable" state. If you need deep immutability, use tuples instead of lists for the field
+      type, or wrap mutation points behind methods that return new instances.</p></div>
+      <ul>
+        <li>Don't forget <code>field(default_factory=...)</code> for mutable defaults on dataclasses — a bare
+        <code>tags: list[str] = []</code> raises <code>ValueError</code> at class definition time specifically
+        to prevent the shared-mutable-default bug from chapter 1.</li>
+        <li><code>__eq__</code> is auto-generated from fields in declaration order as a tuple comparison — if
+        you add a field that shouldn't participate in equality (e.g., an internal cache), mark it
+        <code>field(compare=False)</code>.</li>
+        <li>Multiple inheritance's MRO is powerful but can produce surprising method resolution — use
+        <code>ClassName.__mro__</code> to inspect it when debugging, don't guess.</li>
+        <li>Don't rely on <code>__slots__</code> blindly for "performance" without measuring — it saves memory
+        per instance and blocks dynamic attribute addition, but it complicates multiple inheritance and
+        default values; use it deliberately for high-volume value objects, not everywhere.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>Plain class</td><td>Behavior-heavy object, custom <code>__init__</code> logic beyond simple field assignment</td><td>It's really just a bag of fields — dataclass does it with less code</td><td><code>@dataclass</code></td></tr>
+        <tr><td><code>@dataclass</code></td><td>Internal domain models, value objects, DTOs between internal layers</td><td>You need runtime validation of untrusted external input</td><td>Pydantic <code>BaseModel</code> (ch. 5) — validates at the boundary</td></tr>
+        <tr><td><code>@dataclass(frozen=True)</code></td><td>Value objects that should be hashable/immutable (safe as dict keys, safe to share across threads)</td><td>Object needs frequent in-place mutation for performance</td><td>Mutable dataclass, or a method returning a new frozen instance (functional update)</td></tr>
+        <tr><td><code>Protocol</code> (structural typing)</td><td>You want duck-typed flexibility with static-analysis safety, no forced inheritance</td><td>You want a shared default implementation too (Protocols can't provide one)</td><td>Abstract Base Class (<code>abc.ABC</code>) for shared behavior + enforced interface</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic">
+        <h4>Basic</h4>
+        <details class="qa"><summary>What does `@dataclass` actually generate for you?</summary><div class="answer"><p>
+        By default, `__init__` (from the type-hinted class attributes), `__repr__`, and `__eq__`. With
+        `frozen=True` it also blocks attribute reassignment and makes the instance hashable (by default,
+        plain mutable dataclasses are unhashable).</p></div><div class="followup">Follow-up: why are plain (non-frozen) dataclasses unhashable by default?</div></details>
+        <details class="qa"><summary>What's the difference between `self` in Python and `this` in JS?</summary><div class="answer"><p>
+        `self` is an explicit first parameter you must name in every instance method — Python passes the
+        instance to it automatically when called as `obj.method()`, but there's no implicit binding magic; a
+        method pulled off an instance and called standalone loses that binding entirely (`unbound method`
+        issues), somewhat like `this` losing its binding in JS when a method is detached from its object, but
+        Python requires the explicit parameter everywhere.</p></div><div class="followup">Follow-up: what happens if you call an instance method via the class, like `ClassName.method(instance)`?</div></details>
+        <details class="qa"><summary>Does Python have true private fields like JS's `#field`?</summary><div class="answer"><p>
+        No. A single leading underscore (`_name`) is purely a convention signaling "internal, don't touch."
+        A double leading underscore (`__name`) triggers name-mangling (`_ClassName__name`) which makes
+        accidental access harder but is still accessible if you know the mangled name — not true privacy.</p></div><div class="followup">Follow-up: why does name-mangling exist at all if it's not real privacy?</div></details>
+        <details class="qa"><summary>What is a descriptor, in one sentence?</summary><div class="answer"><p>
+        Any object implementing `__get__` (and optionally `__set__`/`__delete__`) placed as a class attribute,
+        which Python's attribute-lookup machinery calls instead of returning the object itself.</p></div><div class="followup">Follow-up: name two other Python features besides @property that are built on descriptors.</div></details>
+        <details class="qa"><summary>What's `Protocol` used for, and how is it different from inheriting an abstract base class?</summary><div class="answer"><p>
+        `Protocol` enables structural typing — a class satisfies a Protocol just by having matching method
+        signatures, with no explicit inheritance needed (checked statically by type checkers). An ABC
+        requires explicit inheritance and can enforce the interface at runtime (instantiating a subclass
+        missing an abstract method raises `TypeError`).</p></div><div class="followup">Follow-up: can a Protocol provide a default method implementation?</div></details>
+      </div>
+      <div class="qa-level medium">
+        <h4>Medium</h4>
+        <details class="qa"><summary>Why does `frozen=True` not give you deep immutability?</summary><div class="answer"><p>
+        `frozen=True` overrides `__setattr__`/`__delattr__` on the dataclass to raise on reassignment of its
+        own fields — it has no effect on the mutability of the objects those fields point to. A list or dict
+        field remains fully mutable in place; only rebinding the field itself (`obj.field = new_value`) is
+        blocked. True deep immutability requires using immutable field types (tuples, frozensets, nested
+        frozen dataclasses) throughout.</p></div><div class="followup">Follow-up: how would you enforce deep immutability for a nested structure at construction time?</div></details>
+        <details class="qa"><summary>Walk through Python's attribute lookup order when both a data descriptor and an instance `__dict__` entry exist for the same name.</summary><div class="answer"><p>
+        Data descriptors (implementing both `__get__` and `__set__`) take priority over instance `__dict__`
+        — Python checks the type's MRO for a data descriptor first, and if found, calls its `__get__`,
+        ignoring any same-named key that might exist in `instance.__dict__`. Only non-data descriptors
+        (`__get__` only, like plain functions/methods) yield to instance `__dict__` first. This is why you
+        can't "shadow" a `@property` by just setting `instance.__dict__['prop'] = x` directly.</p></div><div class="followup">Follow-up: how would you actually bypass a property to set the underlying value directly, if needed?</div></details>
+        <details class="qa"><summary>How does Python resolve method calls under multiple inheritance, and how is that different from JS?</summary><div class="answer"><p>
+        Python computes a Method Resolution Order (MRO) per class using C3 linearization — a deterministic
+        order that respects each parent's own MRO and local precedence, resolvable via `ClassName.__mro__` or
+        `.mro()`. `super()` walks this MRO, not just "the direct parent," which lets cooperative multiple
+        inheritance chains work correctly. JS has no multiple inheritance at the class level at all — you'd
+        simulate it with mixins (functions that return a class extending their argument) composed manually,
+        with no language-level MRO resolution.</p></div><div class="followup">Follow-up: what's the classic "diamond problem" and how does C3 linearization avoid it?</div></details>
+        <details class="qa"><summary>When would you reach for `__slots__`, and what does it cost you?</summary><div class="answer"><p>
+        Use it for high-volume, fixed-shape value objects where per-instance memory matters (each instance
+        normally carries a `__dict__`, which has real overhead multiplied across millions of instances).
+        `__slots__` replaces that with fixed, fast attribute storage. The cost: no dynamic attribute addition
+        at runtime, more friction combining with multiple inheritance (all non-empty-`__slots__` bases must
+        cooperate), and it conflicts with default mutable field patterns dataclasses otherwise handle for you
+        cleanly.</p></div><div class="followup">Follow-up: can a `@dataclass` use `__slots__`? What changed in recent Python versions to make this easier?</div></details>
+        <details class="qa"><summary>Why would you choose `@dataclass` for an internal domain model but Pydantic's `BaseModel` for the same shape of data at an API boundary?</summary><div class="answer"><p>
+        `@dataclass` trusts its inputs — it doesn't validate or coerce types at construction, just assigns
+        whatever you pass (type hints are purely static-analysis documentation here, same "not enforced at
+        runtime" point from chapter 1). At an API boundary you're receiving untrusted external data (JSON from
+        a client), where you need real runtime validation, coercion, and structured error messages — exactly
+        what Pydantic adds on top of the same type-hint syntax. Using dataclasses internally and Pydantic at
+        the boundary cleanly separates "trusted internal representation" from "validated external contract."</p></div><div class="followup">Follow-up: would you ever convert a Pydantic model into a dataclass internally, and why?</div></details>
+      </div>
+      <div class="qa-level advanced">
+        <h4>Advanced</h4>
+        <details class="qa"><summary>Implement, conceptually, what `@property` does using the raw descriptor protocol, and explain why `fahrenheit.setter` needs to return a new property object.</summary><div class="answer"><p>
+        `property` is a class whose `__init__` stores a getter function; `.setter(fn)` doesn't mutate the
+        existing property in place — it returns a brand-new `property` object built from the original getter
+        plus the new setter function, which then gets rebound to the same class attribute name by the `@`
+        decorator syntax reassigning it. This immutable-builder pattern is why you write
+        `@fahrenheit.setter` referencing the already-decorated name — it's calling a method on the property
+        object created by the first decoration, not modifying a method on the class directly.</p></div><div class="followup">Follow-up: what would go wrong if `property` objects were mutable and `.setter()` mutated in place instead?</div></details>
+        <details class="qa"><summary>A senior teammate claims "dataclasses have zero runtime attribute-access overhead compared to plain classes." Is this accurate, and how would you verify it?</summary><div class="answer"><p>
+        Accurate for the common case: a dataclass without `@property` fields stores its data as plain
+        instance attributes in `__dict__` (or `__slots__`), with the same attribute-access path as any plain
+        class — `@dataclass` only adds work at class-definition time (generating `__init__` etc.), not at
+        attribute-access time. You'd verify with `timeit` comparing attribute gets on a dataclass instance vs
+        an equivalent hand-written class instance — they should be statistically indistinguishable. This
+        stops being true the moment you add `@property` fields or override `__getattribute__`, which do add
+        per-access overhead regardless of whether the class is a dataclass.</p></div><div class="followup">Follow-up: does `frozen=True` add any attribute-access overhead, or only write-path overhead?</div></details>
+        <details class="qa"><summary>Design an immutable, versioned configuration object that supports "update one field, get a new object back" without re-validating every field on every update.</summary><div class="answer"><p>
+        Use a frozen dataclass with a `replace`-style method (or `dataclasses.replace(obj, field=new_value)`
+        from the stdlib) that constructs a new instance by copying existing field values and overriding the
+        changed one. To avoid re-validating unchanged fields, structure `__post_init__` validation to be
+        field-local (each field's own invariant checked independently) so a targeted validation path can
+        re-check only the changed field(s) if you build a custom `replace` wrapper, rather than relying on
+        the stdlib's generic `dataclasses.replace` (which does re-run `__post_init__` on the whole new
+        instance — worth knowing explicitly, since "no re-validation" isn't actually free with the stdlib
+        helper unless you bypass `__post_init__` deliberately).</p></div><div class="followup">Follow-up: what does `dataclasses.replace` actually do internally — does it call `__init__` or `__new__` + manual field copy?</div></details>
+        <details class="qa"><summary>How would you statically enforce that a function only accepts objects that are both "comparable" and "serializable to dict," without using an ABC?</summary><div class="answer"><p>
+        Define two `Protocol`s — e.g. `class Comparable(Protocol): def __lt__(self, other) -> bool: ...` and
+        `class DictSerializable(Protocol): def to_dict(self) -> dict: ...` — then intersect them with a
+        function signature typed to accept an object satisfying both, using `Protocol` multiple inheritance:
+        `class ComparableSerializable(Comparable, DictSerializable, Protocol): pass`, and type the parameter
+        against that combined Protocol. Any class with matching methods satisfies it with zero explicit
+        inheritance, verified by mypy/pyright at type-check time — genuinely closer to TypeScript's
+        intersection types (`A & B`) than anything an ABC-based approach gives you.</p></div><div class="followup">Follow-up: can you runtime-check (`isinstance`) against a Protocol? What's required for that (`@runtime_checkable`) and what are its limits?</div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment">
+        <span class="level-tag">Beginner (30-60 min)</span>
+        <h4>Convert a hand-written class to a dataclass</h4>
+        <p>Take a plain Python class with manually written <code>__init__</code>, <code>__repr__</code>, and
+        <code>__eq__</code> (at least 4 fields, one with a mutable default like a list) and convert it to
+        <code>@dataclass</code>. Verify behavior is identical via assertions covering equality, repr output
+        format, and the mutable-default trap being correctly avoided.</p>
+        <ul><li>Must use `field(default_factory=...)` correctly for the mutable field.</li>
+        <li>Write one short comment explaining what `@dataclass` eliminated from your original code.</li></ul>
+        <p><strong>Acceptance criteria:</strong> All assertions pass; the dataclass version is visibly shorter.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>Compare `repr()` output strings directly in an assertion, not just by eye — the generated repr format is predictable and worth locking down.</p></div></details>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Intermediate (2-4 hrs)</span>
+        <h4>Build a validating descriptor library</h4>
+        <p>Implement a small set of reusable descriptor classes: `PositiveInt`, `NonEmptyString`,
+        `OneOf(*choices)`, each raising a clear `ValueError`/`TypeError` on invalid assignment, using the raw
+        descriptor protocol (`__get__`/`__set__`/`__set_name__`) — not `@property`. Use them as class
+        attributes on at least two different domain classes.</p>
+        <ul><li>Each descriptor must work correctly across multiple instances without state leaking between instances (a classic descriptor bug if you store the value on the descriptor itself instead of the instance).</li>
+        <li>Write a pytest suite covering valid assignment, invalid assignment (expecting the right exception type), and the no-cross-instance-leakage case explicitly.</li></ul>
+        <p><strong>Acceptance criteria:</strong> pytest suite passes; a test specifically creates two instances, sets different valid values on each, and asserts they don't interfere.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>Store each instance's value keyed by instance identity or inside the instance's own `__dict__` under a mangled name set via `__set_name__` — storing it as `self.value = value` directly on the descriptor object is the bug that causes cross-instance leakage.</p></div></details>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Advanced (1-2 days)</span>
+        <h4>Design an immutable event-sourced aggregate</h4>
+        <p>Model a simple domain aggregate (e.g., a bank account: deposit/withdraw/freeze) as a frozen
+        dataclass representing current state, where every mutation is actually "apply an event, get a new
+        frozen state back" — never mutating in place. Support replaying a list of events from an initial
+        state to reconstruct current state, and reject invalid transitions (e.g., withdraw more than balance,
+        or any mutation on a frozen account) with domain-specific exceptions.</p>
+        <ul><li>State transitions must go through a single `apply(event)` method returning a new instance, never mutating.</li>
+        <li>Must support replaying an arbitrary list of historical events to reconstruct state from scratch.</li>
+        <li>Include a pytest suite with parametrized test cases covering valid sequences, invalid transitions, and full replay correctness.</li></ul>
+        <p><strong>Acceptance criteria:</strong> No test or production code path ever mutates a constructed aggregate instance in place — verify this is actually true, don't just assume `frozen=True` handles it (remember the shallow-immutability gotcha). No full reference solution — the point is reasoning about immutable state transitions yourself.</p>
+      </div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet"><ul>
+        <li><code>@dataclass</code> generates <code>__init__</code>/<code>__repr__</code>/<code>__eq__</code> from type-hinted class attributes.</li>
+        <li><code>frozen=True</code> blocks field reassignment and enables hashing — but immutability is shallow (nested mutables still mutate).</li>
+        <li>Use <code>field(default_factory=...)</code> for mutable field defaults, never a bare mutable literal.</li>
+        <li>A descriptor = object with <code>__get__</code>/<code>__set__</code> as a class attribute; <code>@property</code> is just the built-in one.</li>
+        <li>Data descriptors (get+set) win over instance <code>__dict__</code> in attribute lookup; non-data descriptors lose to it.</li>
+        <li>Python supports real multiple inheritance, resolved via MRO (C3 linearization) — JS doesn't have this at all.</li>
+        <li><code>Protocol</code> = structural typing (duck typing checked statically); ABC = explicit inheritance + optional runtime enforcement.</li>
+        <li>No true private fields — single underscore is convention, double underscore name-mangles but isn't real privacy.</li>
+        <li>Dataclasses don't validate at runtime — use Pydantic at trust boundaries, dataclasses for trusted internal models.</li>
+      </ul></div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://docs.python.org/3/library/dataclasses.html">Python docs: dataclasses</a></li>
+        <li><a href="https://docs.python.org/3/howto/descriptor.html">Python docs: Descriptor HOWTO</a></li>
+        <li><a href="https://docs.python.org/3/library/typing.html#typing.Protocol">Python docs: typing.Protocol</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="02-data-structures.html"><span class="dir">← Previous</span>Data Structures, Comprehensions, Generators</a>
+        <a class="next" href="04-async-python.html"><span class="dir">Next →</span>Async Python (asyncio)</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · Python Intermediate</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "08-python-intermediate", chapterKey: "03-oop-dataclasses" });</script>
+</body>
+</html>

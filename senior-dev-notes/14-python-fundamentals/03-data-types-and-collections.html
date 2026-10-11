@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Data Types &amp; Collections — Python Fundamentals — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">Python Fundamentals</a><span class="sep">›</span>Data Types &amp; Collections</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>Data Types &amp; Collections</h1>
+      <p class="meta-line"><span>⏱ ~2 hrs</span><span>📍 Chapter 3 of 6</span></p>
+      <p><strong>One-line summary:</strong> Python gives you four core collection types — list, tuple, dict,
+      set — where JS gives you two (array, object/Map/Set blurred together); the mutability rules, the
+      comprehension syntax, and slicing are where most of the real learning (and interview questions) live.</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>Every real Python codebase you'll read leans heavily on comprehensions and the right collection
+      type for the job — a senior Python engineer reaches for a set to deduplicate or test membership in
+      O(1), a dict comprehension to reshape data, a tuple to signal "this is immutable and fixed-shape" the
+      way you might reach for a readonly tuple type in TypeScript. If you only know "list for everything"
+      the way you might lean on arrays for everything in quick JS scripts, you'll write correct but
+      distinctly non-idiomatic, often slower code — and it reads as a tell in review and interviews alike.</p>
+      <div class="box why"><h4>Why</h4><p>Comprehensions aren't just syntax sugar — they're how experienced
+      Python developers think about transforming data, and interviewers use them as a quick signal of real
+      fluency versus "ported from Python 101 tutorial." Mapping each one cleanly to the JS array method you
+      already know (<code>.map()</code>, <code>.filter()</code>) is the fastest path to fluency here.</p></div>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>Requires <a href="01-python-syntax-and-basics.html">Python Syntax &amp; Basics</a> and
+      <a href="02-control-flow-and-functions.html">Control Flow &amp; Functions</a> (comprehensions are
+      loops in disguise). Continues into <a href="04-file-io-and-modules.html">File I/O &amp; Modules</a>.
+      <a href="../08-python-intermediate/index.html">Python Intermediate</a> covers generators, which
+      generalize the comprehension idea to lazy, memory-efficient iteration.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="collections-overview">Lists, tuples, dicts, sets — and mutability</h3>
+      <table>
+        <tr><th>Python type</th><th>Closest JS equivalent</th><th>Mutable?</th><th>Ordered?</th></tr>
+        <tr><td><code>list</code></td><td><code>Array</code></td><td>Yes</td><td>Yes (insertion order)</td></tr>
+        <tr><td><code>tuple</code></td><td>No direct equivalent — closest is a frozen/readonly array, or just a fixed-shape return value</td><td><strong>No</strong> — immutable once created</td><td>Yes</td></tr>
+        <tr><td><code>dict</code></td><td>Plain object (<code>{}</code>) or <code>Map</code></td><td>Yes (values; keys must be hashable/immutable)</td><td>Yes — guaranteed insertion order since 3.7</td></tr>
+        <tr><td><code>set</code></td><td><code>Set</code></td><td>Yes</td><td>No — unordered, no guaranteed iteration order</td></tr>
+      </table>
+      <pre><code class="language-python">
+nums = [1, 2, 3]            # list -- mutable, like a JS array
+nums.append(4)                # same idea as .push()
+point = (10, 20)              # tuple -- immutable, fixed shape
+# point[0] = 99               # TypeError -- tuples don't support item assignment
+user = {"name": "Alice", "age": 30}   # dict -- like a JS object, but keys can be any hashable type
+tags = {"python", "backend", "senior"}  # set -- like JS's Set, unordered, deduplicated automatically
+
+# JS equivalents:
+# const nums = [1, 2, 3]; nums.push(4);
+# const point = Object.freeze([10, 20]);   // closest JS gets to a real tuple
+# const user = { name: "Alice", age: 30 };
+# const tags = new Set(["python", "backend", "senior"]);
+</code></pre>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Dict keys must be hashable — meaning immutable. You can use a
+      string, number, or tuple as a key, but never a list or another dict. JS object keys are always
+      strings (or Symbols) regardless of what you pass, which silently coerces; Python raises a
+      <code>TypeError: unhashable type</code> instead of coercing — this is Python being stricter, not
+      more permissive.</p></div>
+
+      <h3 id="comprehensions">List, dict, and set comprehensions</h3>
+      <p>This is the single biggest syntax-level productivity unlock in this chapter. A comprehension is
+      <code>.map()</code> + <code>.filter()</code> fused into one expression, read right-to-left in your
+      head as "for each x in this iterable, (optionally if some condition), compute this expression."</p>
+      <pre><code class="language-python">
+nums = [1, 2, 3, 4, 5, 6]
+
+squares = [n ** 2 for n in nums]                  # list comprehension
+# JS: const squares = nums.map(n => n ** 2);
+
+evens = [n for n in nums if n % 2 == 0]            # with a filter condition
+# JS: const evens = nums.filter(n => n % 2 === 0);
+
+even_squares = [n ** 2 for n in nums if n % 2 == 0]  # map + filter fused
+# JS: const evenSquares = nums.filter(n => n % 2 === 0).map(n => n ** 2);
+
+square_map = {n: n ** 2 for n in nums}              # dict comprehension
+# JS: const squareMap = Object.fromEntries(nums.map(n => [n, n ** 2]));
+
+unique_remainders = {n % 3 for n in nums}            # set comprehension -- dedupes automatically
+# JS: const uniqueRemainders = new Set(nums.map(n => n % 3));
+
+# Nested comprehension -- flatten a matrix (read the fors left to right, outer first)
+matrix = [[1, 2], [3, 4], [5, 6]]
+flat = [n for row in matrix for n in row]
+# JS: const flat = matrix.flat();   -- or matrix.flatMap(row => row)
+</code></pre>
+      <div class="box gotcha"><h4>Gotcha</h4><p>A comprehension that nests more than 2 levels deep, or mixes
+      3+ conditions, is a readability trap — at that point a regular <code>for</code> loop (or a named
+      helper function) is more maintainable than a comprehension. "Can I write it as a comprehension" and
+      "should I" are different questions; the same discipline applies to chaining <code>.map().filter().reduce()</code>
+      too far in JS.</p></div>
+
+      <h3 id="slicing-methods">Slicing and common collection methods</h3>
+      <p>Slicing (<code>seq[start:stop:step]</code>) works on lists, tuples, and strings uniformly and is
+      more powerful than JS's <code>.slice()</code> because it supports a step and negative indices
+      natively in the same syntax.</p>
+      <pre><code class="language-python">
+letters = ["a", "b", "c", "d", "e"]
+print(letters[1:3])     # ['b', 'c']   -- like letters.slice(1, 3) in JS
+print(letters[:2])       # ['a', 'b']   -- omit start = from the beginning
+print(letters[2:])       # ['c', 'd', 'e'] -- omit stop = to the end
+print(letters[-1])       # 'e'          -- negative index = from the end
+print(letters[::-1])     # ['e','d','c','b','a'] -- step -1 = reversed, a very common idiom
+print(letters[::2])      # ['a', 'c', 'e'] -- every 2nd element
+
+# Common dict methods with no direct JS equivalent syntax
+user = {"name": "Alice"}
+print(user.get("age", 0))      # 0 -- default if key missing, like user.age ?? 0 but explicit
+user.setdefault("tags", []).append("vip")   # get-or-create-then-mutate in one line
+
+# Common set operations -- genuinely nicer than JS's Set, which lacks these operators
+a = {1, 2, 3}
+b = {2, 3, 4}
+print(a & b)   # {2, 3} -- intersection
+print(a | b)   # {1, 2, 3, 4} -- union
+print(a - b)   # {1} -- difference
+</code></pre>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>Python's <code>list</code> is a dynamic array of pointers to objects (like a JS array under most
+      engine implementations, conceptually), over-allocating capacity to amortize append cost — the same
+      general strategy V8 uses for arrays. The real divergence is <code>dict</code> and <code>set</code>:
+      both are hash tables, and since Python 3.7 a regular <code>dict</code> guarantees iteration in
+      insertion order as a language-level guarantee (an implementation detail in 3.6 that became official
+      in 3.7+) — this is different from a JS <code>Map</code>, which has always guaranteed insertion order,
+      but similar in spirit. A Python <code>tuple</code>, unlike a <code>list</code>, is allocated as a
+      fixed-size immutable structure — no resizing logic needed at all, which is part of why tuples have
+      slightly less memory overhead and are hashable (usable as dict keys) when their contents are
+      themselves hashable, while lists never are.</p>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+flowchart LR
+  A["[n**2 for n in nums if n % 2 == 0]"] --> B["for n in nums"]
+  B --> C{"if n % 2 == 0"}
+  C -->|True| D["compute n**2"]
+  C -->|False| B
+  D --> E["append to result list"]
+  E --> B
+      </div>
+      <div class="mermaid">
+flowchart TD
+  subgraph dict/set internals
+    A["hash(key)"] --> B["bucket index\nin hash table"]
+    B --> C{"collision?"}
+    C -->|No| D["store directly"]
+    C -->|Yes| E["probe next slot\n(open addressing)"]
+  end
+  F["Insertion order"] -.->|tracked separately since 3.7| G["dict iteration\nalways matches insertion order"]
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-python">
+# ---- BAD: using a list where a set is the right tool ----
+seen = []
+def is_duplicate_slow(item, seen=seen):
+    if item in seen:          # O(n) membership check on a list
+        return True
+    seen.append(item)
+    return False
+
+# ---- GOOD: a set gives O(1) average membership checks ----
+seen_set = set()
+def is_duplicate_fast(item):
+    if item in seen_set:       # O(1) average
+        return True
+    seen_set.add(item)
+    return False
+
+# ---- Tuple unpacking -- Python's answer to JS array destructuring ----
+point = (3, 4)
+x, y = point                    # JS: const [x, y] = point;
+first, *rest = [1, 2, 3, 4]     # JS: const [first, ...rest] = [1, 2, 3, 4];
+print(first, rest)                # 1 [2, 3, 4]
+
+# ---- Dict comprehension to reshape a list of records (a very common real task) ----
+users = [{"id": 1, "name": "Alice"}, {"id": 2, "name": "Bob"}]
+by_id = {u["id"]: u["name"] for u in users}
+# JS: const byId = Object.fromEntries(users.map(u => [u.id, u.name]));
+print(by_id)   # {1: 'Alice', 2: 'Bob'}
+</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4><p>A reporting service deduplicating millions of event IDs
+      coming off a Kafka topic was originally written by a JS-background engineer as
+      <code>if event_id not in seen_list: seen_list.append(event_id)</code>, with <code>seen_list</code> as
+      a plain Python list. Throughput degraded badly as the list grew, because membership testing on a list
+      is O(n) — every single check scanned a growing list linearly. Switching <code>seen_list</code> to a
+      <code>set</code> turned the membership check into an O(1) average-case hash lookup and restored
+      throughput immediately, with a one-line change. The broader lesson for a senior engineer: picking
+      list vs set vs dict isn't a style choice, it's an algorithmic complexity choice with direct production
+      performance consequences.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Using a list for membership testing or deduplication out of
+      JS habit (where arrays are the default go-to collection). Reach for a <code>set</code> whenever you
+      need "have I seen this before" or "remove duplicates," and only use a list when order and duplicates
+      both genuinely matter.</p></div>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Trying to use a list or dict as a dict key (
+      <code>cache[[1,2]] = "x"</code>) and hitting <code>TypeError: unhashable type: 'list'</code>. Convert
+      to a tuple first if you need a composite, immutable key (<code>cache[(1,2)] = "x"</code>) — this is a
+      very common pattern for memoization keys.</p></div>
+      <ul>
+        <li>Prefer <code>dict.get(key, default)</code> over a manual <code>if key in d: ... else: ...</code> when you just need a fallback value.</li>
+        <li>Use tuple unpacking (<code>a, b = pair</code>) instead of manual indexing (<code>a = pair[0]; b = pair[1]</code>) — it's the idiomatic equivalent of JS array destructuring.</li>
+        <li>Avoid comprehensions nested more than 2 levels or with 3+ conditions — fall back to a named loop for readability.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td><code>list</code></td><td>Ordered, mutable sequence; duplicates allowed/expected</td><td>Frequent membership checks on large data</td><td><code>set</code> (unordered) or keep a parallel set index</td></tr>
+        <tr><td><code>tuple</code></td><td>Fixed-shape, immutable data (coordinates, a function's multi-return)</td><td>Collection that needs to grow/shrink</td><td><code>list</code></td></tr>
+        <tr><td><code>dict</code></td><td>Key-value lookups, O(1) average access by key</td><td>Need ordering by value, or numeric-range access patterns</td><td><code>list</code> of tuples + sort, or a dedicated data structure</td></tr>
+        <tr><td><code>set</code></td><td>Membership tests, deduplication, set algebra (union/intersection)</td><td>Order matters, or duplicates must be preserved</td><td><code>list</code> + manual dedup, or <code>dict.fromkeys()</code> for order-preserving dedup</td></tr>
+        <tr><td>List/dict comprehension</td><td>Simple map/filter transform, 1-2 conditions</td><td>Complex multi-step logic, 3+ nested loops/conditions</td><td>A regular <code>for</code> loop or a named helper function</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic">
+        <h4>Basic</h4>
+        <details class="qa"><summary>What's the main difference between a list and a tuple?</summary><div class="answer"><p>
+        A list is mutable (can grow, shrink, have items reassigned); a tuple is immutable once created.
+        Both are ordered.</p></div><div class="followup">Follow-up: why does immutability make a tuple usable as a dict key while a list isn't?</div></details>
+        <details class="qa"><summary>What's a Python list comprehension equivalent to in JS array methods?</summary><div class="answer"><p>
+        A fusion of <code>.map()</code> and <code>.filter()</code> — <code>[x for x in items if cond]</code>
+        is <code>items.filter(x => cond).map(x => x)</code> shape, done in one pass, one expression.</p></div><div class="followup">Follow-up: what's the closest JS equivalent of a dict comprehension?</div></details>
+        <details class="qa"><summary>Can a Python set contain duplicate values?</summary><div class="answer"><p>
+        No — a set automatically deduplicates. Adding an already-present value is a silent no-op.</p></div><div class="followup">Follow-up: what must be true about a value for it to be addable to a set at all?</div></details>
+        <details class="qa"><summary>What does <code>letters[::-1]</code> do?</summary><div class="answer"><p>
+        Reverses the sequence — slicing with a step of <code>-1</code> and default start/stop walks the
+        whole sequence backward. This is an extremely common Python idiom for reversing a list or string.</p></div><div class="followup">Follow-up: how would you reverse in place instead of creating a new reversed copy?</div></details>
+        <details class="qa"><summary>Is dict iteration order guaranteed in Python?</summary><div class="answer"><p>
+        Yes, since Python 3.7 — dicts guarantee iteration in insertion order as an official language
+        guarantee, not just an implementation detail.</p></div><div class="followup">Follow-up: was this true in Python 3.6? What changed between 3.6 and 3.7 officially?</div></details>
+        <details class="qa"><summary>How do you provide a default value when getting a possibly-missing dict key?</summary><div class="answer"><p>
+        <code>d.get(key, default_value)</code> — returns the default instead of raising <code>KeyError</code>
+        if the key is absent.</p></div><div class="followup">Follow-up: what's the difference between .get() and dict[key] when the key is missing?</div></details>
+        <details class="qa"><summary>What are the three set algebra operators Python gives you that JS's Set lacks natively?</summary><div class="answer"><p>
+        <code>&amp;</code> (intersection), <code>|</code> (union), <code>-</code> (difference) — and also
+        <code>^</code> (symmetric difference). JS's Set has no operator or built-in method for any of these;
+        you'd manually combine <code>.has()</code> checks with <code>.filter()</code>.</p></div><div class="followup">Follow-up: write the JS equivalent of Python's set intersection using only Set and array methods.</div></details>
+      </div>
+      <div class="qa-level medium">
+        <h4>Medium</h4>
+        <details class="qa"><summary>Why can't a list be used as a dictionary key, and what's the practical workaround?</summary><div class="answer"><p>
+        Dict keys must be hashable, and hashability requires immutability (a mutable object's hash could
+        change after insertion, corrupting the hash table). Lists are mutable, so they're unhashable. The
+        workaround is converting to a tuple first, which is immutable and hashable if its elements are.</p></div><div class="followup">Follow-up: is a tuple containing a list still hashable? Why or why not?</div></details>
+        <details class="qa"><summary>Why would you choose a set over a list for a deduplication task, beyond just "it's built in"?</summary><div class="answer"><p>
+        A set gives O(1) average-time membership checks and insertion via hashing, versus O(n) linear scans
+        for list membership checks. For large or growing collections, this is the difference between a
+        script finishing instantly and one that degrades quadratically as data grows.</p></div><div class="followup">Follow-up: what's the Big-O of converting a list to a set, and does that cost ever outweigh the benefit?</div></details>
+        <details class="qa"><summary>How would you deduplicate a list while preserving original order — why doesn't a plain set work for that?</summary><div class="answer"><p>
+        A plain set drops order entirely (not reliably sortable back to original order). The idiomatic
+        order-preserving dedup is <code>list(dict.fromkeys(items))</code> — dicts preserve insertion order
+        since 3.7, and <code>fromkeys</code> naturally drops duplicate keys while keeping first-seen order.</p></div><div class="followup">Follow-up: what's the time complexity of this dict.fromkeys() approach versus a naive nested-loop dedup?</div></details>
+        <details class="qa"><summary>Explain what happens, step by step, when you write a nested list comprehension flattening a matrix: <code>[n for row in matrix for n in row]</code>.</summary><div class="answer"><p>
+        The <code>for</code> clauses read left to right like nested loops written inline: the outer loop is
+        <code>for row in matrix</code>, and for each row, the inner loop <code>for n in row</code> runs,
+        yielding each <code>n</code> which gets appended to the result — equivalent to two nested
+        <code>for</code> statements with the innermost expression appended each time.</p></div><div class="followup">Follow-up: how would you flatten only rows where len(row) > 1, and where would that condition clause go?</div></details>
+        <details class="qa"><summary>What's the actual memory/performance tradeoff between a tuple and a list of the same values?</summary><div class="answer"><p>
+        Tuples have slightly lower memory overhead (no over-allocated capacity for future growth, since they
+        can't grow) and are faster to construct for fixed data, plus they're hashable if their contents are.
+        Lists pay a small memory/time cost for mutability (resize logic, over-allocation) that's worth it
+        only when you actually need to mutate.</p></div><div class="followup">Follow-up: does Python ever reuse/cache small tuple objects the way it interns small integers?</div></details>
+      </div>
+      <div class="qa-level advanced">
+        <h4>Advanced</h4>
+        <details class="qa"><summary>Explain how Python's dict achieves O(1) average lookup while also guaranteeing insertion order — aren't those two properties in tension?</summary><div class="answer"><p>
+        CPython's dict implementation (since 3.6 as an optimization, official since 3.7) separates the hash
+        table (sparse array of indices into a dense array) from a dense array holding the actual
+        key-value-hash entries in insertion order. Lookups still hash the key and probe the sparse table for
+        O(1) average access; iteration walks the dense array, which happens to be insertion-ordered because
+        entries are appended there as inserted. The two properties aren't actually in tension — they're
+        served by two different underlying structures working together.</p></div><div class="followup">Follow-up: what happens to the dense array's "order" when a key is deleted and a new one is added — does it reuse the slot?</div></details>
+        <details class="qa"><summary>When does a Python list comprehension actually underperform a generator expression, and why would you choose one over the other for a large dataset?</summary><div class="answer"><p>
+        A list comprehension eagerly builds the entire result list in memory. A generator expression
+        (same syntax, parentheses instead of brackets) produces values lazily, one at a time, with O(1)
+        memory regardless of input size. For a large dataset you're only going to iterate once (e.g. summing,
+        or feeding into another loop), a generator avoids materializing the whole intermediate list — this
+        becomes critical at data sizes where the list comprehension would exhaust memory.</p></div><div class="followup">Follow-up: can you use a generator expression result more than once? What happens if you try?</div></details>
+        <details class="qa"><summary>Design a caching layer that needs composite keys (e.g. function name + sorted kwargs) — walk through the hashability constraints you'd need to satisfy.</summary><div class="answer"><p>
+        The key must be built from hashable, immutable pieces: convert the function name (string, already
+        hashable) and the kwargs into a sorted tuple of (key, value) pairs — sorting first guarantees the
+        same logical kwargs always produce the same tuple regardless of call-site ordering, and the tuple
+        itself is hashable as long as every value inside it is also hashable (so you'd need to handle or
+        reject unhashable argument values like lists/dicts being passed as kwargs).</p></div><div class="followup">Follow-up: how does functools.lru_cache handle this exact problem internally?</div></details>
+        <details class="qa"><summary>A teammate claims "Python sets and dicts have basically the same performance characteristics since a dict is just a set with values." Is that accurate, and what's actually shared vs different in CPython's implementation?</summary><div class="answer"><p>
+        Mostly accurate at a conceptual level — both are hash tables with nearly identical collision
+        resolution (open addressing with perturbation) and both guarantee O(1) average membership/lookup.
+        CPython's set and dict implementations are historically closely related (dict predates and the set
+        implementation borrowed heavily from it). The real difference is just the payload: a set's table
+        entries store only the hashed key, while a dict's entries store key+value+hash — a dict is
+        conceptually "a set that also carries a value," which matches the teammate's claim reasonably well.</p></div><div class="followup">Follow-up: given this similarity, why is there no dict-to-set O(1) "view" — why does converting between them cost O(n)?</div></details>
+        <details class="qa"><summary>Explain why <code>frozenset</code> exists and when you'd reach for it over a regular set.</summary><div class="answer"><p>
+        <code>frozenset</code> is an immutable, hashable set — needed anywhere a set-like collection must
+        itself be used as a dict key or stored inside another set (which requires hashability, which a
+        mutable set lacks). It's the set-world equivalent of why tuple exists alongside list.</p></div><div class="followup">Follow-up: can a frozenset contain a regular set as an element? Why or why not?</div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment">
+        <span class="level-tag">Beginner (30-60 min)</span>
+        <h4>Comprehension translation drill</h4>
+        <p>Take five JS array operations using chained <code>.map()</code>/<code>.filter()</code> and
+        rewrite each as a single Python comprehension (list, dict, or set as appropriate), with a comment
+        showing the original JS chain.</p>
+        <ul><li>At least one must become a dict comprehension and one a set comprehension.</li>
+        <li>One must involve nested data (an array of arrays, or array of objects) requiring a nested comprehension or a comprehension over an attribute.</li></ul>
+        <p><strong>Acceptance criteria:</strong> Each comprehension produces output identical to what the described JS chain would produce, verified by printing both the input and output.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>For the dict comprehension from an array of objects, think of it as the Python equivalent of <code>Object.fromEntries(arr.map(...))</code>.</p></div></details>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Intermediate (2-4 hrs)</span>
+        <h4>Build a small in-memory "inventory" data processor</h4>
+        <p>Given a hardcoded list of product dicts (id, name, category, price, quantity), write functions
+        using comprehensions and the right collection types to: get unique categories (set), build a
+        category→total-value dict, find all products under a price threshold (list), and build an id→product
+        lookup dict for O(1) access by id.</p>
+        <ul><li>Every transform must use a comprehension, not a manual for-loop with .append().</li>
+        <li>Include a function that demonstrates the O(1) dict lookup vs. an O(n) linear search for the same lookup, timed with <code>time.perf_counter()</code> on a larger generated dataset.</li></ul>
+        <p><strong>Acceptance criteria:</strong> All transform functions produce correct results against a small hand-verified dataset, and the timing comparison clearly shows the dict lookup winning on a larger (1000+ item) generated dataset.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>Use <code>random</code> to generate the larger dataset for the timing test, and make sure both the dict-lookup and linear-search versions look up the same set of ids for a fair comparison.</p></div></details>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Advanced (1-2 days)</span>
+        <h4>Build a tiny immutable "record" type using tuples and compare it to a dataclass</h4>
+        <p>Implement a simple point/record type two ways: once as a plain tuple with manual index-based
+        access, once using <code>typing.NamedTuple</code> (field-named tuples). Build a small suite of
+        geometric functions (distance between two points, midpoint, is-collinear check for three points)
+        that work against both representations, and write a short comparison of readability and safety.</p>
+        <ul><li>Must demonstrate that both representations are still fundamentally immutable tuples under the hood.</li>
+        <li>Include pytest tests for each geometric function against known coordinate triples.</li>
+        <li>Written comparison (5+ sentences) on when you'd reach for NamedTuple vs a dataclass vs a plain tuple in real code.</li></ul>
+        <p><strong>Acceptance criteria:</strong> All geometric functions produce mathematically correct results verified by the test suite, and work identically against both the plain-tuple and NamedTuple representations. No full solution here — this is meant to build real intuition about immutability tradeoffs.</p>
+      </div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet"><ul>
+        <li><code>list</code> = mutable, ordered; <code>tuple</code> = immutable, ordered; <code>dict</code> = key-value, insertion-ordered since 3.7; <code>set</code> = unordered, unique, hashable items only.</li>
+        <li>List/dict/set comprehensions fuse <code>.map()</code> + <code>.filter()</code> into one expression.</li>
+        <li>Use a <code>set</code> for membership checks/dedup — O(1) average vs O(n) for a list.</li>
+        <li>Dict keys must be hashable (immutable) — convert composite keys to tuples.</li>
+        <li>Slicing <code>seq[start:stop:step]</code> supports negative indices and a step natively; <code>[::-1]</code> reverses.</li>
+        <li>Tuple unpacking (<code>a, b = pair</code>) is Python's array destructuring; <code>*rest</code> captures the remainder.</li>
+        <li>Set algebra operators: <code>&amp;</code> intersection, <code>|</code> union, <code>-</code> difference, <code>^</code> symmetric difference.</li>
+        <li><code>dict.get(key, default)</code> avoids manual existence checks; <code>dict.fromkeys()</code> dedupes a list while preserving order.</li>
+        <li>Avoid comprehensions nested more than 2 levels — fall back to a named loop for readability.</li>
+      </ul></div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://docs.python.org/3/tutorial/datastructures.html">Python docs: Data Structures tutorial</a></li>
+        <li><a href="https://docs.python.org/3/library/stdtypes.html#dict">Python docs: dict type reference</a></li>
+        <li><a href="https://docs.python.org/3/library/stdtypes.html#set-types-set-frozenset">Python docs: set and frozenset</a></li>
+        <li><a href="https://docs.python.org/3/reference/expressions.html#displays-for-lists-sets-and-dictionaries">Python docs: Comprehensions (displays) reference</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="02-control-flow-and-functions.html"><span class="dir">← Previous</span>Control Flow &amp; Functions</a>
+        <a class="next" href="04-file-io-and-modules.html"><span class="dir">Next →</span>File I/O &amp; Modules</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · Python Fundamentals</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "14-python-fundamentals", chapterKey: "03-data-types-and-collections" });</script>
+</body>
+</html>

@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Phase 13 — Greedy Algorithms | DSA Notes</title>
+<style>
+  :root{
+    --ink:#12181B; --ink2:#1A2226; --ink3:#232C31;
+    --paper:#F7F4EE; --paper2:#EFEBE1; --paper3:#E4DECF;
+    --amber:#E8A33D; --amber-soft:#3A2E19;
+    --teal:#4FB3A9; --teal-soft:#12312D;
+    --rust:#D9695F; --rust-soft:#3A1F1C;
+    --slate:#8B9199;
+    --text:#E8E6E1; --text-dim:#A9AFAE;
+    --border: rgba(255,255,255,0.08);
+    --radius: 10px;
+    --mono: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{background:var(--ink); color:var(--text); font-family:var(--sans); line-height:1.65; font-size:16px;}
+  a{color:var(--amber);}
+  code, pre{font-family:var(--mono);}
+  #main{max-width:900px; margin:0 auto; padding:30px 24px 100px;}
+  h1{font-size:2rem; letter-spacing:-.01em; margin:0 0 6px;}
+  h2{font-size:1.5rem; margin-top:52px; padding-top:14px; border-top:1px solid var(--border); letter-spacing:-.01em;}
+  h2:first-of-type{border-top:none; margin-top:20px;}
+  h3{font-size:1.15rem; margin-top:30px; color:var(--amber);}
+  h4{font-size:1rem; margin-top:22px;}
+  .eyebrow{font-size:11px; text-transform:uppercase; letter-spacing:.12em; color:var(--teal); font-weight:700; margin-bottom:4px;}
+  .subtitle{color:var(--text-dim); font-size:15px; margin-bottom:28px;}
+  .callout{border-radius:var(--radius); padding:14px 16px; margin:18px 0; border:1px solid var(--border); font-size:14.5px;}
+  .callout .ctitle{font-weight:700; margin-bottom:4px; display:flex; gap:8px; align-items:center;}
+  .callout.concept{background:var(--teal-soft); border-color:var(--teal);}
+  .callout.concept .ctitle{color:var(--teal);}
+  .callout.example{background:var(--ink3);}
+  .callout.mistake{background:var(--rust-soft); border-color:var(--rust);}
+  .callout.mistake .ctitle{color:var(--rust);}
+  .callout.tip{background:var(--amber-soft); border-color:var(--amber);}
+  .callout.tip .ctitle{color:var(--amber);}
+  .codewrap{position:relative; margin:14px 0;}
+  pre{background:var(--ink3); border:1px solid var(--border); border-radius:var(--radius); padding:16px 18px; overflow-x:auto; font-size:13.5px; line-height:1.6;}
+  .lang-tag{font-size:10px; text-transform:uppercase; letter-spacing:.08em; color:var(--slate); margin-bottom:-4px; display:block;}
+  :not(pre) > code{background:var(--ink3); padding:2px 6px; border-radius:4px; font-size:.88em;}
+  table{width:100%; border-collapse:collapse; margin:16px 0; font-size:14px;}
+  th,td{border:1px solid var(--border); padding:9px 12px; text-align:left;}
+  th{background:var(--ink3); font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:var(--slate);}
+  .badge{display:inline-block; font-size:11px; font-weight:700; padding:3px 9px; border-radius:20px; text-transform:uppercase; letter-spacing:.03em;}
+  .badge.easy{background:var(--teal-soft); color:var(--teal);}
+  .badge.medium{background:var(--amber-soft); color:var(--amber);}
+  .badge.hard{background:var(--rust-soft); color:var(--rust);}
+  .qcard{border:1px solid var(--border); border-radius:var(--radius); padding:16px 18px; margin:14px 0; background:var(--ink2);}
+  .qcard .qhead{display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; gap:10px;}
+  .qcard .qhead b{font-size:14.5px;}
+  .qcard .meta{color:var(--text-dim); font-size:13px; margin:6px 0;}
+  .qcard .hint{margin-top:8px; padding-top:8px; border-top:1px dashed var(--border); font-size:13.5px;}
+  hr.div{border:none; border-top:1px solid var(--border); margin:40px 0;}
+  .navlinks{display:flex; justify-content:space-between; gap:10px; margin:26px 0; font-size:14px; flex-wrap:wrap;}
+  .navlinks a{border:1px solid var(--border); padding:8px 14px; border-radius:8px; text-decoration:none; background:var(--ink2);}
+  .navlinks a:hover{border-color:var(--amber);}
+  .home{text-align:center; margin-bottom:10px;}
+  .home a{font-size:13px; color:var(--text-dim);}
+</style>
+</head>
+<body>
+<div id="main">
+
+  <div class="home"><a href="../../index.html">&larr; Back to Index</a></div>
+  <div class="navlinks">
+    <a href="../Phase-12-Graphs/01-graphs.html">&larr; Prev: Graphs</a>
+    <span></span>
+  </div>
+
+  <div class="eyebrow">Phase 13 · Greedy Algorithms</div>
+  <h1>Greedy Algorithms 🎯</h1>
+  <p class="subtitle">Greedy choice property, activity selection, greedy vs DP — aur interview mein sabse zyada poochhe jaane wale greedy problems.</p>
+
+  <h2 id="greedy">1. Greedy Algorithms — Concept</h2>
+
+  <h3>1. What is it?</h3>
+  <p>Greedy Algorithm har step par wo choice choose karta hai jo <b>abhi ke liye sabse best</b> lage (locally optimal), is umeed mein ki ye choices milkar overall best (globally optimal) solution denge — <b>bina kabhi apni choice ko wapas dekhe (no backtracking)</b>.</p>
+
+  <h3>2. Why Needed?</h3>
+  <p>Bahut saari optimization problems (jinme "maximum/minimum" chahiye) DP se solve ho sakti hain, lekin DP mein saari possibilities explore karni padti hain — slow. Agar problem mein Greedy Choice Property ho, to ek simple sort + single pass se hi optimal answer mil jata hai — much faster aur code karne mein simpler.</p>
+
+  <h3>3. Greedy Choice Property</h3>
+  <p>Greedy sirf tab kaam karta hai jab problem mein "Greedy Choice Property" ho — matlab ek locally optimal choice hamesha ek globally optimal solution ka hissa ban sakti hai. Har problem ye property nahi rakhti!</p>
+
+  <h3>4. Real-Life Analogy</h3>
+  <div class="callout example">
+    <div class="ctitle">📝 Making Change with Coins</div>
+    Agar tumhe 67 rupaye dene hain minimum coins mein (available: 50, 10, 5, 1), tum greedily sabse bade coin se start karte ho: 50 (remaining 17), 10 (remaining 7), 5 (remaining 2), 1+1 (remaining 0). Total 5 coins. Is standard currency system mein greedy hamesha optimal deta hai — lekin har coin system mein aisa nahi hota (see mistake below)!
+  </div>
+
+  <h3>5. When Does Greedy Work?</h3>
+  <div class="callout concept">
+    <div class="ctitle">💡 Two Conditions Needed</div>
+    <ol>
+      <li><b>Greedy Choice Property</b> — Local best choice leads toward global best.</li>
+      <li><b>Optimal Substructure</b> — Problem ka optimal solution, uske subproblems ke optimal solutions se bana ho sakta hai.</li>
+    </ol>
+    Agar in dono mein se koi bhi missing hai, Greedy galat answer de sakta hai — tab Dynamic Programming chahiye hoti hai (jo saari possibilities explore karta hai).
+  </div>
+
+  <h3>6. Greedy vs DP — Visual</h3>
+  <pre><code>Coin problem with coins [1, 3, 4], target = 6
+
+Greedy approach: pick 4 first (biggest &lt;= 6) → remaining 2 → pick 1,1 → Total: 4+1+1 = 3 coins
+Optimal answer:  3 + 3 = 2 coins!  ← Greedy FAILED here!
+
+Ye batata hai: coin denominations jo "canonical" nahi hain (jaise 1,3,4),
+unme Greedy kaam nahi karta — DP chahiye hoti hai.</code></pre>
+
+  <div class="callout concept">
+    <div class="ctitle">💡 Greedy vs DP — Kaise decide karein?</div>
+    Greedy tab use karo jab tumhe pakka pata ho (ya prove kar sako) ki local optimal choice kabhi globally galat nahi hoga (e.g. exchange argument se). Agar tum ek counter-example dhundh sakte ho jaha greedy fail hota hai, to DP use karo — jo har possibility explore karke guaranteed optimal deta hai, bas thoda slower.
+  </div>
+
+  <h3>7. Code Examples</h3>
+
+  <div class="lang-tag">Activity Selection (Maximum Non-Overlapping Intervals)</div>
+  <div class="codewrap">
+<pre><code>function maxActivities(activities) {
+  // activities: [[start, end], ...]
+  activities.sort((a, b) => a[1] - b[1]); // sort by END time - the greedy choice!
+  let count = 1;
+  let lastEnd = activities[0][1];
+
+  for (let i = 1; i < activities.length; i++) {
+    if (activities[i][0] >= lastEnd) { // starts after (or when) last one ended
+      count++;
+      lastEnd = activities[i][1];
+    }
+  }
+  return count;
+}</code></pre></div>
+  <p><b>Why sort by END time (the greedy insight):</b> Jitni jaldi ek activity khatam ho, utni jaldi agli activity ke liye "room" bach jata hai. Isliye hamesha sabse jaldi khatam hone wali valid activity choose karna optimal hota hai — ye ek classic proven Greedy Choice Property hai.</p>
+
+  <div class="lang-tag">Fractional Knapsack</div>
+  <div class="codewrap">
+<pre><code>function fractionalKnapsack(items, capacity) {
+  // items: [[value, weight], ...]
+  items.sort((a, b) => (b[0] / b[1]) - (a[0] / a[1])); // sort by value/weight ratio, descending
+  let totalValue = 0;
+
+  for (const [value, weight] of items) {
+    if (capacity >= weight) {
+      totalValue += value;      // take the whole item
+      capacity -= weight;
+    } else {
+      totalValue += value * (capacity / weight); // take a FRACTION of it
+      break; // knapsack is full
+    }
+  }
+  return totalValue;
+}</code></pre></div>
+  <p><b>Why value/weight ratio:</b> Har unit weight ke liye "sabse zyada value dene wala" item pehle lena hamesha optimal hai — kyunki hum items ko todke (fraction mein) le sakte hain, isliye greedy yahan perfectly kaam karta hai (0/1 Knapsack mein aisa nahi hota — wahan DP chahiye).</p>
+
+  <h3>8. Dry Run — Activity Selection</h3>
+  <div class="callout example">
+    <div class="ctitle">📝 Activities: [1,3], [2,5], [4,6], [6,7]</div>
+    Sorted by end: [1,3], [2,5], [4,6], [6,7] (already sorted here)<br>
+    Pick [1,3]. lastEnd=3, count=1<br>
+    [2,5]: start=2 &lt; 3 → skip<br>
+    [4,6]: start=4 ≥ 3 → pick! lastEnd=6, count=2<br>
+    [6,7]: start=6 ≥ 6 → pick! lastEnd=7, count=3<br>
+    Answer: <b>3</b> activities
+  </div>
+
+  <h3>9. Time / Space Complexity</h3>
+  <p>Both examples: Time O(n log n) — dominated by the sort. Space: O(1) extra (or O(n) if the sort isn't in-place).</p>
+
+  <h3>10. How to Identify Greedy Problems? — Checklist</h3>
+  <div class="callout tip">
+    <div class="ctitle">🎯 Checklist</div>
+    <ul>
+      <li>Problem asks for "maximum/minimum number of..." with some scheduling/selection flavor</li>
+      <li>Sorting by some criterion (end time, ratio, size) seems to reveal an obvious "always pick this" rule</li>
+      <li>Try to find a counter-example to your greedy rule with a small hand-made input — if you can't break it after a few tries, greedy likely works</li>
+      <li>If greedy clearly fails on some input (like the coin example above), switch to DP</li>
+    </ul>
+  </div>
+
+  <h3>11. Common Mistakes</h3>
+  <div class="callout mistake">
+    <ul>
+      <li>Assuming greedy always works without proving/testing the Greedy Choice Property — it's easy to be wrong (see coin change counter-example above).</li>
+      <li>Sorting by the wrong criterion — e.g. sorting Activity Selection by <b>start</b> time instead of <b>end</b> time gives a wrong answer.</li>
+      <li>Forgetting greedy gives NO way to "undo" a choice — if the property doesn't hold, wrong early choices can't be fixed later.</li>
+    </ul>
+  </div>
+
+  <h3>12. Interview Tips</h3>
+  <div class="callout tip">
+    Jab tum greedy approach propose karo, interviewer ko ek chhota sa "proof sketch" do: "Main claim kar raha hoon ki [X criterion] se sort karke greedily choose karna optimal hai, kyunki [reasoning]." Agar tum counter-example khud test kar chuke ho, wo bhi mention karo — ye dikhata hai tumne approach ko validate kiya hai, sirf guess nahi kiya.
+  </div>
+
+  <hr class="div">
+  <h2>Interview Questions — Greedy</h2>
+
+  <h3>Easy</h3>
+
+  <div class="qcard"><div class="qhead"><b>Q1. Activity Selection / Non-overlapping Intervals</b><span class="badge easy">Easy</span></div>
+    <div class="meta">Pattern: Sort by end time</div>
+    <p>Given a set of intervals, find the minimum number of intervals to remove so the rest are non-overlapping (equivalently, find the max number you can keep).</p>
+    <p><b>Example:</b> intervals=[[1,2],[2,3],[3,4],[1,3]] → remove 1 ([1,3])</p>
+    <div class="hint"><b>Hint:</b> Sort by end time, greedily keep an interval if its start &ge; the last kept interval's end. See maxActivities code above.</div>
+  </div>
+
+  <div class="qcard"><div class="qhead"><b>Q2. Assign Cookies</b><span class="badge easy">Easy</span></div>
+    <div class="meta">Pattern: Sort both arrays, two pointers</div>
+    <p>Given children's greed factors and cookie sizes, maximize the number of content children (a child is content if their cookie size &ge; their greed factor).</p>
+    <p><b>Example:</b> g=[1,2,3], s=[1,1] → 1</p>
+    <div class="hint"><b>Hint:</b> Sort both arrays. Use two pointers — greedily assign the smallest sufficient cookie to each child.</div>
+  </div>
+
+  <div class="qcard"><div class="qhead"><b>Q3. Lemonade Change</b><span class="badge easy">Easy</span></div>
+    <div class="meta">Pattern: Greedy cash-register logic</div>
+    <p>Customers pay with $5, $10, or $20 bills for a $5 lemonade; determine if you can provide correct change to every customer in order.</p>
+    <p><b>Example:</b> bills=[5,5,5,10,20] → true</p>
+    <div class="hint"><b>Hint:</b> Track counts of $5 and $10 bills. For a $20 payment, prefer giving one $10+one $5 over three $5s (keeps flexible $5 bills in reserve).</div>
+  </div>
+
+  <div class="qcard"><div class="qhead"><b>Q4. Best Time to Buy and Sell Stock</b><span class="badge easy">Easy</span></div>
+    <div class="meta">Pattern: Greedy min-tracking</div>
+    <p>Given an array of stock prices by day, find the maximum profit from a single buy-sell transaction (buy before sell).</p>
+    <p><b>Example:</b> prices=[7,1,5,3,6,4] → 5 (buy at 1, sell at 6)</p>
+    <div class="hint"><b>Hint:</b> Track the minimum price seen so far while scanning; at each day compute profit if sold today, keep the max.</div>
+  </div>
+
+  <div class="qcard"><div class="qhead"><b>Q5. Minimum Number of Coins (canonical system)</b><span class="badge easy">Easy</span></div>
+    <div class="meta">Pattern: Greedy (works for standard currency)</div>
+    <p>Given a target amount and standard currency denominations, find the minimum number of coins/notes needed.</p>
+    <p><b>Example:</b> amount=67, coins=[50,10,5,1] → 5 coins (50+10+5+1+1)</p>
+    <div class="hint"><b>Hint:</b> Repeatedly take the largest denomination &le; remaining amount. Note: only works for "canonical" coin systems (see the [1,3,4] counter-example above for when it fails).</div>
+  </div>
+
+  <h3>Medium</h3>
+
+  <div class="qcard"><div class="qhead"><b>Q6. Jump Game</b><span class="badge medium">Medium</span></div>
+    <div class="meta">Pattern: Greedy reachability tracking</div>
+    <p>Given an array where each element is your max jump length from that position, determine if you can reach the last index starting from index 0.</p>
+    <p><b>Example:</b> nums=[2,3,1,1,4] → true</p>
+    <div class="hint"><b>Hint:</b> Track the farthest index reachable so far as you scan left to right. If current index ever exceeds farthest reachable, return false.</div>
+  </div>
+
+  <div class="qcard"><div class="qhead"><b>Q7. Gas Station</b><span class="badge medium">Medium</span></div>
+    <div class="meta">Pattern: Greedy with running total reset</div>
+    <p>Given gas and cost arrays for a circular route, find the starting gas station index from which you can complete the circuit, or -1 if impossible.</p>
+    <p><b>Example:</b> gas=[1,2,3,4,5], cost=[3,4,5,1,2] → 3</p>
+    <div class="hint"><b>Hint:</b> Track a running total (gas - cost); if it drops below 0, that station can't be the start — reset and try the next station as the new candidate.</div>
+  </div>
+
+  <div class="qcard"><div class="qhead"><b>Q8. Partition Labels</b><span class="badge medium">Medium</span></div>
+    <div class="meta">Pattern: Greedy with last-occurrence tracking</div>
+    <p>Given a string, partition it into as many parts as possible so each letter appears in at most one part; return the sizes of these parts.</p>
+    <p><b>Example:</b> s="ababcbacadefegdehijhklij" → [9,7,8]</p>
+    <div class="hint"><b>Hint:</b> Precompute the last occurrence index of each character. Scan and extend the current partition's end to the max last-occurrence of characters seen; close the partition when you reach that end.</div>
+  </div>
+
+  <div class="qcard"><div class="qhead"><b>Q9. Minimum Number of Platforms</b><span class="badge medium">Medium</span></div>
+    <div class="meta">Pattern: Sort arrivals/departures, sweep</div>
+    <p>Given arrival and departure times of trains at a station, find the minimum number of platforms needed so no train waits.</p>
+    <p><b>Example:</b> arr=[900,940,950,1100,1500,1800], dep=[910,1200,1120,1130,1900,2000] → 3</p>
+    <div class="hint"><b>Hint:</b> Sort arrivals and departures separately. Sweep through with two pointers, incrementing a platform counter on each arrival and decrementing on each departure that happened before it; track the max.</div>
+  </div>
+
+  <div class="qcard"><div class="qhead"><b>Q10. Job Sequencing with Deadlines</b><span class="badge medium">Medium</span></div>
+    <div class="meta">Pattern: Sort by profit, greedy slot assignment</div>
+    <p>Given jobs each with a deadline and profit (each job takes 1 unit of time, only one job per time slot), find the maximum profit achievable by scheduling a subset of jobs within their deadlines.</p>
+    <p><b>Example:</b> jobs=[(d=2,p=100),(d=1,p=19),(d=2,p=27),(d=1,p=25),(d=3,p=15)] → schedule yielding profit 142</p>
+    <div class="hint"><b>Hint:</b> Sort jobs by profit descending. For each job, greedily place it in the latest available free time slot &le; its deadline (using a simple array or disjoint-set for slot tracking).</div>
+  </div>
+
+  <h3>Hard</h3>
+
+  <div class="qcard"><div class="qhead"><b>Q11. Candy Distribution</b><span class="badge hard">Hard</span></div>
+    <div class="meta">Pattern: Two-pass greedy</div>
+    <p>Given ratings of children in a line, distribute candies so each child gets at least 1, and any child with a higher rating than a neighbor gets more candies than that neighbor. Find the minimum total candies needed.</p>
+    <p><b>Example:</b> ratings=[1,0,2] → 5 (candies: 2,1,2)</p>
+    <div class="hint"><b>Hint:</b> One left-to-right pass giving +1 over left neighbor when rating is higher, then one right-to-left pass doing the same against the right neighbor, taking the max of both passes at each position.</div>
+  </div>
+
+  <div class="qcard"><div class="qhead"><b>Q12. Merge Intervals</b><span class="badge medium">Medium</span></div>
+    <div class="meta">Pattern: Sort by start, greedily merge</div>
+    <p>Given a collection of intervals, merge all overlapping intervals and return the resulting non-overlapping intervals.</p>
+    <p><b>Example:</b> intervals=[[1,3],[2,6],[8,10],[15,18]] → [[1,6],[8,10],[15,18]]</p>
+    <div class="hint"><b>Hint:</b> Sort intervals by start time. Iterate, merging the current interval into the last result interval if they overlap, otherwise start a new one.</div>
+  </div>
+
+  <div class="qcard"><div class="qhead"><b>Q13. Fractional Knapsack</b><span class="badge medium">Medium</span></div>
+    <div class="meta">Pattern: Sort by value/weight ratio</div>
+    <p>Given item values, weights, and a knapsack capacity, maximize total value where items can be taken fractionally.</p>
+    <p><b>Example:</b> items=[(60,10),(100,20),(120,30)], capacity=50 → 240.0</p>
+    <div class="hint"><b>Hint:</b> See fractionalKnapsack code above — sort by value/weight ratio descending, take whole items greedily, fraction the last one that doesn't fully fit.</div>
+  </div>
+
+  <div class="qcard"><div class="qhead"><b>Q14. Minimum Number of Arrows to Burst Balloons</b><span class="badge hard">Hard</span></div>
+    <div class="meta">Pattern: Sort by end, greedy interval grouping</div>
+    <p>Given balloons as intervals on the x-axis, find the minimum number of arrows (vertical shots) needed to burst all balloons (an arrow bursts every balloon whose interval it passes through).</p>
+    <p><b>Example:</b> points=[[10,16],[2,8],[1,6],[7,12]] → 2</p>
+    <div class="hint"><b>Hint:</b> Sort intervals by end coordinate. Greedily shoot an arrow at the end of the first unburst balloon, and skip all balloons whose start is &le; that arrow position (already burst).</div>
+  </div>
+
+  <hr class="div">
+  <div class="navlinks">
+    <a href="../Phase-12-Graphs/01-graphs.html">&larr; Prev: Graphs</a>
+    <span></span>
+  </div>
+  <div class="home"><a href="../../index.html">&larr; Back to Index</a></div>
+
+</div>
+</body>
+</html>

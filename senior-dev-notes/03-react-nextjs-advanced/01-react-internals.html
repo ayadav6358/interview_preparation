@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>React Internals: Fiber &amp; Reconciliation — React & Next.js Advanced — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">React &amp; Next.js Advanced</a><span class="sep">›</span>React Internals</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>React Internals: Reconciliation, Fiber &amp; the Rendering Lifecycle</h1>
+      <p class="meta-line"><span>⏱ 3 hrs</span><span>📍 Chapter 1 of 11</span></p>
+      <p><strong>One-line summary:</strong> React doesn't "re-render the DOM" — it builds a linked-list tree of
+      work units called Fibers, diffs two of those trees, and commits the minimal set of host-tree mutations
+      in a single synchronous pass; understanding that tree and its two-phase (render/commit) model is the
+      single highest-leverage thing you can know for a senior React interview.</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>Every "why does my component re-render twice," "why is this state update not showing immediately,"
+      "how does React batch updates," and "what's the difference between the virtual DOM and Fiber" question
+      traces back to this chapter. Interviewers use it to separate candidates who've memorized hook rules from
+      candidates who can reason about React as a runtime. It's also the prerequisite for Concurrent React
+      (Ch. 5) and Server Components (Ch. 7) — both are built directly on the Fiber architecture.</p>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>You should already be comfortable writing components, hooks, and JSX day-to-day. Related: <a href="02-hooks-deep-dive.html">Hooks Deep Dive</a>, <a href="05-concurrent-react.html">Concurrent React</a>.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="basics-vdom">The "virtual DOM" is really just a tree of plain objects</h3>
+      <p>JSX compiles to <code>React.createElement()</code> (or, with the modern JSX transform, calls into
+      <code>react/jsx-runtime</code>) calls, which produce plain JS objects describing <em>what</em> you want
+      rendered — type, props, children, key. React never touches the real DOM from this description directly.
+      Instead it builds an internal data structure — the <strong>Fiber tree</strong> — that mirrors this
+      description and tracks enough metadata to do incremental, interruptible work.</p>
+
+      <h3 id="fiber-node">What a Fiber actually is</h3>
+      <p>A Fiber is a JS object, one per component instance / host element, that acts as both a unit of work
+      and a linked-list node. Key fields (from React's actual source, simplified):</p>
+      <pre><code class="language-typescript">type Fiber = {
+  tag: WorkTag;              // FunctionComponent, HostComponent, HostRoot, etc.
+  key: string | null;
+  type: any;                 // the function/class/'div' this fiber represents
+  stateNode: any;             // DOM node, class instance, or null
+
+  // Fiber tree pointers — this is the key insight: it's a linked list, not an array tree
+  return: Fiber | null;       // parent
+  child: Fiber | null;        // first child
+  sibling: Fiber | null;      // next sibling
+
+  // Work-in-progress bookkeeping
+  pendingProps: any;
+  memoizedProps: any;
+  memoizedState: any;         // hooks linked list lives here for function components
+  updateQueue: UpdateQueue | null;
+
+  alternate: Fiber | null;    // the "other" tree's corresponding fiber (double buffering)
+  flags: Flags;               // side-effect bitmask (Placement, Update, Deletion...)
+  subtreeFlags: Flags;        // bubbled-up effects so we can bail out of entire subtrees
+  lanes: Lanes;                // priority bitmask for scheduling (see Concurrent chapter)
+};</code></pre>
+      <p>The parent/child/sibling pointers mean React can walk the entire tree with an iterative
+      depth-first traversal and no recursion — which is exactly what makes the work interruptible
+      (a recursive call stack can't be paused and resumed; a <code>while</code> loop walking pointers can).</p>
+
+      <h3 id="double-buffering">Double buffering: current tree vs work-in-progress tree</h3>
+      <p>React keeps <strong>two</strong> Fiber trees alive at once:</p>
+      <ul>
+        <li><strong>current</strong> — the tree that matches what's on screen right now.</li>
+        <li><strong>workInProgress (WIP)</strong> — the tree being built for the next render, created by cloning
+        the <code>current</code> fiber via <code>createWorkInProgress()</code> (reusing the object when possible
+        instead of allocating new ones — a deliberate GC-pressure optimization).</li>
+      </ul>
+      <p>Each fiber's <code>alternate</code> field points to its counterpart in the other tree. When the WIP
+      tree finishes and commits, React simply flips a pointer — <code>FiberRootNode.current = finishedWork</code>
+      — and the WIP tree <em>becomes</em> the current tree. This is why React can throw away an in-progress
+      render without ever having mutated the real DOM: nothing was touched until commit.</p>
+
+      <h3 id="three-phases">The three phases: render, reconciliation, commit</h3>
+      <ol>
+        <li><strong>Render phase (can be interrupted/thrown away, no side effects):</strong> React walks the WIP
+        tree calling your function components (and resolving class lifecycle/hook state), producing new React
+        elements for each fiber's children.</li>
+        <li><strong>Reconciliation (the "diff"), part of the render phase:</strong> for each fiber, React compares
+        the new element(s) to the existing child fiber(s) and decides: reuse (update), create (placement), or
+        remove (deletion) — tagging each fiber's <code>flags</code> bitmask accordingly. This is the
+        <code>beginWork()</code> / <code>reconcileChildren()</code> machinery.</li>
+        <li><strong>Commit phase (synchronous, cannot be interrupted):</strong> React walks the <code>flags</code>-tagged
+        effect list and applies the real DOM mutations (<code>commitMutationEffects</code>), then runs layout
+        effects synchronously, flips <code>current</code>, then schedules passive effects (<code>useEffect</code>)
+        for after paint.</li>
+      </ol>
+
+      <h3 id="diffing-rules">The actual diffing algorithm (reconcileChildren)</h3>
+      <p>React does <strong>not</strong> run a generic tree-diff algorithm (that's O(n³) and far too slow). It
+      uses two heuristics that make diffing O(n):</p>
+      <ul>
+        <li><strong>Different element types at the same position → tear down the whole subtree.</strong> If a
+        <code>&lt;div&gt;</code> becomes a <code>&lt;span&gt;</code>, React doesn't try to patch attributes —
+        it unmounts the old fiber (and all its children, running cleanup) and mounts a brand new one.</li>
+        <li><strong>Same type → reuse the fiber, diff props, recurse into children.</strong> Only changed props
+        reach the DOM.</li>
+        <li><strong>Lists need explicit <code>key</code>s</strong> because without them React's list-diff falls
+        back to positional index comparison, which misattributes state across reorders, insertions and
+        deletions. With stable keys, React uses a single-pass algorithm that detects the common case (items
+        only appended/removed at the edges) in O(n) and only falls back to a slower per-item
+        move-detection pass when keys are out of order.</li>
+      </ul>
+
+      <h3 id="bailouts">Bailouts: how React skips whole subtrees</h3>
+      <p>During <code>beginWork</code>, if a fiber's props, state, and context haven't changed <em>and</em> its
+      <code>lanes</code> indicate no pending work, React calls <code>bailoutOnAlreadyFinishedWork</code> and
+      skips calling your component function entirely — it just clones the existing child fibers. This is the
+      actual mechanism behind <code>React.memo</code> and is why <code>subtreeFlags</code> exists: a parent can
+      bail out of its own re-render but must still check whether any descendant has pending work bubbled up
+      into that bitmask.</p>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>End-to-end for <code>setCount(c => c + 1)</code> inside an event handler:</p>
+      <ol>
+        <li>The update is wrapped in an <code>Update</code> object and enqueued onto the fiber's hook queue;
+        <code>scheduleUpdateOnFiber</code> marks the fiber (and its ancestors, via <code>lanes</code> bubbling
+        up the <code>return</code> pointers) as having pending work on a specific <strong>lane</strong>
+        (priority bucket).</li>
+        <li>React (via the Scheduler package) decides synchronously or asynchronously when to start work,
+        begins building a new WIP tree from the root, re-cloning only fibers on the path to/through the
+        updated fiber (siblings outside that path are bailout-skipped).</li>
+        <li><code>beginWork</code> calls your function component, which calls hooks in order against the
+        fiber's <code>memoizedState</code> linked list, returns new React elements.</li>
+        <li><code>reconcileChildren</code> diffs new elements against the old child fibers, tagging
+        <code>flags</code>.</li>
+        <li>When the whole WIP tree finishes (<code>completeWork</code> bubbling back up), React enters the
+        commit phase: mutate DOM → run <code>useLayoutEffect</code>s synchronously → flip
+        <code>current</code> pointer → paint → schedule <code>useEffect</code>s asynchronously.</li>
+      </ol>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+flowchart TD
+  A[State update scheduled] --> B[scheduleUpdateOnFiber marks lanes]
+  B --> C{Scheduler: sync or concurrent?}
+  C -->|Sync, e.g. discrete event| D[Render phase: build WIP tree]
+  C -->|Concurrent, e.g. transition| D
+  D --> E[beginWork: call components, reconcile children, tag flags]
+  E --> F{Work interrupted by higher-priority update?}
+  F -->|Yes| D
+  F -->|No, tree complete| G[Commit phase: mutate DOM]
+  G --> H[Run useLayoutEffect synchronously]
+  H --> I[Flip current pointer -- WIP becomes current]
+  I --> J[Browser paints]
+  J --> K[Run useEffect asynchronously]
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-jsx">// Demonstrating a bailout: React.memo prevents beginWork from re-running
+// the function body when props are shallow-equal.
+import { memo, useState } from "react";
+
+const ExpensiveRow = memo(function ExpensiveRow({ label }) {
+  console.log("rendering row:", label); // only logs when `label` actually changes
+  return <li>{label}</li>;
+});
+
+function List() {
+  const [tick, setTick] = useState(0);
+  const items = ["a", "b", "c"]; // stable reference content, new array each render
+
+  return (
+    <div>
+      {/* Clicking this causes List to re-render, but ExpensiveRow fibers
+         bail out because their `label` prop is unchanged -- beginWork
+         skips calling the component and just reuses the child fiber. */}
+      <button onClick={() => setTick(t => t + 1)}>tick: {tick}</button>
+      <ul>
+        {items.map(label => <ExpensiveRow key={label} label={label} />)}
+      </ul>
+    </div>
+  );
+}
+
+// BAD: breaks the memo bailout by passing a new object reference every render
+function BadParent() {
+  const [tick, setTick] = useState(0);
+  return <ExpensiveRow key="x" label={{ v: tick }} />; // new object identity -> no bailout possible even if shallow-equal check runs
+}
+
+// GOOD: pass primitives or memoized objects so reference equality is stable
+function GoodParent() {
+  const [tick, setTick] = useState(0);
+  return <ExpensiveRow key="x" label={tick} />;
+}</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4>
+      <p>A dashboard with a 5,000-row table re-rendered the entire table on every keystroke in a filter input
+      because the table and the input shared one parent component and the table rows weren't keyed by a stable
+      ID (they were keyed by array index). Every filter kept the array length similar but changed row identity
+      under the hood, so React's index-based diff reused fibers for the wrong logical rows, causing
+      input-focus loss, incorrect animation states, and full subtree re-renders instead of bailouts. The fix:
+      stable entity IDs as keys, lifting the filter input's state out of the table's re-render path (into a
+      sibling, or via <code>useDeferredValue</code>, covered in Ch. 5), and wrapping row components in
+      <code>memo</code>. Root-caused with the React DevTools Profiler's flame graph, which showed every row
+      fiber re-rendering despite unchanged content.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4>
+      <p>"Virtual DOM is always faster than direct DOM manipulation" is false and will get called out in a
+      senior interview — Fiber's advantage is <em>not</em> raw speed, it's incremental/interruptible rendering
+      and the ability to batch and prioritize updates. A hand-tuned direct DOM update for one hot path will
+      always beat Fiber's render+commit overhead; React wins on maintainability and scheduling, not on being
+      intrinsically faster than manual DOM writes.</p></div>
+      <ul>
+        <li>Using array index as <code>key</code> for lists that reorder/filter — breaks fiber reuse identity.</li>
+        <li>Believing state updates are always synchronous — since React 18, updates are batched automatically
+        even outside event handlers (e.g. in <code>fetch().then()</code>), which surprises code relying on
+        reading updated state immediately after calling a setter.</li>
+        <li>Assuming <code>useLayoutEffect</code> and <code>useEffect</code> run at the same time — layout effects
+        run synchronously in the commit phase before paint; passive effects run asynchronously after paint.</li>
+        <li>Mutating props/state objects directly — breaks the reference-equality checks that bailouts and
+        <code>memo</code> depend on.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>Let React re-render freely, rely on Fiber bailouts</td><td>Most UI; component tree is shallow/cheap</td><td>Deeply nested trees with expensive leaf renders</td><td><code>memo</code> + stable props</td></tr>
+        <tr><td><code>memo</code>/<code>useMemo</code> everywhere</td><td>Profiler shows a real hot path</td><td>Premature, unmeasured optimization — adds comparison overhead and complexity</td><td>Fix the data flow / colocate state instead</td></tr>
+        <tr><td>Index-based keys</td><td>Static, never-reordered lists</td><td>Any filterable/sortable/insertable list</td><td>Stable entity ID keys</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic"><h4>Basic</h4>
+      <details class="qa"><summary>What is the virtual DOM and why does React use it?</summary><div class="answer"><p>It's a lightweight JS object tree describing the desired UI. React diffs it against the previous tree to compute the minimal set of real DOM mutations, instead of re-rendering everything, and it lets React batch/schedule work before touching the (expensive) real DOM.</p></div><div class="followup">Follow-up: Is virtual DOM diffing always faster than manual DOM updates?</div></details>
+      <details class="qa"><summary>What is a Fiber?</summary><div class="answer"><p>A JS object representing a unit of work for one component/element instance, with pointers to its parent, first child, and next sibling, plus fields for pending/memoized props and state. It's both a tree node and a resumable work unit.</p></div><div class="followup">Follow-up: Why a linked list instead of a recursive tree walk?</div></details>
+      <details class="qa"><summary>What triggers a re-render?</summary><div class="answer"><p>A state update (via a hook setter or class setState), a parent re-rendering (unless bailed out via memo), a context value change for consumers, or a force update.</p></div><div class="followup">Follow-up: Does a parent re-rendering always re-render its children?</div></details>
+      <details class="qa"><summary>What's the difference between render and commit phases?</summary><div class="answer"><p>Render phase computes what should change (can be paused/thrown away, no DOM writes, no side effects allowed). Commit phase actually applies DOM mutations and runs layout effects synchronously — it cannot be interrupted.</p></div><div class="followup">Follow-up: Why must render phase be side-effect free?</div></details>
+      <details class="qa"><summary>Why does React need a `key` prop in lists?</summary><div class="answer"><p>To give each list item a stable identity across renders so React's diff algorithm can match old fibers to new elements correctly — reusing state/DOM nodes for unchanged items and correctly creating/destroying ones that were added/removed, rather than falling back to error-prone positional matching.</p></div><div class="followup">Follow-up: What breaks specifically if you use array index as key on a sortable list?</div></details>
+      <details class="qa"><summary>What does React.memo do internally?</summary><div class="answer"><p>Wraps a component so that during beginWork, if the shallow prop comparison (or custom comparator) says props are equal and there's no pending work on that fiber's lanes, React bails out and skips calling the component function.</p></div><div class="followup">Follow-up: Does memo stop context changes from re-rendering the component?</div></details>
+      </div>
+      <div class="qa-level medium"><h4>Medium</h4>
+      <details class="qa"><summary>Explain double buffering in Fiber.</summary><div class="answer"><p>React keeps two Fiber trees: `current` (on screen) and `workInProgress` (being built). Each fiber has an `alternate` pointer to its counterpart in the other tree. Building WIP never mutates `current` or the real DOM; on completion React flips `FiberRootNode.current` to the finished tree. This lets React discard an in-progress render safely.</p></div><div class="followup">Follow-up: What happens to the alternate tree if a render is abandoned?</div></details>
+      <details class="qa"><summary>Walk through what happens, fiber-by-fiber, when you call a state setter inside an onClick handler.</summary><div class="answer"><p>Update object enqueued on the fiber's hook queue -> scheduleUpdateOnFiber marks lanes up the return-pointer chain to the root -> since it's a discrete event, React schedules (often synchronously-ish/batched within the event) a render -> beginWork walks from root, bailing out subtrees without pending lanes -> reconcileChildren diffs and tags flags -> completeWork bubbles subtreeFlags -> commit phase mutates DOM, runs layout effects, flips current, schedules passive effects.</p></div><div class="followup">Follow-up: How does this differ if the setState happens inside a startTransition?</div></details>
+      <details class="qa"><summary>Why can't side effects run during the render phase?</summary><div class="answer"><p>Render phase work can be paused, abandoned, or re-run multiple times for the same commit (e.g., under Concurrent rendering with Strict Mode double-invocation, or when a higher-priority update interrupts it) before anything is actually shown. A side effect (DOM write, subscription, mutation) run during an abandoned render would leak or run redundantly, since there is no guarantee that render corresponds to what eventually commits.</p></div><div class="followup">Follow-up: Where specifically does React enforce or encourage this separation?</div></details>
+      <details class="qa"><summary>How does React decide whether changing an element's type tears down the subtree vs. updates it?</summary><div class="answer"><p>In reconcileChildren, if the new element's `type` differs from the old fiber's `type` at the same position, React treats it as a full replace: unmount old fiber subtree (cleanup effects, remove DOM), create a brand-new fiber subtree. Same type -> reuse fiber, just diff/update props and recurse into children.</p></div><div class="followup">Follow-up: Does this apply to conditionally rendering `<div>` vs `<span>` wrapping the same children?</div></details>
+      <details class="qa"><summary>What is `subtreeFlags` and why does it exist?</summary><div class="answer"><p>A bitmask on a fiber summarizing side-effect flags of its entire subtree (bubbled up during completeWork). It lets the commit phase skip walking into subtrees that have no pending effects at all, rather than visiting every single fiber to check.</p></div><div class="followup">Follow-up: How does this interact with a bailed-out subtree that still has one deeply nested effect?</div></details>
+      <details class="qa"><summary>Why does React recommend against using array index as key, concretely?</summary><div class="answer"><p>When items are inserted/removed/reordered, the index-to-item mapping shifts, so React matches old fiber at index i to the new element at index i even though they represent different logical items — causing it to reuse/mutate the wrong component instance's local state and DOM (e.g., an input losing focus or showing the wrong value, uncontrolled component state "sticking" to the wrong row).</p></div><div class="followup">Follow-up: Is it ever safe to use index as key?</div></details>
+      </div>
+      <div class="qa-level advanced"><h4>Advanced</h4>
+      <details class="qa"><summary>How does React implement the O(n) list-diff instead of a full O(n³) tree-edit-distance algorithm, and what's the actual tradeoff being made?</summary><div class="answer"><p>React assumes two heuristics hold in practice: (1) elements of different types produce substantially different trees — so it never tries to match across type boundaries, and (2) the developer can hint stable identity via `key`. Given keyed children, React's `reconcileChildren` does essentially a single forward pass trying to match by key in order, and only does extra bookkeeping (tracking a "lastPlacedIndex") to detect moves when keys appear out of their expected order, insertion/deletion handled by diffing against a Map of key->old fiber built once. This trades perfect minimal-edit-distance correctness for linear time, correct in the common app case where reordering is rare relative to appends/removals.</p></div><div class="followup">Follow-up: What pathological key pattern makes this degrade toward worse performance?</div></details>
+      <details class="qa"><summary>Explain how Strict Mode's double-invocation of components/effects in development interacts with the Fiber render phase, and why it's safe.</summary><div class="answer"><p>Strict Mode intentionally calls function component bodies (and, for effects, mounts/unmounts/remounts) twice during development to surface impure render logic or effects lacking proper cleanup. Because render-phase work is required to be pure/side-effect-free by the Fiber model (nothing commits until the WIP tree completes), re-invoking it twice is observably safe for correct code — it only breaks code that smuggles side effects (mutating module-level variables, starting a subscription inline) into the render phase, which was already relying on undefined behavior.</p></div><div class="followup">Follow-up: Why does this not double-invoke in production builds?</div></details>
+      <details class="qa"><summary>A fiber bails out of re-rendering via memo, but one of its grandchildren has pending work on a transition lane. How does that grandchild's work still get processed?</summary><div class="answer"><p>Bailout at a fiber only skips calling that fiber's own component function and reconciling its direct children from scratch; React still checks `childLanes`/`subtreeFlags` bubbled up from descendants. If any descendant has pending lanes, React still walks down into that subtree (cloning only the fibers on the path to the fiber with pending work) even though the bailed-out fiber itself isn't re-rendered or its sibling subtrees untouched.</p></div><div class="followup">Follow-up: What does this imply about clone cost for a bailout deep in a wide tree?</div></details>
+      <details class="qa"><summary>Why does React need two full Fiber trees (current + WIP) instead of diffing the new element tree directly against the DOM?</summary><div class="answer"><p>The DOM alone doesn't carry React's bookkeeping (hook state linked lists, pending update queues, fiber-level flags, lane priorities) and reading element attributes/structure back out of the DOM to reconstruct that would be slow and lossy. Maintaining a parallel in-memory tree lets React do cheap, interruptible, side-effect-free comparisons entirely in JS, and only touch the real (expensive) DOM once, in the commit phase, with a minimal mutation list.</p></div><div class="followup">Follow-up: What would break if React mutated `current` in place during render instead of building a separate WIP tree?</div></details>
+      <details class="qa"><summary>How does `completeWork` differ from `beginWork` in traversal direction, and why does React need both passes?</summary><div class="answer"><p>`beginWork` walks top-down (parent before child), calling components and reconciling children, effectively a depth-first descent. `completeWork` runs bottom-up as the traversal unwinds back toward the root, finalizing each fiber (e.g., creating/updating actual host instances for HostComponents, bubbling `subtreeFlags` and `childLanes` upward). The descent decides *what* changed per node top-down (since a parent's output determines its children's props), while the ascent is needed to aggregate child-level effect information into something the commit phase can use without re-walking the whole tree.</p></div><div class="followup">Follow-up: At which pass are actual host DOM nodes created for new elements?</div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment"><span class="level-tag">Beginner (30-60 min)</span><h4>Observe bailouts with console logs</h4>
+      <p>Build a parent component with a counter button and three child components wrapped in <code>memo</code>, each receiving a different kind of prop: a primitive, a stable object (created with <code>useMemo</code>), and a fresh inline object literal created every render.</p>
+      <ul><li>Log inside each child on every render.</li><li>Click the counter and record which children re-render.</li></ul>
+      <p><strong>Acceptance criteria:</strong> You can explain in your own words, per child, exactly why it re-rendered or bailed out.</p>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>Memo does a shallow (<code>Object.is</code> per-prop) comparison. A fresh object literal is never equal by reference across renders even if its contents are identical.</p></div></details>
+      <p><strong>Bonus:</strong> Add the React DevTools Profiler and visually confirm the flame graph matches your console logs.</p></div>
+
+      <div class="assignment"><span class="level-tag">Intermediate (2-4 hrs)</span><h4>Build a keyed vs. unkeyed list bug reproduction</h4>
+      <p>Build a list of 10 rows, each containing an uncontrolled text input (so it has local DOM state). Implement a "shuffle" and a "remove first item" button for two versions of the list: one keyed by array index, one keyed by a stable per-item ID.</p>
+      <ul><li>Type distinct text in each input before shuffling/removing.</li><li>Document which version "loses" the correct text-to-row association and why.</li></ul>
+      <p><strong>Acceptance criteria:</strong> A written explanation referencing fiber reuse/identity, not just "it looks buggy."</p>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>Uncontrolled inputs store their value in the DOM node itself, which is only preserved if React decides to reuse the same host fiber for that logical row.</p></div></details>
+      <p><strong>Bonus:</strong> Reproduce the same bug with CSS transition state instead of input text.</p></div>
+
+      <div class="assignment"><span class="level-tag">Advanced (1-2 days)</span><h4>Instrument a mental model of the Fiber tree</h4>
+      <p>Using React DevTools' "Profiler" + "Components" tabs (and optionally the open-source React source), build a small app with 4-5 levels of nesting and deliberately cause: a full subtree remount (type change), a bailout, and a prop-driven update that only touches one branch. For each case, write down what you'd expect `beginWork`/`completeWork`/commit to do, then verify against the Profiler's commit details (which fibers rendered, render duration per fiber).</p>
+      <ul><li>No full solution is provided — this is a research-and-verify exercise against real React behavior.</li></ul>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>The Profiler's flamegraph literally color-codes components that rendered during a commit; a bailed-out fiber won't appear as "rendered" even though its parent did.</p></div></details>
+      </div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet"><ul>
+        <li>Fiber = linked-list node (return/child/sibling) + unit of work, one per component instance.</li>
+        <li>Two trees always exist: current (on screen) and workInProgress (being built), linked via `alternate`.</li>
+        <li>Render phase: pure, interruptible, no DOM writes. Commit phase: synchronous, mutates DOM, runs layout effects.</li>
+        <li>Diffing is O(n), not full tree-edit-distance: same type -> reuse+diff; different type -> tear down+rebuild.</li>
+        <li>`key` gives list items stable identity across renders — critical for correct fiber reuse.</li>
+        <li>Bailout = React skips calling your component function when props/state/context unchanged and no pending lanes.</li>
+        <li>`subtreeFlags`/`childLanes` let commit and render skip whole subtrees with no pending work.</li>
+        <li>Virtual DOM's win is incremental/prioritizable rendering, not raw speed over direct DOM writes.</li>
+      </ul></div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://react.dev/learn/render-and-commit">react.dev — Render and Commit</a></li>
+        <li><a href="https://github.com/acdlite/react-fiber-architecture">Fiber Architecture (Andrew Clark's notes)</a></li>
+        <li><a href="https://react.dev/reference/react/memo">react.dev — memo reference</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="index.html"><span class="dir">← Previous</span>Topic Overview</a>
+        <a class="next" href="02-hooks-deep-dive.html"><span class="dir">Next →</span>Hooks Deep Dive</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · React &amp; Next.js Advanced</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-jsx.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-typescript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-tsx.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "03-react-nextjs-advanced", chapterKey: "01-react-internals" });</script>
+</body>
+</html>

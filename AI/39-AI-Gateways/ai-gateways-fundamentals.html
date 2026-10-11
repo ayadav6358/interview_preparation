@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Gateways Fundamentals</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <input class="searchbox" placeholder="Search topics..." />
+    <a href="../index.html">← Home</a>
+    <h3>39-AI-Gateways</h3>
+    <a href="ai-gateways-fundamentals.html">AI Gateways Fundamentals</a>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumbs"><a href="../index.html">Home</a> / 39-AI-Gateways</div>
+      <button class="theme-toggle" onclick="toggleTheme()">🌓 Theme</button>
+    </div>
+    <h1>AI Gateways: LiteLLM, Portkey, OpenRouter</h1>
+    <span class="tag good">Stable</span><span class="tag">Last verified: 2026-10-06</span>
+
+    <div class="toc">
+      <b>On this page</b>
+      <a href="#what">1. What is this?</a>
+      <a href="#whyexist">2. Why does it exist?</a>
+      <a href="#whyimportant">3. Why is it important?</a>
+      <a href="#whereused">4. Where is it used?</a>
+      <a href="#prereq">5. Prerequisites</a>
+      <a href="#core">6. Core concepts</a>
+      <a href="#terms">7. Terminology</a>
+      <a href="#arch">8. Architecture</a>
+      <a href="#internal">9. How it works internally</a>
+      <a href="#steps">10. Step-by-step: adopting a gateway</a>
+      <a href="#simple">11. Simple example</a>
+      <a href="#real">12. Real-world example</a>
+      <a href="#code">13. Code example</a>
+      <a href="#advanced">14. Advanced example (routing + fallback)</a>
+      <a href="#mistakes">15. Common mistakes</a>
+      <a href="#best">16. Best practices</a>
+      <a href="#production">17. Production considerations</a>
+      <a href="#security">18. Security considerations</a>
+      <a href="#performance">19. Performance considerations</a>
+      <a href="#cost">20. Cost considerations</a>
+      <a href="#debug">21. Debugging/troubleshooting</a>
+      <a href="#related">22. Related concepts</a>
+      <a href="#comparison">23. Comparison table</a>
+      <a href="#exercise">24. Mini practical exercise</a>
+      <a href="#project">25. Practical project</a>
+      <a href="#projectarch">26. Project architecture</a>
+      <a href="#interview-b">27. Interview Questions — Beginner</a>
+      <a href="#interview-i">28. Interview Questions — Intermediate</a>
+      <a href="#interview-a">29. Interview Questions — Advanced</a>
+      <a href="#interview-s">30. Interview Questions — Senior/Architect</a>
+      <a href="#interview-sc">31. Scenario-Based Questions</a>
+      <a href="#revision">32. Quick revision notes</a>
+      <a href="#cheat">33. Cheat sheet</a>
+      <a href="#further">34. Further topics to learn</a>
+    </div>
+
+    <h2 id="what">1. What is this?</h2>
+    <p>An AI gateway sits between your application and multiple LLM providers, offering a unified API, routing, fallback, load balancing, cost control, and observability — tools like LiteLLM, Portkey, and OpenRouter are the most widely used implementations.</p>
+
+    <h2 id="whyexist">2. Why does it exist?</h2>
+    <p>Building your own provider abstraction layer (07-LLM-APIs-and-SDKs) solves part of the problem, but reimplementing routing, fallback, rate limiting, and cost tracking for every project is wasteful — AI gateways exist as the productized, reusable version of that abstraction layer.</p>
+
+    <h2 id="whyimportant">3. Why is it important?</h2>
+    <p>Gateways have become the standard infrastructure layer for any serious multi-provider or cost-conscious LLM deployment — understanding when to adopt one (versus building custom) is a practical architecture decision many teams face.</p>
+
+    <h2 id="whereused">4. Where is it used?</h2>
+    <p>Multi-provider production systems, cost-sensitive high-volume applications, teams needing centralized observability/control across many internal AI features.</p>
+
+    <h2 id="prereq">5. Prerequisites</h2>
+    <p><a href="../07-LLM-APIs-and-SDKs/llm-apis-and-sdks.html">LLM APIs and SDKs</a>, <a href="../06-LLM-Providers/llm-providers-comparison.html">LLM Providers</a>.</p>
+
+    <h2 id="core">6. Core concepts</h2>
+    <ul>
+      <li><b>Unified API:</b> one consistent request/response schema regardless of underlying provider.</li>
+      <li><b>Routing:</b> directing requests to specific models/providers based on rules (cost, latency, task type).</li>
+      <li><b>Fallback:</b> automatically switching to a backup provider/model on failure.</li>
+      <li><b>Load balancing:</b> distributing requests across multiple API keys/providers to manage rate limits.</li>
+      <li><b>Cost control:</b> budgets, spend tracking, and alerts per team/project/user.</li>
+      <li><b>Observability:</b> built-in logging/tracing of all requests across providers in one place.</li>
+    </ul>
+
+    <h2 id="terms">7. Terminology</h2>
+    <table>
+      <tr><th>Term</th><th>Meaning</th></tr>
+      <tr><td>LiteLLM</td><td>An open-source library/proxy providing a unified API across 100+ LLM providers.</td></tr>
+      <tr><td>Portkey</td><td>A managed AI gateway platform with routing, caching, and observability features.</td></tr>
+      <tr><td>OpenRouter</td><td>A unified API/marketplace for accessing many different models through one endpoint.</td></tr>
+      <tr><td>Virtual key</td><td>A gateway-issued API key mapping to underlying provider credentials, enabling centralized control without exposing raw provider keys.</td></tr>
+    </table>
+
+    <h2 id="arch">8. Architecture</h2>
+    <pre><code>Application
+ → AI Gateway (unified API)
+      → Routing rules (cost/latency/task-based)
+      → Fallback chain
+      → Rate limit / load balancing across keys
+ → OpenAI / Anthropic / Gemini / self-hosted models
+ → Centralized logging, cost tracking, observability</code></pre>
+
+    <h2 id="internal">9. How it works internally</h2>
+    <p>Gateways implement a translation layer converting their unified request format into each specific provider's actual API schema, then normalizing the response back into a consistent format — this is the same provider-abstraction pattern covered in 07-LLM-APIs-and-SDKs, productized and extended with routing logic, centralized key management, and built-in observability so individual application teams don't each reimplement it.</p>
+
+    <h2 id="steps">10. Step-by-step: adopting a gateway</h2>
+    <ol>
+      <li>Choose a gateway (self-hosted LiteLLM, managed Portkey, or OpenRouter) based on control/ops preference.</li>
+      <li>Configure provider credentials centrally behind the gateway.</li>
+      <li>Define routing/fallback rules (e.g., primary model → fallback model on failure).</li>
+      <li>Point application code at the gateway's unified API instead of individual provider SDKs.</li>
+      <li>Set up cost budgets/alerts and review the gateway's observability dashboard.</li>
+    </ol>
+
+    <h2 id="simple">11. Simple example</h2>
+    <pre><code class="language-python">import litellm
+
+response = litellm.completion(
+    model="claude-sonnet-5",  # or "gpt-5", "gemini-pro", etc. — same call shape
+    messages=[{"role": "user", "content": "Explain AI gateways briefly."}],
+)
+print(response.choices[0].message.content)
+</code></pre>
+
+    <h2 id="real">12. Real-world example</h2>
+    <p>A company routes all internal AI feature requests through a self-hosted LiteLLM proxy, giving every team a consistent API while centrally enforcing per-team budgets, automatic fallback to a secondary provider during outages, and unified cost dashboards across dozens of internal AI features — without each team building this infrastructure themselves.</p>
+
+    <h2 id="code">13. Code example</h2>
+    <pre><code class="language-yaml"># LiteLLM proxy config.yaml
+model_list:
+  - model_name: primary-model
+    litellm_params:
+      model: claude-sonnet-5
+      api_key: os.environ/ANTHROPIC_API_KEY
+  - model_name: fallback-model
+    litellm_params:
+      model: gpt-5
+      api_key: os.environ/OPENAI_API_KEY
+
+router_settings:
+  fallbacks: [{"primary-model": ["fallback-model"]}]
+  num_retries: 2
+</code></pre>
+
+    <h2 id="advanced">14. Advanced example (routing + fallback)</h2>
+    <pre><code class="language-python">import litellm
+
+def route_by_complexity(prompt, complexity_score):
+    model = "fast-cheap-model" if complexity_score < 0.5 else "frontier-model"
+    try:
+        return litellm.completion(model=model, messages=[{"role": "user", "content": prompt}],
+                                    fallbacks=["fallback-model"])
+    except Exception as e:
+        log_gateway_error(e)
+        raise
+</code></pre>
+
+    <h2 id="mistakes">15. Common mistakes</h2>
+    <ul>
+      <li>Building a custom provider abstraction from scratch when a mature gateway would save significant engineering time.</li>
+      <li>Not configuring fallback chains, losing the main benefit of gateway adoption during outages.</li>
+      <li>Ignoring the gateway's own latency overhead in latency-sensitive applications.</li>
+      <li>Exposing raw provider API keys to application code instead of using gateway-managed virtual keys.</li>
+    </ul>
+
+    <h2 id="best">16. Best practices</h2>
+    <ul>
+      <li>Use virtual keys issued by the gateway rather than distributing raw provider credentials.</li>
+      <li>Configure and test fallback chains explicitly, not just assume they work.</li>
+      <li>Set up cost budgets/alerts per team/project from day one.</li>
+      <li>Monitor the gateway's own added latency to ensure it's not a bottleneck.</li>
+    </ul>
+
+    <h2 id="production">17. Production considerations</h2>
+    <p>A self-hosted gateway (LiteLLM proxy) becomes a critical piece of infrastructure itself — apply the same reliability engineering (redundancy, monitoring, scaling) as any other production service; a managed gateway (Portkey) shifts this operational burden to the vendor.</p>
+
+    <h2 id="security">18. Security considerations</h2>
+    <p>Centralizing provider credentials behind a gateway reduces credential sprawl (a security benefit) but makes the gateway itself a high-value target — secure it with the same rigor as any system holding sensitive API keys.</p>
+
+    <h2 id="performance">19. Performance considerations</h2>
+    <p>A gateway adds a network hop and processing overhead — generally small relative to LLM call latency, but measure it explicitly for latency-sensitive applications rather than assuming it's negligible.</p>
+
+    <h2 id="cost">20. Cost considerations</h2>
+    <p>Self-hosted gateways (LiteLLM) have no additional per-request fee beyond your own infrastructure cost; managed gateways (Portkey) typically charge based on usage — factor this into overall cost alongside the underlying LLM provider costs.</p>
+
+    <h2 id="debug">21. Debugging/troubleshooting</h2>
+    <ul>
+      <li><b>Fallback isn't triggering on provider failure:</b> verify the fallback configuration and test it explicitly (e.g., by simulating a primary provider failure).</li>
+      <li><b>Unexpected added latency:</b> profile the gateway's own processing time separately from the underlying provider's latency.</li>
+      <li><b>Cost tracking doesn't match actual provider bills:</b> verify the gateway's pricing configuration is up to date with current provider rates.</li>
+    </ul>
+
+    <h2 id="related">22. Related concepts</h2>
+    <p><a href="../07-LLM-APIs-and-SDKs/llm-apis-and-sdks.html">LLM APIs and SDKs</a> · <a href="../40-Cost-Optimization/">Cost Optimization</a> · <a href="../36-LLM-Observability/llm-observability-fundamentals.html">LLM Observability</a></p>
+
+    <h2 id="comparison">23. Comparison table</h2>
+    <table>
+      <tr><th>Tool</th><th>Type</th><th>Notes</th></tr>
+      <tr><td>LiteLLM</td><td>Open-source, self-hosted or SDK</td><td>Broad provider support, flexible, no vendor fee</td></tr>
+      <tr><td>Portkey</td><td>Managed platform</td><td>Rich observability/caching features, managed ops</td></tr>
+      <tr><td>OpenRouter</td><td>Managed unified API/marketplace</td><td>Easy access to many models through one key, usage-based pricing</td></tr>
+    </table>
+
+    <h2 id="exercise">24. Mini practical exercise</h2>
+    <p>Configure LiteLLM with two models (primary + fallback) and simulate a primary failure (e.g., invalid API key) to verify the fallback actually triggers.</p>
+
+    <h2 id="project">25. Practical project</h2>
+    <p><b>Multi-Provider Gateway Setup:</b> set up a LiteLLM proxy routing between two providers based on task complexity, with cost tracking and a tested fallback chain, replacing a direct-SDK integration from an earlier project.</p>
+
+    <h2 id="projectarch">26. Project architecture</h2>
+    <pre><code>config.yaml (primary + fallback models, routing rules)
+ → litellm proxy server
+ → application code calls gateway's unified endpoint
+ → cost_dashboard (per-request logging, aggregated spend)
+ → test: simulate primary failure, verify fallback + logging</code></pre>
+
+    <h2 id="interview-b">27. Interview Questions — Beginner</h2>
+    <div class="qa"><b>Q1.</b> What is an AI gateway?<br><b>A.</b> A layer sitting between your application and multiple LLM providers, offering a unified API, routing, fallback, and observability.</div>
+    <div class="qa"><b>Q2.</b> Name three popular AI gateway tools.<br><b>A.</b> LiteLLM, Portkey, and OpenRouter.</div>
+    <div class="qa"><b>Q3.</b> What problem does an AI gateway solve?<br><b>A.</b> It avoids every application/team reimplementing provider abstraction, routing, fallback, and cost tracking individually.</div>
+    <div class="qa"><b>Q4.</b> What is a virtual key?<br><b>A.</b> A gateway-issued API key mapping to underlying provider credentials, enabling centralized control without exposing raw provider keys.</div>
+    <div class="qa"><b>Q5.</b> What does routing mean in the context of an AI gateway?<br><b>A.</b> Directing requests to specific models/providers based on rules like cost, latency, or task type.</div>
+    <div class="qa"><b>Q6.</b> What does fallback mean in this context?<br><b>A.</b> Automatically switching to a backup provider/model if the primary one fails.</div>
+    <div class="qa"><b>Q7.</b> Is LiteLLM self-hosted or a managed service?<br><b>A.</b> It can be used as a self-hosted proxy or as an SDK; it's open-source, unlike fully managed platforms.</div>
+    <div class="qa"><b>Q8.</b> Why would centralizing provider credentials behind a gateway be a security benefit?<br><b>A.</b> It reduces credential sprawl across many applications/teams, concentrating control in one managed location.</div>
+    <div class="qa"><b>Q9.</b> Does an AI gateway add any latency?<br><b>A.</b> Yes — a network hop and processing overhead, generally small but worth measuring explicitly.</div>
+    <div class="qa"><b>Q10.</b> What's a cost control feature a gateway might provide?<br><b>A.</b> Spend budgets, tracking, and alerts per team/project/user.</div>
+
+    <h2 id="interview-i">28. Interview Questions — Intermediate</h2>
+    <div class="qa"><b>Q1.</b> How does an AI gateway's translation layer work conceptually?<br><b>A.</b> It converts a unified request format into each specific provider's actual API schema, then normalizes the response back into a consistent format — the same provider-abstraction pattern an individual team might build themselves, productized and reused across many consumers.</div>
+    <div class="qa"><b>Q2.</b> When would building a custom provider abstraction be preferable to adopting an existing gateway?<br><b>A.</b> For very simple, single-provider applications where the overhead of adopting and operating a gateway isn't justified, or when highly specific custom routing logic isn't well supported by available gateway tools — most teams beyond a certain scale/complexity benefit from adopting rather than building, but very small projects may not need either.</div>
+    <div class="qa"><b>Q3.</b> Why should fallback configuration be explicitly tested rather than assumed to work?<br><b>A.</b> Misconfigured fallback chains (wrong model names, missing credentials for the fallback) can silently fail exactly when needed most (during an actual outage) — explicit testing (simulating failures) verifies the safety net actually functions before you depend on it in a real incident.</div>
+    <div class="qa"><b>Q4.</b> What's a practical reason a self-hosted gateway like LiteLLM might be preferred over a managed one for a security-conscious enterprise?<br><b>A.</b> Self-hosting keeps all request/response data and credential management within the company's own infrastructure boundary, avoiding sending potentially sensitive request content through a third-party managed service — relevant for compliance-sensitive use cases.</div>
+    <div class="qa"><b>Q5.</b> How would you use gateway-level routing to implement the cost-optimization "model routing" pattern discussed elsewhere in this knowledge base?<br><b>A.</b> Configure routing rules in the gateway that direct requests to a fast/cheap model for simple/low-complexity tasks and a frontier model for complex tasks, centralizing this routing logic at the gateway layer rather than reimplementing it in every individual application.</div>
+
+    <h2 id="interview-a">29. Interview Questions — Advanced</h2>
+    <div class="qa"><b>Q1.</b> How would you design a gateway deployment architecture that itself doesn't become a single point of failure for a company's entire AI infrastructure?<br><b>A.</b> Deploy multiple redundant gateway instances behind a load balancer (if self-hosted), ensure the gateway's own failure mode degrades gracefully (e.g., falls back to direct provider calls if the gateway itself is unreachable, for critical paths), and monitor gateway health/latency as a first-class production dependency with its own alerting, just like any other critical infrastructure component.</div>
+    <div class="qa"><b>Q2.</b> What's a subtle risk of relying entirely on gateway-level cost tracking without independent verification against actual provider billing?<br><b>A.</b> Gateway pricing configuration can drift out of sync with actual, potentially changing, provider rates, causing the gateway's reported cost to diverge from real billed cost — periodically reconcile gateway-reported spend against actual provider invoices to catch this drift.</div>
+
+    <h2 id="interview-s">30. Interview Questions — Senior/Architect</h2>
+    <div class="qa"><b>Q1.</b> Design a company-wide AI gateway strategy for an organization with dozens of teams building independent AI features, balancing centralized control with team autonomy.<br><b>A.</b> Deploy a centrally-managed, redundant self-hosted gateway (or adopt a managed platform) as the mandatory entry point for all production LLM calls; issue scoped virtual keys per team with individual budgets/rate limits; centralize fallback and routing policy defaults while allowing teams to override for specific needs; provide centralized observability dashboards per team and company-wide; and establish a change-management process for updating shared routing/fallback configuration that could affect multiple teams simultaneously.</div>
+
+    <h2 id="interview-sc">31. Scenario-Based Questions</h2>
+    <div class="qa"><b>Scenario 1.</b> During a provider outage, your fallback didn't trigger as expected, causing a production incident. What do you investigate?<br><b>A.</b> Review the fallback configuration for errors (wrong model name, missing/expired fallback credentials), check gateway logs from the incident window to see what actually happened when the primary failed, and add this specific scenario to your fallback testing suite to prevent recurrence.</div>
+    <div class="qa"><b>Scenario 2.</b> Your gateway's reported monthly AI spend doesn't match the actual provider invoices, with provider invoices showing higher costs. What do you investigate?<br><b>A.</b> Check if the gateway's pricing configuration is outdated relative to current provider rates, verify all actual usage is flowing through the gateway (uninstrumented direct calls bypassing it wouldn't be tracked), and reconcile discrepancies by auditing a sample of individual requests against both the gateway log and the provider's own billing detail.</div>
+
+    <h2 id="revision">32. Quick revision notes</h2>
+    <ul>
+      <li>AI gateway = unified API + routing + fallback + load balancing + cost control + observability.</li>
+      <li>LiteLLM (open-source/self-hosted), Portkey (managed), OpenRouter (managed marketplace).</li>
+      <li>Use virtual keys, not raw provider credentials, in application code.</li>
+      <li>Always test fallback explicitly; don't assume it works.</li>
+    </ul>
+
+    <h2 id="cheat">33. Cheat sheet</h2>
+    <div class="callout">AI gateway = unified API + routing + fallback + cost tracking + observability, centralized. LiteLLM (open/self-hosted), Portkey (managed), OpenRouter (marketplace). Use virtual keys; test fallback explicitly; monitor gateway's own latency.</div>
+
+    <h2 id="further">34. Further topics to learn</h2>
+    <p><a href="../40-Cost-Optimization/">Cost Optimization</a> → <a href="../41-AI-Performance-and-Scaling/">Performance and Scaling</a></p>
+
+    <div class="prevnext">
+      <a href="../38-AI-Security/ai-security-fundamentals.html">← AI Security</a>
+      <a href="../40-Cost-Optimization/cost-optimization-fundamentals.html">Next: Cost Optimization →</a>
+    </div>
+  </main>
+</div>
+<script src="../assets/app.js"></script>
+</body>
+</html>

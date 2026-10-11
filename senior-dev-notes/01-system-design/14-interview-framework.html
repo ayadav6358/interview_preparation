@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Interview Framework — System Design — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">System Design</a><span class="sep">›</span>Interview Framework</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>Interview Framework</h1>
+      <p class="meta-line"><span>⏱ 1.5 hrs</span><span>📍 Chapter 14 of 14</span></p>
+      <p><strong>One-line summary:</strong> A repeatable 8-step framework for a 35-45 minute system design interview, the back-of-envelope numbers you should have memorized cold, and how to handle pushback gracefully — this is the chapter that turns everything else in this topic into an actual interview performance.</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>Knowing CAP theorem, caching strategies, and seven HLD case studies cold doesn't automatically translate into a strong interview performance — the single biggest way strong engineers fail system design interviews is poor time management and structure, not lack of knowledge: spending 20 minutes on requirements and then rushing the architecture, or diving straight into a detailed database schema before establishing what the system even needs to do. Interviewers are explicitly trained to watch for a structured approach because it's a proxy for how you'll behave in a real design review — can you drive a conversation, prioritize what matters, and adapt when someone pushes back on an assumption. This chapter is the thing you rehearse until it's automatic, so your cognitive effort in the actual interview goes entirely into content, not structure.</p>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>This chapter assumes you've worked through <a href="01-fundamentals.html">Chapter 1: Fundamentals</a> (the vocabulary you'll use throughout) and ideally <a href="13-hld-case-studies.html">Chapter 13: HLD Case Studies</a> (the worked examples you'll draw on for concrete patterns). This is the capstone chapter — it's about performance and structure, not new technical content.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="step1-clarify">Step 1: Clarify requirements (3-5 min)</h3>
+      <p>Never start designing before you know what you're designing. Ask targeted questions, don't just repeat "what are the requirements" vaguely: who are the users, what's the core use case (pick the 1-2 flows that matter most — you cannot design everything), what's explicitly out of scope ("should I worry about admin/moderation tooling, or just the core user flow?"), and what scale are we targeting (this determines nearly every subsequent decision — a 10K-user system and a 500M-user system have almost nothing in common architecturally). A senior candidate narrows scope proactively ("I'll focus on the post-creation and feed-read paths, and treat moderation as out of scope unless you want me to cover it") rather than waiting to be told.</p>
+
+      <h3 id="step2-nfr">Step 2: Functional vs non-functional requirements (2-3 min)</h3>
+      <p>Explicitly separate what the system does (functional: "users can post, follow, like") from the quality attributes it must have (non-functional: latency targets, availability target, consistency requirements, read:write ratio). This separation matters because non-functional requirements are what actually drive architecture — two systems with identical functional requirements (both are "a feed") can have completely different designs depending on whether staleness is acceptable (social feed: yes) or not (a trading order book: no).</p>
+
+      <h3 id="step3-capacity">Step 3: Capacity estimation (5 min)</h3>
+      <p>Compute QPS (average and peak), storage growth, and bandwidth from the DAU/MAU and per-user-action numbers given or assumed. This isn't about being precise to three significant figures — it's about getting the order of magnitude right, because the order of magnitude determines whether you need sharding, caching, CDN, or whether a single well-provisioned server and a managed database would be completely fine. State your assumptions out loud as you go; a wrong assumption stated explicitly is far better than silent, unstated math.</p>
+
+      <h3 id="step4-api">Step 4: API design (3-5 min)</h3>
+      <p>Sketch the core endpoints/contracts (REST, gRPC, or WebSocket as appropriate) for the 1-2 flows you scoped in step 1. This forces you to pin down exactly what data moves between client and server, which surfaces data model questions early rather than discovering them while drawing boxes later. Keep it to the essential endpoints — you don't need full CRUD for every entity, just what the core flow requires.</p>
+
+      <h3 id="step5-hld">Step 5: High-level architecture (8-10 min)</h3>
+      <p>Draw the component diagram: client, load balancer, API/application tier, cache, database, queue, any specialized services (search index, geospatial index, notification fanout). Narrate as you draw — explain each box's responsibility and why it's a separate component rather than folded into another. This is the longest single step and the one most candidates rush into without steps 1-4 first — resist that; the architecture should visibly follow from the requirements and numbers you already established, not be designed from pattern-matching to "systems I've seen before."</p>
+
+      <h3 id="step6-deepdive">Step 6: Deep dive on 1-2 components (10-12 min)</h3>
+      <p>The interviewer will usually steer you here, or you should proactively offer: "I'd like to go deeper on the fanout strategy / the data model / the caching layer — which would be most useful?" This is where the real signal is extracted — anyone can draw a load balancer box, but explaining precisely how your cache invalidates, or how you handle the celebrity-fanout problem, or how your geospatial index shards, is what separates candidates. Always ground the deep dive in a specific tradeoff with named alternatives, exactly like the case studies in <a href="13-hld-case-studies.html">Chapter 13</a>.</p>
+
+      <h3 id="step7-bottlenecks">Step 7: Identify bottlenecks and tradeoffs (5 min)</h3>
+      <p>Proactively name the weakest point in your own design before the interviewer has to ask — a single database instance that will eventually need sharding, a hot partition/hot key risk, a component with no redundancy. This demonstrates the self-critical awareness that's hard to fake, and it's a much stronger signal than waiting passively for the interviewer to find the flaw themselves.</p>
+
+      <h3 id="step8-wrapup">Step 8: Wrap up (2-3 min)</h3>
+      <p>Summarize the design in 2-3 sentences, restate the key tradeoffs you made and why, and mention what you'd want to validate or revisit with more time/data (monitoring, a real load test, revisiting an assumption from step 1 if it turns out wrong). This closes the loop and signals you can synthesize, not just enumerate.</p>
+
+      <h3 id="estimation-numbers">Back-of-envelope numbers to have memorized</h3>
+      <table>
+        <tr><th>Latency reference</th><th>Approx value</th></tr>
+        <tr><td>L1 cache reference</td><td>~1 ns</td></tr>
+        <tr><td>Main memory (RAM) reference</td><td>~100 ns</td></tr>
+        <tr><td>SSD random read</td><td>~100-150 μs</td></tr>
+        <tr><td>Round trip within same datacenter</td><td>~0.5 ms</td></tr>
+        <tr><td>Read 1MB sequentially from SSD</td><td>~1 ms</td></tr>
+        <tr><td>Round trip, cross-country (e.g., US coast to coast)</td><td>~40-60 ms</td></tr>
+        <tr><td>Round trip, intercontinental</td><td>~150 ms</td></tr>
+        <tr><td>Disk seek (spinning HDD)</td><td>~10 ms</td></tr>
+      </table>
+      <p>These are adapted from Jeff Dean's famous "Latency Numbers Every Programmer Should Know" — the exact numbers matter less than the <em>relative</em> magnitude: memory is ~100x faster than SSD, SSD is ~100x faster than a cross-datacenter round trip, and a cross-continent round trip dwarfs almost everything else in your stack. This is why CDN edge caching (avoiding the intercontinental round trip entirely) often matters more than micro-optimizing a database query.</p>
+      <p><strong>QPS/storage shortcuts:</strong> seconds in a day ≈ 86,400 (round to 100K for quick mental math — "divide daily total by 100,000" is close enough for order-of-magnitude estimation). A reasonable default peak:average ratio for consumer-facing traffic is 2-3x if you have no better information, higher (5-10x+) for anything with a specific triggering event (flash sales, live events). 1 million requests/day ≈ ~12 QPS average — a genuinely useful anchor number to memorize since so many estimation questions start from a daily or monthly active user count.</p>
+
+      <h3 id="red-flags">Common interviewer red flags to avoid</h3>
+      <p><strong>Jumping to a solution before clarifying requirements:</strong> immediately drawing "I'll use microservices with Kafka and Redis" before asking what the system needs to do is the single most common failure mode — it signals pattern-matching over reasoning. <strong>Ignoring non-functional requirements:</strong> designing a chat system without ever discussing latency targets or consistency needs for message ordering. <strong>Not discussing tradeoffs:</strong> presenting your design as the only correct answer rather than "I chose X over Y because of Z constraint — if the constraint were different, I'd reconsider." <strong>Over-engineering for unstated scale:</strong> introducing Kafka, Cassandra, and 12 microservices for a system the interviewer scoped at 10K users — matching your design's complexity to the actual stated scale is itself a signal of judgment. <strong>Silence during capacity estimation:</strong> doing math in your head instead of narrating it — the interviewer needs to hear your reasoning process, not just a final number.</p>
+
+      <h3 id="handling-pushback">Handling interviewer pushback and follow-ups gracefully</h3>
+      <p>Pushback is not a sign you're failing — it's usually the interviewer deliberately probing the load-bearing part of your design, and how you respond is itself being evaluated. The wrong response is defensiveness (re-justifying the original choice without engaging the new information) or an immediate total reversal (abandoning your design without a clear new reason). The right response: acknowledge the specific concern, reason about it out loud using the same tradeoff vocabulary, and either defend your choice with a sharper justification or revise it — both are fine outcomes as long as the reasoning is visible. "That's a good point — if write volume is actually 10x what I assumed, my single-database design would become a bottleneck; I'd shard by user_id at that point, here's roughly how" is a strong answer because it shows you can adapt live rather than treating your first answer as fixed.</p>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>The framework works because it mirrors how real design reviews actually proceed at a company: nobody writes a detailed architecture doc before agreeing on requirements and rough scale, and nobody ships a design without someone (a staff engineer, an architecture review board) poking at the weakest assumption. The interview is a compressed, time-boxed simulation of that process — the steps aren't arbitrary interview theater, they're the actual sequence of decisions a real system design requires, just compressed from weeks into 40 minutes. This is also why rehearsing the framework pays off: in a real design review you'd naturally pace yourself over days; in an interview you must consciously allocate minutes per step or you'll run out of time mid-deep-dive, which is the most common way a technically strong candidate still gets a weak score.</p>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+flowchart TD
+    A["1. Clarify requirements<br/>(3-5 min)"] --> B["2. Functional vs<br/>Non-functional (2-3 min)"]
+    B --> C["3. Capacity estimation<br/>(5 min)"]
+    C --> D["4. API design<br/>(3-5 min)"]
+    D --> E["5. High-level architecture<br/>(8-10 min)"]
+    E --> F["6. Deep dive on<br/>1-2 components (10-12 min)"]
+    F --> G["7. Identify bottlenecks<br/>and tradeoffs (5 min)"]
+    G --> H["8. Wrap up<br/>(2-3 min)"]
+    H -. "pushback can loop<br/>back to any step" .-> E
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-typescript">// The exact kind of executable back-of-envelope math you should be able to produce
+// out loud within the first 5 minutes of any system design interview.
+function estimate(dau: number, actionsPerUserPerDay: number, avgPayloadBytes: number, peakMultiplier = 3) {
+  const SECONDS_PER_DAY = 86_400;
+  const totalActionsPerDay = dau * actionsPerUserPerDay;
+  const avgQps = totalActionsPerDay / SECONDS_PER_DAY;
+  const peakQps = avgQps * peakMultiplier;
+  const dailyStorageGB = (totalActionsPerDay * avgPayloadBytes) / 1024 ** 3;
+  const yearlyStorageTB = (dailyStorageGB * 365) / 1024;
+
+  return {
+    avgQps: avgQps.toFixed(1),
+    peakQps: peakQps.toFixed(1),
+    dailyStorageGB: dailyStorageGB.toFixed(2),
+    yearlyStorageTB: yearlyStorageTB.toFixed(2),
+  };
+}
+
+// Example: "design a ride booking app" — 20M DAU, 0.3 rides/user/day, 2KB event payload/ride
+console.log(estimate(20_000_000, 0.3, 2048, 4));
+// => { avgQps: '69.4', peakQps: '277.8', dailyStorageGB: '11.18', yearlyStorageTB: '3.98' }
+// Takeaway to say out loud: "~280 QPS at peak is comfortably handled by a modest fleet behind
+// a load balancer with read replicas — the real complexity here is the geospatial matching logic,
+// not raw throughput, so I'll spend most of my deep-dive time there."
+</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4><p>Think of this framework itself as something that gets load-tested: a candidate spent 18 of their 40 minutes on requirements and API design for a "design Twitter" prompt, leaving only 10 minutes for architecture and zero time for a deep dive — the equivalent of an engineering team that spends three sprints on a design doc and ships with no time left to actually validate the riskiest assumption before launch. The fix in both cases is the same discipline: timebox each phase explicitly (literally glance at a clock or tell the interviewer "I want to spend about 5 minutes here"), and if you notice a phase running long, consciously cut scope rather than cutting the deep-dive phase short — the deep dive is where most of your signal is generated, so protecting those final 10-12 minutes is the single highest-leverage time management move you can make in the interview.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Treating capacity estimation as a one-time step whose numbers are never referenced again. Strong candidates come back to their own numbers during the deep dive ("since we estimated ~280 QPS peak, a single primary with 2 read replicas comfortably covers this without needing to shard yet") — this is what makes the estimation step feel load-bearing rather than ceremonial.</p></div>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Presenting only one design with no alternatives considered. Even a brief "I could also have done fanout-on-read here, but given the follower-count skew we estimated, fanout-on-write with a celebrity exception is the better fit" signals far more seniority than a single unchallenged design.</p></div>
+      <ul>
+        <li>Narrate your thinking continuously — silence during an interview reads as uncertainty even when you're reasoning correctly in your head.</li>
+        <li>Proactively scope down ("I'll focus on X and treat Y as out of scope unless you want me to cover it") rather than waiting to be told what to skip.</li>
+        <li>Keep a mental clock — if step 5 is eating into step 6's time, say so out loud and move forward rather than silently running out of time.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs: Framework Pacing by Interview Length</h2>
+      <table>
+        <tr><th>Interview length</th><th>Adjust</th><th>Avoid</th><th>Alternative</th></tr>
+        <tr><td>25-30 min (phone screen)</td><td>Compress steps 1-4 into ~8 min combined; one deep dive only</td><td>Full 8-step pacing as if you had 45 min</td><td>Ask interviewer which step they want most depth on, early</td></tr>
+        <tr><td>45 min (standard onsite/virtual)</td><td>Follow the 8-step timing in this chapter directly</td><td>Spending &gt;12 min on high-level architecture alone</td><td>N/A — this is the default case</td></tr>
+        <tr><td>60+ min (staff/senior loop)</td><td>Expect 2 deep dives and a deliberate "now double the scale" curveball</td><td>Treating it like a 45-min interview and running out of content</td><td>Prepare a second-order follow-up for your own design in advance</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic"><h4>Basic</h4>
+        <details class="qa"><summary>What are the 8 steps of the framework, in order?</summary><div class="answer"><p>Clarify requirements, functional vs non-functional requirements, capacity estimation, API design, high-level architecture, deep dive on 1-2 components, identify bottlenecks/tradeoffs, wrap up.</p></div></details>
+        <details class="qa"><summary>Why is clarifying requirements the first step rather than jumping into architecture?</summary><div class="answer"><p>Architecture should be a consequence of requirements and scale, not a pattern-matched guess; skipping clarification risks designing for the wrong scope or scale entirely, which wastes the rest of the interview on a mismatched design.</p></div></details>
+        <details class="qa"><summary>Roughly how many QPS does 1 million requests/day correspond to?</summary><div class="answer"><p>About 12 QPS average (1,000,000 / 86,400 ≈ 11.6) — a useful anchor number since many estimation questions start from a daily request/user count.</p></div></details>
+        <details class="qa"><summary>Why does a cross-continent network round trip matter so much more than most in-process optimizations?</summary><div class="answer"><p>It's roughly 150ms versus sub-millisecond for in-datacenter operations — several orders of magnitude larger, so eliminating or caching around a cross-continent call (e.g., via a CDN) typically yields far more latency improvement than micro-optimizing code that runs in microseconds.</p></div></details>
+        <details class="qa"><summary>What's the difference between functional and non-functional requirements, and why does the order matter in the framework?</summary><div class="answer"><p>Functional requirements describe what the system does; non-functional requirements describe required qualities (latency, availability, consistency). They're separated and come right after initial scoping because non-functional requirements, more than functional ones, determine the actual architecture.</p></div></details>
+      </div>
+      <div class="qa-level medium"><h4>Medium</h4>
+        <details class="qa"><summary>An interviewer pushes back with "what if traffic is 10x what you estimated?" mid-way through your high-level design. How should you respond?</summary><div class="answer"><p>Acknowledge the new constraint, reason about which part of your current design breaks first under 10x load (usually whichever single-instance component you have), and propose the specific change (sharding strategy, added cache layer, etc.) rather than either dismissing the question or abandoning your whole design — the goal is visible, specific adaptation.</p></div></details>
+        <details class="qa"><summary>How would you adapt this framework for a 25-minute phone screen versus a 45-minute onsite round?</summary><div class="answer"><p>Compress the early clarification/NFR/estimation steps into roughly a third of the time combined, do a lighter-weight high-level architecture pass, and commit to only one deep dive rather than potentially two — explicitly tell the interviewer you're compressing due to time, which itself signals time-management awareness.</p></div></details>
+        <details class="qa"><summary>Why is "I'll focus on X and treat Y as out of scope" a stronger move than waiting for the interviewer to scope the problem for you?</summary><div class="answer"><p>It demonstrates the same prioritization judgment a senior engineer must exercise on real projects with limited time — proactively scoping shows you can identify what matters most without needing to be told, which is exactly the skill the interview is trying to assess.</p></div></details>
+        <details class="qa"><summary>What's wrong with presenting a design as "the" correct answer rather than one of several valid tradeoffs?</summary><div class="answer"><p>It suggests you haven't considered alternatives or their tradeoffs, which is a weaker signal of engineering judgment than being able to say why you chose this approach over at least one plausible alternative, tied to the specific constraints given.</p></div></details>
+      </div>
+      <div class="qa-level advanced"><h4>Advanced</h4>
+        <details class="qa"><summary>You realize 15 minutes into a 45-minute interview that your initial scope was wrong (the interviewer actually cares most about a component you planned to skip). How do you recover without losing the remaining time?</summary><div class="answer"><p>Explicitly name the realization out loud, quickly re-scope ("given that, let me shift focus to X and move faster through the remaining high-level architecture"), and reallocate the remaining time rather than trying to cover both the original and corrected scope fully — a visible, decisive re-scoping reads as strong judgment, while silently trying to cram everything in usually produces a worse outcome on both fronts.</p></div></details>
+        <details class="qa"><summary>How should the deep-dive step differ when the interviewer explicitly tells you which component to go deeper on, versus when they leave it open-ended?</summary><div class="answer"><p>When told explicitly, go as deep as time allows on exactly that component, since that's a direct signal of what they're evaluating. When open-ended, proactively choose the component with the most interesting tradeoff relative to the stated scale/requirements (not necessarily the one you personally find most comfortable) — picking the component that best demonstrates judgment under the stated constraints is a stronger choice than defaulting to a familiar topic.</p></div></details>
+        <details class="qa"><summary>Design a self-critique you'd give at the end of an interview for a system you know has a significant unaddressed weakness you didn't have time to cover.</summary><div class="answer"><p>Name the weakness explicitly and specifically rather than hoping it goes unnoticed ("given more time I'd want to address the single point of failure in the matching service — I'd look at an active-active setup with consistent hashing for session affinity"), since proactively surfacing a known gap is scored far better than having the interviewer find it and ask why you didn't mention it.</p></div></details>
+        <details class="qa"><summary>How do staff-level system design interviews typically differ in what they probe for, beyond just "harder" versions of the same 8 steps?</summary><div class="answer"><p>Staff-level loops more often probe organizational/operational dimensions beyond pure technical architecture: migration strategy from an existing system (not just greenfield design), team ownership boundaries aligning with service boundaries, cost tradeoffs stated in real terms, and how you'd roll out a risky change safely (feature flags, canary deploys, gradual migration) — the framework's 8 steps still apply, but step 7 (bottlenecks/tradeoffs) and step 8 (wrap-up) carry more weight and more follow-up depth.</p></div></details>
+        <details class="qa"><summary>Why might memorizing exact latency numbers (e.g., "SSD read is 150 microseconds") matter less than understanding their relative ordering?</summary><div class="answer"><p>Hardware numbers shift over time and vary by specific device/network, so interviewers care far more about whether you understand the relative magnitude gaps (memory &lt;&lt; SSD &lt;&lt; same-DC network &lt;&lt; cross-region network) that drive architectural decisions like "cache aggressively" or "use a CDN," than whether you can recite a number to the correct order of microseconds.</p></div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment"><span class="level-tag">Beginner (30-60 min)</span><h4>Timed capacity-estimation drill</h4><p>Pick any system from Chapter 13's case studies and, with a timer set to 5 minutes, perform the full capacity estimation (QPS average/peak, storage) out loud (record yourself or explain to someone else) without looking at the chapter's numbers first.</p><ul><li>Compare your numbers to the chapter's worked example afterward.</li><li>Note where you ran out of time or got stuck, and why.</li></ul><p><strong>Acceptance criteria:</strong> A completed estimation within the 5-minute timebox, plus a short written reflection on what slowed you down.</p><details class="qa"><summary>Hints</summary><div class="answer"><p>Use the estimate() function pattern from this chapter's Code Examples as your mental template: DAU × actions/day → total actions → ÷86,400 for average QPS → × peak multiplier.</p></div></details><p><strong>Bonus:</strong> Repeat for a second case study and see if your speed improves.</p></div>
+      <div class="assignment"><span class="level-tag">Intermediate (2-4 hrs)</span><h4>Full mock interview, timed and recorded</h4><p>Run a complete 40-minute mock system design interview (with a peer, mentor, or by recording yourself narrating alone) on a prompt not covered in Chapter 13 (e.g., "design a parking reservation system" or "design a video streaming service's view-count counter"), following all 8 steps with a visible timer.</p><ul><li>Track actual time spent per step against the chapter's suggested allocation.</li><li>Afterward, identify the single step where you most deviated from the suggested timing and why.</li></ul><p><strong>Acceptance criteria:</strong> A completed run-through covering all 8 steps with timing data recorded, plus a written retrospective identifying your biggest pacing gap.</p><details class="qa"><summary>Hints</summary><div class="answer"><p>Most candidates on their first timed run overspend on high-level architecture (step 5) and underspend on the deep dive (step 6) — if that happens to you, it's the single most common pattern, not a unique failure.</p></div></details><p><strong>Bonus:</strong> Have a peer deliberately inject pushback mid-interview (e.g., "what if this needs to work offline?") and practice the graceful-adaptation response from this chapter.</p></div>
+      <div class="assignment"><span class="level-tag">Advanced (1-2 days)</span><h4>Build your own pushback playbook</h4><p>Write a personal reference document (not for submission here, for your own prep) listing the 10 most likely pushback questions across the 7 case studies in Chapter 13 (e.g., "what if this needs to scale 10x," "what if this component becomes a bottleneck," "how would you handle a regional outage") and draft your graceful-adaptation response for each, following this chapter's pattern (acknowledge, reason live, defend-or-revise with visible logic).</p><ul><li>For at least 3 of them, write both a "defend the original choice" and a "revise the design" version, and justify which one you'd actually give depending on what new information the pushback contains.</li></ul><p><strong>Acceptance criteria:</strong> This is a self-prep exercise with hints only — no single correct answer, but your playbook should demonstrate the acknowledge-reason-adapt pattern consistently across all 10 entries, not just assert a conclusion.</p><details class="qa"><summary>Hints</summary><div class="answer"><p>The most valuable playbook entries are ones where the "right" answer genuinely depends on specifics the interviewer hasn't given you yet — practice asking a clarifying question as part of your pushback response itself, not just answering blind.</p></div></details></div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet"><ul>
+        <li>8 steps: clarify requirements → functional/non-functional → capacity estimation → API design → high-level architecture → deep dive (1-2 components) → bottlenecks/tradeoffs → wrap up.</li>
+        <li>Suggested timing for a 40-45 min interview: ~5/3/5/5/10/12/5/3 minutes respectively — protect the deep-dive time above all else.</li>
+        <li>Memorize relative latency ordering: memory (~100ns) &lt;&lt; SSD (~100μs) &lt;&lt; same-DC round trip (~0.5ms) &lt;&lt; cross-country (~50ms) &lt;&lt; intercontinental (~150ms).</li>
+        <li>1M requests/day ≈ 12 QPS average; default peak:average ratio ≈ 2-3x without better info, higher for event-triggered traffic.</li>
+        <li>Narrate your reasoning out loud continuously — silence reads as uncertainty even when correct.</li>
+        <li>Proactively scope down and proactively surface your own design's weakest point — don't wait to be asked.</li>
+        <li>Pushback is a probe, not a failure signal — respond with acknowledge → reason live → defend-or-revise, never defensiveness or total reversal.</li>
+        <li>Match design complexity to stated scale — introducing Kafka/Cassandra/12 microservices for a 10K-user system is a negative signal, not a positive one.</li>
+      </ul></div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://colin-scott.github.io/personal_website/research/interactive_latency.html">Latency Numbers Every Programmer Should Know (interactive, Jeff Dean's numbers)</a></li>
+        <li><a href="https://github.com/donnemartin/system-design-primer">System Design Primer (GitHub)</a></li>
+        <li><a href="https://www.educative.io/courses/grokking-the-system-design-interview">Grokking the System Design Interview</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="13-hld-case-studies.html"><span class="dir">← Previous</span>HLD Case Studies</a>
+        <a class="next" href="../02-typescript-advanced/index.html"><span class="dir">Next →</span>TypeScript Advanced</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · System Design</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-typescript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-sql.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-yaml.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "01-system-design", chapterKey: "14-interview-framework" });</script>
+</body>
+</html>

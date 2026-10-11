@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Python Intermediate — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span>Python Intermediate</div>
+      <div class="topbar-actions"><button id="theme-toggle" class="icon-btn">🌙</button></div>
+    </div>
+    <div class="content">
+      <h1>Python Intermediate</h1>
+      <p class="meta-line"><span>📚 6 chapters</span><span>⏱ ~15–18 hrs total</span></p>
+      <p>Python keeps showing up in senior/staff interviews now, not because teams are rewriting their Node
+      backends in Python, but because every AI/ML-adjacent team (RAG pipelines, agent orchestration, data/ML
+      platform work) is built on it, and interviewers expect a senior candidate to read and write it fluently,
+      not just "know the syntax." You already have 10 years of JS/Node — this topic is not "learn programming
+      again," it is a fast, honest bridge: what's the same, what's genuinely different (the GIL, the import
+      system, duck typing without TypeScript's safety net), and where Python's answer to a problem you already
+      solved in Node (concurrency, packaging, testing, building an API) actually works.</p>
+
+      <h2 id="outcomes">Learning Outcomes</h2>
+      <ul>
+        <li>Read and write idiomatic Python without translating it mentally from JS line by line.</li>
+        <li>Explain the GIL, why CPython threads don't give you parallelism, and when multiprocessing/async
+        actually help — and defend that against someone who thinks "Python is just slow."</li>
+        <li>Use comprehensions, iterators, and generators correctly, and explain the iterator protocol
+        (<code>__iter__</code>/<code>__next__</code>) the way you'd explain JS iterables/generators.</li>
+        <li>Design clean domain models with <code>dataclasses</code> and type hints, and know what the
+        descriptor protocol is actually doing under <code>@property</code> and dataclass fields.</li>
+        <li>Write and reason about <code>asyncio</code> code, and compare its single-threaded event loop to
+        Node's libuv loop point by point — where they're the same idea and where they diverge.</li>
+        <li>Build a production-grade FastAPI service: routing, Pydantic validation, dependency injection,
+        async DB access, middleware, background tasks.</li>
+        <li>Set up a real Python project the way a senior engineer would: venv, <code>pyproject.toml</code>,
+        pinned deps, and a pytest suite with fixtures and parametrization.</li>
+      </ul>
+
+      <h2 id="chapters">Chapters</h2>
+      <table>
+        <tr><th>#</th><th>Chapter</th><th>Time</th></tr>
+        <tr><td>01</td><td><a href="01-python-for-js-devs.html">Python for JS Developers: syntax and mindset differences</a></td><td>2 hrs</td></tr>
+        <tr><td>02</td><td><a href="02-data-structures.html">Data Structures, Comprehensions, Generators (and the iterator protocol)</a></td><td>2.5 hrs</td></tr>
+        <tr><td>03</td><td><a href="03-oop-dataclasses.html">OOP, Dataclasses, Type Hints</a></td><td>2.5 hrs</td></tr>
+        <tr><td>04</td><td><a href="04-async-python.html">Async Python (asyncio) vs Node's event loop</a></td><td>3 hrs</td></tr>
+        <tr><td>05</td><td><a href="05-fastapi.html">FastAPI in Production</a></td><td>3 hrs</td></tr>
+        <tr><td>06</td><td><a href="06-venv-packaging-pytest.html">Virtual Envs, Packaging, pytest</a></td><td>2.5 hrs</td></tr>
+      </table>
+
+      <div class="capstone">
+        <h3>🏆 Capstone Project: Port a Node/Express "Users" API to FastAPI</h3>
+        <p><strong>Problem statement:</strong> You have (or imagine) a small Express CRUD API for a
+        <code>users</code> resource backed by Postgres — <code>GET/POST/PATCH/DELETE /users</code>,
+        validation middleware, a service layer, and a Jest test suite. Port it to Python, end to end, using
+        everything from this topic: FastAPI, async DB access, Pydantic validation, dataclasses for internal
+        (non-wire) models, type hints throughout, pytest, and real packaging — not a single-file script.</p>
+        <p><strong>Required features:</strong></p>
+        <ul>
+          <li><code>POST /users</code>, <code>GET /users</code> (paginated, filterable by query param),
+          <code>GET /users/{id}</code>, <code>PATCH /users/{id}</code>, <code>DELETE /users/{id}</code>.</li>
+          <li>Pydantic models for request/response schemas (separate <code>UserCreate</code>,
+          <code>UserUpdate</code>, <code>UserOut</code> — mirror how you'd separate DTOs in a typed Node API),
+          and an internal <code>@dataclass(frozen=True)</code> domain model that the service layer works with.</li>
+          <li>Async Postgres access (via <code>asyncpg</code> or SQLAlchemy's async engine) — no blocking
+          DB calls inside async route handlers.</li>
+          <li>Dependency-injected DB session/connection per request using FastAPI's <code>Depends</code>.</li>
+          <li>Proper HTTP error mapping (404 on missing user, 409 on duplicate email, 422 validation —
+          FastAPI gives you most of this for free, but you should know why).</li>
+          <li>A pytest suite: unit tests for the dataclass/service logic, integration tests for the routes
+          using <code>httpx.AsyncClient</code> + a test DB or transaction rollback fixture, parametrized edge
+          cases (duplicate email, invalid payload, not-found).</li>
+          <li>Real packaging: <code>pyproject.toml</code> with pinned dependencies, a venv, a README with
+          setup steps, <code>ruff</code>/<code>mypy</code> configured (even if you don't fix every warning).</li>
+        </ul>
+        <p><strong>Tech stack suggestion:</strong> Python 3.13, FastAPI, Pydantic v2, SQLAlchemy 2.0 async
+        (or asyncpg directly), Postgres (Docker Compose), pytest + pytest-asyncio + httpx, uv or pip-tools
+        for dependency management.</p>
+        <p><strong>Milestones:</strong></p>
+        <ol>
+          <li>Set up the project: venv, <code>pyproject.toml</code>, dependency groups (runtime vs dev/test),
+          directory layout (<code>app/routers</code>, <code>app/models</code>, <code>app/services</code>,
+          <code>app/db</code>, <code>tests/</code>).</li>
+          <li>Define the Pydantic schemas and the frozen dataclass domain model; write unit tests for any
+          validation/business logic that lives on the dataclass (e.g., an <code>__post_init__</code> check).</li>
+          <li>Wire up async DB access and a <code>Depends</code>-based session provider; write the service
+          layer functions (pure async functions, no FastAPI imports — testable in isolation).</li>
+          <li>Build the five routes on top of the service layer; add exception handlers that translate
+          domain errors (e.g., <code>UserNotFoundError</code>) into HTTP responses.</li>
+          <li>Write the pytest integration suite against a real (dockerized) Postgres or SQLite-for-tests,
+          with fixtures for app/client/db session and a rollback-per-test strategy.</li>
+          <li>Add <code>ruff</code> + <code>mypy</code> config, a Makefile or justfile for
+          <code>test</code>/<code>lint</code>/<code>run</code>, and document how this differs from the
+          Express version in a short README section ("what changed and why").</li>
+        </ol>
+        <p><strong>Evaluation checklist:</strong></p>
+        <ul>
+          <li>☐ No blocking I/O call sits inside an <code>async def</code> route or service function.</li>
+          <li>☐ Can explain why the dataclass is frozen and what that buys you (vs a plain dict, vs a
+          Pydantic model used for internal logic).</li>
+          <li>☐ Tests pass in isolation and in any order — no shared mutable DB state leaking between tests.</li>
+          <li>☐ Can explain FastAPI's dependency injection resolution order and request lifecycle from a
+          cold request to response.</li>
+          <li>☐ Can articulate, concretely, the single biggest mindset shift from Express to FastAPI (not
+          "Python syntax is different" — something structural, e.g. Pydantic validation at the boundary vs
+          hand-rolled middleware).</li>
+        </ul>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · Python Intermediate</footer>
+  </main>
+</div>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "08-python-intermediate" });</script>
+</body>
+</html>

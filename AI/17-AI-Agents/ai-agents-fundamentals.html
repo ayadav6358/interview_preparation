@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Agents Fundamentals</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <input class="searchbox" placeholder="Search topics..." />
+    <a href="../index.html">← Home</a>
+    <h3>17-AI-Agents</h3>
+    <a href="ai-agents-fundamentals.html">AI Agents Fundamentals</a>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumbs"><a href="../index.html">Home</a> / 17-AI-Agents</div>
+      <button class="theme-toggle" onclick="toggleTheme()">🌓 Theme</button>
+    </div>
+    <h1>AI Agents Fundamentals (ReAct, Planning, Reflection)</h1>
+    <span class="tag good">Stable</span><span class="tag">Last verified: 2026-10-06</span>
+
+    <div class="toc">
+      <b>On this page</b>
+      <a href="#what">1. What is this?</a>
+      <a href="#whyexist">2. Why does it exist?</a>
+      <a href="#whyimportant">3. Why is it important?</a>
+      <a href="#whereused">4. Where is it used?</a>
+      <a href="#prereq">5. Prerequisites</a>
+      <a href="#core">6. Core concepts</a>
+      <a href="#terms">7. Terminology</a>
+      <a href="#arch">8. Architecture (ReAct loop)</a>
+      <a href="#internal">9. How it works internally</a>
+      <a href="#steps">10. Step-by-step: LLM app vs workflow vs agent</a>
+      <a href="#simple">11. Simple example</a>
+      <a href="#real">12. Real-world example</a>
+      <a href="#code">13. Code example</a>
+      <a href="#advanced">14. Advanced example (reflection)</a>
+      <a href="#mistakes">15. Common mistakes</a>
+      <a href="#best">16. Best practices</a>
+      <a href="#production">17. Production considerations</a>
+      <a href="#security">18. Security considerations</a>
+      <a href="#performance">19. Performance considerations</a>
+      <a href="#cost">20. Cost considerations</a>
+      <a href="#debug">21. Debugging/troubleshooting</a>
+      <a href="#related">22. Related concepts</a>
+      <a href="#comparison">23. LLM app vs Workflow vs Agent</a>
+      <a href="#exercise">24. Mini practical exercise</a>
+      <a href="#project">25. Practical project</a>
+      <a href="#projectarch">26. Project architecture</a>
+      <a href="#interview-b">27. Interview Questions — Beginner</a>
+      <a href="#interview-i">28. Interview Questions — Intermediate</a>
+      <a href="#interview-a">29. Interview Questions — Advanced</a>
+      <a href="#interview-s">30. Interview Questions — Senior/Architect</a>
+      <a href="#interview-sc">31. Scenario-Based Questions</a>
+      <a href="#revision">32. Quick revision notes</a>
+      <a href="#cheat">33. Cheat sheet</a>
+      <a href="#further">34. Further topics to learn</a>
+    </div>
+
+    <h2 id="what">1. What is this?</h2>
+    <p>An AI agent is a system where an LLM autonomously decides a sequence of actions (tool calls, reasoning steps) to accomplish a goal, observing results and adapting its plan, rather than following a fixed, developer-defined sequence of steps.</p>
+
+    <h2 id="whyexist">2. Why does it exist?</h2>
+    <p>Many real tasks can't be fully specified as a fixed pipeline in advance — the right next step depends on what's discovered along the way (a search result, an error, a user's clarification). Agents exist to let the LLM itself make that step-by-step decision, within a loop the application controls.</p>
+
+    <h2 id="whyimportant">3. Why is it important?</h2>
+    <p>"Agent" is one of the most overused and most interview-tested terms in 2026 AI engineering — being able to precisely define what makes something an agent (vs. a workflow vs. a simple LLM call) and when NOT to use one is a key differentiator in interviews and in avoiding over-engineered production systems.</p>
+
+    <h2 id="whereused">4. Where is it used?</h2>
+    <p>Coding assistants, research assistants, customer support automation, autonomous data analysis, any task requiring dynamic multi-step reasoning and tool use.</p>
+
+    <h2 id="prereq">5. Prerequisites</h2>
+    <p><a href="../16-Tool-Calling/tool-calling-fundamentals.html">Tool Calling</a>, <a href="../08-Prompt-Engineering/advanced-prompting-patterns.html">Advanced Prompting Patterns (CoT)</a>.</p>
+
+    <h2 id="core">6. Core concepts</h2>
+    <ul>
+      <li><b>ReAct (Reason + Act):</b> the foundational agent pattern — the model alternates between reasoning (thinking about what to do) and acting (calling a tool), observing results between steps.</li>
+      <li><b>Planning:</b> the agent forms a multi-step plan before or during execution.</li>
+      <li><b>Observation:</b> the agent incorporates tool/environment feedback into its next decision.</li>
+      <li><b>Reflection:</b> the agent critiques its own previous output/plan and revises it.</li>
+      <li><b>Retry/self-correction:</b> the agent recovers from errors by adjusting its approach, informed by the failure.</li>
+      <li><b>Memory:</b> the agent retains relevant information across steps or sessions (see <a href="../20-Agent-Memory/">Agent Memory</a>).</li>
+    </ul>
+
+    <h2 id="terms">7. Terminology</h2>
+    <table>
+      <tr><th>Term</th><th>Meaning</th></tr>
+      <tr><td>ReAct</td><td>Reason+Act pattern: interleaved reasoning traces and tool-call actions, each informed by prior observations.</td></tr>
+      <tr><td>Goal-based agent</td><td>An agent operating toward a specified objective rather than following a fixed script.</td></tr>
+      <tr><td>Autonomous agent</td><td>An agent that operates with minimal human intervention across many steps.</td></tr>
+      <tr><td>Agent loop</td><td>The iterative cycle of reasoning, acting, and observing until a stopping condition.</td></tr>
+    </table>
+
+    <h2 id="arch">8. Architecture (ReAct loop)</h2>
+    <pre><code>Goal/Task
+ → Reason: "What should I do next?"
+ → Act: call a tool
+ → Observe: tool result
+ → Reason: "Does this complete the goal, or what's next?"
+ → (repeat) ...
+ → Final answer when goal is satisfied</code></pre>
+
+    <h2 id="internal">9. How it works internally</h2>
+    <p>At each iteration, the full conversation history (including all prior reasoning, tool calls, and observations) is sent back to the model, which generates the next reasoning step and/or tool call conditioned on everything so far — the "memory" of the agent's progress is just the growing context, unless externalized to a separate memory store for very long tasks (see Agent Memory).</p>
+
+    <h2 id="steps">10. Step-by-step: LLM app vs workflow vs agent</h2>
+    <ol>
+      <li><b>LLM application:</b> a single LLM call producing output from input — no loop, no dynamic branching.</li>
+      <li><b>Workflow:</b> a fixed, developer-defined sequence of steps (possibly including LLM calls), where the control flow is hardcoded in advance.</li>
+      <li><b>Agent:</b> the LLM itself decides the sequence of steps/actions dynamically at runtime, within a loop, based on the evolving situation.</li>
+    </ol>
+
+    <h2 id="simple">11. Simple example</h2>
+    <p>Task: "Find the weather in 3 cities and tell me which is warmest." An agent calls the weather tool 3 times (deciding to do so itself, in whatever order/pattern it chooses), compares results, and answers — versus a hardcoded workflow that would call the same tool exactly 3 times in a fixed, pre-written sequence regardless of what's discovered.</p>
+
+    <h2 id="real">12. Real-world example</h2>
+    <p>A coding agent (like this assistant) doesn't follow a fixed script — it reads files, searches code, decides what to edit, runs tests, and reacts to failures, with each next step determined dynamically by what it observes, which is the defining characteristic of an agent rather than a workflow.</p>
+
+    <h2 id="code">13. Code example</h2>
+    <pre><code class="language-python">def run_agent(goal: str, tools: dict, max_iterations=10):
+    messages = [{"role": "user", "content": goal}]
+    for i in range(max_iterations):
+        response = client.messages.create(
+            model="claude-sonnet-5", max_tokens=1000,
+            tools=list(tools.values()), messages=messages,
+        )
+        messages.append({"role": "assistant", "content": response.content})
+        if response.stop_reason != "tool_use":
+            return response.content[0].text  # final answer
+        tool_results = []
+        for block in response.content:
+            if block.type == "tool_use":
+                result = tools[block.name]["fn"](**block.input)
+                tool_results.append({"type": "tool_result", "tool_use_id": block.id, "content": str(result)})
+        messages.append({"role": "user", "content": tool_results})
+    return "Max iterations reached without a final answer."
+</code></pre>
+
+    <h2 id="advanced">14. Advanced example (reflection)</h2>
+    <pre><code class="language-python">def run_agent_with_reflection(goal, tools, max_iterations=10):
+    result = run_agent(goal, tools, max_iterations)
+    critique = client.messages.create(
+        model="claude-sonnet-5", max_tokens=300,
+        messages=[{"role": "user", "content":
+            f"Critique this answer for the goal '{goal}':\n{result}\nAny errors or missing steps?"}],
+    ).content[0].text
+    if "no issues" not in critique.lower():
+        # Feed critique back for a revision pass
+        revised = run_agent(f"{goal}\n\nPrevious attempt: {result}\nIssues found: {critique}\nRevise.", tools, max_iterations)
+        return revised
+    return result
+</code></pre>
+
+    <h2 id="mistakes">15. Common mistakes</h2>
+    <ul>
+      <li>Calling any multi-step LLM pipeline an "agent" even when the steps are fully fixed in advance (that's a workflow).</li>
+      <li>Using an agent for a task that's actually deterministic and better served by a fixed workflow (less latency/cost, more predictable).</li>
+      <li>No iteration limit, risking runaway cost on an edge case the agent can't resolve.</li>
+      <li>Not logging/tracing agent reasoning steps, making failures very hard to debug.</li>
+    </ul>
+
+    <h2 id="best">16. Best practices</h2>
+    <ul>
+      <li>Use a workflow instead of an agent whenever the task's steps are actually predictable/fixed — reserve agents for genuine dynamic decision-making needs.</li>
+      <li>Always set a maximum iteration limit.</li>
+      <li>Log full reasoning/tool-call traces for debugging and evaluation.</li>
+      <li>Add reflection/self-critique steps for higher-stakes tasks where a revision pass improves reliability.</li>
+    </ul>
+
+    <h2 id="production">17. Production considerations</h2>
+    <p>Treat agent runs as a cost/latency variable, not fixed — track distribution of iteration counts and tool calls per task to catch regressions or runaway cases; add human-approval gates for high-risk actions.</p>
+
+    <h2 id="security">18. Security considerations</h2>
+    <p>Agents combine the "excessive agency" risk (too much autonomy/permission) with tool-call injection risks — apply tight tool permission scoping and treat all intermediate observations (including tool results) as potentially containing injected instructions if they include external/untrusted content.</p>
+
+    <h2 id="performance">19. Performance considerations</h2>
+    <p>Each agent iteration is a full LLM round trip — latency scales with iteration count; minimize unnecessary steps via clear tool descriptions and task framing, and consider parallel tool calls where independent sub-tasks allow it.</p>
+
+    <h2 id="cost">20. Cost considerations</h2>
+    <p>Agent cost is a function of (iterations × tokens per iteration) and is much harder to predict upfront than a single LLM call — budget for a distribution, not a point estimate, and cap worst-case cost via iteration limits.</p>
+
+    <h2 id="debug">21. Debugging/troubleshooting</h2>
+    <ul>
+      <li><b>Agent doesn't converge on an answer:</b> check for ambiguous tool results or an unclear goal statement confusing the model about completion criteria.</li>
+      <li><b>Agent takes an unexpectedly roundabout path:</b> review the full reasoning trace — often a tool description or ordering issue leads it astray.</li>
+      <li><b>High variance in iteration count across similar tasks:</b> may indicate the task framing itself is ambiguous, not just model inconsistency.</li>
+    </ul>
+
+    <h2 id="related">22. Related concepts</h2>
+    <p><a href="../16-Tool-Calling/tool-calling-fundamentals.html">Tool Calling</a> · <a href="../18-LangGraph/">LangGraph</a> · <a href="../19-Agentic-AI/">Agentic AI</a> · <a href="../20-Agent-Memory/">Agent Memory</a></p>
+
+    <h2 id="comparison">23. LLM app vs Workflow vs Agent</h2>
+    <table>
+      <tr><th>Type</th><th>Control flow</th><th>Example</th></tr>
+      <tr><td>LLM application</td><td>Single call, no loop</td><td>Summarize this text</td></tr>
+      <tr><td>Workflow</td><td>Fixed, developer-defined sequence</td><td>Extract → classify → format (always in this exact order)</td></tr>
+      <tr><td>Agent</td><td>LLM dynamically decides the sequence of actions</td><td>Research a topic, deciding what to search and when to stop</td></tr>
+    </table>
+
+    <h2 id="exercise">24. Mini practical exercise</h2>
+    <p>Run the `run_agent` example with a goal requiring 2-3 tool calls, printing the full message history after completion to observe the reasoning/action/observation pattern.</p>
+
+    <h2 id="project">25. Practical project</h2>
+    <p><b>Research Mini-Agent:</b> build an agent with a web-search tool and a note-taking tool that researches a given topic across multiple searches and produces a summary, deciding itself how many searches are needed.</p>
+
+    <h2 id="projectarch">26. Project architecture</h2>
+    <pre><code>goal = "Research X and summarize key findings"
+tools = {search_web, take_note}
+agent loop: reason -> search or note -> observe -> repeat until summary is ready
+output: final structured summary + list of sources used</code></pre>
+
+    <h2 id="interview-b">27. Interview Questions — Beginner</h2>
+    <div class="qa"><b>Q1.</b> What is an AI agent?<br><b>A.</b> A system where an LLM autonomously decides a sequence of actions to accomplish a goal, adapting based on observed results, rather than following a fixed predefined sequence.</div>
+    <div class="qa"><b>Q2.</b> What does ReAct stand for?<br><b>A.</b> Reason + Act — alternating between reasoning about what to do and taking an action (tool call), informed by observations.</div>
+    <div class="qa"><b>Q3.</b> What's the key difference between a workflow and an agent?<br><b>A.</b> A workflow follows a fixed, developer-defined sequence of steps; an agent's LLM dynamically decides the sequence of actions at runtime.</div>
+    <div class="qa"><b>Q4.</b> What is reflection in the context of agents?<br><b>A.</b> The agent critiquing its own previous output or plan and revising it based on that critique.</div>
+    <div class="qa"><b>Q5.</b> Why should agents have a maximum iteration limit?<br><b>A.</b> To bound worst-case cost and latency in case the agent fails to converge on an answer.</div>
+    <div class="qa"><b>Q6.</b> Is every multi-step LLM pipeline an "agent"?<br><b>A.</b> No — if the steps are fixed and predetermined, it's a workflow, not an agent.</div>
+    <div class="qa"><b>Q7.</b> What does "observation" mean in an agent loop?<br><b>A.</b> The agent incorporating the result of its previous action (e.g., a tool's output) into its next decision.</div>
+    <div class="qa"><b>Q8.</b> What is a goal-based agent?<br><b>A.</b> An agent operating toward a specified objective, deciding its own steps, rather than following a fixed script.</div>
+    <div class="qa"><b>Q9.</b> Should you always use an agent for multi-step tasks?<br><b>A.</b> No — if the steps are predictable/fixed, a workflow is simpler, cheaper, and more predictable; reserve agents for genuine dynamic decision-making needs.</div>
+    <div class="qa"><b>Q10.</b> What provides an agent's "memory" of its progress within a single run?<br><b>A.</b> The growing conversation history/context sent back to the model at each iteration.</div>
+
+    <h2 id="interview-i">28. Interview Questions — Intermediate</h2>
+    <div class="qa"><b>Q1.</b> Why would you choose a workflow over an agent even when the task technically involves multiple LLM-assisted steps?<br><b>A.</b> If the correct sequence of steps is known in advance regardless of intermediate results, a workflow is cheaper, faster, more predictable, and easier to debug than an agent, which incurs extra reasoning overhead and unpredictability for no benefit in that case.</div>
+    <div class="qa"><b>Q2.</b> How does reflection improve agent reliability, and what's its cost trade-off?<br><b>A.</b> It catches errors or missed steps the initial pass made, improving final answer quality, but doubles (or more) the LLM calls per task, adding latency and cost — worth it for high-stakes tasks, not for simple/low-stakes ones.</div>
+    <div class="qa"><b>Q3.</b> Why is it important to log the full reasoning trace of an agent, not just its final answer?<br><b>A.</b> Debugging agent failures requires understanding the sequence of decisions and observations leading to a wrong outcome — the final answer alone gives no insight into which step in the dynamic decision process went wrong.</div>
+    <div class="qa"><b>Q4.</b> What's a practical risk of giving an agent an ambiguous or overly broad goal statement?<br><b>A.</b> The agent may take an unpredictable, inefficient, or incorrect path trying to interpret what "done" means, potentially looping or taking much longer/more expensive routes than a clearly-scoped goal would produce.</div>
+    <div class="qa"><b>Q5.</b> How would you measure whether an agent is actually more effective than a simpler workflow for a given task?<br><b>A.</b> Compare success rate, cost, and latency on a representative evaluation set between the agent and an equivalent fixed workflow — if the workflow matches the agent's success rate at lower cost/latency, the task didn't actually need agentic dynamism.</div>
+
+    <h2 id="interview-a">29. Interview Questions — Advanced</h2>
+    <div class="qa"><b>Q1.</b> How would you design an agent to recognize when it's stuck in an unproductive loop and change strategy rather than just hitting the iteration limit?<br><b>A.</b> Track state/progress signals across iterations (e.g., repeated identical tool calls, no new information gained), and inject an explicit self-check prompt ("have you made progress in the last 2 steps? If not, try a different approach") when such signals are detected, rather than relying purely on a hard iteration cutoff.</div>
+    <div class="qa"><b>Q2.</b> What's the architectural tension between giving an agent more autonomy (fewer constraints) and production reliability requirements?<br><b>A.</b> More autonomy increases the agent's ability to handle novel situations but also increases unpredictability, cost variance, and risk of undesired actions (excessive agency); production systems typically need to find a calibrated middle ground — enough autonomy to handle real task variability, with guardrails (tool permission scoping, iteration limits, human approval gates for risky actions) bounding the downside.</div>
+
+    <h2 id="interview-s">30. Interview Questions — Senior/Architect</h2>
+    <div class="qa"><b>Q1.</b> A team wants to build an "agent" for a customer support task that's actually: classify ticket → look up order → draft response → send. How do you advise them?<br><b>A.</b> Point out this is a fixed, predictable sequence — a workflow, not an agent — and building it as a hardcoded pipeline (possibly with LLM calls at the classification and drafting steps) will be cheaper, faster, and far easier to test/debug/monitor than an agentic implementation that adds unnecessary dynamic decision-making overhead for a task that doesn't need it.</div>
+    <div class="qa"><b>Q2.</b> Design the production safety architecture for a customer-facing autonomous agent that can take real actions (e.g., process refunds).<br><b>A.</b> Scope tool permissions tightly to only the specific actions needed; require human approval for actions above a risk/value threshold (e.g., refunds over $X); log full reasoning and action traces for audit; set hard iteration and cost limits per session; add a reflection/verification pass before high-stakes actions execute; and continuously monitor success/error rates with alerting on anomalies.</div>
+
+    <h2 id="interview-sc">31. Scenario-Based Questions</h2>
+    <div class="qa"><b>Scenario 1.</b> Your "agent" for a document-processing pipeline always executes the exact same 4 steps in the same order regardless of input. Is it really an agent?<br><b>A.</b> No — if the sequence never varies based on observed results, it's a workflow, just implemented using an LLM-call-capable framework; relabeling it doesn't change its actual nature, and simplifying it to an explicit fixed pipeline would likely reduce cost/latency with no loss of capability.</div>
+    <div class="qa"><b>Scenario 2.</b> An autonomous research agent occasionally runs for 50+ iterations on simple questions that should take 2-3. How do you fix this?<br><b>A.</b> Investigate whether the goal framing or tool result format is ambiguous about "task complete" conditions, add explicit completion criteria to the prompt, and set a reasonable iteration limit with escalation (e.g., return best-effort partial answer) rather than silently running to the cap.</div>
+
+    <h2 id="revision">32. Quick revision notes</h2>
+    <ul>
+      <li>Agent = LLM dynamically decides action sequence; Workflow = fixed sequence; LLM app = single call.</li>
+      <li>ReAct = reason + act + observe, repeated.</li>
+      <li>Use agents only when the task genuinely needs dynamic decision-making.</li>
+      <li>Always bound iterations; log full reasoning traces.</li>
+    </ul>
+
+    <h2 id="cheat">33. Cheat sheet</h2>
+    <div class="callout">LLM app = 1 call. Workflow = fixed steps. Agent = LLM decides steps dynamically (ReAct: reason → act → observe → repeat). Use the simplest type that solves the task — don't default to "agent" for predictable pipelines.</div>
+
+    <h2 id="further">34. Further topics to learn</h2>
+    <p><a href="../18-LangGraph/">LangGraph</a> → <a href="../19-Agentic-AI/">Agentic AI</a> → <a href="../20-Agent-Memory/">Agent Memory</a> → <a href="../21-Multi-Agent-Systems/">Multi-Agent Systems</a></p>
+
+    <div class="prevnext">
+      <a href="../16-Tool-Calling/tool-calling-fundamentals.html">← Tool Calling</a>
+      <a href="../18-LangGraph/langgraph-fundamentals.html">Next: LangGraph →</a>
+    </div>
+  </main>
+</div>
+<script src="../assets/app.js"></script>
+</body>
+</html>

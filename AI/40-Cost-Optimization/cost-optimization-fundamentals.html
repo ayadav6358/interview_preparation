@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cost Optimization Fundamentals</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <input class="searchbox" placeholder="Search topics..." />
+    <a href="../index.html">← Home</a>
+    <h3>40-Cost-Optimization</h3>
+    <a href="cost-optimization-fundamentals.html">Cost Optimization Fundamentals</a>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumbs"><a href="../index.html">Home</a> / 40-Cost-Optimization</div>
+      <button class="theme-toggle" onclick="toggleTheme()">🌓 Theme</button>
+    </div>
+    <h1>Cost Optimization: Caching, Model Routing, Batch Processing</h1>
+    <span class="tag good">Stable</span><span class="tag">Last verified: 2026-10-06</span>
+
+    <div class="toc">
+      <b>On this page</b>
+      <a href="#what">1. What is this?</a>
+      <a href="#whyexist">2. Why does it exist?</a>
+      <a href="#whyimportant">3. Why is it important?</a>
+      <a href="#whereused">4. Where is it used?</a>
+      <a href="#prereq">5. Prerequisites</a>
+      <a href="#core">6. Core concepts</a>
+      <a href="#terms">7. Terminology</a>
+      <a href="#arch">8. Architecture</a>
+      <a href="#internal">9. How it works internally</a>
+      <a href="#steps">10. Step-by-step: a cost optimization audit</a>
+      <a href="#simple">11. Simple example</a>
+      <a href="#real">12. Real-world example</a>
+      <a href="#code">13. Code example (cost calculator)</a>
+      <a href="#advanced">14. Advanced example (semantic caching)</a>
+      <a href="#mistakes">15. Common mistakes</a>
+      <a href="#best">16. Best practices</a>
+      <a href="#production">17. Production considerations</a>
+      <a href="#security">18. Security considerations</a>
+      <a href="#performance">19. Performance considerations</a>
+      <a href="#cost">20. Cost considerations (meta)</a>
+      <a href="#debug">21. Debugging/troubleshooting</a>
+      <a href="#related">22. Related concepts</a>
+      <a href="#comparison">23. Comparison of levers</a>
+      <a href="#exercise">24. Mini practical exercise</a>
+      <a href="#project">25. Practical project</a>
+      <a href="#projectarch">26. Project architecture</a>
+      <a href="#interview-b">27. Interview Questions — Beginner</a>
+      <a href="#interview-i">28. Interview Questions — Intermediate</a>
+      <a href="#interview-a">29. Interview Questions — Advanced</a>
+      <a href="#interview-s">30. Interview Questions — Senior/Architect</a>
+      <a href="#interview-sc">31. Scenario-Based Questions</a>
+      <a href="#revision">32. Quick revision notes</a>
+      <a href="#cheat">33. Cheat sheet</a>
+      <a href="#further">34. Further topics to learn</a>
+    </div>
+
+    <h2 id="what">1. What is this?</h2>
+    <p>Cost optimization for LLM applications covers token optimization, prompt/context caching, model routing (cheap vs. frontier models), batch processing, semantic caching, and context reduction — the practical levers for controlling what's often the largest line-item cost in a production AI system.</p>
+
+    <h2 id="whyexist">2. Why does it exist?</h2>
+    <p>Unlike traditional software where compute cost is often a minor line item, LLM token costs scale directly and significantly with usage — cost optimization exists because naive implementations can be 10-100x more expensive than necessary for the same user-facing quality.</p>
+
+    <h2 id="whyimportant">3. Why is it important?</h2>
+    <p>Cost is frequently the limiting factor determining whether an AI feature is viable at scale — every technique covered elsewhere in this knowledge base (model routing, caching, RAG precision) ultimately connects back to this practical bottom line.</p>
+
+    <h2 id="whereused">4. Where is it used?</h2>
+    <p>Every production LLM application at meaningful scale; especially critical for high-volume consumer products and agentic systems with multi-call loops.</p>
+
+    <h2 id="prereq">5. Prerequisites</h2>
+    <p><a href="../05-LLM-Fundamentals/tokens-and-context-window.html">Tokens & Context Window</a>, <a href="../07-LLM-APIs-and-SDKs/llm-apis-and-sdks.html">LLM APIs and SDKs</a>.</p>
+
+    <h2 id="core">6. Core concepts</h2>
+    <ul>
+      <li><b>Token optimization:</b> reducing unnecessary tokens in prompts/context without sacrificing quality.</li>
+      <li><b>Prompt/context caching:</b> reusing precomputed attention state for repeated prefixes (e.g., stable system prompts), reducing cost/latency on cache hits.</li>
+      <li><b>Model routing:</b> sending simple tasks to cheap/fast models, complex tasks to frontier models.</li>
+      <li><b>Small vs large models:</b> matching model capability to task complexity rather than defaulting to the most powerful (and expensive) option everywhere.</li>
+      <li><b>Batch processing:</b> using a provider's batch API for non-real-time workloads, often at a cost discount.</li>
+      <li><b>Semantic caching:</b> caching responses for semantically similar (not just identical) queries.</li>
+      <li><b>Context reduction:</b> summarization/compaction of history, precise retrieval instead of over-fetching.</li>
+    </ul>
+
+    <h2 id="terms">7. Terminology</h2>
+    <table>
+      <tr><th>Term</th><th>Meaning</th></tr>
+      <tr><td>Cache hit rate</td><td>The fraction of requests served from cache rather than requiring a fresh LLM call.</td></tr>
+      <tr><td>Model tier</td><td>A provider's lineup from cheap/fast to expensive/frontier.</td></tr>
+      <tr><td>Batch API</td><td>An asynchronous, often discounted API mode for non-real-time bulk processing.</td></tr>
+      <tr><td>$/1M tokens</td><td>Common unit for comparing provider/model pricing.</td></tr>
+    </table>
+
+    <h2 id="arch">8. Architecture</h2>
+    <pre><code>Request
+ → Semantic cache check (is this similar to a recently-answered query?)
+      → Hit: return cached response (near-zero cost)
+      → Miss: continue
+ → Model routing (classify complexity)
+      → Simple: cheap/fast model
+      → Complex: frontier model
+ → Prompt/context caching for stable prefixes (system prompt, static docs)
+ → Response + cost logging</code></pre>
+
+    <h2 id="internal">9. How it works internally</h2>
+    <p>Prompt caching works by having the provider cache the internal attention computation (KV cache) for a prompt prefix, so a subsequent request sharing that exact prefix skips recomputing attention for those tokens — billed at a steep discount compared to processing them fresh. Semantic caching works differently: it embeds incoming queries and checks similarity against previously-answered queries, serving a cached response if similarity exceeds a threshold — appropriate for FAQ-style workloads with repeated semantically-similar questions, but risky for tasks needing precise, query-specific answers.</p>
+
+    <h2 id="steps">10. Step-by-step: a cost optimization audit</h2>
+    <ol>
+      <li>Log token usage and cost per request, broken down by feature/endpoint.</li>
+      <li>Identify the highest-cost features/endpoints by volume × per-request cost.</li>
+      <li>For each, ask: does this need the current model tier? Is context over-sized? Is there repeated/cacheable content?</li>
+      <li>Apply the appropriate lever (routing, caching, context reduction) per finding.</li>
+      <li>Re-measure cost and quality after each change — never trade quality for cost without evaluation.</li>
+    </ol>
+
+    <h2 id="simple">11. Simple example</h2>
+    <p>Routing simple FAQ-style questions to a fast/cheap model tier and only escalating genuinely complex, multi-step reasoning questions to a frontier model — cutting average cost per request significantly for a support chatbot where most questions are simple.</p>
+
+    <h2 id="real">12. Real-world example</h2>
+    <p>A company implements prompt caching for its RAG system's large, static system prompt (containing formatting instructions and tool definitions), cutting the input-token cost for that unchanging portion of every request by a significant discount, compounding across millions of daily requests into substantial savings.</p>
+
+    <h2 id="code">13. Code example (cost calculator)</h2>
+    <pre><code class="language-python">PRICING = {  # illustrative $ per 1M tokens
+    "frontier": {"input": 3.00, "output": 15.00},
+    "fast": {"input": 0.25, "output": 1.25},
+}
+
+def estimate_cost(model_tier, input_tokens, output_tokens):
+    rates = PRICING[model_tier]
+    return (input_tokens / 1_000_000 * rates["input"]) + (output_tokens / 1_000_000 * rates["output"])
+
+def compare_routing_savings(num_requests, pct_simple, avg_in, avg_out):
+    all_frontier = estimate_cost("frontier", avg_in, avg_out) * num_requests
+    routed = (estimate_cost("fast", avg_in, avg_out) * num_requests * pct_simple +
+              estimate_cost("frontier", avg_in, avg_out) * num_requests * (1 - pct_simple))
+    return {"all_frontier_cost": all_frontier, "routed_cost": routed, "savings": all_frontier - routed}
+
+print(compare_routing_savings(num_requests=100_000, pct_simple=0.8, avg_in=500, avg_out=200))
+</code></pre>
+
+    <h2 id="advanced">14. Advanced example (semantic caching)</h2>
+    <pre><code class="language-python">cache_store = []  # list of (embedding, query, response)
+
+def semantic_cache_lookup(query, threshold=0.95):
+    q_vec = embed(query)
+    for cached_vec, cached_query, cached_response in cache_store:
+        if cosine_similarity(q_vec, cached_vec) >= threshold:
+            return cached_response
+    return None
+
+def answer_with_cache(query):
+    cached = semantic_cache_lookup(query)
+    if cached:
+        return cached  # near-zero cost
+    response = generate_llm_response(query)
+    cache_store.append((embed(query), query, response))
+    return response
+</code></pre>
+
+    <h2 id="mistakes">15. Common mistakes</h2>
+    <ul>
+      <li>Defaulting to the most expensive/capable model for every request regardless of task complexity.</li>
+      <li>Semantic caching with too loose a similarity threshold, serving wrong cached answers to subtly different questions.</li>
+      <li>Not monitoring token usage per feature, missing the actual cost drivers.</li>
+      <li>Retrieving far more RAG context than needed "to be safe," inflating generation cost without quality benefit.</li>
+    </ul>
+
+    <h2 id="best">16. Best practices</h2>
+    <ul>
+      <li>Route by task complexity; don't use a frontier model for everything by default.</li>
+      <li>Use prompt caching for any stable, repeated prefix (system prompts, static reference docs).</li>
+      <li>Tune semantic cache similarity thresholds carefully and monitor for incorrect cache hits.</li>
+      <li>Measure and attribute cost per feature/endpoint continuously, not just in aggregate.</li>
+    </ul>
+
+    <h2 id="production">17. Production considerations</h2>
+    <p>Build cost monitoring and attribution into observability from day one (see <a href="../36-LLM-Observability/llm-observability-fundamentals.html">LLM Observability</a>); set budget alerts per feature to catch regressions (e.g., unbounded context growth) before they become large bills.</p>
+
+    <h2 id="security">18. Security considerations</h2>
+    <p>Semantic/exact caching must respect tenant/user data isolation — never serve a cached response containing one user's data to a different user's semantically similar query.</p>
+
+    <h2 id="performance">19. Performance considerations</h2>
+    <p>Caching (prompt or semantic) typically improves both cost and latency simultaneously — a rare case where the cost optimization directly benefits user experience too.</p>
+
+    <h2 id="cost">20. Cost considerations (meta)</h2>
+    <p>Cost optimization itself has engineering cost (building routing logic, cache infrastructure, evaluation to ensure quality isn't sacrificed) — prioritize optimizations by actual cost impact (highest-volume, highest-cost features first) rather than optimizing uniformly everywhere.</p>
+
+    <h2 id="debug">21. Debugging/troubleshooting</h2>
+    <ul>
+      <li><b>Costs higher than expected despite "optimization":</b> verify caching is actually hitting (check cache hit rate) and routing logic is correctly classifying requests as simple vs. complex.</li>
+      <li><b>Semantic cache serving wrong answers:</b> tighten the similarity threshold and audit a sample of cache hits for correctness.</li>
+      <li><b>Model routing misclassifying complex requests as simple:</b> review and refine the complexity classifier/heuristic against real failure examples.</li>
+    </ul>
+
+    <h2 id="related">22. Related concepts</h2>
+    <p><a href="../39-AI-Gateways/ai-gateways-fundamentals.html">AI Gateways</a> · <a href="../41-AI-Performance-and-Scaling/">Performance and Scaling</a> · <a href="../36-LLM-Observability/llm-observability-fundamentals.html">LLM Observability</a></p>
+
+    <h2 id="comparison">23. Comparison of levers</h2>
+    <table>
+      <tr><th>Lever</th><th>Savings potential</th><th>Risk</th></tr>
+      <tr><td>Model routing</td><td>High</td><td>Misclassification sending complex tasks to weak models</td></tr>
+      <tr><td>Prompt caching</td><td>Moderate-High (for repeated prefixes)</td><td>Low risk — purely a cost/latency win on exact matches</td></tr>
+      <tr><td>Semantic caching</td><td>High (for FAQ-style workloads)</td><td>Serving wrong answers if threshold too loose</td></tr>
+      <tr><td>Batch processing</td><td>Moderate (provider discount)</td><td>Only applicable to non-real-time workloads</td></tr>
+      <tr><td>Context reduction</td><td>Moderate</td><td>Over-aggressive trimming can lose needed information</td></tr>
+    </table>
+
+    <h2 id="exercise">24. Mini practical exercise</h2>
+    <p>Using the cost calculator code above, model the savings of routing 60% vs 90% of traffic to the cheap tier, and observe how sensitive total savings are to that classification accuracy.</p>
+
+    <h2 id="project">25. Practical project</h2>
+    <p><b>Cost-Aware Support Bot:</b> add model routing (complexity classifier), prompt caching for the system prompt, and per-feature cost logging to an existing chatbot, measuring total cost reduction against an evaluation set to confirm no quality regression.</p>
+
+    <h2 id="projectarch">26. Project architecture</h2>
+    <pre><code>request → complexity_classifier() → route to fast/frontier model
+ → prompt sent with cacheable system-prompt prefix
+ → cost_logger records {model, tokens, cost} per request
+ → eval_suite runs nightly comparing quality before/after routing changes</code></pre>
+
+    <h2 id="interview-b">27. Interview Questions — Beginner</h2>
+    <div class="qa"><b>Q1.</b> What is model routing in the context of cost optimization?<br><b>A.</b> Sending simple tasks to cheap/fast models and complex tasks to frontier models, rather than using one model tier for everything.</div>
+    <div class="qa"><b>Q2.</b> What is prompt/context caching?<br><b>A.</b> Reusing precomputed attention state for a repeated prefix (like a stable system prompt), reducing cost/latency on subsequent requests sharing that prefix.</div>
+    <div class="qa"><b>Q3.</b> What is semantic caching?<br><b>A.</b> Caching responses for semantically similar (not just identical) queries, using embedding similarity to detect matches.</div>
+    <div class="qa"><b>Q4.</b> What is a Batch API used for in cost optimization?<br><b>A.</b> Processing non-real-time bulk workloads asynchronously, often at a cost discount compared to real-time calls.</div>
+    <div class="qa"><b>Q5.</b> Why is retrieving too much RAG context a cost problem?<br><b>A.</b> More retrieved context means more input tokens, directly increasing generation cost without necessarily improving (and sometimes hurting) answer quality.</div>
+    <div class="qa"><b>Q6.</b> Does caching usually help or hurt latency alongside cost?<br><b>A.</b> It usually helps both — a cache hit is both cheaper and faster than a fresh LLM call.</div>
+    <div class="qa"><b>Q7.</b> What's a risk of semantic caching with too loose a similarity threshold?<br><b>A.</b> Serving an incorrect cached answer to a query that's similar but not actually asking the same thing.</div>
+    <div class="qa"><b>Q8.</b> Why should you log token usage per feature/endpoint, not just in aggregate?<br><b>A.</b> To identify which specific features are actually driving cost, enabling targeted optimization rather than guessing.</div>
+    <div class="qa"><b>Q9.</b> Should you always use the most capable/expensive model for best quality?<br><b>A.</b> No — matching model capability to task complexity often achieves similar quality at much lower cost for simpler tasks.</div>
+    <div class="qa"><b>Q10.</b> What's one way to reduce cost from conversation history growth?<br><b>A.</b> Summarize/compact older turns rather than sending the full unbounded history on every request.</div>
+
+    <h2 id="interview-i">28. Interview Questions — Intermediate</h2>
+    <div class="qa"><b>Q1.</b> How does prompt caching achieve its cost discount technically?<br><b>A.</b> The provider caches the internal attention computation (KV cache) for a matching prompt prefix, so subsequent requests sharing that exact prefix skip recomputing attention for those tokens, billed at a discount compared to fresh processing.</div>
+    <div class="qa"><b>Q2.</b> Why must semantic caching respect tenant/user data isolation just like RAG retrieval?<br><b>A.</b> A cached response generated for one user's query could contain that user's specific data; serving it to a different user whose query is merely semantically similar would constitute a data leak, just as an improperly-scoped RAG retrieval would.</div>
+    <div class="qa"><b>Q3.</b> What's a practical approach to building a "complexity classifier" for model routing without a dedicated training pipeline?<br><b>A.</b> Start with simple heuristics (query length, presence of multi-step keywords, whether it's a known simple-FAQ pattern) or a cheap LLM call specifically prompted just to classify complexity, validating the classifier's routing decisions against a labeled set of known-simple and known-complex examples before trusting it in production.</div>
+    <div class="qa"><b>Q4.</b> Why might aggressive context reduction (summarization) sometimes hurt quality more than it saves in cost?<br><b>A.</b> Summarization can lose nuanced details needed for a later, more specific question — if the lost information causes incorrect answers or additional clarification round-trips, the net effect (extra turns, degraded user experience) can outweigh the token savings from the shorter context.</div>
+    <div class="qa"><b>Q5.</b> How would you measure whether a model-routing cost optimization actually preserved quality?<br><b>A.</b> Run the routed system against an evaluation golden set covering both simple and complex query types, comparing quality metrics before and after the routing change — cost savings alone don't validate the optimization; quality must be confirmed unchanged (or acceptably impacted) via evaluation.</div>
+
+    <h2 id="interview-a">29. Interview Questions — Advanced</h2>
+    <div class="qa"><b>Q1.</b> How would you design a dynamic cost-optimization system that automatically adjusts routing thresholds based on observed quality/cost trade-offs over time?<br><b>A.</b> Continuously log outcomes (quality signals like user feedback or escalation rate) alongside routing decisions, periodically analyze whether the "simple" tier's error/escalation rate for specific query patterns exceeds an acceptable threshold, and adjust routing rules (or retrain the complexity classifier) to shift the boundary — effectively a feedback loop tuning the cost/quality trade-off empirically rather than via a fixed, manually-set threshold.</div>
+    <div class="qa"><b>Q2.</b> What's a subtle interaction between prompt caching and frequently-changing system prompts that could reduce caching's effectiveness?<br><b>A.</b> If the system prompt includes any dynamic content (e.g., a timestamp, a per-request variable) even in a small portion, the cached prefix match can break entirely since caching typically requires an exact prefix match — structuring prompts to keep genuinely static content separate from dynamic content (placing dynamic parts after the cacheable static prefix) preserves caching effectiveness.</div>
+
+    <h2 id="interview-s">30. Interview Questions — Senior/Architect</h2>
+    <div class="qa"><b>Q1.</b> Design a comprehensive cost-governance program for a company running dozens of AI features across many teams.<br><b>A.</b> Mandate per-feature token/cost logging and attribution as a standard requirement (via a shared observability/gateway layer); establish company-wide model-routing guidelines and a shared complexity-classification utility teams can reuse rather than each building their own; require evaluation-gated validation for any cost optimization claiming savings (no quality trade-off without explicit, measured sign-off); set per-team cost budgets with alerting; and run periodic cost-audit reviews identifying the highest-cost features company-wide for targeted optimization investment.</div>
+
+    <h2 id="interview-sc">31. Scenario-Based Questions</h2>
+    <div class="qa"><b>Scenario 1.</b> After implementing model routing to cut costs, customer satisfaction scores dropped slightly. What do you investigate?<br><b>A.</b> Check whether the complexity classifier is misrouting some genuinely complex queries to the cheap model tier, review a sample of low-satisfaction interactions to see which tier handled them, and consider tightening the routing threshold (routing more borderline cases to the frontier model) based on this evidence.</div>
+    <div class="qa"><b>Scenario 2.</b> Your semantic cache's hit rate looks great, but a user reported receiving an answer meant for a completely different question. What's the fix?<br><b>A.</b> Tighten the similarity threshold used for cache hits, audit a sample of recent cache hits for correctness to gauge how widespread the issue is, and consider adding a secondary verification step (e.g., a quick check that the cached answer is still contextually appropriate) before serving cached responses for ambiguous similarity scores.</div>
+
+    <h2 id="revision">32. Quick revision notes</h2>
+    <ul>
+      <li>Model routing: match model tier to task complexity.</li>
+      <li>Prompt caching: cache stable prefixes for cost+latency win.</li>
+      <li>Semantic caching: cache similar (not just identical) queries — tune threshold carefully, respect tenant isolation.</li>
+      <li>Always validate cost optimizations against an evaluation set — never trade quality blindly.</li>
+    </ul>
+
+    <h2 id="cheat">33. Cheat sheet</h2>
+    <div class="callout">Model routing (cheap vs frontier) + prompt caching (stable prefixes) + semantic caching (similar queries, tuned threshold) + batch API (non-real-time) + context reduction. Always validate against an eval set — never trade quality blindly for cost.</div>
+
+    <h2 id="further">34. Further topics to learn</h2>
+    <p><a href="../41-AI-Performance-and-Scaling/">Performance and Scaling</a> → <a href="../36-LLM-Observability/llm-observability-fundamentals.html">LLM Observability</a></p>
+
+    <div class="prevnext">
+      <a href="../39-AI-Gateways/ai-gateways-fundamentals.html">← AI Gateways</a>
+      <a href="../41-AI-Performance-and-Scaling/performance-and-scaling-fundamentals.html">Next: Performance and Scaling →</a>
+    </div>
+  </main>
+</div>
+<script src="../assets/app.js"></script>
+</body>
+</html>

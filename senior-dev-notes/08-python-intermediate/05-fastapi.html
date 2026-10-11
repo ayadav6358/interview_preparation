@@ -1,0 +1,534 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FastAPI: Building Production APIs — Python Intermediate — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">Python Intermediate</a><span class="sep">›</span>FastAPI: Building Production APIs</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>FastAPI: Building Production APIs</h1>
+      <p class="meta-line"><span>⏱ ~3.5 hrs</span><span>📍 Chapter 5 of 6</span></p>
+      <p><strong>One-line summary:</strong> FastAPI is Python's closest analogue to Express/NestJS for building
+      async HTTP APIs — Pydantic replaces Zod/Joi for request validation, and its dependency-injection system
+      replaces Express middleware chains with typed, composable, request-scoped functions resolved automatically
+      from route signatures.</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>FastAPI is the dominant framework for Python web services in 2025-26, especially in AI/ML-adjacent
+      backends (model-serving APIs, RAG pipelines, agent orchestration layers) — exactly the kind of system
+      senior interviews increasingly probe for. It's built directly on the asyncio model from chapter 4 and on
+      Pydantic for validation, so this chapter assumes both. Interviewers expect you to reason about request
+      lifecycle, dependency injection, validation boundaries, and async correctness at the same depth you'd
+      reason about an Express/Nest service — the vocabulary differs, the architectural concerns don't.</p>
+      <div class="box why"><h4>Why</h4><p>Unlike Express, where "middleware" is a single generic concept stacked
+      in a pipeline, FastAPI's dependencies are typed, composable functions that can themselves depend on other
+      dependencies, get cached per-request, and integrate with OpenAPI docs generation automatically. Senior
+      candidates who can only describe "it's like middleware" miss the parts interviewers actually probe:
+      how dependency resolution order works, how to scope a dependency per-request vs per-app, and how
+      validation errors propagate before your handler even runs.</p></div>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>This chapter assumes <a href="04-async-python.html">Async Python (asyncio)</a> (FastAPI route handlers
+      are coroutines running on the event loop) and <a href="03-oop-dataclasses.html">OOP, Dataclasses, Type
+      Hints</a> (Pydantic models extend this type-hint-driven mental model). Related: <a href="06-venv-packaging-pytest.html">Virtual Envs, Packaging, Testing</a> for testing FastAPI apps with pytest.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="basics-bridge">Routing, request/response models (bridge from Express)</h3>
+      <table>
+        <tr><th>Express/Node</th><th>FastAPI</th><th>Notes</th></tr>
+        <tr><td><code>app.post('/users', handler)</code></td><td><code>@app.post("/users")<br>async def create_user(...)</code></td><td>FastAPI infers path params, query params, and body shape from the function signature's type hints — no manual <code>req.body</code> parsing.</td></tr>
+        <tr><td>Zod/Joi schema + manual <code>safeParse</code> call in handler</td><td>Pydantic model as a parameter type; validation runs automatically before your function body executes</td><td>A malformed body never reaches your handler — FastAPI returns <code>422</code> with structured field-level errors itself.</td></tr>
+        <tr><td><code>res.status(201).json(data)</code></td><td><code>return data</code> (model instance or dict); status via <code>@app.post(..., status_code=201)</code></td><td>FastAPI serializes the return value using the declared <code>response_model</code>, stripping extra fields automatically — like a Zod <code>.pick()</code> applied on the way out.</td></tr>
+        <tr><td>Express middleware: <code>app.use(authMiddleware)</code></td><td>FastAPI dependency: <code>current_user: User = Depends(get_current_user)</code></td><td>Declared per-route (or per-router) rather than globally stacked; typed, testable in isolation, and overridable in tests.</td></tr>
+        <tr><td><code>express.Router()</code></td><td><code>APIRouter()</code> + <code>app.include_router(router, prefix="/v1")</code></td><td>Nearly identical mental model for modularizing routes.</td></tr>
+      </table>
+      <pre><code class="language-python">
+from fastapi import FastAPI
+from pydantic import BaseModel
+
+app = FastAPI()
+
+class UserIn(BaseModel):
+    name: str
+    email: str
+    age: int | None = None
+
+class UserOut(BaseModel):
+    id: int
+    name: str
+    email: str
+    # note: no "age" here -- response_model strips fields not declared,
+    # similar to applying a Zod output schema on the way out
+
+@app.post("/users", response_model=UserOut, status_code=201)
+async def create_user(payload: UserIn):
+    # payload is already validated -- this line only runs if validation passed
+    return {"id": 1, "name": payload.name, "email": payload.email, "age": payload.age}
+</code></pre>
+
+      <h3 id="pydantic-validation">Pydantic: request validation as the type system (vs Zod/Joi)</h3>
+      <p>Pydantic models are the Python equivalent of Zod schemas, but validation is driven by the same type
+      hints you'd write anyway for readability — there's no separate schema DSL to maintain alongside your
+      types. Validators run eagerly at model construction; FastAPI constructs the model from the incoming
+      request body, so invalid input never reaches your handler at all (compare: Express middleware that calls
+      <code>schema.safeParse(req.body)</code> and manually short-circuits on failure).</p>
+      <pre><code class="language-python">
+from pydantic import BaseModel, EmailStr, field_validator, Field
+
+class SignupRequest(BaseModel):
+    username: str = Field(min_length=3, max_length=30)
+    email: EmailStr                      # built-in format validation, like Zod's .email()
+    password: str = Field(min_length=8)
+
+    @field_validator("username")
+    @classmethod
+    def no_spaces(cls, v: str) -> str:
+        if " " in v:
+            raise ValueError("username must not contain spaces")
+        return v
+
+# Equivalent Zod:
+# const SignupRequest = z.object({
+#   username: z.string().min(3).max(30).refine(v => !v.includes(" ")),
+#   email: z.string().email(),
+#   password: z.string().min(8),
+# });
+</code></pre>
+
+      <h3 id="dependency-injection">Dependency Injection (the real conceptual leap from Express middleware)</h3>
+      <ul>
+        <li><code>Depends(fn)</code> declares that a route parameter's value comes from calling <code>fn</code>
+        (itself possibly <code>async</code>) — FastAPI resolves the whole dependency graph before your handler
+        runs, including dependencies that themselves use <code>Depends()</code>, recursively.</li>
+        <li>Unlike Express middleware, which runs unconditionally for every matched route in its mount path,
+        a FastAPI dependency is declared explicitly per-route (or per-router via <code>dependencies=[...]</code>),
+        making the "what runs before this handler" question answerable by reading the function signature alone.</li>
+        <li>Dependencies are cached per-request by default — if two different route parameters depend on the
+        same underlying dependency function, it's called once per request, not twice (configurable via
+        <code>use_cache=False</code>).</li>
+        <li><code>yield</code>-based dependencies give you setup/teardown in one function (acquire a DB session,
+        <code>yield</code> it, close it in a <code>finally</code>) — the dependency equivalent of the
+        async context manager from chapter 4, scoped automatically to the request lifecycle.</li>
+      </ul>
+      <pre><code class="language-python">
+from fastapi import Depends, HTTPException, Header
+
+async def get_db():
+    db = await create_connection()
+    try:
+        yield db          # handler runs here, db is available
+    finally:
+        await db.close()  # guaranteed cleanup, even on exception -- like Express's res.on('finish')
+                           # but scoped per-request automatically, no manual wiring
+
+async def get_current_user(authorization: str = Header(...), db = Depends(get_db)):
+    token = authorization.removeprefix("Bearer ")
+    user = await db.fetch_user_by_token(token)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    return user
+
+@app.get("/me")
+async def read_me(user = Depends(get_current_user)):
+    # by the time we're here: token was validated, db session was opened,
+    # and will be closed automatically after the response is sent
+    return {"id": user.id, "name": user.name}
+</code></pre>
+
+      <h2 id="under-the-hood">How It Works Under the Hood: request lifecycle vs Node/Express</h2>
+      <p>FastAPI sits on Starlette (ASGI) the way Express sits on Node's raw <code>http</code> module. The
+      request lifecycle: an ASGI server (Uvicorn) accepts the connection and hands off to the ASGI app; FastAPI
+      matches the route, resolves the dependency tree (running each dependency's coroutine, respecting the
+      per-request cache), validates path/query/body params into Pydantic models, calls your handler coroutine,
+      then serializes the return value against <code>response_model</code> before sending bytes back. Critically,
+      because route handlers are coroutines, a single Uvicorn worker process can hold many requests "in flight"
+      concurrently exactly like a single Node process — the entire reason chapter 4's "don't block the loop"
+      rule applies here with full force: a synchronous blocking call inside a FastAPI route handler stalls every
+      other concurrent request on that worker.</p>
+      <table>
+        <tr><th>Aspect</th><th>Express/Node</th><th>FastAPI</th></tr>
+        <tr><td>Server protocol layer</td><td>Node's <code>http</code> module directly</td><td>ASGI spec, implemented by Uvicorn/Hypercorn — a standardized async interface, analogous conceptually to Node's raw request/response but with a formal spec multiple frameworks share</td></tr>
+        <tr><td>Request validation</td><td>Manual (Zod/Joi call inside middleware or handler)</td><td>Automatic, driven by type hints on the handler signature — validation failure short-circuits before your code runs</td></tr>
+        <tr><td>Per-request setup/teardown</td><td>Middleware + manual cleanup, or <code>res.on('finish', cleanup)</code></td><td><code>yield</code>-based dependencies with guaranteed <code>finally</code> cleanup, scoped automatically</td></tr>
+        <tr><td>API docs</td><td>Manual (Swagger/OpenAPI generated by a separate tool reading annotations/comments)</td><td>Generated automatically from Pydantic models and type hints — <code>/docs</code> (Swagger UI) and <code>/redoc</code> ship for free</td></tr>
+        <tr><td>Process model for scaling</td><td><code>cluster</code> module or PM2 to run multiple Node processes</td><td>Uvicorn workers (<code>--workers N</code>) or Gunicorn+Uvicorn workers — same "multiple single-threaded event-loop processes" scaling story</td></tr>
+      </table>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+sequenceDiagram
+  participant Client
+  participant Uvicorn as Uvicorn (ASGI server)
+  participant FastAPI
+  participant Deps as Dependency graph
+  participant Handler as Route handler (async def)
+  Client->>Uvicorn: POST /users {json body}
+  Uvicorn->>FastAPI: ASGI scope + receive()
+  FastAPI->>FastAPI: match route, parse path/query params
+  FastAPI->>Deps: resolve get_db(), get_current_user(db)
+  Deps-->>FastAPI: db session, current_user (cached per-request)
+  FastAPI->>FastAPI: validate body against Pydantic model
+  alt validation fails
+    FastAPI-->>Client: 422 Unprocessable Entity (field errors)
+  else validation passes
+    FastAPI->>Handler: await create_user(payload, user, db)
+    Handler-->>FastAPI: return UserOut-shaped dict
+    FastAPI->>FastAPI: serialize via response_model
+    FastAPI-->>Client: 201 Created + JSON
+    FastAPI->>Deps: run finally blocks (close db)
+  end
+      </div>
+      <div class="mermaid">
+graph TD
+  A[Depends get_current_user] --> B[Depends get_db]
+  A --> C[Header: Authorization]
+  D[Route: POST /orders] --> A
+  D --> E[Depends get_rate_limiter]
+  E --> B
+  F[Pydantic: OrderIn body model] --> D
+  note1[Shared Depends get_db is resolved ONCE per request<br/>and reused by both get_current_user and get_rate_limiter]
+  B -.cached, reused.-> E
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-python">
+from fastapi import FastAPI, Depends, HTTPException, APIRouter
+from pydantic import BaseModel
+import asyncio
+
+app = FastAPI(title="Orders API")
+router = APIRouter(prefix="/orders", tags=["orders"])
+
+class OrderIn(BaseModel):
+    product_id: int
+    quantity: int
+
+class OrderOut(BaseModel):
+    id: int
+    product_id: int
+    quantity: int
+    total_cents: int
+
+# ---- BAD: blocking DB driver call inside an async route stalls the whole worker ----
+@router.post("/bad", response_model=OrderOut)
+async def create_order_bad(payload: OrderIn):
+    import psycopg2   # synchronous driver
+    conn = psycopg2.connect("...")
+    cur = conn.cursor()
+    cur.execute("INSERT INTO orders ...")   # BLOCKS the event loop -- same bug as chapter 4
+    conn.commit()
+    return {"id": 1, **payload.model_dump(), "total_cents": 999}
+
+# ---- GOOD: async-native driver, non-blocking end to end ----
+async def get_pool():
+    # created once at app startup in practice (lifespan event), shown inline here
+    import asyncpg
+    pool = await asyncpg.create_pool(dsn="postgresql://...")
+    try:
+        yield pool
+    finally:
+        await pool.close()
+
+@router.post("", response_model=OrderOut, status_code=201)
+async def create_order(payload: OrderIn, pool = Depends(get_pool)):
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "INSERT INTO orders (product_id, quantity) VALUES ($1, $2) RETURNING id, total_cents",
+            payload.product_id, payload.quantity,
+        )
+    return {"id": row["id"], **payload.model_dump(), "total_cents": row["total_cents"]}
+
+# ---- Composable dependencies: rate limiting on top of auth ----
+class RateLimitExceeded(HTTPException):
+    def __init__(self):
+        super().__init__(status_code=429, detail="Too many requests")
+
+_request_counts: dict[str, int] = {}
+
+async def rate_limiter(user = Depends(lambda: {"id": 1})):  # simplified; normally Depends(get_current_user)
+    count = _request_counts.get(user["id"], 0)
+    if count >= 100:
+        raise RateLimitExceeded()
+    _request_counts[user["id"]] = count + 1
+
+@router.get("/{order_id}", response_model=OrderOut, dependencies=[Depends(rate_limiter)])
+async def get_order(order_id: int, pool = Depends(get_pool)):
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT * FROM orders WHERE id = $1", order_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Order not found")
+    return dict(row)
+
+app.include_router(router)
+
+# ---- Lifespan events: startup/shutdown (replaces @app.on_event, deprecated) ----
+from contextlib import asynccontextmanager
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    print("startup: warm caches, open pools")
+    yield
+    print("shutdown: close pools gracefully")
+
+app.router.lifespan_context = lifespan
+</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4><p>A FastAPI service backing an internal ML feature store serves
+      p50 latency under 20ms in staging but degrades sharply in production once traffic crosses roughly 200
+      req/sec per worker. Investigation shows the team wired <code>Depends(get_db)</code> to open a brand-new
+      database connection per request (no pool) — functionally correct, but each connection's TCP handshake
+      and TLS negotiation adds tens of milliseconds, and the DB server's max-connections limit gets hit under
+      load, causing cascading timeouts. The fix: create the connection pool once at app startup via a
+      <code>lifespan</code> context manager, and have <code>get_db</code> acquire/release from that shared pool
+      per request instead of opening a fresh connection each time — directly analogous to the classic Node
+      mistake of calling <code>new Pool()</code> inside a request handler instead of once at module load. This
+      is the single most common FastAPI production misconfiguration reported by teams new to the framework.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Defining a route handler as a plain <code>def</code> (not
+      <code>async def</code>) causes FastAPI to run it in a thread pool automatically — this is a deliberate
+      feature for wrapping blocking libraries, <strong>not</strong> a free pass. Mixing <code>def</code> and
+      <code>async def</code> handlers inconsistently across a codebase, without understanding which threading
+      model each gets, is a common source of "why does this one endpoint behave differently under load" bugs.</p></div>
+      <div class="box gotcha"><h4>Gotcha</h4><p><code>response_model</code> validates and filters the
+      <em>output</em> too — if your handler returns extra sensitive fields (e.g., a password hash) and you
+      forgot to declare a tight <code>response_model</code>, FastAPI will serialize whatever your handler
+      returns using the model you declared, but if you return a raw dict and have no <code>response_model</code>
+      at all, nothing strips sensitive fields. Always declare an explicit output model for anything touching
+      user data — don't rely on remembering to manually exclude fields in each handler.</p></div>
+      <ul>
+        <li>Creating a new DB connection pool (or any expensive resource) inside a dependency function called
+        per-request, instead of once at startup via <code>lifespan</code>, defeats pooling entirely.</li>
+        <li>Forgetting that Pydantic's default <code>BaseModel</code> is strict about types but not about
+        unexpected extra fields unless you set <code>model_config = ConfigDict(extra="forbid")</code> — silently
+        accepting unknown fields can hide client bugs.</li>
+        <li>Using mutable default arguments or module-level mutable state (like the <code>_request_counts</code>
+        dict above, shown simplified) across requests without considering multi-worker deployments — state like
+        that must live in Redis/a shared store once you run more than one worker process, since each worker has
+        its own memory.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td><code>async def</code> route handlers</td><td>All I/O inside the handler is async-native (DB, HTTP, cache)</td><td>You must call a blocking library you can't swap</td><td>Plain <code>def</code> handler (FastAPI runs it in a thread pool) or offload the blocking call with <code>run_in_executor</code></td></tr>
+        <tr><td>Plain <code>def</code> route handlers</td><td>Wrapping legacy sync code, simple CPU-light endpoints, quick migration</td><td>High-concurrency I/O-bound workloads — thread pool has a bounded size, limiting concurrency ceiling</td><td><code>async def</code> + async-native client libraries</td></tr>
+        <tr><td><code>Depends()</code> with <code>yield</code> for resource lifecycle</td><td>Any per-request resource needing guaranteed cleanup (DB session, lock)</td><td>App-wide singletons that should be created once, not per request</td><td><code>lifespan</code> context manager for app-scoped resources</td></tr>
+        <tr><td>Pydantic strict validation (<code>extra="forbid"</code>)</td><td>Public APIs, security-sensitive inputs</td><td>Internal APIs evolving quickly where forward-compatibility with extra fields matters</td><td>Default permissive extra-field behavior</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic">
+        <h4>Basic</h4>
+        <details class="qa"><summary>How does FastAPI know how to validate an incoming request body?</summary><div class="answer"><p>
+        From the type hint on the route handler's parameter — if the parameter's type is a Pydantic
+        <code>BaseModel</code> subclass, FastAPI parses the JSON body and constructs that model, running all its
+        validators before the handler body ever executes. A validation failure returns a <code>422</code>
+        automatically without your code running at all.</p></div><div class="followup">Follow-up: what HTTP status code does a validation failure return by default, and what does the error body look like?</div></details>
+        <details class="qa"><summary>What is `Depends()` and what's the closest Express equivalent?</summary><div class="answer"><p>
+        `Depends(fn)` tells FastAPI to call `fn` (resolving its own dependencies recursively) and inject the
+        result as that parameter's value, before the route handler runs. The closest Express equivalent is
+        middleware, but unlike middleware it's declared explicitly per-route/router, is typed, and can be
+        swapped out in tests via dependency overrides.</p></div><div class="followup">Follow-up: are dependencies resolved sequentially or can independent ones run concurrently?</div></details>
+        <details class="qa"><summary>What does `response_model` do, and why would you always declare one on routes handling user data?</summary><div class="answer"><p>
+        It defines the shape FastAPI serializes the handler's return value into, stripping any fields not
+        declared on that model. Without it, whatever dict/object your handler returns gets serialized as-is,
+        which risks leaking fields like password hashes or internal IDs that happened to be present on the
+        object you returned.</p></div><div class="followup">Follow-up: does response_model also validate, or only filter?</div></details>
+        <details class="qa"><summary>What's the practical difference between an `async def` and a plain `def` route handler in FastAPI?</summary><div class="answer"><p>
+        An `async def` handler runs directly on the event loop like any other coroutine. A plain `def` handler
+        is automatically run in a thread pool by FastAPI/Starlette, so it won't block the event loop even if it
+        does blocking work internally -- but it's bounded by the thread pool's size, and still shares the GIL,
+        so it's not a substitute for genuinely async-native I/O under high concurrency.</p></div><div class="followup">Follow-up: what's the default size of that thread pool, and how would you tune it?</div></details>
+        <details class="qa"><summary>Where does FastAPI's automatic OpenAPI documentation (`/docs`) come from?</summary><div class="answer"><p>
+        It's generated from the type hints and Pydantic models on your route handlers -- path/query/body
+        parameter types, response models, and status codes are all introspected to build the OpenAPI schema,
+        which Swagger UI (`/docs`) and ReDoc (`/redoc`) render automatically with zero extra annotation work.</p></div><div class="followup">Follow-up: how would you add a custom description or example to a field for the generated docs?</div></details>
+        <details class="qa"><summary>What's `APIRouter` and why would you use it instead of registering every route directly on `app`?</summary><div class="answer"><p>
+        `APIRouter` lets you group related routes (e.g., all `/orders` endpoints) into their own module with a
+        shared prefix, tags, and dependencies, then mount the whole group onto the main app with
+        `app.include_router(router, prefix=...)` -- the direct equivalent of `express.Router()` for modularizing
+        a large API.</p></div><div class="followup">Follow-up: can you apply a dependency to every route in a router at once, without repeating `Depends()` on each?</div></details>
+      </div>
+      <div class="qa-level medium">
+        <h4>Medium</h4>
+        <details class="qa"><summary>Explain exactly what happens, step by step, between a client POST request arriving and your handler's code running, for a route with two nested dependencies.</summary><div class="answer"><p>
+        Uvicorn accepts the connection and hands the ASGI scope to FastAPI; FastAPI matches the route, then
+        builds the dependency graph top-down: it calls the outermost dependency, which itself declares
+        `Depends()` on an inner one, so the inner one is resolved first (and cached if reused elsewhere in the
+        same request), then the outer one runs with that result. Only after the full graph resolves does FastAPI
+        parse and validate the request body against the declared Pydantic model, and only after that does your
+        handler coroutine actually get awaited.</p></div><div class="followup">Follow-up: at what point in this sequence does a 422 get returned versus a 401 from an auth dependency?</div></details>
+        <details class="qa"><summary>Why is creating a database connection pool inside a per-request `Depends()` function (instead of at app startup) a production problem, and what's the Node/Express parallel?</summary><div class="answer"><p>
+        It means every single request pays the cost of establishing a brand-new connection (TCP handshake, TLS,
+        auth) instead of reusing one from a pre-warmed pool, adding latency and risking hitting the database's
+        max-connections limit under concurrency. The exact parallel in Node is instantiating `new Pool()` (pg,
+        mysql2) inside a request handler instead of once at module load -- both mistakes turn a cheap pooled
+        operation into an expensive per-request setup cost.</p></div><div class="followup">Follow-up: where specifically should the pool be created and torn down in a FastAPI app's lifecycle?</div></details>
+        <details class="qa"><summary>How would you override a dependency in tests without changing production code?</summary><div class="answer"><p>
+        FastAPI's `app.dependency_overrides` dict lets you map a dependency function to a replacement for the
+        duration of a test -- e.g., override `get_db` to return an in-memory/test database session, or override
+        `get_current_user` to return a fixed test user, bypassing real auth entirely. This is cleaner than
+        monkeypatching because it's scoped to the app instance and FastAPI's own resolution mechanism handles it.</p></div><div class="followup">Follow-up: how would you scope an override to a single test function versus the whole test session using pytest fixtures?</div></details>
+        <details class="qa"><summary>What's the risk of using a plain in-memory dict (like a request-count tracker) as shared state across requests in a FastAPI app deployed with multiple Uvicorn workers?</summary><div class="answer"><p>
+        Each worker process has its own separate memory space -- a dict in one worker's process is invisible to
+        the others. A rate limiter or counter built this way will undercount under multi-worker deployment,
+        since a client's requests get load-balanced across workers that each think they're seeing fewer requests
+        than they actually are in aggregate. Shared state across workers needs an external store like Redis.</p></div><div class="followup">Follow-up: how would you redesign the rate limiter example to be correct across multiple workers?</div></details>
+        <details class="qa"><summary>Compare FastAPI's `response_model` filtering to how you'd achieve the same output-shaping in an Express/Zod stack.</summary><div class="answer"><p>
+        In Express, output shaping is manual: you'd typically call something like `OutputSchema.parse(data)` or
+        hand-pick fields before calling `res.json()`, and nothing enforces that every handler does this
+        consistently. FastAPI's `response_model` is declarative on the route decorator itself -- it's enforced
+        automatically for every response from that route, and it's also what feeds the OpenAPI docs, so the
+        documented response shape and the actual enforced shape can never drift apart.</p></div><div class="followup">Follow-up: what happens if your handler returns a field that response_model doesn't declare but a required field is missing?</div></details>
+      </div>
+      <div class="qa-level advanced">
+        <h4>Advanced</h4>
+        <details class="qa"><summary>Design a FastAPI service's dependency structure for an endpoint that needs: authenticated user, per-user rate limiting, and a database transaction that must roll back if the handler raises.</summary><div class="answer"><p>
+        Layer dependencies: `get_db` (yield-based, opens a connection), `get_current_user` depending on a
+        decoded auth header, and a `get_db_transaction` dependency depending on `get_db` that begins a
+        transaction, yields the connection, and commits on clean exit or rolls back if an exception propagates
+        through it (via try/except around the yield). The route depends on `get_db_transaction` and
+        `get_current_user`; because `get_db` is cached per-request, both the transaction dependency and anything
+        else needing raw DB access share the same underlying connection without opening it twice.</p></div><div class="followup">Follow-up: how would you handle a case where the rate limiter dependency must run and reject the request BEFORE the (potentially expensive) transaction dependency opens a connection?</div></details>
+        <details class="qa"><summary>Explain how FastAPI's background tasks (`BackgroundTasks`) differ from `asyncio.create_task()`, and when you'd pick one over the other.</summary><div class="answer"><p>
+        `BackgroundTasks` (injected via a route parameter) schedules a function to run after the response has
+        already been sent to the client, still within the same request's lifecycle and still on the same worker
+        -- useful for "send a confirmation email after responding" without making the client wait. `asyncio.create_task()`
+        schedules something to run concurrently immediately, not tied to response completion, and its lifecycle
+        is detached from the request/response cycle entirely (with the exception-swallowing risk from chapter
+        4). For anything that must survive past a single request/response or needs retry guarantees, neither is
+        really sufficient -- that's what a real task queue (Celery, arq, or a cloud queue) is for.</p></div><div class="followup">Follow-up: what happens to a BackgroundTask if it raises an exception -- does the client ever find out?</div></details>
+        <details class="qa"><summary>A FastAPI service needs to call three independent downstream APIs per request and combine results, while respecting a strict 2-second total SLA. Design the handler.</summary><div class="answer"><p>
+        Issue all three downstream calls as concurrently scheduled tasks (`asyncio.gather` or `TaskGroup`), each
+        wrapped individually with `asyncio.wait_for`/`asyncio.timeout` sized so the slowest acceptable path still
+        fits the 2-second budget, and decide explicitly whether a partial failure (one downstream timing out)
+        should degrade gracefully (return partial data) or fail the whole request -- using
+        `return_exceptions=True` with `gather` if partial degradation is acceptable. Wrap the whole dependency
+        resolution + handler execution in an outer timeout as a backstop, and emit metrics on which downstream
+        call is the actual bottleneck under load so the SLA risk is visible before it's breached in production.</p></div><div class="followup">Follow-up: how would you differentiate, in your metrics, between "downstream is slow" and "our own event loop is the bottleneck"?</div></details>
+        <details class="qa"><summary>How would you structure a large FastAPI codebase (50+ endpoints, multiple teams) to avoid a monolithic app.py, and what's the Express/Nest parallel?</summary><div class="answer"><p>
+        Split by domain into separate `APIRouter` modules (orders, users, payments), each with its own
+        dependencies, Pydantic schemas, and service-layer functions, mounted onto the main app via
+        `include_router` with distinct prefixes/tags -- directly analogous to Nest's module system or a
+        well-organized Express app split into per-domain routers. Shared cross-cutting dependencies (auth, DB
+        session, rate limiting) live in a common module imported by each domain router, and a `lifespan` context
+        manager in the main app wires up app-wide resources (pools, caches) once at startup, injected down into
+        domain-specific dependencies.</p></div><div class="followup">Follow-up: how would you enforce that one domain's router never directly imports another domain's internal service functions?</div></details>
+        <details class="qa"><summary>Explain the tradeoff between using FastAPI's built-in `response_model` validation on every response versus skipping it for performance on a very hot, high-throughput endpoint.</summary><div class="answer"><p>
+        `response_model` validation/serialization has real CPU cost -- Pydantic has to construct and validate a
+        model instance from your return value on every single response, which is measurable overhead at very
+        high request rates (tens of thousands of req/sec). For genuinely hot paths, FastAPI lets you set
+        `response_model=None` or use `Response`/`ORJSONResponse` directly to bypass that step, trading the
+        safety/consistency guarantee (and the OpenAPI doc accuracy) for raw throughput -- a decision that should
+        be measured with profiling, not assumed, since Pydantic v2's Rust core made this overhead much smaller
+        than it was in Pydantic v1.</p></div><div class="followup">Follow-up: how would you benchmark whether response_model overhead is actually your bottleneck before deciding to remove it?</div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment">
+        <span class="level-tag">Beginner (30-60 min)</span>
+        <h4>Build a validated CRUD endpoint</h4>
+        <p>Build a single FastAPI route group for an in-memory "notes" resource (no real DB — a dict is fine):
+        create, get-by-id, list, delete. Use separate Pydantic models for input and output, with at least one
+        custom field validator (e.g., reject empty titles) and correct status codes (201 on create, 404 on
+        missing, 204 on delete).</p>
+        <ul><li>Must use distinct Pydantic input/output models, not the same model for both directions.</li></ul>
+        <p><strong>Acceptance criteria:</strong> Hitting <code>/docs</code> shows correct request/response
+        schemas; invalid input returns 422 with field-level errors; all four operations work via curl or the
+        Swagger UI.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>Start from `fastapi dev` (or `uvicorn main:app --reload`) and build incrementally, checking `/docs` after each route — it's the fastest feedback loop for catching schema mistakes.</p></div></details>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Intermediate (2-4 hrs)</span>
+        <h4>Layered dependency injection with auth and a fake DB pool</h4>
+        <p>Build a small API with a `get_db` yield-dependency wrapping a fake async connection pool (simulate
+        with `asyncio.sleep` for "connect"/"query" delays), a `get_current_user` dependency that reads a bearer
+        token from headers and raises 401 if invalid, and at least one route that depends on both plus a
+        rate-limiter dependency layered on top of auth.</p>
+        <ul><li>Must demonstrate dependency caching: prove via logging/print statements that `get_db` is called once per request even when two other dependencies both depend on it.</li>
+        <li>Must include a `lifespan` context manager that creates the fake pool once at startup.</li>
+        <li>Must write pytest tests using `app.dependency_overrides` to bypass real auth in tests.</li></ul>
+        <p><strong>Acceptance criteria:</strong> Test suite passes with overridden dependencies; log output
+        proves single resolution of shared dependencies per request.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>Use `TestClient` (from `fastapi.testclient`, sync) or `httpx.AsyncClient` with `ASGITransport` for async tests — the pytest-asyncio chapter (06) covers the async test setup in depth.</p></div></details>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Advanced (1-2 days)</span>
+        <h4>Production-shaped service: real DB, graceful degradation, load test</h4>
+        <p>Build a FastAPI service backed by a real async-native database (SQLite via `aiosqlite` is fine for
+        local dev) with a connection pool created at startup, at least two endpoints that fan out to two
+        "downstream" calls concurrently (can be fake async HTTP calls to httpbin with simulated delay) with
+        per-call timeouts and graceful partial-failure handling, structured logging of request latency per
+        endpoint, and a basic load test (using `locust` or a simple asyncio-based script) demonstrating the
+        service holds a target p99 latency under a defined concurrency level.</p>
+        <ul><li>Must handle one downstream call timing out without failing the whole request (degrade gracefully).</li>
+        <li>Must include a pytest suite covering the happy path, a downstream timeout path, and a validation-failure path.</li>
+        <li>Must include a short write-up of what p99 latency you achieved under what concurrency, and what the bottleneck was.</li></ul>
+        <p><strong>Acceptance criteria:</strong> Load test results and write-up included; test suite passes; no
+        blocking calls present in any `async def` route (verify by code review, not just testing). No full
+        reference solution — this is meant to force real engagement with FastAPI's production concerns.</p>
+      </div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet"><ul>
+        <li>FastAPI infers request validation from type hints on the handler signature — a Pydantic model param means automatic body validation, 422 on failure, before your code runs.</li>
+        <li><code>Depends(fn)</code> ≈ typed, composable Express middleware — resolved per-route, cached per-request, recursively composable.</li>
+        <li><code>yield</code>-based dependencies give setup/teardown (like async context managers) scoped automatically to the request lifecycle.</li>
+        <li>Always declare an explicit <code>response_model</code> for routes touching user data — it strips undeclared fields on the way out.</li>
+        <li>Create pools/expensive resources once in a <code>lifespan</code> context manager at startup, never per-request inside a dependency.</li>
+        <li><code>async def</code> handlers run on the event loop; plain <code>def</code> handlers run in a bounded thread pool — know which one each route is and why.</li>
+        <li>In-memory shared state (dicts, counters) breaks across multiple Uvicorn workers — each worker has separate memory; use Redis/a shared store instead.</li>
+        <li><code>/docs</code> (Swagger) and <code>/redoc</code> are generated automatically from your type hints and Pydantic models — no manual annotation needed.</li>
+        <li>Override dependencies in tests via <code>app.dependency_overrides</code>, not monkeypatching.</li>
+      </ul></div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://fastapi.tiangolo.com/tutorial/dependencies/">FastAPI docs: Dependencies</a></li>
+        <li><a href="https://fastapi.tiangolo.com/advanced/testing-dependencies/">FastAPI docs: Testing Dependencies with Overrides</a></li>
+        <li><a href="https://docs.pydantic.dev/latest/concepts/validators/">Pydantic docs: Validators</a></li>
+        <li><a href="https://fastapi.tiangolo.com/advanced/events/">FastAPI docs: Lifespan Events</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="04-async-python.html"><span class="dir">← Previous</span>Async Python (asyncio)</a>
+        <a class="next" href="06-venv-packaging-pytest.html"><span class="dir">Next →</span>Virtual Envs, Packaging, Testing</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · Python Intermediate</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "08-python-intermediate", chapterKey: "05-fastapi" });</script>
+</body>
+</html>

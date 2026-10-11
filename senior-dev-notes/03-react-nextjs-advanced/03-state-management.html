@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>State Management — React & Next.js Advanced — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">React &amp; Next.js Advanced</a><span class="sep">›</span>State Management</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>State Management: Context, Redux Toolkit, Zustand, React Query</h1>
+      <p class="meta-line"><span>⏱ 2.5 hrs</span><span>📍 Chapter 3 of 11</span></p>
+      <p><strong>One-line summary:</strong> The single highest-leverage decision in frontend architecture is
+      classifying every piece of state as <em>server cache</em>, <em>global client state</em>, <em>local UI
+      state</em>, or <em>URL state</em> — and picking a tool per category instead of forcing one store to do
+      everything.</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>"Should this go in Redux?" is a trick question in a senior interview — the correct answer is almost
+      always "it depends what kind of state it is," and demonstrating that taxonomy (plus knowing the real
+      mechanics of Context re-renders) is what separates a senior from someone who's only used one tool.</p>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>Read <a href="01-react-internals.html">React Internals</a> and <a href="02-hooks-deep-dive.html">Hooks Deep Dive</a> first. Related: <a href="04-performance.html">Performance</a>.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="taxonomy">The four kinds of state</h3>
+      <ul>
+        <li><strong>Server cache state:</strong> data that actually lives on a server and your client has a
+        cached, possibly-stale copy of (user profile, product list). This is <em>not</em> client state at all —
+        it needs revalidation, dedup, background refetch, and cache invalidation semantics that tools like
+        Redux/Zustand don't provide out of the box. React Query (TanStack Query) or SWR exist specifically
+        for this.</li>
+        <li><strong>Global client state:</strong> state that's genuinely client-only and needed across distant
+        parts of the tree (auth session, theme, feature flags, shopping cart). Context, Zustand, or Redux
+        Toolkit.</li>
+        <li><strong>Local UI state:</strong> state scoped to one component/subtree (form input value, modal open/
+        closed, hover state). Plain <code>useState</code>/<code>useReducer</code>, always — never lift this
+        into a global store "just in case."</li>
+        <li><strong>URL state:</strong> state that should survive a refresh or be shareable/bookmarkable
+        (current tab, filters, pagination page). Belongs in the URL (search params), not in any JS store.</li>
+      </ul>
+
+      <h3 id="context-mechanics">How Context actually triggers re-renders</h3>
+      <p>Every component that calls <code>useContext(MyContext)</code> subscribes to that context. When the
+      <code>&lt;MyContext.Provider value={...}&gt;</code> re-renders with a <em>new</em> value (compared by
+      <code>Object.is</code>), React re-renders <strong>every</strong> subscribed consumer in the subtree,
+      regardless of whether that consumer actually uses the specific field of the value object that changed —
+      Context has no field-level selector mechanism built in. This is why putting a frequently-changing value
+      (like mouse position) and a rarely-changing value (like theme) in the same context object is a classic
+      performance mistake: every mouse-move re-renders every theme consumer too.</p>
+
+      <h3 id="redux-toolkit">Redux Toolkit: when the ceremony is worth it</h3>
+      <p>Redux Toolkit (RTK) is "Redux with the boilerplate removed" — <code>createSlice</code> generates
+      action types/creators/reducers from a single object using Immer under the hood (so you write "mutating"
+      code that's actually translated into immutable updates). RTK Query layers server-cache features
+      (similar to React Query) on top of the same store. Reach for RTK when: multiple teams need a single
+      predictable state shape with time-travel debugging, strict action-based auditability, or you're already
+      deep in the Redux ecosystem (middleware, selectors with <code>reselect</code>/RTK's built-in memoized
+      selectors). Its cost is verbosity and a learning curve for the action/reducer/selector mental model.</p>
+
+      <h3 id="zustand">Zustand: minimal global state without the ceremony</h3>
+      <p>Zustand is a small store built on a plain closure + <code>useSyncExternalStore</code> under the hood
+      (the same primitive React itself uses for subscribing to external stores safely under concurrent
+      rendering). Components subscribe with a <em>selector</em> function, and Zustand only re-renders a
+      component when the selected slice actually changes (shallow-compared) — giving you Context's ergonomics
+      without Context's "every consumer re-renders" problem. No providers required by default (though you can
+      scope stores per-subtree if needed).</p>
+
+      <h3 id="react-query">React Query: solving the server-cache problem correctly</h3>
+      <p>React Query treats server data as a cache with a key (<code>queryKey</code>), not as state you manually
+      store and update. It handles: deduplication of identical in-flight requests, background refetch on window
+      focus/reconnect, stale-while-revalidate semantics, automatic retries with backoff, and cache invalidation
+      via <code>queryClient.invalidateQueries</code>. Trying to replicate this with Redux/Zustand means
+      hand-rolling loading/error/staleness logic for every endpoint — this is the #1 reason senior engineers
+      reach for React Query over a general-purpose store for anything that originates from an API.</p>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>Zustand and most modern libraries use <code>useSyncExternalStore(subscribe, getSnapshot)</code> — the
+      React 18 primitive designed exactly for "state lives outside React, but components need to safely read it
+      under concurrent rendering (torn reads must be avoided when a render is interrupted mid-flight)." The
+      <code>getSnapshot</code> function must return a value that's referentially stable across calls unless the
+      underlying data truly changed, or React re-renders in a loop. React Query internally uses the same
+      primitive to subscribe components to query cache entries.</p>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+flowchart TD
+  A[Where does this state live?] --> B{Does a server own the source of truth?}
+  B -->|Yes| C[React Query / SWR]
+  B -->|No| D{Needed across distant components?}
+  D -->|No| E[useState / useReducer locally]
+  D -->|Yes| F{Should it survive refresh / be shareable?}
+  F -->|Yes| G[URL search params]
+  F -->|No| H{High write frequency + many consumers?}
+  H -->|Yes| I[Zustand selector-based store]
+  H -->|No| J[Context, or Redux Toolkit if team needs its tooling]
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-jsx">// Context pitfall: one object, mixed update frequencies -> over-rendering
+const AppContext = createContext(null);
+function AppProvider({ children }) {
+  const [theme, setTheme] = useState("dark");
+  const [cursor, setCursor] = useState({ x: 0, y: 0 }); // changes constantly
+  // BAD: every cursor move creates a new object -> every consumer re-renders,
+  // including ones that only care about `theme`.
+  const value = { theme, setTheme, cursor, setCursor };
+  return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
+}
+
+// FIX: split into two contexts by update frequency
+const ThemeContext = createContext(null);
+const CursorContext = createContext(null);
+// Theme consumers never re-render on cursor movement, and vice versa.
+
+// Zustand: selector-based subscription avoids the Context problem entirely
+import { create } from "zustand";
+
+const useCartStore = create((set) => ({
+  items: [],
+  addItem: (item) => set((s) => ({ items: [...s.items, item] })),
+  removeItem: (id) => set((s) => ({ items: s.items.filter(i => i.id !== id) })),
+}));
+
+// Only re-renders when `items.length` changes, not on unrelated store updates
+function CartBadge() {
+  const count = useCartStore((s) => s.items.length);
+  return <span>{count}</span>;
+}
+
+// React Query: server cache done correctly
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+
+function useTodos() {
+  return useQuery({
+    queryKey: ["todos"],
+    queryFn: () => fetch("/api/todos").then(r => r.json()),
+    staleTime: 30_000, // treat data as fresh for 30s, skip refetch on remount
+  });
+}
+
+function useAddTodo() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (todo) => fetch("/api/todos", { method: "POST", body: JSON.stringify(todo) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["todos"] }), // refetch after mutation
+  });
+}</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4>
+      <p>A dashboard app stored API responses (users, orders, metrics) directly inside a single Redux store,
+      manually tracking <code>loading</code>/<code>error</code> flags per slice. As the number of endpoints grew
+      past ~40, every new feature required hand-written thunk boilerplate for fetch/retry/cache invalidation,
+      and stale data bugs (showing week-old cached orders after a mutation elsewhere) became common because
+      invalidation was manual and inconsistent across slices. Migrating server-derived state to React Query
+      (keeping Redux/Zustand only for genuinely client-only global state like UI panel visibility) cut the
+      data-fetching code by roughly 60% and eliminated an entire category of staleness bugs by centralizing
+      invalidation through query keys.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4>
+      <p>Putting server data into Redux/Zustand/Context "because that's our global store" is the most common
+      senior-level architecture mistake in this space — it works, but it means hand-rolling cache invalidation,
+      staleness, retries, and race-condition handling that a dedicated server-cache library already solved.
+      The tell in an interview: if you need to ask "when do I refetch this?", it's server cache state.</p></div>
+      <ul>
+        <li>One giant Context value mixing high- and low-frequency state — causes unrelated re-renders.</li>
+        <li>Lifting local UI state (e.g., a single input's focus state) into global state "for consistency."</li>
+        <li>Storing derived data in state instead of computing it from the source on render/selector.</li>
+        <li>Forgetting that Redux/Zustand selectors need to return stable references (or use shallow-compare) to avoid re-render loops.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>Context</td><td>Low-frequency global values (theme, auth, locale), few consumers</td><td>High-frequency updates, many consumers, or need for selective subscription</td><td>Zustand</td></tr>
+        <tr><td>Redux Toolkit</td><td>Large team, need strict structure, time-travel debugging, RTK Query ecosystem fit</td><td>Small app, team unfamiliar with action/reducer model</td><td>Zustand</td></tr>
+        <tr><td>Zustand</td><td>Global client state with frequent updates and selective subscribers</td><td>Need built-in server cache semantics</td><td>React Query (for server data) + Zustand (for client-only)</td></tr>
+        <tr><td>React Query / SWR</td><td>Any data that originates from a server/API</td><td>Purely client-local ephemeral state</td><td>useState/useReducer</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic"><h4>Basic</h4>
+      <details class="qa"><summary>When would you use Context vs. a dedicated state library?</summary><div class="answer"><p>Context for simple, infrequently-changing global values with a small number of consumers. A dedicated library (Zustand/Redux) when state changes frequently, many unrelated components consume slices of it, and you need selective re-rendering.</p></div><div class="followup">Follow-up: Does Context support selective subscription out of the box?</div></details>
+      <details class="qa"><summary>What problem does React Query solve that useState/useEffect data fetching doesn't?</summary><div class="answer"><p>Caching, deduplication of concurrent identical requests, background revalidation, retries with backoff, and consistent loading/error state — all without hand-written bookkeeping per endpoint.</p></div><div class="followup">Follow-up: How does it know when cached data is "stale"?</div></details>
+      <details class="qa"><summary>What is "lifting state up" and when should you NOT do it?</summary><div class="answer"><p>Moving state to the nearest common ancestor of components that need it. You shouldn't do it when the state is genuinely local (e.g., one input's value) — lifting it unnecessarily causes extra re-renders in the ancestor's whole subtree.</p></div><div class="followup">Follow-up: What's the alternative to lifting state for sharing it between distant siblings?</div></details>
+      <details class="qa"><summary>What is URL state and why keep filters/pagination there?</summary><div class="answer"><p>State encoded in the URL (search params/path) so it survives refresh, is shareable via link, and participates in browser back/forward navigation naturally — things no JS store gives you for free.</p></div><div class="followup">Follow-up: What library/hook would you use in Next.js to read/write it?</div></details>
+      <details class="qa"><summary>What does Redux Toolkit add on top of plain Redux?</summary><div class="answer"><p>`createSlice` to generate actions/reducers from one object with Immer-powered "mutating" syntax, built-in `configureStore` with sensible middleware defaults (including thunk and dev tools), and RTK Query for server-cache management.</p></div><div class="followup">Follow-up: What does Immer let you write that plain Redux reducers wouldn't allow?</div></details>
+      </div>
+      <div class="qa-level medium"><h4>Medium</h4>
+      <details class="qa"><summary>Explain why a single Context re-renders all consumers even when they use different fields of the value.</summary><div class="answer"><p>`useContext` subscribes a component to the nearest Provider's value as a whole; React has no built-in way to know a consumer only reads `value.theme` and not `value.cursor` — any new value reference triggers every subscriber's re-render. Selector-based libraries solve this by comparing the *selected slice*, not the whole object.</p></div><div class="followup">Follow-up: How would you manually work around this using multiple contexts or memoized sub-components?</div></details>
+      <details class="qa"><summary>How does Zustand avoid Context's over-rendering problem mechanically?</summary><div class="answer"><p>Each `useStore(selector)` call subscribes via `useSyncExternalStore` and Zustand only notifies that subscriber if the selector's output changed (shallow equality by default); unrelated state changes in the same store don't trigger re-renders for selectors that didn't touch the changed slice.</p></div><div class="followup">Follow-up: What happens if your selector returns a new object/array every call?</div></details>
+      <details class="qa"><summary>Design the state architecture for a filterable, paginated data table in a dashboard app. What goes where?</summary><div class="answer"><p>Filter values + page number -> URL search params (shareable, survives refresh). The actual row data for the current filter/page -> React Query keyed on those params (cache, refetch, loading/error state). Row selection / expanded-row UI state -> local useState in the table component. Any cross-page "saved views" feature -> Zustand or server-persisted via its own React Query mutation.</p></div><div class="followup">Follow-up: Where would you put "is this column sortable ascending or descending" state?</div></details>
+      <details class="qa"><summary>Why can RTK Query and React Query coexist awkwardly in a codebase, and when would you actually want both?</summary><div class="answer"><p>They solve the same problem (server cache) with different APIs/cache stores, so using both means duplicated caching logic and two mental models. It can make sense transitionally during a migration, or if a team already has heavy Redux Toolkit investment (selectors, devtools, middleware) and wants RTK Query specifically for that ecosystem fit while a newer part of the app adopts React Query — but it should be a deliberate, temporary choice, not a steady state.</p></div><div class="followup">Follow-up: What's the migration risk of having two separate caches for overlapping data?</div></details>
+      <details class="qa"><summary>What's wrong with storing a fetched list's "filtered/sorted" derived version in state instead of computing it on render?</summary><div class="answer"><p>It creates two sources of truth that can desync (the base list updates but the derived copy doesn't, or vice versa) and requires manual synchronization via effects, adding render cycles and bug surface. Computing the derived view inline (optionally via useMemo if the computation is expensive) guarantees it's always consistent with the current base data.</p></div><div class="followup">Follow-up: When would caching the derived value with useMemo actually be necessary vs. premature?</div></details>
+      </div>
+      <div class="qa-level advanced"><h4>Advanced</h4>
+      <details class="qa"><summary>Explain how `useSyncExternalStore` prevents "tearing" under concurrent rendering, and why external stores needed a new primitive in React 18.</summary><div class="answer"><p>Under concurrent rendering, React may render a tree at different points in time for different priority lanes, or restart a render after being interrupted. An external store (one React doesn't manage) can mutate between those renders; without a dedicated primitive, different parts of the same tree could read different snapshots of that external state during a single logical update, producing an inconsistent ("torn") UI. `useSyncExternalStore` forces a synchronous, consistent snapshot check (and forces a synchronous re-render if the snapshot changed since last render) specifically to rule this out, which is why library authors (Redux, Zustand, React Query) migrated their subscription internals to it.</p></div><div class="followup">Follow-up: What would you have to do to make an external store "tearing-safe" in React 17 without this primitive?</div></details>
+      <details class="qa"><summary>You need global state that's updated 60 times/second (e.g., a live cursor-position overlay shared across many components) without causing jank. Compare Context, Zustand, and a non-React approach.</summary><div class="answer"><p>Context is disqualified outright — every update re-renders every consumer regardless of relevance. Zustand with a tightly-scoped selector only re-renders components that read the specific changing slice, which is viable but still pays React's render+commit cost per update for each subscriber. A non-React approach (directly mutating a DOM element's style/transform via a ref and an external event subscription, bypassing React's render cycle entirely for just that hot value) avoids React scheduling overhead altogether and is the standard pattern for this specific "very high frequency, purely visual" case.</p></div><div class="followup">Follow-up: How would you still keep this testable/debuggable if you bypass React's render cycle?</div></details>
+      <details class="qa"><summary>How does React Query decide a query is "stale" vs "fresh," and what's the actual mechanism for background refetch without flashing a loading state?</summary><div class="answer"><p>Each query has a `staleTime` window after a successful fetch during which cached data is served with zero refetch on mount/focus. Past that window, a refetch triggers on relevant triggers (refocus, reconnect, mount) but the UI keeps showing the previous (now "stale") data via `isFetching` (background) rather than `isLoading` (no data yet) state, so consumers can choose to show a subtle "refreshing" indicator instead of blanking the UI — this is the stale-while-revalidate pattern implemented at the hook-state level.</p></div><div class="followup">Follow-up: How would you implement optimistic updates on top of this without fighting the background refetch?</div></details>
+      <details class="qa"><summary>Critique: "We put everything in Redux because it's the single source of truth and makes debugging easier." What's right and wrong about this in a 2025+ React/Next.js app?</summary><div class="answer"><p>Right: a single predictable store with time-travel debugging genuinely helps for complex client-only state machines. Wrong: server data isn't a "client state" problem at all — forcing it through Redux means reimplementing cache invalidation/staleness/retry logic Redux has no opinion on, and in an App Router app a meaningful amount of data should never reach client JS as mutable state in the first place (it can be fetched in Server Components and streamed, with Server Actions handling mutations) — treating "single source of truth" as "one client store for everything" ignores that the server itself is often the actual source of truth.</p></div><div class="followup">Follow-up: In an App Router app, what client-state categories genuinely still need Zustand/Redux?</div></details>
+      <details class="qa"><summary>Design a selector memoization strategy for a Redux Toolkit app with deeply nested normalized state and explain the failure mode of a naive selector.</summary><div class="answer"><p>A naive selector like `state => state.orders.map(id => state.ordersById[id])` returns a new array every call even if nothing changed, defeating `useSelector`'s reference-equality bailout and causing the consuming component to re-render on every unrelated store update. The fix is memoized selectors (via RTK's `createSelector`/reselect) that cache based on their actual input references (`state.orders`, `state.ordersById`), only recomputing the derived array when one of those inputs' references change — and structuring normalized state (entities keyed by id + an ids array) specifically so those input references stay stable across unrelated updates.</p></div><div class="followup">Follow-up: What breaks this memoization if `ordersById` is rebuilt on every reducer run regardless of what changed?</div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment"><span class="level-tag">Beginner (30-60 min)</span><h4>Classify and fix a Context over-rendering bug</h4>
+      <p>Build an app with one Context holding both `theme` and rapidly-updating `mouseCoords`. Add a console log in a component that only reads `theme`. Move the mouse and observe unnecessary re-renders; then split into two contexts and confirm the fix.</p>
+      <p><strong>Acceptance criteria:</strong> The theme-only consumer no longer re-renders on mouse movement.</p>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>React re-renders all consumers of a Provider whose value reference changed, with no field-level granularity.</p></div></details>
+      <p><strong>Bonus:</strong> Add a memoized selector-style wrapper component pattern as a third fix, without changing the context structure.</p></div>
+
+      <div class="assignment"><span class="level-tag">Intermediate (2-4 hrs)</span><h4>Build the same feature twice: Zustand vs. React Query</h4>
+      <p>Build a "favorites" list feature where favorites are persisted server-side. Implement it once storing favorites in a Zustand store that manually fetches/syncs with the server, and once using React Query with optimistic updates via `useMutation`'s `onMutate`.</p>
+      <ul><li>Simulate network latency and a failed mutation case.</li></ul>
+      <p><strong>Acceptance criteria:</strong> Document which implementation handles the failed-mutation rollback more cleanly and why.</p>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>React Query's `onMutate`/`onError` pair is purpose-built for optimistic update + rollback; replicating it manually in Zustand means hand-writing the rollback snapshot logic yourself.</p></div></details>
+      <p><strong>Bonus:</strong> Add query invalidation so a second browser tab's favorites list updates after a window refocus.</p></div>
+
+      <div class="assignment"><span class="level-tag">Advanced (1-2 days)</span><h4>Design a full state architecture for a multi-tab dashboard</h4>
+      <p>Given a hypothetical dashboard with: live metrics (polling), user-configurable saved views (server-persisted), a filter bar (should be shareable via URL), and a multi-step "create alert" wizard (local, ephemeral, multi-field), produce an architecture doc classifying every piece of state into one of the four categories and naming the specific tool/hook for each, with justification.</p>
+      <ul><li>No single "put it all in Redux" answers accepted — justify each category independently.</li></ul>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>Think about what should survive a refresh, what's shareable via link, and what truly needs cross-component subscription vs. local-only state.</p></div></details>
+      </div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet"><ul>
+        <li>Four categories: server cache, global client, local UI, URL state — pick a tool per category.</li>
+        <li>Server data -> React Query/SWR, never hand-rolled fetch+useState for anything nontrivial.</li>
+        <li>Context re-renders ALL consumers on any value change — no built-in field-level selectors.</li>
+        <li>Zustand/Redux selectors give field-level subscription via reference/shallow comparison.</li>
+        <li>Local UI state should stay local — don't lift "just in case."</li>
+        <li>Filters/pagination/active-tab -> URL search params, not a JS store.</li>
+        <li>Redux Toolkit = Redux + Immer-powered createSlice + RTK Query, worth it for large teams needing structure.</li>
+        <li>useSyncExternalStore is the React 18 primitive behind safe external-store subscriptions (tearing prevention).</li>
+      </ul></div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://tanstack.com/query/latest">TanStack Query docs</a></li>
+        <li><a href="https://zustand.docs.pmnd.rs/">Zustand docs</a></li>
+        <li><a href="https://redux-toolkit.js.org/">Redux Toolkit docs</a></li>
+        <li><a href="https://react.dev/reference/react/useSyncExternalStore">react.dev — useSyncExternalStore</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="02-hooks-deep-dive.html"><span class="dir">← Previous</span>Hooks Deep Dive</a>
+        <a class="next" href="04-performance.html"><span class="dir">Next →</span>React Performance</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · React &amp; Next.js Advanced</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-jsx.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-typescript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-tsx.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "03-react-nextjs-advanced", chapterKey: "03-state-management" });</script>
+</body>
+</html>

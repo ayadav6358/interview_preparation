@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Phase 14 — Dynamic Programming | DSA Notes</title>
+<style>
+  :root{
+    --ink:#12181B; --ink2:#1A2226; --ink3:#232C31;
+    --paper:#F7F4EE; --paper2:#EFEBE1; --paper3:#E4DECF;
+    --amber:#E8A33D; --amber-soft:#3A2E19;
+    --teal:#4FB3A9; --teal-soft:#12312D;
+    --rust:#D9695F; --rust-soft:#3A1F1C;
+    --slate:#8B9199;
+    --text:#E8E6E1; --text-dim:#A9AFAE;
+    --border: rgba(255,255,255,0.08);
+    --radius: 10px;
+    --mono: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{background:var(--ink); color:var(--text); font-family:var(--sans); line-height:1.65; font-size:16px;}
+  a{color:var(--amber);}
+  code, pre{font-family:var(--mono);}
+  #main{max-width:900px; margin:0 auto; padding:30px 24px 100px;}
+  h1{font-size:2rem; letter-spacing:-.01em; margin:0 0 6px;}
+  h2{font-size:1.5rem; margin-top:52px; padding-top:14px; border-top:1px solid var(--border); letter-spacing:-.01em;}
+  h2:first-of-type{border-top:none; margin-top:20px;}
+  h3{font-size:1.15rem; margin-top:30px; color:var(--amber);}
+  h4{font-size:1rem; margin-top:22px;}
+  .eyebrow{font-size:11px; text-transform:uppercase; letter-spacing:.12em; color:var(--teal); font-weight:700; margin-bottom:4px;}
+  .subtitle{color:var(--text-dim); font-size:15px; margin-bottom:28px;}
+  .callout{border-radius:var(--radius); padding:14px 16px; margin:18px 0; border:1px solid var(--border); font-size:14.5px;}
+  .callout .ctitle{font-weight:700; margin-bottom:4px; display:flex; gap:8px; align-items:center;}
+  .callout.concept{background:var(--teal-soft); border-color:var(--teal);}
+  .callout.concept .ctitle{color:var(--teal);}
+  .callout.example{background:var(--ink3);}
+  .callout.mistake{background:var(--rust-soft); border-color:var(--rust);}
+  .callout.mistake .ctitle{color:var(--rust);}
+  .callout.tip{background:var(--amber-soft); border-color:var(--amber);}
+  .callout.tip .ctitle{color:var(--amber);}
+  .codewrap{position:relative; margin:14px 0;}
+  pre{background:var(--ink3); border:1px solid var(--border); border-radius:var(--radius); padding:16px 18px; overflow-x:auto; font-size:13.5px; line-height:1.6;}
+  .lang-tag{font-size:10px; text-transform:uppercase; letter-spacing:.08em; color:var(--slate); margin-bottom:-4px; display:block;}
+  :not(pre) > code{background:var(--ink3); padding:2px 6px; border-radius:4px; font-size:.88em;}
+  table{width:100%; border-collapse:collapse; margin:16px 0; font-size:14px;}
+  th,td{border:1px solid var(--border); padding:9px 12px; text-align:left;}
+  th{background:var(--ink3); font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:var(--slate);}
+  .badge{display:inline-block; font-size:11px; font-weight:700; padding:3px 9px; border-radius:20px; text-transform:uppercase; letter-spacing:.03em;}
+  .badge.easy{background:var(--teal-soft); color:var(--teal);}
+  .badge.medium{background:var(--amber-soft); color:var(--amber);}
+  .badge.hard{background:var(--rust-soft); color:var(--rust);}
+  .qcard{border:1px solid var(--border); border-radius:var(--radius); padding:16px 18px; margin:14px 0; background:var(--ink2);}
+  .qcard .qhead{display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; gap:10px;}
+  .qcard .qhead b{font-size:14.5px;}
+  .qcard .meta{color:var(--text-dim); font-size:13px; margin:6px 0;}
+  .qcard .hint{font-size:13.5px; margin-top:8px;}
+  hr.div{border:none; border-top:1px solid var(--border); margin:40px 0;}
+  .navbar{display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; padding:14px 0; border-bottom:1px solid var(--border); font-size:13.5px;}
+  .navbar.bottom{border-bottom:none; border-top:1px solid var(--border); margin-top:50px;}
+  .navbar a{text-decoration:none; padding:6px 10px; border:1px solid var(--border); border-radius:8px; color:var(--text-dim);}
+  .navbar a:hover{border-color:var(--amber); color:var(--amber);}
+  ul{padding-left:22px;}
+  ol{padding-left:22px;}
+</style>
+</head>
+<body>
+<div id="main">
+
+  <div class="navbar">
+    <a href="../../index.html">🏠 Index</a>
+    <span>
+      <a href="../Phase-15-BitManipulation/01-bit-manipulation.html">Next: Bit Manipulation →</a>
+    </span>
+  </div>
+
+  <div class="eyebrow">Phase 14 · Dynamic Programming</div>
+  <h1>Dynamic Programming — Zero se Interview Tak 🧠</h1>
+  <p class="subtitle">Recursion ko fast banane ka tareeka — jab same subproblems baar-baar solve ho rahe hon, unhe cache karke exponential time se polynomial time tak le aana.</p>
+
+  <h2 id="dp">1. What is it?</h2>
+  <p>Dynamic Programming (DP) ek technique hai jo Recursion ko <b>fast</b> banati hai, un problems ke liye jisme <b>same subproblems baar-baar solve</b> ho rahe hote hain — hum unko ek baar solve karke <b>store (cache)</b> kar lete hain, taaki dobara calculate na karna pade.</p>
+
+  <h3>2. Why do we need it?</h3>
+  <p>Naive Fibonacci recursion O(2ⁿ) leta hai — kyunki <code>fib(3)</code> jaisi values baar-baar recompute hoti hain. DP isse O(n) mein le aata hai — bas ek chhota sa change: "agar answer pehle se pata hai, dobara mat nikalo."</p>
+
+  <h3>3. Real-Life Analogy</h3>
+  <div class="callout example">
+    <div class="ctitle">📝 Homework Answers Notebook</div>
+    Socho tumhe wahi sawaal baar-baar solve karna pad raha hai. Agar tum apna answer ek notebook mein likh lo pehli baar, agli baar bas notebook dekh lo — dobara poora solve karne ki zaroorat nahi. Yehi Memoization hai.
+  </div>
+
+  <h3>4. The Journey: Recursion → Memoization → Tabulation</h3>
+  <pre><code>Recursion (Brute Force)
+   ↓  "same subproblems repeat — let's cache them"
+Memoization (Top-Down DP)
+   ↓  "let's build the answer from the bottom instead of recursing"
+Tabulation (Bottom-Up DP)</code></pre>
+
+  <h3>5. Visual — Fibonacci Recursion Tree (repeated work)</h3>
+  <pre><code>                    fib(5)
+                 /          \
+            fib(4)          fib(3)
+           /      \         /      \
+       fib(3)    fib(2)  fib(2)   fib(1)
+       /    \     /   \    /  \
+   fib(2) fib(1) fib(1)fib(0) fib(1)fib(0)
+    /  \
+ fib(1)fib(0)
+
+Notice: fib(3) computed TWICE, fib(2) computed THREE times!
+As n grows, this repetition explodes → O(2ⁿ)</code></pre>
+
+  <h3>6. Code — All Three Stages for Fibonacci</h3>
+  <div class="lang-tag">Stage 1: Plain Recursion — O(2ⁿ)</div>
+  <div class="codewrap"><pre><code>function fibRecursive(n) {
+  if (n <= 1) return n;
+  return fibRecursive(n - 1) + fibRecursive(n - 2);
+}</code></pre></div>
+
+  <div class="lang-tag">Stage 2: Memoization (Top-Down) — O(n)</div>
+  <div class="codewrap"><pre><code>function fibMemo(n, memo = {}) {
+  if (n <= 1) return n;
+  if (n in memo) return memo[n];       // already solved? return cached answer
+  memo[n] = fibMemo(n - 1, memo) + fibMemo(n - 2, memo); // solve & cache
+  return memo[n];
+}</code></pre></div>
+  <p><b>Line-by-line:</b> Bilkul same recursion hai, bas ek <code>memo</code> object add kiya hai. Agar <code>n</code> ka answer already <code>memo</code> mein hai, seedha return kar do — koi dobara call nahi. Warna solve karo aur <code>memo</code> mein store kar do future ke liye.</p>
+
+  <div class="lang-tag">Stage 3: Tabulation (Bottom-Up) — O(n)</div>
+  <div class="codewrap"><pre><code>function fibTabulation(n) {
+  if (n <= 1) return n;
+  const dp = new Array(n + 1);
+  dp[0] = 0; dp[1] = 1;               // base cases
+  for (let i = 2; i <= n; i++) {
+    dp[i] = dp[i - 1] + dp[i - 2];    // build up from smaller answers
+  }
+  return dp[n];
+}</code></pre></div>
+  <p><b>Difference from Memoization:</b> Yahan koi recursion hi nahi hai — hum <b>chhote se bade</b> (bottom-up) values calculate karte jaate hain ek loop mein. Same O(n) time, but no call-stack overhead.</p>
+
+  <div class="lang-tag">Bonus: Space-Optimized Tabulation — O(1) space</div>
+  <div class="codewrap"><pre><code>function fibOptimal(n) {
+  if (n <= 1) return n;
+  let prev2 = 0, prev1 = 1;
+  for (let i = 2; i <= n; i++) {
+    const curr = prev1 + prev2;
+    prev2 = prev1;
+    prev1 = curr;
+  }
+  return prev1;
+}</code></pre></div>
+  <p>Kyunki hume sirf pichle 2 values chahiye hoti hain kisi bhi point par, poora array store karne ki zaroorat nahi — bas 2 variables kaafi hain.</p>
+
+  <h3>7. Dry Run — fibMemo(5)</h3>
+  <div class="callout example">
+    <div class="ctitle">📝 Step by step (showing cache hits)</div>
+    fib(5) → needs fib(4) + fib(3)<br>
+    fib(4) → needs fib(3) + fib(2) → computes and caches fib(3), fib(2), fib(1), fib(0)<br>
+    Back to fib(5): fib(3) is <b>already in memo!</b> → instant return, no recomputation<br>
+    Total unique computations: fib(0) through fib(5) = only 6 calls (vs 15 in plain recursion)
+  </div>
+
+  <h3>8. Complexity Comparison</h3>
+  <table>
+    <tr><th>Approach</th><th>Time</th><th>Space</th></tr>
+    <tr><td>Plain Recursion</td><td>O(2ⁿ)</td><td>O(n) (call stack)</td></tr>
+    <tr><td>Memoization (Top-Down)</td><td>O(n)</td><td>O(n) (memo + call stack)</td></tr>
+    <tr><td>Tabulation (Bottom-Up)</td><td>O(n)</td><td>O(n), or O(1) optimized</td></tr>
+  </table>
+
+  <hr class="div">
+  <h3>Important DP Problem 1: Climbing Stairs</h3>
+  <p>Problem: n stairs hain, tum 1 ya 2 steps ek baar mein chad sakte ho. Kitne distinct ways hain top tak pahunchne ke?</p>
+  <div class="callout concept">
+    <div class="ctitle">💡 Spotting the Recurrence</div>
+    Step n tak pahunchne ke ways = (step n-1 se 1 step lekar) + (step n-2 se 2 steps lekar) = <code>ways(n-1) + ways(n-2)</code>. Ye <b>bilkul Fibonacci jaisa hi</b> recurrence hai!
+  </div>
+  <div class="codewrap"><pre><code>function climbStairs(n) {
+  if (n <= 2) return n;
+  let prev2 = 1, prev1 = 2;
+  for (let i = 3; i <= n; i++) {
+    const curr = prev1 + prev2;
+    prev2 = prev1;
+    prev1 = curr;
+  }
+  return prev1;
+}</code></pre></div>
+
+  <h3>Important DP Problem 2: 0/1 Knapsack</h3>
+  <p>Problem: N items hain, har ek ka weight aur value hai. Ek bag hai capacity W ki. Maximum value kya hai jo tum utha sakte ho (har item pura lo ya bilkul mat lo)?</p>
+  <div class="callout concept">
+    <div class="ctitle">💡 Why NOT Greedy here?</div>
+    Fractional Knapsack mein greedy (value/weight ratio) kaam karta tha kyunki items todh sakte the. 0/1 Knapsack mein items todh nahi sakte — isliye <b>saari possibilities try karni padti hain</b> — DP chahiye.
+  </div>
+  <div class="codewrap"><pre><code>function knapsack(weights, values, capacity) {
+  const n = weights.length;
+  // dp[i][w] = max value using first i items with capacity w
+  const dp = Array.from({ length: n + 1 }, () => new Array(capacity + 1).fill(0));
+
+  for (let i = 1; i <= n; i++) {
+    for (let w = 0; w <= capacity; w++) {
+      dp[i][w] = dp[i - 1][w]; // option 1: don't take item i-1
+      if (weights[i - 1] <= w) {
+        dp[i][w] = Math.max(dp[i][w], dp[i - 1][w - weights[i - 1]] + values[i - 1]); // option 2: take it
+      }
+    }
+  }
+  return dp[n][capacity];
+}</code></pre></div>
+  <p><b>Line-by-line:</b> <code>dp[i][w]</code> stores the best value using the first <code>i</code> items with capacity <code>w</code>. Har item ke liye decide karo: <b>lo ya mat lo</b> — jo bhi bada value de. Ye "include/exclude" pattern backtracking jaisa hi hai, bas ab results cache ho rahe hain.</p>
+
+  <h3>Important DP Problem 3: Longest Common Subsequence (LCS)</h3>
+  <p>Problem: Do strings di gayi hain — unka longest common subsequence (order same, contiguous nahi) length kya hai?</p>
+  <div class="codewrap"><pre><code>function longestCommonSubsequence(text1, text2) {
+  const m = text1.length, n = text2.length;
+  const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      if (text1[i - 1] === text2[j - 1]) {
+        dp[i][j] = dp[i - 1][j - 1] + 1; // characters match, extend the LCS
+      } else {
+        dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]); // best of skipping either char
+      }
+    }
+  }
+  return dp[m][n];
+}</code></pre></div>
+  <div class="callout example">
+    <div class="ctitle">📝 Dry Run: text1="ace", text2="abcde"</div>
+    'a'='a' → match, extend. 'c' and 'e' also match at right positions. Final LCS = "ace", length = <b>3</b>.
+  </div>
+
+  <h3>How to Identify DP Problems — Checklist</h3>
+  <div class="callout tip">
+    <div class="ctitle">🎯 Look for these signs</div>
+    <ol>
+      <li><b>Overlapping Subproblems</b> — a naive recursive solution recomputes the same smaller inputs repeatedly.</li>
+      <li><b>Optimal Substructure</b> — the optimal answer for the full problem can be built from optimal answers to subproblems.</li>
+      <li>Keywords: "maximum/minimum ways", "count the number of ways", "longest/shortest subsequence", "can you reach/partition", "minimum cost to..."</li>
+      <li>You find yourself writing a brute-force recursion with choices at each step (include/exclude) — strong hint DP applies.</li>
+    </ol>
+    <b>Process:</b> Write the brute-force recursion first → identify repeated subproblems → add memoization → (optionally) convert to tabulation.
+  </div>
+
+  <h3>Common Mistakes</h3>
+  <div class="callout mistake">
+    <ul>
+      <li>Jumping straight to a DP table without first writing the recursive relation.</li>
+      <li>Off-by-one errors in the DP table dimensions (length vs length+1).</li>
+      <li>Forgetting base cases in the DP table.</li>
+      <li>Using DP where Greedy would suffice, or Greedy where DP was needed — always check the Greedy Choice Property first.</li>
+    </ul>
+  </div>
+
+  <h3>Interview Tips</h3>
+  <div class="callout tip">
+    DP problems mein interviewer sabse zyada ye dekhna chahta hai ki tum <b>recursion se DP tak ka safar</b> dikha sako: "Pehle brute force recursion, phir dikhaunga kaunse subproblems repeat ho rahe hain, phir memoize karunga." Ye process bolna, sirf final table code likhne se zyada valuable hai.
+  </div>
+
+  <hr class="div">
+  <h2>Interview Questions — Dynamic Programming</h2>
+
+  <h3>Easy</h3>
+
+  <div class="qcard"><div class="qhead"><b>Q1. Climbing Stairs</b><span class="badge easy">Easy</span></div>
+    <div class="meta">n stairs, 1 ya 2 steps ek baar mein. Kitne distinct ways top tak pahunchne ke?</div>
+    <p><b>Example:</b> Input: n = 3 → Output: 3 (ways: 1+1+1, 1+2, 2+1)</p>
+    <p class="hint"><b>Hint:</b> Recurrence is exactly Fibonacci — ways(n) = ways(n-1) + ways(n-2).</p>
+  </div>
+
+  <div class="qcard"><div class="qhead"><b>Q2. House Robber</b><span class="badge easy">Easy</span></div>
+    <div class="meta">Array of house values di gayi hai — adjacent houses rob nahi kar sakte. Maximum money?</div>
+    <p><b>Example:</b> Input: [1,2,3,1] → Output: 4 (rob house 0 and 2)</p>
+    <p class="hint"><b>Hint:</b> At each house decide skip vs rob — dp[i] = max(dp[i-1], dp[i-2] + arr[i]).</p>
+  </div>
+
+  <div class="qcard"><div class="qhead"><b>Q3. Min Cost Climbing Stairs</b><span class="badge easy">Easy</span></div>
+    <div class="meta">Har step par ek cost hai. Minimum cost floor tak pahunchne ka (0 ya 1 index se start, 1 ya 2 step jump).</div>
+    <p><b>Example:</b> Input: cost = [10,15,20] → Output: 15</p>
+    <p class="hint"><b>Hint:</b> dp[i] = cost[i] + min(dp[i-1], dp[i-2]).</p>
+  </div>
+
+  <div class="qcard"><div class="qhead"><b>Q4. Maximum Subarray (Kadane's Algorithm)</b><span class="badge easy">Easy</span></div>
+    <div class="meta">Contiguous subarray ka maximum sum nikalo.</div>
+    <p><b>Example:</b> Input: [-2,1,-3,4,-1,2,1,-5,4] → Output: 6 (subarray [4,-1,2,1])</p>
+    <p class="hint"><b>Hint:</b> At each position, decide: extend the previous subarray, or start fresh here.</p>
+  </div>
+
+  <div class="qcard"><div class="qhead"><b>Q5. Fibonacci Number</b><span class="badge easy">Easy</span></div>
+    <div class="meta">Nth Fibonacci number nikalo efficiently.</div>
+    <p><b>Example:</b> Input: n = 6 → Output: 8</p>
+    <p class="hint"><b>Hint:</b> Practice all three stages — recursion, memoization, tabulation, and O(1)-space version.</p>
+  </div>
+
+  <h3>Medium</h3>
+
+  <div class="qcard"><div class="qhead"><b>Q6. Coin Change (Minimum Coins)</b><span class="badge medium">Medium</span></div>
+    <div class="meta">Coins ka array aur ek amount di gayi hai. Minimum coins chahiye amount banane ke liye.</div>
+    <p><b>Example:</b> Input: coins=[1,2,5], amount=11 → Output: 3 (5+5+1)</p>
+    <p class="hint"><b>Hint:</b> dp[amount] over 1..target; for each coin try dp[amount-coin]+1.</p>
+  </div>
+
+  <div class="qcard"><div class="qhead"><b>Q7. Longest Increasing Subsequence</b><span class="badge medium">Medium</span></div>
+    <div class="meta">Array mein sabse lambi strictly increasing subsequence ki length nikalo.</div>
+    <p><b>Example:</b> Input: [10,9,2,5,3,7,101,18] → Output: 4 ([2,3,7,101])</p>
+    <p class="hint"><b>Hint:</b> dp[i] = length of LIS ending at i = 1 + max(dp[j]) for j&lt;i where arr[j]&lt;arr[i].</p>
+  </div>
+
+  <div class="qcard"><div class="qhead"><b>Q8. Longest Palindromic Substring (DP version)</b><span class="badge medium">Medium</span></div>
+    <div class="meta">String mein sabse lambi palindromic substring dhundo.</div>
+    <p><b>Example:</b> Input: "babad" → Output: "bab" (ya "aba")</p>
+    <p class="hint"><b>Hint:</b> dp[i][j] = true if s[i..j] is palindrome, using dp[i+1][j-1] and s[i]==s[j].</p>
+  </div>
+
+  <div class="qcard"><div class="qhead"><b>Q9. Partition Equal Subset Sum</b><span class="badge medium">Medium</span></div>
+    <div class="meta">Array ko do subsets mein divide kar sakte ho jinka sum equal ho?</div>
+    <p><b>Example:</b> Input: [1,5,11,5] → Output: true ([1,5,5] and [11])</p>
+    <p class="hint"><b>Hint:</b> This is a 0/1 knapsack variant — target = sum/2, check if that subset sum is achievable.</p>
+  </div>
+
+  <div class="qcard"><div class="qhead"><b>Q10. Unique Paths</b><span class="badge medium">Medium</span></div>
+    <div class="meta">m x n grid mein top-left se bottom-right tak (only right/down moves) kitne unique paths hain?</div>
+    <p><b>Example:</b> Input: m=3, n=7 → Output: 28</p>
+    <p class="hint"><b>Hint:</b> dp[i][j] = dp[i-1][j] + dp[i][j-1], base case first row/col = 1.</p>
+  </div>
+
+  <div class="qcard"><div class="qhead"><b>Q11. Longest Common Subsequence</b><span class="badge medium">Medium</span></div>
+    <div class="meta">Do strings ka longest common subsequence ka length nikalo.</div>
+    <p><b>Example:</b> Input: text1="abcde", text2="ace" → Output: 3</p>
+    <p class="hint"><b>Hint:</b> 2D dp[i][j] — match extends diagonal, mismatch takes max of left/up.</p>
+  </div>
+
+  <h3>Hard</h3>
+
+  <div class="qcard"><div class="qhead"><b>Q12. Edit Distance</b><span class="badge hard">Hard</span></div>
+    <div class="meta">Do strings ke beech minimum operations (insert/delete/replace) nikalo ek ko dusre mein convert karne ke liye.</div>
+    <p><b>Example:</b> Input: word1="horse", word2="ros" → Output: 3</p>
+    <p class="hint"><b>Hint:</b> dp[i][j] = dp[i-1][j-1] if chars match, else 1 + min(insert, delete, replace) options.</p>
+  </div>
+
+  <div class="qcard"><div class="qhead"><b>Q13. Word Break</b><span class="badge hard">Hard</span></div>
+    <div class="meta">String ko dictionary words se break kar sakte ho ya nahi, check karo.</div>
+    <p><b>Example:</b> Input: s="leetcode", wordDict=["leet","code"] → Output: true</p>
+    <p class="hint"><b>Hint:</b> dp[i] = true if s[0..i] can be segmented; check every j&lt;i where dp[j] is true and s[j..i] is in dict.</p>
+  </div>
+
+  <div class="qcard"><div class="qhead"><b>Q14. Best Time to Buy and Sell Stock with Cooldown</b><span class="badge hard">Hard</span></div>
+    <div class="meta">Stock prices ka array di gayi hai. Maximum profit nikalo, lekin sell ke baad ek din cooldown hai (agle din buy nahi kar sakte).</div>
+    <p><b>Example:</b> Input: [1,2,3,0,2] → Output: 3</p>
+    <p class="hint"><b>Hint:</b> Maintain three states per day — held, sold (cooldown next), rest — and transition between them.</p>
+  </div>
+
+  <div class="qcard"><div class="qhead"><b>Q15. 0/1 Knapsack (Full Reconstruction)</b><span class="badge hard">Hard</span></div>
+    <div class="meta">Knapsack ke max value ke saath-saath, kaunse items select huye wo bhi batao.</div>
+    <p><b>Example:</b> Input: weights=[1,3,4,5], values=[1,4,5,7], W=7 → Output: max value 9, items indices [1,2]</p>
+    <p class="hint"><b>Hint:</b> Build the full dp table, then backtrack from dp[n][W] checking whether dp[i][w] equals dp[i-1][w] (not taken) or not (taken).</p>
+  </div>
+
+  <div class="navbar bottom">
+    <a href="../../index.html">🏠 Index</a>
+    <span>
+      <a href="../Phase-15-BitManipulation/01-bit-manipulation.html">Next: Bit Manipulation →</a>
+    </span>
+  </div>
+
+</div>
+</body>
+</html>

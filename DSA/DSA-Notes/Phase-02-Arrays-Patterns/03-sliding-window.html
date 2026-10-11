@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sliding Window — DSA Trail</title>
+<style>
+  :root{
+    --ink:#12181B; --ink2:#1A2226; --ink3:#232C31;
+    --amber:#E8A33D; --amber-soft:#3A2E19;
+    --teal:#4FB3A9; --teal-soft:#12312D;
+    --rust:#D9695F; --rust-soft:#3A1F1C;
+    --slate:#8B9199;
+    --text:#E8E6E1; --text-dim:#A9AFAE;
+    --border: rgba(255,255,255,0.08);
+    --radius: 10px;
+    --mono: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{background:var(--ink); color:var(--text); font-family:var(--sans); line-height:1.65; font-size:16px;}
+  a{color:var(--amber); text-decoration:none;}
+  a:hover{text-decoration:underline;}
+  code, pre{font-family:var(--mono);}
+  #main{max-width:900px; margin:0 auto; padding:30px 24px 100px;}
+  h1{font-size:2rem; letter-spacing:-.01em; margin:14px 0 6px;}
+  h2{font-size:1.5rem; margin-top:52px; padding-top:14px; border-top:1px solid var(--border); letter-spacing:-.01em;}
+  h2:first-of-type{border-top:none; margin-top:20px;}
+  h3{font-size:1.15rem; margin-top:30px; color:var(--amber);}
+  .eyebrow{font-size:11px; text-transform:uppercase; letter-spacing:.12em; color:var(--teal); font-weight:700; margin-bottom:4px;}
+  .subtitle{color:var(--text-dim); font-size:15px; margin-bottom:28px;}
+  .callout{border-radius:var(--radius); padding:14px 16px; margin:18px 0; border:1px solid var(--border); font-size:14.5px;}
+  .callout .ctitle{font-weight:700; margin-bottom:4px; display:flex; gap:8px; align-items:center;}
+  .callout.concept{background:var(--teal-soft); border-color:var(--teal);}
+  .callout.concept .ctitle{color:var(--teal);}
+  .callout.example{background:var(--ink3);}
+  .callout.mistake{background:var(--rust-soft); border-color:var(--rust);}
+  .callout.mistake .ctitle{color:var(--rust);}
+  .callout.tip{background:var(--amber-soft); border-color:var(--amber);}
+  .callout.tip .ctitle{color:var(--amber);}
+  .codewrap{position:relative; margin:14px 0;}
+  pre{background:var(--ink3); border:1px solid var(--border); border-radius:var(--radius); padding:16px 18px; overflow-x:auto; font-size:13.5px; line-height:1.6;}
+  .lang-tag{font-size:10px; text-transform:uppercase; letter-spacing:.08em; color:var(--slate); margin-bottom:-4px; display:block;}
+  :not(pre) > code{background:var(--ink3); padding:2px 6px; border-radius:4px; font-size:.88em;}
+  table{width:100%; border-collapse:collapse; margin:16px 0; font-size:14px;}
+  th,td{border:1px solid var(--border); padding:9px 12px; text-align:left;}
+  th{background:var(--ink3); font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:var(--slate);}
+  .badge{display:inline-block; font-size:11px; font-weight:700; padding:3px 9px; border-radius:20px; text-transform:uppercase; letter-spacing:.03em;}
+  .badge.easy{background:var(--teal-soft); color:var(--teal);}
+  .badge.medium{background:var(--amber-soft); color:var(--amber);}
+  .badge.hard{background:var(--rust-soft); color:var(--rust);}
+  .qcard{border:1px solid var(--border); border-radius:var(--radius); padding:16px 18px; margin:14px 0; background:var(--ink2);}
+  .qcard .qhead{display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; gap:10px;}
+  .qcard .qhead b{font-size:14.5px;}
+  .qcard .ex{background:var(--ink3); border-radius:8px; padding:8px 12px; margin:8px 0; font-size:13.5px;}
+  .qcard .hint{color:var(--amber); font-size:13.5px; margin-top:8px;}
+  hr.div{border:none; border-top:1px solid var(--border); margin:40px 0;}
+  .navlinks{display:flex; justify-content:space-between; gap:12px; font-size:14px; margin:18px 0; flex-wrap:wrap;}
+  .navlinks a{background:var(--ink2); border:1px solid var(--border); padding:8px 14px; border-radius:8px;}
+  .navlinks a:hover{border-color:var(--amber);}
+  .index-link{font-size:13px; color:var(--text-dim);}
+</style>
+</head>
+<body>
+<div id="main">
+
+  <p class="index-link"><a href="../index.html">&larr; Back to Index</a></p>
+  <div class="eyebrow">Phase 2 · Arrays & Patterns</div>
+  <h1>Sliding Window</h1>
+  <p class="subtitle">Continuous subarray/substring problems ko O(n) mein solve karne ka pattern.</p>
+
+  <div class="navlinks">
+    <a href="02-prefix-sum.html">&larr; Prev: Prefix Sum</a>
+    <a href="04-two-pointers.html">Next: Two Pointers &rarr;</a>
+  </div>
+
+  <hr class="div">
+  <h2>1. What is it?</h2>
+  <p>Sliding Window ek technique hai jisme hum array/string ke ek "window" (continuous chunk) ko track karte hain, aur usko left-right slide karte hain — <b>bina poore window ko dobara process kiye.</b></p>
+
+  <h2>2. Why do we use it?</h2>
+  <p>Agar tumhe har continuous subarray/substring check karna hai (jaise "size k ka max sum" ya "sabse chhota substring jisme sab characters unique ho"), brute force O(n²) ya O(n³) lagega. Sliding Window isse O(n) mein solve kar deta hai — kyunki window move karte waqt sirf ek element add aur ek element remove hota hai, poora dobara calculate nahi karna padta.</p>
+
+  <h2>3. Real-Life Analogy</h2>
+  <div class="callout example">
+    <div class="ctitle">📝 Train Window View</div>
+    Train ki khidki se bahar dekho — tumhe ek waqt mein sirf ek "frame" dikhta hai. Jaise train aage badhti hai, purana view chhoot jata hai aur naya aata hai — poora scene dobara nahi dekhna padta, sirf jo naya aaya aur jo gaya, wahi update hota hai.
+  </div>
+
+  <h2>4. Fixed-size vs Variable-size Window</h2>
+  <ul>
+    <li><b>Fixed-size:</b> Window ka size (k) hamesha fixed rehta hai. Jaise "max sum of any subarray of size k".</li>
+    <li><b>Variable-size:</b> Window size condition ke hisaab se badhta-ghatta hai. Jaise "smallest subarray with sum ≥ target".</li>
+  </ul>
+
+  <h2>5. Visual Diagram</h2>
+  <pre><code>arr = [1, 3, 2, 6, 4, 8], k = 3
+
+Window 1: [1 3 2] 6  4  8   → sum = 6
+           1  [3 2 6] 4  8  → sum = 11  (remove 1, add 6)
+           1  3  [2 6 4] 8  → sum = 12  (remove 3, add 4)
+           1  3  2  [6 4 8] → sum = 18  (remove 2, add 8)
+
+Notice: har step par sirf ek element remove, ek add — poora sum dobara nahi.</code></pre>
+
+  <h2>6. Code — Fixed Size Window</h2>
+  <div class="lang-tag">JavaScript — Brute Force</div>
+  <div class="codewrap"><pre><code>function maxSumBrute(arr, k) {
+  let maxSum = -Infinity;
+  for (let i = 0; i <= arr.length - k; i++) {
+    let sum = 0;
+    for (let j = i; j < i + k; j++) sum += arr[j]; // recompute every time
+    maxSum = Math.max(maxSum, sum);
+  }
+  return maxSum;
+}</code></pre></div>
+  <p>Har window ka sum dobara se calculate ho raha hai — O(n × k), overlapping elements bar bar add ho rahe hain.</p>
+
+  <div class="lang-tag">JavaScript — Optimal Sliding Window</div>
+  <div class="codewrap"><pre><code>function maxSumOptimal(arr, k) {
+  let windowSum = 0;
+  for (let i = 0; i < k; i++) windowSum += arr[i]; // build first window
+  let maxSum = windowSum;
+
+  for (let i = k; i < arr.length; i++) {
+    windowSum += arr[i] - arr[i - k]; // add new, remove old
+    maxSum = Math.max(maxSum, windowSum);
+  }
+  return maxSum;
+}</code></pre></div>
+  <p><b>Why faster:</b> Pehla window O(k) mein banaya. Uske baad har slide mein sirf ek subtraction aur ek addition — O(1) per slide. Total: O(n) instead of O(n×k).</p>
+
+  <h3>Variable-Size Window Example</h3>
+  <p>Problem: Smallest subarray with sum ≥ target.</p>
+  <div class="codewrap"><pre><code>function smallestSubarrayWithSum(arr, target) {
+  let left = 0, sum = 0, minLen = Infinity;
+  for (let right = 0; right < arr.length; right++) {
+    sum += arr[right];              // expand window
+    while (sum >= target) {         // shrink window while condition holds
+      minLen = Math.min(minLen, right - left + 1);
+      sum -= arr[left];
+      left++;
+    }
+  }
+  return minLen === Infinity ? 0 : minLen;
+}</code></pre></div>
+  <p><b>Line-by-line:</b> <code>right</code> hamesha window ko expand karta hai. Jab tak sum target se bada/equal hai, hum <code>left</code> ko andar la kar window ko shrink karte hain aur minimum length track karte hain.</p>
+
+  <h2>7. Dry Run</h2>
+  <div class="callout example">
+    <div class="ctitle">📝 arr = [2, 1, 5, 2, 3, 2], target = 7</div>
+    <table>
+      <tr><th>right</th><th>sum</th><th>shrink?</th><th>left</th><th>minLen</th></tr>
+      <tr><td>0 (2)</td><td>2</td><td>No</td><td>0</td><td>∞</td></tr>
+      <tr><td>1 (1)</td><td>3</td><td>No</td><td>0</td><td>∞</td></tr>
+      <tr><td>2 (5)</td><td>8</td><td>Yes → sum=6,left=1</td><td>1</td><td>3</td></tr>
+      <tr><td>3 (2)</td><td>8</td><td>Yes → sum=7,left=2 → still≥7 → sum=2,left=3</td><td>3</td><td>2</td></tr>
+      <tr><td>4 (3)</td><td>5</td><td>No</td><td>3</td><td>2</td></tr>
+      <tr><td>5 (2)</td><td>7</td><td>Yes → sum=5,left=4</td><td>4</td><td>2</td></tr>
+    </table>
+    Answer: <b>2</b> (subarray [5,2] at indices 2-3)
+  </div>
+
+  <h2>8. Complexity</h2>
+  <p>Time: O(n) — chahe left aur right dono move ho rahe hon, dono milke total n baar hi move karte hain (each pointer only moves forward). Space: O(1).</p>
+
+  <h3>When to Use It? — Checklist</h3>
+  <div class="callout tip">
+    <div class="ctitle">🎯 Use Sliding Window when you see:</div>
+    <ul>
+      <li>"Contiguous subarray" ya "substring" mentioned</li>
+      <li>"Maximum/minimum sum of size k"</li>
+      <li>"Longest/shortest substring with condition X" (no repeating chars, at most k distinct, etc.)</li>
+      <li>Sab numbers <b>non-negative</b> hain (agar negative numbers hain, sliding window kaam nahi karega achhe se — tab prefix sum + hashmap socho)</li>
+    </ul>
+  </div>
+
+  <h3>Common Mistakes</h3>
+  <div class="callout mistake">
+    <ul>
+      <li>Window shrink karna bhool jaana jab condition already satisfy ho rahi ho (infinite growth ho jayega).</li>
+      <li>Negative numbers wale array par sliding window try karna — ye tabhi kaam karta hai jab sum monotonically badhta ho as window grows.</li>
+      <li>Frequency map update karna bhool jana jab left pointer move hota hai (variable window mein).</li>
+    </ul>
+  </div>
+
+  <h3>Interview Tips</h3>
+  <div class="callout tip">
+    Interviewer ko bolo: "Ye ek continuous subarray problem hai, so main Sliding Window try karunga — pehle brute force O(n²) socha, phir socha ki jab window slide hoti hai to sirf boundary elements change hote hain, so O(n) mein optimize kar sakte hain."
+  </div>
+
+  <hr class="div">
+  <h2>Interview Questions</h2>
+
+  <h3><span class="badge easy">Easy</span> Section</h3>
+
+  <div class="qcard">
+    <div class="qhead"><b>Q1. Maximum Sum Subarray of Size K</b><span class="badge easy">Easy</span></div>
+    <p>Find the max sum among all contiguous subarrays of size k.</p>
+    <div class="ex"><b>Input:</b> [2,1,5,1,3,2], k=3 &rarr; <b>Output:</b> 9</div>
+    <div class="hint">Hint: Build the first window's sum, then slide by adding the new element and removing the one leaving the window.</div>
+  </div>
+
+  <div class="qcard">
+    <div class="qhead"><b>Q2. Average of Subarrays of Size K</b><span class="badge easy">Easy</span></div>
+    <p>Return the average of every contiguous subarray of size k.</p>
+    <div class="ex"><b>Input:</b> [1,3,2,6,-1,4,1,8,2], k=5 &rarr; <b>Output:</b> [2.2,2.8,2.4,3.6,2.8]</div>
+    <div class="hint">Hint: Same fixed-window sum technique, just divide each windowSum by k.</div>
+  </div>
+
+  <div class="qcard">
+    <div class="qhead"><b>Q3. Longest Substring Without Repeating Characters</b><span class="badge easy">Easy</span></div>
+    <p>Find the length of the longest substring without repeating characters.</p>
+    <div class="ex"><b>Input:</b> "abcabcbb" &rarr; <b>Output:</b> 3 ("abc")</div>
+    <div class="hint">Hint: Use a Set/Map of characters in the window; shrink from the left whenever a duplicate is found.</div>
+  </div>
+
+  <div class="qcard">
+    <div class="qhead"><b>Q4. Count Occurrences of Anagram</b><span class="badge easy">Easy</span></div>
+    <p>Count how many substrings of a string are anagrams of a given pattern.</p>
+    <div class="ex"><b>Input:</b> s="forxxorfxdofr", pattern="for" &rarr; <b>Output:</b> 3</div>
+    <div class="hint">Hint: Use a fixed window of pattern's length; maintain a frequency map of the window and compare to pattern's frequency map at each slide.</div>
+  </div>
+
+  <div class="qcard">
+    <div class="qhead"><b>Q5. Maximum Number of Vowels in a Substring of Given Length</b><span class="badge easy">Easy</span></div>
+    <p>Find the max number of vowels in any substring of length k.</p>
+    <div class="ex"><b>Input:</b> s="abciiidef", k=3 &rarr; <b>Output:</b> 3</div>
+    <div class="hint">Hint: Fixed-size window — track a running vowel count, add new char, remove the one sliding out.</div>
+  </div>
+
+  <h3><span class="badge medium">Medium</span> Section</h3>
+
+  <div class="qcard">
+    <div class="qhead"><b>Q6. Longest Substring with At Most K Distinct Characters</b><span class="badge medium">Medium</span></div>
+    <p>Find the longest substring containing at most k distinct characters.</p>
+    <div class="ex"><b>Input:</b> "eceba", k=2 &rarr; <b>Output:</b> 3 ("ece")</div>
+    <div class="hint">Hint: Maintain a frequency map; when distinct count exceeds k, shrink from the left until it's k again.</div>
+  </div>
+
+  <div class="qcard">
+    <div class="qhead"><b>Q7. Fruit Into Baskets</b><span class="badge medium">Medium</span></div>
+    <p>Pick fruits from trees in a row into 2 baskets, each basket holding only one type — find max fruits collected.</p>
+    <div class="ex"><b>Input:</b> [1,2,1] &rarr; <b>Output:</b> 3</div>
+    <div class="hint">Hint: Same as "at most k distinct" pattern with k=2, applied to fruit types instead of characters.</div>
+  </div>
+
+  <div class="qcard">
+    <div class="qhead"><b>Q8. Max Consecutive Ones III</b><span class="badge medium">Medium</span></div>
+    <p>Find the max length of contiguous 1s if you can flip at most k zeroes.</p>
+    <div class="ex"><b>Input:</b> [1,1,1,0,0,0,1,1,1,1,0], k=2 &rarr; <b>Output:</b> 6</div>
+    <div class="hint">Hint: Track number of zeros in the window; shrink from left when zero-count exceeds k.</div>
+  </div>
+
+  <div class="qcard">
+    <div class="qhead"><b>Q9. Maximum of All Subarrays of Size K</b><span class="badge medium">Medium</span></div>
+    <p>Return the maximum value of each sliding window of size k.</p>
+    <div class="ex"><b>Input:</b> [1,3,-1,-3,5,3,6,7], k=3 &rarr; <b>Output:</b> [3,3,5,5,6,7]</div>
+    <div class="hint">Hint: Use a monotonic deque storing indices in decreasing order of value; pop smaller elements from back, pop front when out of window.</div>
+  </div>
+
+  <div class="qcard">
+    <div class="qhead"><b>Q10. Subarrays with K Different Integers</b><span class="badge medium">Medium</span></div>
+    <p>Count subarrays with exactly k distinct integers.</p>
+    <div class="ex"><b>Input:</b> [1,2,1,2,3], k=2 &rarr; <b>Output:</b> 7</div>
+    <div class="hint">Hint: exactly(k) = atMost(k) - atMost(k-1), where atMost uses a standard variable sliding window.</div>
+  </div>
+
+  <h3><span class="badge hard">Hard</span> Section</h3>
+
+  <div class="qcard">
+    <div class="qhead"><b>Q11. Minimum Window Substring</b><span class="badge hard">Hard</span></div>
+    <p>Find the smallest substring of s that contains all characters of t (with counts).</p>
+    <div class="ex"><b>Input:</b> s="ADOBECODEBANC", t="ABC" &rarr; <b>Output:</b> "BANC"</div>
+    <div class="hint">Hint: Expand right until the window contains all needed characters (using a "need" map and a "have" counter), then shrink from left while still valid.</div>
+  </div>
+
+  <div class="qcard">
+    <div class="qhead"><b>Q12. Longest Repeating Character Replacement</b><span class="badge hard">Hard</span></div>
+    <p>Find the longest substring where you can replace at most k characters to make all characters the same.</p>
+    <div class="ex"><b>Input:</b> s="AABABBA", k=1 &rarr; <b>Output:</b> 4</div>
+    <div class="hint">Hint: Track the count of the most frequent character in the window; window is valid if (windowSize - maxFreqCount) &le; k.</div>
+  </div>
+
+  <div class="qcard">
+    <div class="qhead"><b>Q13. Sliding Window Median</b><span class="badge hard">Hard</span></div>
+    <p>Return the median of each window of size k as it slides through the array.</p>
+    <div class="ex"><b>Input:</b> [1,3,-1,-3,5,3,6,7], k=3 &rarr; <b>Output:</b> [1,-1,-1,3,5,6]</div>
+    <div class="hint">Hint: Maintain two heaps (or a balanced multiset) representing the lower and upper halves of the current window, rebalancing as the window slides.</div>
+  </div>
+
+  <hr class="div">
+  <div class="navlinks">
+    <a href="02-prefix-sum.html">&larr; Prev: Prefix Sum</a>
+    <a href="04-two-pointers.html">Next: Two Pointers &rarr;</a>
+  </div>
+  <p class="index-link"><a href="../index.html">&larr; Back to Index</a></p>
+
+</div>
+</body>
+</html>

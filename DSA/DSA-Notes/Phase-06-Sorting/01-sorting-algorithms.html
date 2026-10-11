@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sorting Algorithms — DSA Notes</title>
+<style>
+  :root{
+    --ink:#12181B; --ink2:#1A2226; --ink3:#232C31;
+    --amber:#E8A33D; --amber-soft:#3A2E19;
+    --teal:#4FB3A9; --teal-soft:#12312D;
+    --rust:#D9695F; --rust-soft:#3A1F1C;
+    --slate:#8B9199;
+    --text:#E8E6E1; --text-dim:#A9AFAE;
+    --border: rgba(255,255,255,0.08);
+    --radius: 10px;
+    --mono: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{background:var(--ink); color:var(--text); font-family:var(--sans); line-height:1.65; font-size:16px;}
+  a{color:var(--amber);}
+  code, pre{font-family:var(--mono);}
+  #main{max-width:900px; margin:0 auto; padding:30px 22px 100px;}
+  h1{font-size:2rem; letter-spacing:-.01em; margin:0 0 6px;}
+  h2{font-size:1.5rem; margin-top:52px; padding-top:14px; border-top:1px solid var(--border); letter-spacing:-.01em;}
+  h2:first-of-type{border-top:none; margin-top:20px;}
+  h3{font-size:1.15rem; margin-top:30px; color:var(--amber);}
+  h4{font-size:1rem; margin-top:22px;}
+  .eyebrow{font-size:11px; text-transform:uppercase; letter-spacing:.12em; color:var(--teal); font-weight:700; margin-bottom:4px;}
+  .subtitle{color:var(--text-dim); font-size:15px; margin-bottom:28px;}
+  .callout{border-radius:var(--radius); padding:14px 16px; margin:18px 0; border:1px solid var(--border); font-size:14.5px;}
+  .callout .ctitle{font-weight:700; margin-bottom:4px; display:flex; gap:8px; align-items:center;}
+  .callout.concept{background:var(--teal-soft); border-color:var(--teal);}
+  .callout.concept .ctitle{color:var(--teal);}
+  .callout.example{background:var(--ink3);}
+  .callout.mistake{background:var(--rust-soft); border-color:var(--rust);}
+  .callout.mistake .ctitle{color:var(--rust);}
+  .callout.tip{background:var(--amber-soft); border-color:var(--amber);}
+  .callout.tip .ctitle{color:var(--amber);}
+  .codewrap{position:relative; margin:14px 0;}
+  pre{background:var(--ink3); border:1px solid var(--border); border-radius:var(--radius); padding:16px 18px; overflow-x:auto; font-size:13.5px; line-height:1.6;}
+  .copybtn{position:absolute; top:8px; right:8px; background:var(--ink); color:var(--text-dim); border:1px solid var(--border); border-radius:6px; padding:4px 9px; font-size:11px; cursor:pointer; font-family:var(--sans);}
+  .copybtn:hover{color:var(--amber); border-color:var(--amber);}
+  .lang-tag{font-size:10px; text-transform:uppercase; letter-spacing:.08em; color:var(--slate); margin-bottom:-4px; display:block;}
+  :not(pre) > code{background:var(--ink3); padding:2px 6px; border-radius:4px; font-size:.88em;}
+  table{width:100%; border-collapse:collapse; margin:16px 0; font-size:14px;}
+  th,td{border:1px solid var(--border); padding:9px 12px; text-align:left;}
+  th{background:var(--ink3); font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:var(--slate);}
+  .badge{display:inline-block; font-size:11px; font-weight:700; padding:3px 9px; border-radius:20px; text-transform:uppercase; letter-spacing:.03em;}
+  .badge.easy{background:var(--teal-soft); color:var(--teal);}
+  .badge.medium{background:var(--amber-soft); color:var(--amber);}
+  .badge.hard{background:var(--rust-soft); color:var(--rust);}
+  .qcard{border:1px solid var(--border); border-radius:var(--radius); padding:16px 18px; margin:14px 0; background:var(--ink2);}
+  .qcard .qhead{display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; gap:10px;}
+  .qcard .qhead b{font-size:14.5px;}
+  .qcard .meta{color:var(--text-dim); font-size:13px; margin:6px 0;}
+  .qcard .hint{color:var(--text-dim); font-size:13.5px; margin-top:8px; padding-top:8px; border-top:1px dashed var(--border);}
+  .qcard .hint b{color:var(--amber);}
+  hr.div{border:none; border-top:1px solid var(--border); margin:40px 0;}
+  .navlinks{display:flex; justify-content:space-between; gap:12px; font-size:14px; margin:18px 0; flex-wrap:wrap;}
+  .navlinks a{text-decoration:none; border:1px solid var(--border); padding:8px 14px; border-radius:8px; background:var(--ink2);}
+  .navlinks a:hover{border-color:var(--amber);}
+  .home{font-size:13px; color:var(--text-dim); margin-bottom:10px; display:inline-block;}
+</style>
+</head>
+<body>
+<div id="main">
+
+<a class="home" href="../index.html">&larr; Back to Index</a>
+<div class="navlinks">
+  <a href="../Phase-05-Searching/01-binary-search.html">&larr; Prev: Binary Search</a>
+  <a href="../Phase-07-Recursion-Backtracking/01-recursion-backtracking.html">Next: Recursion &amp; Backtracking &rarr;</a>
+</div>
+
+<div class="eyebrow">Phase 6 · Sorting</div>
+<h1>Sorting Algorithms</h1>
+<p class="subtitle">Sorting matlab data ko ek order (ascending/descending) mein arrange karna. Ye itna fundamental hai ki bahut saari optimizations (Binary Search, Two Pointers) sirf tabhi kaam karti hain jab data sorted ho. Chalo 5 important sorting algorithms dekhte hain — simple se lekar efficient tak.</p>
+
+<h2>Concept</h2>
+
+<h3>🔵 Bubble Sort</h3>
+<p><b>Idea:</b> Baar-baar adjacent elements ko compare karo, agar galat order mein hain to swap karo. Har pass mein sabse bada element "bubble up" hokar apni sahi jagah (end) chala jata hai.</p>
+<div class="callout example">
+  <div class="ctitle">📝 Analogy</div>
+  Bulbule paani mein upar aate hain — waise hi bada element har pass mein aage khisak kar end tak pahunch jata hai.
+</div>
+<div class="codewrap"><button class="copybtn" onclick="copyCode(this)">Copy</button>
+<pre><code>function bubbleSort(arr) {
+  const n = arr.length;
+  for (let i = 0; i < n - 1; i++) {
+    let swapped = false;
+    for (let j = 0; j < n - i - 1; j++) {
+      if (arr[j] > arr[j + 1]) {
+        [arr[j], arr[j + 1]] = [arr[j + 1], arr[j]]; // swap
+        swapped = true;
+      }
+    }
+    if (!swapped) break; // already sorted, stop early
+  }
+  return arr;
+}</code></pre></div>
+<p><b>Dry Run [5,1,4,2]:</b> Pass1: compare(5,1)→swap→[1,5,4,2]; compare(5,4)→swap→[1,4,5,2]; compare(5,2)→swap→[1,4,2,5]. Pass2: compare(1,4)→no; compare(4,2)→swap→[1,2,4,5]. Sorted!</p>
+<table><tr><th>Time (Best)</th><th>Time (Worst)</th><th>Space</th></tr><tr><td>O(n) (already sorted, with early-exit)</td><td>O(n²)</td><td>O(1)</td></tr></table>
+<p><b>When to use:</b> Almost never in practice — only for teaching purposes or tiny/near-sorted datasets.</p>
+
+<h3>🔵 Selection Sort</h3>
+<p><b>Idea:</b> Har pass mein, remaining unsorted part se <b>sabse chhota</b> element dhundo aur usse front mein swap kar do.</p>
+<div class="codewrap"><button class="copybtn" onclick="copyCode(this)">Copy</button>
+<pre><code>function selectionSort(arr) {
+  const n = arr.length;
+  for (let i = 0; i < n - 1; i++) {
+    let minIdx = i;
+    for (let j = i + 1; j < n; j++) {
+      if (arr[j] < arr[minIdx]) minIdx = j;
+    }
+    if (minIdx !== i) [arr[i], arr[minIdx]] = [arr[minIdx], arr[i]];
+  }
+  return arr;
+}</code></pre></div>
+<p><b>Dry Run [5,1,4,2]:</b> i=0: min in [5,1,4,2] is 1 at idx1 → swap → [1,5,4,2]. i=1: min in [5,4,2] is 2 at idx3 → swap → [1,2,4,5]. i=2: min in [4,5] is 4, already in place → [1,2,4,5]. Sorted!</p>
+<table><tr><th>Time (Best)</th><th>Time (Worst)</th><th>Space</th></tr><tr><td>O(n²) (no early exit possible)</td><td>O(n²)</td><td>O(1)</td></tr></table>
+<p><b>When to use:</b> When <b>minimizing swaps</b> matters (only n swaps total, unlike Bubble Sort) — e.g. when writes are expensive.</p>
+
+<h3>🔵 Insertion Sort</h3>
+<p><b>Idea:</b> Ek waqt mein ek element lo aur usse already-sorted part mein sahi jagah "insert" kar do — jaise cards ko haath mein sort karna.</p>
+<div class="callout example">
+  <div class="ctitle">📝 Analogy</div>
+  Playing cards ko haath mein arrange karte waqt, tum ek naya card uthate ho aur already-sorted cards mein uski sahi jagah dhundh kar daal dete ho.
+</div>
+<div class="codewrap"><button class="copybtn" onclick="copyCode(this)">Copy</button>
+<pre><code>function insertionSort(arr) {
+  for (let i = 1; i < arr.length; i++) {
+    let key = arr[i], j = i - 1;
+    while (j >= 0 && arr[j] > key) {
+      arr[j + 1] = arr[j]; // shift bigger elements right
+      j--;
+    }
+    arr[j + 1] = key; // place key in correct spot
+  }
+  return arr;
+}</code></pre></div>
+<p><b>Dry Run [5,1,4,2]:</b> i=1(key=1): shift 5 right → [5,5,4,2] → place 1 → [1,5,4,2]. i=2(key=4): shift 5 right → [1,5,5,2] → place 4 → [1,4,5,2]. i=3(key=2): shift 5,4 right → [1,4,5,5]→[1,4,4,5] → place 2 → [1,2,4,5]. Sorted!</p>
+<table><tr><th>Time (Best)</th><th>Time (Worst)</th><th>Space</th></tr><tr><td>O(n) (already sorted)</td><td>O(n²)</td><td>O(1)</td></tr></table>
+<p><b>When to use:</b> Small arrays, or <b>nearly sorted</b> data (very fast in that case), or online sorting (data arriving one at a time).</p>
+
+<h3>🔵 Merge Sort — Divide and Conquer</h3>
+<p><b>Idea:</b> Array ko baar-baar aadha karo jab tak single elements na bache (already sorted). Phir unhe sorted order mein merge karte hue wapas jodo.</p>
+<pre><code>[5, 1, 4, 2]
+   /        \
+[5, 1]    [4, 2]
+ /  \      /  \
+[5] [1]  [4]  [2]
+ \  /      \  /
+[1,5]     [2,4]      ← merge sorted halves
+   \       /
+  [1,2,4,5]           ← final merge</code></pre>
+<div class="codewrap"><button class="copybtn" onclick="copyCode(this)">Copy</button>
+<pre><code>function mergeSort(arr) {
+  if (arr.length <= 1) return arr;
+  const mid = Math.floor(arr.length / 2);
+  const left = mergeSort(arr.slice(0, mid));
+  const right = mergeSort(arr.slice(mid));
+  return merge(left, right);
+}
+
+function merge(left, right) {
+  const result = [];
+  let i = 0, j = 0;
+  while (i < left.length && j < right.length) {
+    if (left[i] <= right[j]) result.push(left[i++]);
+    else result.push(right[j++]);
+  }
+  while (i < left.length) result.push(left[i++]); // leftover left
+  while (j < right.length) result.push(right[j++]); // leftover right
+  return result;
+}</code></pre></div>
+<table><tr><th>Time (Best)</th><th>Time (Worst)</th><th>Space</th></tr><tr><td>O(n log n)</td><td>O(n log n)</td><td>O(n)</td></tr></table>
+<div class="callout tip">
+  <div class="ctitle">🎯 Why always O(n log n)?</div>
+  Merge Sort ka performance <b>input arrangement par depend nahi karta</b> — chahe array already sorted ho ya reverse, hum hamesha isko poora split aur merge karte hain. Ye consistency isse bahut reliable banati hai.
+</div>
+<p><b>When to use:</b> Jab tumhe <b>guaranteed O(n log n)</b> chahiye (no worst-case surprises), aur jab <b>stability</b> important ho (equal elements apna relative order maintain karte hain). Linked lists sort karne ke liye bhi best hai (no random access needed).</p>
+
+<h3>🔵 Quick Sort — Divide and Conquer with a Pivot</h3>
+<p><b>Idea:</b> Ek "pivot" element choose karo. Array ko is tarah partition karo ki pivot se chhote elements left mein aayen, bade right mein. Phir dono halves ko recursively sort karo.</p>
+<div class="codewrap"><button class="copybtn" onclick="copyCode(this)">Copy</button>
+<pre><code>function quickSort(arr, low = 0, high = arr.length - 1) {
+  if (low < high) {
+    const pivotIndex = partition(arr, low, high);
+    quickSort(arr, low, pivotIndex - 1);
+    quickSort(arr, pivotIndex + 1, high);
+  }
+  return arr;
+}
+
+function partition(arr, low, high) {
+  const pivot = arr[high]; // choose last element as pivot
+  let i = low - 1; // boundary of "smaller than pivot" region
+  for (let j = low; j < high; j++) {
+    if (arr[j] < pivot) {
+      i++;
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+  }
+  [arr[i + 1], arr[high]] = [arr[high], arr[i + 1]]; // place pivot correctly
+  return i + 1;
+}</code></pre></div>
+<p><b>Line-by-line:</b> <code>partition</code> pivot ko last element chunta hai, phir sab chhote elements ko pivot se pehle laata hai swaps ke through. Aakhir mein pivot apni final sorted position mein rakh diya jata hai — usse phir kabhi move nahi karna padta.</p>
+<table><tr><th>Time (Best/Avg)</th><th>Time (Worst)</th><th>Space</th></tr><tr><td>O(n log n)</td><td>O(n²) (bad pivot choices, e.g. already sorted array with last-element pivot)</td><td>O(log n) — recursion stack</td></tr></table>
+<div class="callout mistake">
+  <div class="ctitle">⚠️ Worst Case Trap</div>
+  Agar array already sorted hai aur tum hamesha last element ko pivot chunte ho, har partition sirf ek element ko sahi jagah rakhta hai — O(n²)! Real implementations "random pivot" ya "median-of-three" use karte hain isse avoid karne ke liye.
+</div>
+<p><b>When to use:</b> Practically fastest average-case sorting for arrays (in-place, cache-friendly) — yehi wajah hai languages ke built-in sort often Quick Sort variants use karte hain (arrays ke liye).</p>
+
+<h3>Comparison Table — All 5 Algorithms</h3>
+<table>
+  <tr><th>Algorithm</th><th>Best</th><th>Average</th><th>Worst</th><th>Space</th><th>Stable?</th></tr>
+  <tr><td>Bubble Sort</td><td>O(n)</td><td>O(n²)</td><td>O(n²)</td><td>O(1)</td><td>Yes</td></tr>
+  <tr><td>Selection Sort</td><td>O(n²)</td><td>O(n²)</td><td>O(n²)</td><td>O(1)</td><td>No</td></tr>
+  <tr><td>Insertion Sort</td><td>O(n)</td><td>O(n²)</td><td>O(n²)</td><td>O(1)</td><td>Yes</td></tr>
+  <tr><td>Merge Sort</td><td>O(n log n)</td><td>O(n log n)</td><td>O(n log n)</td><td>O(n)</td><td>Yes</td></tr>
+  <tr><td>Quick Sort</td><td>O(n log n)</td><td>O(n log n)</td><td>O(n²)</td><td>O(log n)</td><td>No</td></tr>
+</table>
+<p><b>"Stable"</b> ka matlab: agar do elements equal hain, unka relative order sort ke baad wahi rehta hai jo pehle tha. Ye tab important hota hai jab tum multiple keys par sort kar rahe ho (e.g., pehle name se, phir age se).</p>
+
+<h3>Common Mistakes</h3>
+<div class="callout mistake">
+  <ul>
+    <li>Quick Sort ka worst case bhool jaana — hamesha random/median pivot use karo real code mein.</li>
+    <li>Merge Sort mein merge step galat likhna — remaining elements (jab ek array khatam ho jaye) copy karna bhool jaana.</li>
+    <li>In-place vs extra-space sorts ko confuse karna — Merge Sort O(n) extra space leta hai, Quick Sort sirf O(log n) (stack).</li>
+  </ul>
+</div>
+
+<h3>Interview Tips</h3>
+<div class="callout tip">
+  Agar interviewer poochhe "sort karo", clarifying question poochho: "Stability chahiye? Extra space allowed hai? Worst case guarantee chahiye?" — In answers ke hisaab se Merge Sort (guaranteed + stable) ya Quick Sort (fast average, in-place) choose karo.
+</div>
+
+<hr class="div">
+<h2>Interview Questions</h2>
+
+<h3>Easy <span class="badge easy">Easy</span></h3>
+
+<div class="qcard">
+  <div class="qhead"><b>Q1. Implement Bubble Sort</b><span class="badge easy">Easy</span></div>
+  <p>Sort an array in-place using bubble sort, with early-exit if no swaps happen in a pass.</p>
+  <p><b>Example:</b> arr = [5,1,4,2] → Output: [1,2,4,5]</p>
+  <div class="hint"><b>Hint:</b> Compare adjacent pairs, swap if out of order, repeat n-1 passes.</div>
+</div>
+
+<div class="qcard">
+  <div class="qhead"><b>Q2. Implement Insertion Sort</b><span class="badge easy">Easy</span></div>
+  <p>Sort an array in-place using insertion sort.</p>
+  <p><b>Example:</b> arr = [5,1,4,2] → Output: [1,2,4,5]</p>
+  <div class="hint"><b>Hint:</b> For each element, shift larger sorted elements right and insert it in the correct spot.</div>
+</div>
+
+<div class="qcard">
+  <div class="qhead"><b>Q3. Sort Colors (Dutch National Flag)</b><span class="badge easy">Easy</span></div>
+  <p>Given an array of only 0s, 1s and 2s, sort it in-place in one pass.</p>
+  <p><b>Example:</b> arr = [2,0,2,1,1,0] → Output: [0,0,1,1,2,2]</p>
+  <div class="hint"><b>Hint:</b> Use three pointers — low, mid, high — to partition the array into three regions in a single pass.</div>
+</div>
+
+<div class="qcard">
+  <div class="qhead"><b>Q4. Check if Array is Sorted</b><span class="badge easy">Easy</span></div>
+  <p>Return true if the array is sorted in non-decreasing order.</p>
+  <p><b>Example:</b> arr = [1,2,2,3] → Output: true</p>
+  <div class="hint"><b>Hint:</b> Single pass, compare each element with the next.</div>
+</div>
+
+<div class="qcard">
+  <div class="qhead"><b>Q5. Merge Two Sorted Arrays</b><span class="badge easy">Easy</span></div>
+  <p>Merge two sorted arrays into one sorted array.</p>
+  <p><b>Example:</b> a = [1,3,5], b = [2,4,6] → Output: [1,2,3,4,5,6]</p>
+  <div class="hint"><b>Hint:</b> Two pointers, one per array; pick the smaller each time, then append leftovers.</div>
+</div>
+
+<h3>Medium <span class="badge medium">Medium</span></h3>
+
+<div class="qcard">
+  <div class="qhead"><b>Q6. Implement Merge Sort</b><span class="badge medium">Medium</span></div>
+  <p>Implement merge sort from scratch (divide and merge).</p>
+  <p><b>Example:</b> arr = [5,1,4,2] → Output: [1,2,4,5]</p>
+  <div class="hint"><b>Hint:</b> Recursively split in half, then merge two sorted halves using two pointers.</div>
+</div>
+
+<div class="qcard">
+  <div class="qhead"><b>Q7. Implement Quick Sort</b><span class="badge medium">Medium</span></div>
+  <p>Implement quick sort from scratch using the Lomuto partition scheme.</p>
+  <p><b>Example:</b> arr = [5,1,4,2] → Output: [1,2,4,5]</p>
+  <div class="hint"><b>Hint:</b> Choose a pivot, partition so smaller elements go left, then recurse on both sides.</div>
+</div>
+
+<div class="qcard">
+  <div class="qhead"><b>Q8. Kth Largest Element in an Array</b><span class="badge medium">Medium</span></div>
+  <p>Find the k-th largest element in an unsorted array without fully sorting.</p>
+  <p><b>Example:</b> arr = [3,2,1,5,6,4], k = 2 → Output: 5</p>
+  <div class="hint"><b>Hint:</b> Use Quickselect — partition like Quick Sort but recurse only into the relevant half.</div>
+</div>
+
+<div class="qcard">
+  <div class="qhead"><b>Q9. Merge Intervals</b><span class="badge medium">Medium</span></div>
+  <p>Given a list of intervals, merge all overlapping intervals.</p>
+  <p><b>Example:</b> [[1,3],[2,6],[8,10]] → Output: [[1,6],[8,10]]</p>
+  <div class="hint"><b>Hint:</b> Sort intervals by start value first, then sweep through merging overlaps as you go.</div>
+</div>
+
+<div class="qcard">
+  <div class="qhead"><b>Q10. Largest Number Formed From Array</b><span class="badge medium">Medium</span></div>
+  <p>Arrange array elements to form the largest possible number (concatenation).</p>
+  <p><b>Example:</b> arr = [3,30,34,5,9] → Output: "9534330"</p>
+  <div class="hint"><b>Hint:</b> Use a custom comparator: compare (a+b) vs (b+a) as strings instead of numeric comparison.</div>
+</div>
+
+<h3>Hard <span class="badge hard">Hard</span></h3>
+
+<div class="qcard">
+  <div class="qhead"><b>Q11. Count Inversions in an Array</b><span class="badge hard">Hard</span></div>
+  <p>Count pairs (i, j) where i &lt; j but arr[i] &gt; arr[j].</p>
+  <p><b>Example:</b> arr = [2,4,1,3,5] → Output: 3</p>
+  <div class="hint"><b>Hint:</b> Modify Merge Sort's merge step — when an element from the right half is placed before remaining left elements, count those remaining left elements.</div>
+</div>
+
+<div class="qcard">
+  <div class="qhead"><b>Q12. Meeting Rooms II (min rooms required)</b><span class="badge hard">Hard</span></div>
+  <p>Given meeting time intervals, find the minimum number of conference rooms required.</p>
+  <p><b>Example:</b> [[0,30],[5,10],[15,20]] → Output: 2</p>
+  <div class="hint"><b>Hint:</b> Sort start times and end times separately, then sweep with two pointers tracking overlapping meetings.</div>
+</div>
+
+<div class="qcard">
+  <div class="qhead"><b>Q13. Median in a Stream of Running Integers</b><span class="badge hard">Hard</span></div>
+  <p>Design a structure that supports adding numbers and finding the median efficiently at any point.</p>
+  <p><b>Example:</b> add(1), add(2), median()=1.5, add(3), median()=2</p>
+  <div class="hint"><b>Hint:</b> Maintain two heaps (max-heap for lower half, min-heap for upper half) instead of sorting on every insert.</div>
+</div>
+
+<hr class="div">
+<div class="navlinks">
+  <a href="../Phase-05-Searching/01-binary-search.html">&larr; Prev: Binary Search</a>
+  <a href="../Phase-07-Recursion-Backtracking/01-recursion-backtracking.html">Next: Recursion &amp; Backtracking &rarr;</a>
+</div>
+
+</div>
+<script>
+function copyCode(btn){
+  const code = btn.parentElement.querySelector('code');
+  if(code){ navigator.clipboard.writeText(code.innerText); btn.textContent='Copied!'; setTimeout(()=>btn.textContent='Copy',1200); }
+}
+</script>
+</body>
+</html>

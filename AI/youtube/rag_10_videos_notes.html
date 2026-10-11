@@ -1,0 +1,713 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RAG Course Notes</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#f7f8fb; --panel:#ffffff; --text:#1d2433; --muted:#5b6478; --line:#e3e7ef;
+  --accent:#0d8a7a; --accent-soft:#e3f5f2; --code-bg:#0f172a; --code-text:#e2e8f0;
+  --tip:#2563eb; --tip-soft:#e8f0ff; --warn:#c2410c; --warn-soft:#fff1e8;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0d1117; --panel:#151b24; --text:#e6e9ef; --muted:#9aa4b6; --line:#263040;
+    --accent:#2dd4bf; --accent-soft:#0f2a28; --code-bg:#0a0e14; --code-text:#d8dee9;
+    --tip:#6ea0ff; --tip-soft:#1a2740; --warn:#fb923c; --warn-soft:#2a1a10;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0d1117; --panel:#151b24; --text:#e6e9ef; --muted:#9aa4b6; --line:#263040;
+  --accent:#2dd4bf; --accent-soft:#0f2a28; --code-bg:#0a0e14; --code-text:#d8dee9;
+  --tip:#6ea0ff; --tip-soft:#1a2740; --warn:#fb923c; --warn-soft:#2a1a10;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,system-ui,sans-serif;line-height:1.65;font-size:16px}
+.layout{display:grid;grid-template-columns:280px 1fr;min-height:100vh}
+nav{position:sticky;top:0;height:100vh;overflow-y:auto;background:var(--panel);border-right:1px solid var(--line);padding:20px 14px}
+nav h1{font-size:17px;margin:0 0 4px}
+nav .sub{font-size:12px;color:var(--muted);margin-bottom:14px}
+nav input{width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--text);font:inherit;font-size:14px;margin-bottom:10px}
+nav ol{list-style:none;padding:0;margin:0}
+nav li a{display:flex;gap:8px;padding:6px 8px;border-radius:6px;color:var(--text);text-decoration:none;font-size:14px}
+nav li a:hover{background:var(--accent-soft)}
+nav li a span.n{color:var(--accent);font-weight:600;min-width:22px}
+.phase{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:14px 8px 4px}
+main{padding:32px 40px;max-width:1000px}
+header.hero{margin-bottom:28px}
+header.hero h2{font-size:30px;margin:0 0 8px;line-height:1.25}
+header.hero p{color:var(--muted);margin:0 0 6px}
+section.video{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:28px;margin-bottom:28px;scroll-margin-top:16px}
+.tag{display:inline-block;background:var(--accent-soft);color:var(--accent);font-weight:600;font-size:12px;padding:3px 10px;border-radius:999px;margin-bottom:8px}
+section.video h2{margin:0 0 10px;font-size:24px;line-height:1.3}
+section.video h3{margin:24px 0 8px;font-size:18px}
+section.video h4{margin:16px 0 4px;font-size:15.5px}
+.lead{color:var(--muted);font-size:16.5px}
+ul,ol.inner{padding-left:22px}
+li{margin:4px 0}
+pre{background:var(--code-bg);color:var(--code-text);padding:14px 16px;border-radius:10px;overflow-x:auto;font-family:"JetBrains Mono",monospace;font-size:13.5px;line-height:1.55}
+code{font-family:"JetBrains Mono",monospace;font-size:.9em;background:var(--accent-soft);padding:1px 5px;border-radius:4px}
+pre code{background:none;padding:0;font-size:inherit}
+.diagram{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:14px;margin:12px 0;overflow-x:auto;text-align:center}
+.box{border-radius:10px;padding:12px 16px;margin:14px 0}
+.tip{background:var(--tip-soft);border-left:4px solid var(--tip)}
+.warn{background:var(--warn-soft);border-left:4px solid var(--warn)}
+table{border-collapse:collapse;width:100%;margin:10px 0;font-size:14.5px}
+th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+th{background:var(--accent-soft)}
+.tablewrap{overflow-x:auto}
+.toggle{position:fixed;top:14px;right:14px;z-index:5;border:1px solid var(--line);background:var(--panel);color:var(--text);border-radius:8px;padding:6px 10px;cursor:pointer;font:inherit;font-size:13px}
+.menu-btn{display:none}
+@media (max-width:860px){
+  .layout{grid-template-columns:1fr}
+  nav{position:fixed;inset:0 25% 0 0;transform:translateX(-100%);transition:transform .2s;z-index:10;height:100%}
+  nav.open{transform:none;box-shadow:0 0 40px rgba(0,0,0,.4)}
+  .menu-btn{display:block;position:fixed;top:14px;left:16px;z-index:11;border:1px solid var(--line);background:var(--panel);color:var(--text);border-radius:8px;padding:6px 10px;font:inherit;font-size:13px}
+  main{padding:64px 16px 24px}
+  section.video{padding:18px}
+  header.hero h2{font-size:24px}
+}
+</style>
+</head>
+<body>
+<button class="menu-btn" id="menuBtn">☰ Topics</button>
+<button class="toggle" id="themeBtn">◐ Theme</button>
+<div class="layout">
+<nav id="nav">
+  <h1>RAG — 10 Videos</h1>
+  <div class="sub">Retrieval Augmented Generation notes with diagrams</div>
+  <input id="search" placeholder="Search topics…">
+  <ol id="toc">
+    <div class="phase">Foundations</div>
+    <li><a href="#v1"><span class="n">1</span>What is RAG &amp; Why</a></li>
+    <li><a href="#v2"><span class="n">2</span>RAG Architecture</a></li>
+    <div class="phase">Indexing</div>
+    <li><a href="#v3"><span class="n">3</span>Data Ingestion &amp; Parsing</a></li>
+    <li><a href="#v4"><span class="n">4</span>Chunking Strategies</a></li>
+    <li><a href="#v5"><span class="n">5</span>Embeddings &amp; Vector DBs</a></li>
+    <div class="phase">Retrieval &amp; generation</div>
+    <li><a href="#v6"><span class="n">6</span>Retrieval Strategies</a></li>
+    <li><a href="#v7"><span class="n">7</span>Re-ranking &amp; Context</a></li>
+    <li><a href="#v8"><span class="n">8</span>End-to-End RAG App</a></li>
+    <div class="phase">Quality &amp; advanced</div>
+    <li><a href="#v9"><span class="n">9</span>RAG Evaluation</a></li>
+    <li><a href="#v10"><span class="n">10</span>Advanced RAG Patterns</a></li>
+  </ol>
+</nav>
+
+<main>
+<header class="hero">
+  <span class="tag">Course map</span>
+  <h2>RAG: Complete Topic &amp; Subtopic Notes</h2>
+  <p>10 sections covering the full RAG lifecycle: why RAG → indexing → retrieval → generation → evaluation → advanced patterns. Each section has explanation, subtopics, a diagram, code and key takeaways.</p>
+  <p>Code uses LangChain (<code>langchain-core</code>, <code>langchain-openai</code>, <code>langchain-community</code>).</p>
+  <div class="diagram"><pre class="mermaid">
+flowchart LR
+  A["1-2 Why RAG + Architecture"] --> B["3-5 Indexing&lt;br/&gt;load, chunk, embed, store"]
+  B --> C["6-7 Retrieval&lt;br/&gt;search, hybrid, re-rank"]
+  C --> D["8 Build the app"]
+  D --> E["9 Evaluate"]
+  E --> F["10 Advanced RAG&lt;br/&gt;agentic, corrective, graph"]
+  </pre></div>
+</header>
+
+<!-- ================= 1 ================= -->
+<section class="video" id="v1">
+  <span class="tag">Video 1</span>
+  <h2>What is RAG &amp; Why Do We Need It?</h2>
+  <p class="lead">RAG (Retrieval Augmented Generation) lets an LLM answer using <b>external knowledge</b> fetched at question time, instead of relying only on what it memorized during training.</p>
+
+  <h3>1. How an LLM "knows" things</h3>
+  <p>An LLM stores knowledge in its <b>parameters</b> (weights), learned from training data. This is called <b>parametric knowledge</b>. To use it, you just prompt the model.</p>
+
+  <h3>2. Problems with parametric knowledge only</h3>
+  <ul>
+    <li><b>Private data</b> — the model never saw your company docs, your code, your notes.</li>
+    <li><b>Knowledge cutoff</b> — it doesn't know events after its training date.</li>
+    <li><b>Hallucination</b> — when it doesn't know, it may confidently invent facts.</li>
+    <li><b>No sources</b> — you can't easily verify where an answer came from.</li>
+  </ul>
+
+  <h3>3. Solution 1: Fine-tuning</h3>
+  <p>Train the pre-trained model further on your domain data (supervised fine-tuning, continued pre-training, LoRA / QLoRA).</p>
+  <ul>
+    <li>Steps: collect data → choose method → train → evaluate → deploy.</li>
+    <li><b>Drawbacks:</b> expensive compute, needs ML expertise, and every time data changes you must re-train. Also doesn't fully stop hallucination.</li>
+  </ul>
+
+  <h3>4. Solution 2: In-context learning</h3>
+  <p>Large LLMs can learn a task from examples or information placed <b>inside the prompt</b>, without changing weights (an emergent ability seen in GPT-3 scale models). Few-shot prompting is one example.</p>
+  <p><b>RAG = in-context learning where the context is fetched automatically</b> from your knowledge base for every question.</p>
+
+  <div class="diagram"><pre class="mermaid">
+flowchart LR
+  Q["Question"] --> R["Retriever&lt;br/&gt;search knowledge base"]
+  KB[("Your documents")] --> R
+  R --> C["Relevant context"]
+  Q --> P["Prompt = question + context"]
+  C --> P
+  P --> L["LLM"] --> A["Grounded answer"]
+  </pre></div>
+
+  <h3>5. RAG vs Fine-tuning</h3>
+  <div class="tablewrap"><table>
+    <tr><th></th><th>RAG</th><th>Fine-tuning</th></tr>
+    <tr><td>Cost</td><td>Low (no training)</td><td>High</td></tr>
+    <tr><td>Updating knowledge</td><td>Add/re-index documents</td><td>Re-train model</td></tr>
+    <tr><td>Private / fresh data</td><td>Yes</td><td>Only what was trained</td></tr>
+    <tr><td>Citations / transparency</td><td>Can show sources</td><td>No</td></tr>
+    <tr><td>Changes style / behaviour</td><td>Limited</td><td>Yes — good for tone, format, domain language</td></tr>
+  </table></div>
+  <div class="box tip"><b>Key takeaway:</b> Use RAG to give the model <b>knowledge</b>; use fine-tuning to change its <b>behaviour</b>. Many production systems use both.</div>
+</section>
+
+<!-- ================= 2 ================= -->
+<section class="video" id="v2">
+  <span class="tag">Video 2</span>
+  <h2>RAG Architecture — The 4 Steps</h2>
+  <p class="lead">Every RAG system has an <b>offline</b> indexing phase and an <b>online</b> query phase.</p>
+  <div class="diagram"><pre class="mermaid">
+flowchart TB
+  subgraph OFF["Offline: Indexing"]
+    D["Documents&lt;br/&gt;PDF, web, DB"] --> L["1a. Load"] --> S["1b. Chunk"] --> E["1c. Embed"] --> V[("1d. Vector store")]
+  end
+  subgraph ON["Online: Query time"]
+    Q["User query"] --> QE["Embed query"] --> R["2. Retrieve top-k"]
+    V --> R
+    R --> AU["3. Augment prompt"]
+    Q --> AU
+    AU --> G["4. Generate with LLM"] --> A["Answer + sources"]
+  end
+  </pre></div>
+
+  <h3>Step 1 — Indexing</h3>
+  <ol class="inner">
+    <li><b>Document ingestion</b> — load data from sources into Document objects (text + metadata).</li>
+    <li><b>Text chunking</b> — split into small, meaningful pieces.</li>
+    <li><b>Embedding generation</b> — convert each chunk into a dense vector.</li>
+    <li><b>Storage</b> — save vectors + text + metadata in a vector store.</li>
+  </ol>
+  <h3>Step 2 — Retrieval</h3>
+  <p>Embed the question with the <b>same</b> embedding model, search the vector store for nearest chunks (cosine similarity / dot product), optionally re-rank, return top-k.</p>
+  <h3>Step 3 — Augmentation</h3>
+  <p>Combine query + retrieved chunks into a prompt with clear instructions:</p>
+<pre><code>You are a helpful assistant.
+Answer ONLY from the provided context.
+If the context is insufficient, say "I don't know".
+
+Context:
+{context}
+
+Question: {question}</code></pre>
+  <h3>Step 4 — Generation</h3>
+  <p>The LLM produces the answer using the context (plus its general language ability). Optionally cite chunk sources.</p>
+  <div class="box warn"><b>Golden rule:</b> RAG quality = retrieval quality. If the right chunk is not retrieved, even the best LLM cannot answer correctly.</div>
+  <div class="box tip"><b>Key takeaway:</b> Index → Retrieve → Augment → Generate. The next videos zoom into each box.</div>
+</section>
+
+<!-- ================= 3 ================= -->
+<section class="video" id="v3">
+  <span class="tag">Video 3</span>
+  <h2>Data Ingestion &amp; Document Parsing</h2>
+  <p class="lead">Garbage in, garbage out. Getting clean text and useful metadata out of messy sources is the most underrated part of RAG.</p>
+  <h3>1. Common sources</h3>
+  <div class="diagram"><pre class="mermaid">
+flowchart LR
+  P["PDF"] --> DL["Loaders / Parsers"]
+  W["Web pages"] --> DL
+  YT["YouTube transcripts"] --> DL
+  DB["SQL / CSV"] --> DL
+  N["Notion, Drive, Confluence"] --> DL
+  DL --> DOC["Document&lt;br/&gt;page_content + metadata"]
+  </pre></div>
+<pre><code>from langchain_community.document_loaders import PyPDFLoader, WebBaseLoader, CSVLoader, DirectoryLoader
+docs = PyPDFLoader("handbook.pdf").load()          # one Document per page
+docs = DirectoryLoader("data", glob="**/*.pdf", loader_cls=PyPDFLoader).load()
+print(docs[0].page_content[:200], docs[0].metadata)  # {'source': 'handbook.pdf', 'page': 0}</code></pre>
+
+  <h3>2. Hard cases in PDFs</h3>
+  <ul>
+    <li><b>Scanned PDFs</b> — no text layer → need OCR (Tesseract, cloud OCR).</li>
+    <li><b>Tables</b> — plain extraction scrambles rows/columns → use layout-aware parsers (pdfplumber, Unstructured, Docling, LlamaParse) or convert tables to Markdown.</li>
+    <li><b>Multi-column layouts, headers/footers, page numbers</b> — clean them out.</li>
+    <li><b>Images &amp; charts</b> — caption them with a vision model (multimodal RAG).</li>
+  </ul>
+
+  <h3>3. Metadata matters</h3>
+  <p>Store <code>source</code>, <code>page</code>, <code>section</code>, <code>date</code>, <code>author</code>, <code>department</code>… Metadata enables <b>filtering</b> ("only 2025 policies"), <b>citations</b> and access control.</p>
+
+  <h3>4. Cleaning checklist</h3>
+  <ul>
+    <li>Normalize whitespace, fix broken hyphenation, remove boilerplate.</li>
+    <li>De-duplicate repeated documents.</li>
+    <li>Keep structure (headings) — it helps chunking later.</li>
+    <li>For large data use <code>lazy_load()</code> (generator) instead of <code>load()</code>.</li>
+  </ul>
+  <div class="box tip"><b>Key takeaway:</b> Spend time on parsing. Clean text + rich metadata gives better chunks, better retrieval, better answers.</div>
+</section>
+
+<!-- ================= 4 ================= -->
+<section class="video" id="v4">
+  <span class="tag">Video 4</span>
+  <h2>Chunking Strategies</h2>
+  <p class="lead">Chunking decides <b>what unit of text</b> gets embedded and retrieved. Too big = noisy, diluted embeddings. Too small = missing context.</p>
+  <h3>1. Why chunk?</h3>
+  <ul>
+    <li>Embedding models and LLM context windows have limits.</li>
+    <li>One focused idea per vector = more accurate semantic search.</li>
+    <li>Send only relevant parts to the LLM → cheaper, less distraction.</li>
+  </ul>
+  <div class="diagram"><pre class="mermaid">
+flowchart TB
+  C["Chunking strategies"] --> F["Fixed size&lt;br/&gt;every N chars/tokens"]
+  C --> R["Recursive&lt;br/&gt;paragraph, line, word"]
+  C --> D["Document structure&lt;br/&gt;Markdown headers, code, HTML"]
+  C --> S["Semantic&lt;br/&gt;split where meaning changes"]
+  C --> A["Advanced&lt;br/&gt;parent-child, late chunking"]
+  </pre></div>
+
+  <h3>2. Fixed-size chunking</h3>
+<pre><code>from langchain_text_splitters import CharacterTextSplitter
+splitter = CharacterTextSplitter(chunk_size=500, chunk_overlap=50, separator="")</code></pre>
+  <p>Simple, but can cut sentences in half.</p>
+
+  <h3>3. Recursive character splitting (default choice)</h3>
+<pre><code>from langchain_text_splitters import RecursiveCharacterTextSplitter
+splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+chunks = splitter.split_documents(docs)          # metadata is copied to each chunk</code></pre>
+  <p>Tries <code>"\n\n"</code> → <code>"\n"</code> → <code>" "</code> → <code>""</code> so paragraphs stay together when possible.</p>
+
+  <h3>4. Structure-aware</h3>
+<pre><code>from langchain_text_splitters import MarkdownHeaderTextSplitter
+md = MarkdownHeaderTextSplitter(headers_to_split_on=[("#", "h1"), ("##", "h2")])
+chunks = md.split_text(markdown_text)            # headers go into metadata</code></pre>
+
+  <h3>5. Semantic chunking</h3>
+  <p>Embed sentences; start a new chunk where similarity between neighbours drops sharply. Better topic boundaries, more compute.</p>
+
+  <h3>6. Chunk overlap</h3>
+  <p>Repeats the end of one chunk at the start of the next so ideas crossing the boundary aren't lost. Typical: 10–20% of chunk size.</p>
+
+  <h3>7. Choosing chunk size</h3>
+  <div class="tablewrap"><table>
+    <tr><th>Content</th><th>Typical size</th></tr>
+    <tr><td>FAQs, short facts</td><td>200–500 tokens</td></tr>
+    <tr><td>Articles, docs</td><td>500–1000 tokens</td></tr>
+    <tr><td>Long reasoning / legal</td><td>1000+ or parent-child</td></tr>
+  </table></div>
+  <div class="box tip"><b>Key takeaway:</b> Start with recursive splitting (~1000 chars, 200 overlap), then tune using evaluation (video 9). Never guess — measure.</div>
+</section>
+
+<!-- ================= 5 ================= -->
+<section class="video" id="v5">
+  <span class="tag">Video 5</span>
+  <h2>Embeddings &amp; Vector Databases</h2>
+  <p class="lead">Embeddings turn text into vectors where <b>similar meaning = nearby points</b>. Vector databases store them and find nearest neighbours fast.</p>
+  <h3>1. Embeddings</h3>
+  <ul>
+    <li>A dense vector (e.g. 384, 768, 1536, 3072 dimensions).</li>
+    <li>"How to reset password" and "forgot my login" end up close even with no common words.</li>
+    <li>Use the <b>same model</b> for documents and queries.</li>
+  </ul>
+<pre><code>from langchain_openai import OpenAIEmbeddings
+emb = OpenAIEmbeddings(model="text-embedding-3-small")
+v = emb.embed_query("What is RAG?")             # list of floats
+# open-source alternative
+from langchain_huggingface import HuggingFaceEmbeddings
+emb = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")</code></pre>
+
+  <h3>2. Similarity metrics</h3>
+  <ul>
+    <li><b>Cosine similarity</b> — angle between vectors (most common).</li>
+    <li><b>Dot product</b> — same as cosine for normalized vectors.</li>
+    <li><b>Euclidean (L2) distance</b> — lower = closer.</li>
+  </ul>
+
+  <h3>3. Why a vector database?</h3>
+  <p>Comparing a query against millions of vectors one by one is too slow. Vector DBs use <b>Approximate Nearest Neighbour (ANN)</b> indexes:</p>
+  <div class="diagram"><pre class="mermaid">
+flowchart LR
+  Q["Query vector"] --> IDX["ANN index"]
+  IDX --> H["HNSW&lt;br/&gt;graph layers, fast and accurate"]
+  IDX --> IVF["IVF&lt;br/&gt;cluster then search nearby clusters"]
+  IDX --> PQ["PQ&lt;br/&gt;compress vectors to save memory"]
+  H --> K["Top-k nearest chunks"]
+  IVF --> K
+  PQ --> K
+  </pre></div>
+
+  <h3>4. Popular options</h3>
+  <div class="tablewrap"><table>
+    <tr><th>Tool</th><th>Type</th><th>Good for</th></tr>
+    <tr><td>FAISS</td><td>Library (in-memory)</td><td>Prototypes, fast local search</td></tr>
+    <tr><td>Chroma</td><td>Lightweight DB, persists to disk</td><td>Learning, small apps</td></tr>
+    <tr><td>Pinecone</td><td>Managed cloud</td><td>Production without ops</td></tr>
+    <tr><td>Qdrant / Weaviate / Milvus</td><td>Open-source DB</td><td>Production, self-hosted, hybrid search</td></tr>
+    <tr><td>pgvector</td><td>Postgres extension</td><td>When you already use Postgres</td></tr>
+  </table></div>
+<pre><code>from langchain_community.vectorstores import FAISS
+vs = FAISS.from_documents(chunks, emb)
+vs.save_local("faiss_index")
+vs.similarity_search_with_score("refund policy", k=4)</code></pre>
+  <div class="box tip"><b>Key takeaway:</b> Embedding model choice affects quality; vector DB choice affects speed, scale and features (filters, hybrid search).</div>
+</section>
+
+<!-- ================= 6 ================= -->
+<section class="video" id="v6">
+  <span class="tag">Video 6</span>
+  <h2>Retrieval Strategies</h2>
+  <p class="lead">Plain top-k similarity search is a start. Several techniques improve <b>recall</b> (find the right chunk) and <b>precision</b> (avoid wrong chunks).</p>
+  <div class="diagram"><pre class="mermaid">
+mindmap
+  root((Retrieval))
+    Basic
+      Similarity top-k
+      Score threshold
+      Metadata filter
+    Diversity
+      MMR
+    Keyword plus semantic
+      BM25
+      Hybrid search
+      RRF fusion
+    Query transformation
+      Multi-query
+      Query rewriting
+      HyDE
+      Step-back
+    Structure
+      Parent document
+      Self-query
+  </pre></div>
+
+  <h3>1. Similarity search, threshold &amp; filters</h3>
+<pre><code>retriever = vs.as_retriever(search_kwargs={"k": 4})
+retriever = vs.as_retriever(search_type="similarity_score_threshold",
+                            search_kwargs={"score_threshold": 0.5})
+chroma_vs.similarity_search("leave policy", k=4, filter={"department": "HR"})</code></pre>
+
+  <h3>2. MMR — Maximal Marginal Relevance</h3>
+  <p>Balances relevance and diversity so top results aren't near-duplicates.</p>
+<pre><code>vs.as_retriever(search_type="mmr", search_kwargs={"k": 4, "fetch_k": 20, "lambda_mult": 0.5})</code></pre>
+
+  <h3>3. Hybrid search (BM25 + dense)</h3>
+  <p>Dense embeddings understand meaning but can miss exact terms (product codes, names, error IDs). <b>BM25</b> keyword search catches those. Combine both and merge with <b>Reciprocal Rank Fusion</b>.</p>
+<pre><code>from langchain_community.retrievers import BM25Retriever
+from langchain.retrievers import EnsembleRetriever
+bm25 = BM25Retriever.from_documents(chunks); bm25.k = 4
+dense = vs.as_retriever(search_kwargs={"k": 4})
+hybrid = EnsembleRetriever(retrievers=[bm25, dense], weights=[0.4, 0.6])</code></pre>
+  <div class="diagram"><pre class="mermaid">
+flowchart LR
+  Q["Query"] --> B["BM25 keyword"]
+  Q --> D["Dense vector"]
+  B --> F["Reciprocal Rank Fusion"]
+  D --> F
+  F --> K["Merged top-k"]
+  </pre></div>
+
+  <h3>4. Query transformation</h3>
+  <ul>
+    <li><b>Multi-query</b> — LLM writes 3–5 versions of the question; retrieve for each; union results.</li>
+    <li><b>Query rewriting</b> — turn a vague/chatty question into a clear search query (also uses chat history: "what about its price?" → "price of iPhone 16").</li>
+    <li><b>HyDE</b> — LLM writes a hypothetical answer; embed <i>that</i> and search (answers look more like documents than questions do).</li>
+    <li><b>Step-back prompting</b> — ask a more general question first to fetch background.</li>
+  </ul>
+
+  <h3>5. Parent-document retrieval</h3>
+  <p>Search on <b>small child chunks</b> (precise matching) but return the <b>larger parent chunk</b> (full context) to the LLM.</p>
+
+  <h3>6. Self-query retriever</h3>
+  <p>LLM extracts filters from natural language: "movies by Nolan after 2010 about space" → query "space" + filter <code>director="Nolan", year &gt; 2010</code>.</p>
+  <div class="box tip"><b>Key takeaway:</b> Hybrid search + query rewriting fix most "it didn't find the right document" problems.</div>
+</section>
+
+<!-- ================= 7 ================= -->
+<section class="video" id="v7">
+  <span class="tag">Video 7</span>
+  <h2>Re-ranking &amp; Context Optimization</h2>
+  <p class="lead">Retrieve broadly (high recall), then re-rank precisely (high precision), then send only the best, compact context to the LLM.</p>
+  <div class="diagram"><pre class="mermaid">
+flowchart LR
+  Q["Query"] --> R["First-stage retriever&lt;br/&gt;fast, top 20-50"]
+  R --> RR["Re-ranker&lt;br/&gt;cross-encoder scores each pair"]
+  RR --> T["Top 3-5"]
+  T --> CC["Compression&lt;br/&gt;keep relevant sentences"]
+  CC --> O["Order + format context"]
+  O --> L["LLM"]
+  </pre></div>
+
+  <h3>1. Bi-encoder vs Cross-encoder</h3>
+  <div class="tablewrap"><table>
+    <tr><th></th><th>Bi-encoder (embeddings)</th><th>Cross-encoder (re-ranker)</th></tr>
+    <tr><td>How</td><td>Query and doc embedded separately, compare vectors</td><td>Query + doc read <b>together</b> by one model, outputs a relevance score</td></tr>
+    <tr><td>Speed</td><td>Very fast (vectors pre-computed)</td><td>Slow (runs per pair)</td></tr>
+    <tr><td>Accuracy</td><td>Good</td><td>Better</td></tr>
+    <tr><td>Use</td><td>First stage over millions</td><td>Second stage over top 20–50</td></tr>
+  </table></div>
+<pre><code>from langchain.retrievers import ContextualCompressionRetriever
+from langchain.retrievers.document_compressors import CrossEncoderReranker
+from langchain_community.cross_encoders import HuggingFaceCrossEncoder
+
+model = HuggingFaceCrossEncoder(model_name="BAAI/bge-reranker-base")
+reranker = CrossEncoderReranker(model=model, top_n=4)
+retriever = ContextualCompressionRetriever(
+    base_compressor=reranker,
+    base_retriever=vs.as_retriever(search_kwargs={"k": 20}))</code></pre>
+  <p>Hosted alternatives: Cohere Rerank, Jina, Voyage rerankers.</p>
+
+  <h3>2. Contextual compression</h3>
+  <p>An LLM (<code>LLMChainExtractor</code>) or embedding filter (<code>EmbeddingsFilter</code>) removes irrelevant sentences from each retrieved chunk.</p>
+
+  <h3>3. "Lost in the middle"</h3>
+  <p>LLMs pay most attention to the beginning and end of long contexts. Put the most relevant chunks <b>first and last</b> (<code>LongContextReorder</code>), and don't stuff too many chunks.</p>
+
+  <h3>4. Context formatting</h3>
+<pre><code>def format_docs(docs):
+    return "\n\n".join(f"[{i+1}] (source: {d.metadata.get('source')}, page {d.metadata.get('page')})\n{d.page_content}"
+                       for i, d in enumerate(docs))</code></pre>
+  <p>Numbered sources let the LLM cite <code>[1]</code>, <code>[2]</code> in its answer.</p>
+  <div class="box tip"><b>Key takeaway:</b> Two-stage retrieval (fast retrieve → accurate re-rank) is one of the highest-impact RAG upgrades.</div>
+</section>
+
+<!-- ================= 8 ================= -->
+<section class="video" id="v8">
+  <span class="tag">Video 8</span>
+  <h2>Building an End-to-End RAG App</h2>
+  <p class="lead">Put everything together: a "Chat with your PDF" app with a LangChain backend and Streamlit UI.</p>
+  <div class="diagram"><pre class="mermaid">
+flowchart TB
+  UP["Upload PDF"] --> LD["PyPDFLoader"] --> SP["RecursiveCharacterTextSplitter"] --> EM["Embeddings"] --> VS[("FAISS / Chroma")]
+  Q["Question + chat history"] --> RW["Rewrite to standalone question"]
+  RW --> RT["Retriever + re-ranker"]
+  VS --> RT
+  RT --> FD["format_docs"]
+  FD --> PR["Prompt"]
+  Q --> PR
+  PR --> LLM["Chat model"] --> OUT["Answer with citations"]
+  </pre></div>
+
+  <h3>1. Indexing</h3>
+<pre><code>from langchain_community.document_loaders import PyPDFLoader
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_openai import OpenAIEmbeddings, ChatOpenAI
+from langchain_community.vectorstores import FAISS
+
+docs = PyPDFLoader("book.pdf").load()
+chunks = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200).split_documents(docs)
+vs = FAISS.from_documents(chunks, OpenAIEmbeddings(model="text-embedding-3-small"))
+retriever = vs.as_retriever(search_type="mmr", search_kwargs={"k": 4})</code></pre>
+
+  <h3>2. The RAG chain (LCEL)</h3>
+<pre><code>from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.runnables import RunnableParallel, RunnablePassthrough, RunnableLambda
+from langchain_core.output_parsers import StrOutputParser
+
+prompt = ChatPromptTemplate.from_messages([
+    ("system", "Answer ONLY from the context. Cite sources like [1]. "
+               "If the answer is not in the context, say you don't know.\n\nContext:\n{context}"),
+    ("human", "{question}")
+])
+llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+
+rag_chain = (
+    RunnableParallel({"context": retriever | RunnableLambda(format_docs),
+                      "question": RunnablePassthrough()})
+    | prompt | llm | StrOutputParser()
+)
+print(rag_chain.invoke("What does chapter 3 say about gradient descent?"))</code></pre>
+
+  <h3>3. Conversational RAG (chat history)</h3>
+  <p>Follow-ups like "explain it simply" need context. First rewrite the question into a <b>standalone question</b> using chat history, then retrieve.</p>
+<pre><code>contextualize = ChatPromptTemplate.from_messages([
+    ("system", "Rewrite the latest question as a standalone question using the chat history."),
+    MessagesPlaceholder("chat_history"), ("human", "{question}")])
+standalone_q = contextualize | llm | StrOutputParser()</code></pre>
+
+  <h3>4. Streamlit UI (sketch)</h3>
+<pre><code>file = st.sidebar.file_uploader("Upload PDF", type="pdf")
+if file and "vs" not in st.session_state:
+    st.session_state.vs = build_index(file)          # cache the index
+q = st.chat_input("Ask about the document")
+if q:
+    with st.chat_message("assistant"):
+        st.write_stream(rag_chain.stream(q))</code></pre>
+
+  <h3>5. Practical tips</h3>
+  <ul>
+    <li><code>temperature=0</code> for factual answers.</li>
+    <li>Cache embeddings / persist the index — don't re-embed on every run.</li>
+    <li>Return source documents alongside the answer for the UI.</li>
+    <li>Add a fallback message when nothing relevant is found.</li>
+  </ul>
+  <div class="box tip"><b>Key takeaway:</b> A complete RAG app is ~40 lines of LCEL: retriever + format + prompt + LLM + parser, plus question rewriting for chat.</div>
+</section>
+
+<!-- ================= 9 ================= -->
+<section class="video" id="v9">
+  <span class="tag">Video 9</span>
+  <h2>RAG Evaluation</h2>
+  <p class="lead">You can't improve what you don't measure. Evaluate the <b>retriever</b> and the <b>generator</b> separately to know which part is failing.</p>
+  <div class="diagram"><pre class="mermaid">
+flowchart LR
+  Q["Question"] --> RET["Retriever"] --> CTX["Context"]
+  CTX --> GEN["Generator"] --> ANS["Answer"]
+  GT["Ground-truth answer"]
+  CTX -. context precision and recall .-> GT
+  ANS -. faithfulness .-> CTX
+  ANS -. answer relevancy .-> Q
+  ANS -. answer correctness .-> GT
+  </pre></div>
+
+  <h3>1. Retrieval metrics</h3>
+  <ul>
+    <li><b>Context precision</b> — are the retrieved chunks actually relevant (and ranked high)?</li>
+    <li><b>Context recall</b> — did we retrieve everything needed to answer?</li>
+    <li>Classic IR metrics: <b>Hit rate / Recall@k</b>, <b>MRR</b> (how high the first correct chunk ranks), <b>nDCG</b>.</li>
+  </ul>
+  <h3>2. Generation metrics</h3>
+  <ul>
+    <li><b>Faithfulness (groundedness)</b> — is every claim in the answer supported by the context? (catches hallucination)</li>
+    <li><b>Answer relevancy</b> — does the answer address the question?</li>
+    <li><b>Answer correctness</b> — matches the ground-truth answer?</li>
+  </ul>
+
+  <h3>3. Building an evaluation dataset</h3>
+  <ol class="inner">
+    <li>Collect 30–100 real questions (or generate with an LLM from your docs).</li>
+    <li>Write / verify reference answers (and ideally which chunk contains them).</li>
+    <li>Run the pipeline, store question, contexts, answer.</li>
+    <li>Score with metrics; compare configurations (chunk size, k, hybrid, re-ranker).</li>
+  </ol>
+
+  <h3>4. RAGAS</h3>
+<pre><code>from ragas import evaluate
+from ragas.metrics import faithfulness, answer_relevancy, context_precision, context_recall
+from datasets import Dataset
+
+data = Dataset.from_dict({
+    "question": questions,
+    "answer": answers,              # from your RAG chain
+    "contexts": contexts,           # list of retrieved chunk texts per question
+    "ground_truth": references,
+})
+scores = evaluate(data, metrics=[faithfulness, answer_relevancy, context_precision, context_recall])
+print(scores.to_pandas())</code></pre>
+  <p>These metrics use an <b>LLM-as-a-judge</b> internally. Other tools: LangSmith evaluations, TruLens, DeepEval, Arize Phoenix.</p>
+
+  <h3>5. Diagnosing failures</h3>
+  <div class="tablewrap"><table>
+    <tr><th>Symptom</th><th>Likely cause</th><th>Fix</th></tr>
+    <tr><td>Low context recall</td><td>Right chunk not found</td><td>Better chunking, hybrid search, multi-query, higher k</td></tr>
+    <tr><td>Low context precision</td><td>Too much noise</td><td>Re-ranker, metadata filters, smaller k</td></tr>
+    <tr><td>Low faithfulness</td><td>LLM ignores context</td><td>Stricter prompt, temperature 0, better model</td></tr>
+    <tr><td>Low answer relevancy</td><td>Off-topic answer</td><td>Prompt clarity, query rewriting</td></tr>
+  </table></div>
+  <div class="box tip"><b>Key takeaway:</b> Separate retrieval and generation metrics; change one setting at a time and re-run the same dataset.</div>
+</section>
+
+<!-- ================= 10 ================= -->
+<section class="video" id="v10">
+  <span class="tag">Video 10</span>
+  <h2>Advanced RAG Patterns</h2>
+  <p class="lead">Naive RAG retrieves once and answers. Advanced RAG adds decisions, self-checks and richer knowledge structures.</p>
+  <div class="diagram"><pre class="mermaid">
+flowchart LR
+  N["Naive RAG&lt;br/&gt;retrieve, then generate"] --> A["Advanced RAG&lt;br/&gt;pre-retrieval + post-retrieval steps"]
+  A --> M["Modular / Agentic RAG&lt;br/&gt;LLM decides when and how to retrieve"]
+  </pre></div>
+
+  <h3>1. Agentic RAG</h3>
+  <p>The retriever is a <b>tool</b>. The agent decides whether to retrieve, which source (vector DB, web search, SQL), and can retrieve multiple times for multi-hop questions. Usually built with LangGraph.</p>
+
+  <h3>2. Corrective RAG (CRAG)</h3>
+  <p>Grade retrieved documents; if they're irrelevant or weak, rewrite the query and fall back to <b>web search</b> before answering.</p>
+  <div class="diagram"><pre class="mermaid">
+flowchart LR
+  Q["Query"] --> R["Retrieve"] --> G{"Grade docs&lt;br/&gt;relevant?"}
+  G -->|yes| GEN["Generate"]
+  G -->|no / ambiguous| RW["Rewrite query"] --> WS["Web search"] --> GEN
+  GEN --> A["Answer"]
+  </pre></div>
+
+  <h3>3. Self-RAG</h3>
+  <p>The model reflects on its own output: Is retrieval needed? Are the docs relevant? Is my answer supported by them? Is it useful? If not, retry.</p>
+  <div class="diagram"><pre class="mermaid">
+flowchart LR
+  Q["Query"] --> D{"Need retrieval?"}
+  D -->|no| GEN["Generate"]
+  D -->|yes| R["Retrieve + grade"] --> GEN
+  GEN --> H{"Grounded in docs?"}
+  H -->|no| GEN
+  H -->|yes| U{"Answers the question?"}
+  U -->|no| RW["Rewrite query"] --> R
+  U -->|yes| A["Final answer"]
+  </pre></div>
+
+  <h3>4. Adaptive RAG / Routing</h3>
+  <p>Classify the query first: simple → answer directly; needs docs → vector RAG; current events → web search; numbers → SQL.</p>
+
+  <h3>5. GraphRAG</h3>
+  <p>Extract entities and relationships into a <b>knowledge graph</b>; retrieve connected facts and community summaries. Great for "global" questions ("What are the main themes across all reports?") and multi-hop reasoning.</p>
+
+  <h3>6. Multimodal RAG</h3>
+  <p>Index images, charts and tables (via captions or multimodal embeddings) and send relevant images to a vision LLM.</p>
+
+  <h3>7. Production concerns</h3>
+  <ul>
+    <li><b>Freshness</b> — incremental indexing, delete/update stale chunks.</li>
+    <li><b>Access control</b> — filter by user permissions via metadata.</li>
+    <li><b>Latency &amp; cost</b> — caching, smaller embeddings, limit re-ranking depth.</li>
+    <li><b>Guardrails</b> — prompt-injection in retrieved docs, PII handling.</li>
+    <li><b>Monitoring</b> — trace with LangSmith, track faithfulness over time.</li>
+  </ul>
+  <div class="box tip"><b>Key takeaway:</b> Start naive, measure, then add only the advanced pieces your failures need: hybrid → re-rank → query rewriting → corrective/agentic.</div>
+</section>
+
+<footer style="color:var(--muted);font-size:13px;padding:10px 0 40px">
+  Study notes on Retrieval Augmented Generation, organised in 10 sections. Library APIs change often — check the official docs for the latest imports.
+</footer>
+</main>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script>
+(function(){
+  var root=document.documentElement;
+  function isDark(){
+    var t=root.getAttribute("data-theme");
+    if(t) return t==="dark";
+    return window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+  }
+  var blocks=[].slice.call(document.querySelectorAll("pre.mermaid"));
+  blocks.forEach(function(b){ b.dataset.src=b.textContent; });
+  function render(){
+    if(!window.mermaid) return;
+    blocks.forEach(function(b){ b.removeAttribute("data-processed"); b.textContent=b.dataset.src; });
+    mermaid.initialize({startOnLoad:false, theme:isDark()?"dark":"default", securityLevel:"loose", flowchart:{useMaxWidth:true}});
+    mermaid.run({nodes:blocks}).catch(function(e){console.error(e);});
+  }
+  window.addEventListener("load", render);
+  document.getElementById("themeBtn").addEventListener("click",function(){
+    root.setAttribute("data-theme", isDark()?"light":"dark"); render();
+  });
+  var nav=document.getElementById("nav");
+  document.getElementById("menuBtn").addEventListener("click",function(){ nav.classList.toggle("open"); });
+  nav.addEventListener("click",function(e){ if(e.target.closest("a")) nav.classList.remove("open"); });
+  document.getElementById("search").addEventListener("input",function(e){
+    var q=e.target.value.toLowerCase();
+    document.querySelectorAll("#toc li").forEach(function(li){
+      var id=li.querySelector("a").getAttribute("href").slice(1);
+      var sec=document.getElementById(id);
+      var hit=!q || li.textContent.toLowerCase().indexOf(q)>-1 || sec.textContent.toLowerCase().indexOf(q)>-1;
+      li.style.display=hit?"":"none";
+    });
+  });
+})();
+</script>
+</body>
+</html>

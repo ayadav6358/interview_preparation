@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Phase 11 — Heap &amp; Priority Queue | DSA Notes</title>
+<style>
+  :root{
+    --ink:#12181B; --ink2:#1A2226; --ink3:#232C31;
+    --paper:#F7F4EE; --paper2:#EFEBE1; --paper3:#E4DECF;
+    --amber:#E8A33D; --amber-soft:#3A2E19;
+    --teal:#4FB3A9; --teal-soft:#12312D;
+    --rust:#D9695F; --rust-soft:#3A1F1C;
+    --slate:#8B9199;
+    --text:#E8E6E1; --text-dim:#A9AFAE;
+    --border: rgba(255,255,255,0.08);
+    --radius: 10px;
+    --mono: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{background:var(--ink); color:var(--text); font-family:var(--sans); line-height:1.65; font-size:16px;}
+  a{color:var(--amber);}
+  code, pre{font-family:var(--mono);}
+  #main{max-width:900px; margin:0 auto; padding:30px 24px 100px;}
+  h1{font-size:2rem; letter-spacing:-.01em; margin:0 0 6px;}
+  h2{font-size:1.5rem; margin-top:52px; padding-top:14px; border-top:1px solid var(--border); letter-spacing:-.01em;}
+  h2:first-of-type{border-top:none; margin-top:20px;}
+  h3{font-size:1.15rem; margin-top:30px; color:var(--amber);}
+  h4{font-size:1rem; margin-top:22px;}
+  .eyebrow{font-size:11px; text-transform:uppercase; letter-spacing:.12em; color:var(--teal); font-weight:700; margin-bottom:4px;}
+  .subtitle{color:var(--text-dim); font-size:15px; margin-bottom:28px;}
+  .callout{border-radius:var(--radius); padding:14px 16px; margin:18px 0; border:1px solid var(--border); font-size:14.5px;}
+  .callout .ctitle{font-weight:700; margin-bottom:4px; display:flex; gap:8px; align-items:center;}
+  .callout.concept{background:var(--teal-soft); border-color:var(--teal);}
+  .callout.concept .ctitle{color:var(--teal);}
+  .callout.example{background:var(--ink3);}
+  .callout.mistake{background:var(--rust-soft); border-color:var(--rust);}
+  .callout.mistake .ctitle{color:var(--rust);}
+  .callout.tip{background:var(--amber-soft); border-color:var(--amber);}
+  .callout.tip .ctitle{color:var(--amber);}
+  .codewrap{position:relative; margin:14px 0;}
+  pre{background:var(--ink3); border:1px solid var(--border); border-radius:var(--radius); padding:16px 18px; overflow-x:auto; font-size:13.5px; line-height:1.6;}
+  .lang-tag{font-size:10px; text-transform:uppercase; letter-spacing:.08em; color:var(--slate); margin-bottom:-4px; display:block;}
+  :not(pre) > code{background:var(--ink3); padding:2px 6px; border-radius:4px; font-size:.88em;}
+  table{width:100%; border-collapse:collapse; margin:16px 0; font-size:14px;}
+  th,td{border:1px solid var(--border); padding:9px 12px; text-align:left;}
+  th{background:var(--ink3); font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:var(--slate);}
+  .badge{display:inline-block; font-size:11px; font-weight:700; padding:3px 9px; border-radius:20px; text-transform:uppercase; letter-spacing:.03em;}
+  .badge.easy{background:var(--teal-soft); color:var(--teal);}
+  .badge.medium{background:var(--amber-soft); color:var(--amber);}
+  .badge.hard{background:var(--rust-soft); color:var(--rust);}
+  .qcard{border:1px solid var(--border); border-radius:var(--radius); padding:16px 18px; margin:14px 0; background:var(--ink2);}
+  .qcard .qhead{display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; gap:10px;}
+  .qcard .qhead b{font-size:14.5px;}
+  .qcard .meta{color:var(--text-dim); font-size:13px; margin:6px 0;}
+  .qcard .hint{margin-top:8px; padding-top:8px; border-top:1px dashed var(--border); font-size:13.5px;}
+  hr.div{border:none; border-top:1px solid var(--border); margin:40px 0;}
+  .navlinks{display:flex; justify-content:space-between; gap:10px; margin:26px 0; font-size:14px; flex-wrap:wrap;}
+  .navlinks a{border:1px solid var(--border); padding:8px 14px; border-radius:8px; text-decoration:none; background:var(--ink2);}
+  .navlinks a:hover{border-color:var(--amber);}
+  .home{text-align:center; margin-bottom:10px;}
+  .home a{font-size:13px; color:var(--text-dim);}
+</style>
+</head>
+<body>
+<div id="main">
+
+  <div class="home"><a href="../../index.html">&larr; Back to Index</a></div>
+  <div class="navlinks">
+    <a href="../Phase-10-Trees/01-trees.html">&larr; Prev: Trees</a>
+    <a href="../Phase-12-Graphs/01-graphs.html">Next: Graphs &rarr;</a>
+  </div>
+
+  <div class="eyebrow">Phase 11 · Heap &amp; Priority Queue</div>
+  <h1>Heap and Priority Queue 🏔️</h1>
+  <p class="subtitle">Min/Max Heap implementation, kth largest element, merge k sorted lists — aur interview mein sabse zyada poochhe jaane wale heap problems.</p>
+
+  <h2 id="heap">1. Heap &amp; Priority Queue — Concept</h2>
+
+  <h3>1. What is it?</h3>
+  <p>Heap ek special <b>Binary Tree</b> hai (usually array se implement kiya jata hai) jisme ek property maintain hoti hai:</p>
+  <ul>
+    <li><b>Min Heap</b> — har parent apne children se <b>chhota</b> hai. Root = smallest element.</li>
+    <li><b>Max Heap</b> — har parent apne children se <b>bada</b> hai. Root = largest element.</li>
+  </ul>
+  <p><b>Priority Queue</b> ek abstract concept hai jisme elements <b>priority ke hisaab se</b> nikalte hain, insertion order se nahi — Heap iska sabse common implementation hai.</p>
+
+  <h3>2. Why do we need it?</h3>
+  <p>Agar tumhe baar-baar "sabse chhota/bada element nikaalo" chahiye (aur naye elements bhi insert karne hain beech mein), array ko sort rakhna expensive hai (O(n) per insert to maintain order), aur bina sort kiye min/max dhundhna O(n) hai. Heap dono operations — insert aur min/max nikaalna — O(log n) mein deta hai.</p>
+
+  <h3>3. Real-Life Analogy</h3>
+  <div class="callout example">
+    <div class="ctitle">📝 Hospital Emergency Room</div>
+    ER mein patients FIFO order mein treat nahi hote — sabse critical (highest priority) patient pehle dekha jata hai, chahe wo abhi-abhi aaya ho. Ye exactly Priority Queue hai — priority order mein serve karna, arrival order mein nahi.
+  </div>
+
+  <h3>4. How It Works + Diagram</h3>
+  <p>Heap ek <b>complete binary tree</b> hai — matlab har level bhara hua hai (last level chhod ke, jo left se right fill hota hai). Isko array mein store karna easy hai:</p>
+  <pre><code>Min Heap (as a tree):
+              1
+            /   \
+           3     5
+          / \   /
+         8   9 6
+
+Same heap (as an array):  [1, 3, 5, 8, 9, 6]
+                            0  1  2  3  4  5  (indices)
+
+For any index i:
+  left child index  = 2*i + 1
+  right child index = 2*i + 2
+  parent index       = Math.floor((i - 1) / 2)</code></pre>
+
+  <h3>5. Code — Min Heap Implementation</h3>
+  <div class="codewrap">
+<pre><code>class MinHeap {
+  constructor() { this.heap = []; }
+
+  peek() { return this.heap[0]; } // smallest element - O(1)
+
+  insert(val) {
+    this.heap.push(val);              // add at the end
+    this.bubbleUp(this.heap.length - 1);
+  }
+
+  bubbleUp(i) {
+    while (i > 0) {
+      const parent = Math.floor((i - 1) / 2);
+      if (this.heap[parent] <= this.heap[i]) break; // heap property satisfied
+      [this.heap[parent], this.heap[i]] = [this.heap[i], this.heap[parent]];
+      i = parent;
+    }
+  }
+
+  extractMin() {
+    const min = this.heap[0];
+    const last = this.heap.pop();
+    if (this.heap.length > 0) {
+      this.heap[0] = last;         // move last element to root
+      this.bubbleDown(0);
+    }
+    return min;
+  }
+
+  bubbleDown(i) {
+    const n = this.heap.length;
+    while (true) {
+      let smallest = i;
+      const left = 2 * i + 1, right = 2 * i + 2;
+      if (left < n && this.heap[left] < this.heap[smallest]) smallest = left;
+      if (right < n && this.heap[right] < this.heap[smallest]) smallest = right;
+      if (smallest === i) break; // heap property satisfied
+      [this.heap[i], this.heap[smallest]] = [this.heap[smallest], this.heap[i]];
+      i = smallest;
+    }
+  }
+}</code></pre></div>
+  <p><b>Line-by-line:</b> <code>insert</code> naya element end mein daalta hai, phir <code>bubbleUp</code> use karke usko upar move karta hai jab tak parent usse chhota na ho jaye. <code>extractMin</code> root (min) return karta hai, last element ko root par la kar <code>bubbleDown</code> se sahi jagah settle karta hai.</p>
+
+  <h3>6. Dry Run — Insert into Min Heap [3, 8, 5], insert(1)</h3>
+  <div class="callout example">
+    <div class="ctitle">📝 bubbleUp trace</div>
+    heap = [3, 8, 5, 1] (1 pushed at end, index 3)<br>
+    parent of index 3 = floor((3-1)/2) = 1 → heap[1]=8. Is 8 &gt; 1? Yes → swap → [3, 1, 5, 8]<br>
+    parent of index 1 = floor((1-1)/2) = 0 → heap[0]=3. Is 3 &gt; 1? Yes → swap → [1, 3, 5, 8]<br>
+    i=0, loop stops. Final: [1, 3, 5, 8] ✅ (1 is now root, the minimum)
+  </div>
+
+  <h3>7. Time / Space Complexity</h3>
+  <table>
+    <tr><th>Operation</th><th>Time</th><th>Why</th></tr>
+    <tr><td>Peek (min/max)</td><td>O(1)</td><td>Always at the root (index 0)</td></tr>
+    <tr><td>Insert</td><td>O(log n)</td><td>bubbleUp travels at most tree height (log n)</td></tr>
+    <tr><td>Extract Min/Max</td><td>O(log n)</td><td>bubbleDown travels at most tree height</td></tr>
+    <tr><td>Build heap from array</td><td>O(n)</td><td>Clever bottom-up construction (not n × log n!)</td></tr>
+  </table>
+  <p>Space: O(n) — stores all elements.</p>
+
+  <h3>Why Not Just Use a Sorted Array?</h3>
+  <table>
+    <tr><th>Operation</th><th>Sorted Array</th><th>Heap</th></tr>
+    <tr><td>Get min</td><td>O(1)</td><td>O(1)</td></tr>
+    <tr><td>Insert (keeping sorted)</td><td>O(n)</td><td>O(log n) ⭐</td></tr>
+    <tr><td>Extract min</td><td>O(n) (shift array)</td><td>O(log n) ⭐</td></tr>
+  </table>
+  <p>Heap trade-off karta hai "poori sorted order" ki jagah "sirf min/max fast milna" — jo bahut sari problems mein hi chahiye hota hai.</p>
+
+  <h3>8. Key Problem 1: Kth Largest Element</h3>
+  <div class="codewrap">
+<pre><code>// Using a Min Heap of size k
+function findKthLargest(arr, k) {
+  const heap = new MinHeap();
+  for (const num of arr) {
+    heap.insert(num);
+    if (heap.heap.length > k) heap.extractMin(); // keep only top k largest
+  }
+  return heap.peek(); // smallest of the k largest = kth largest overall
+}</code></pre></div>
+  <p><b>Why a Min Heap for "Kth LARGEST"?</b> Counter-intuitive but clever: hum sirf top-k largest elements ko heap mein rakhte hain. Jab heap size k se bada ho jaye, sabse chhota (root of min-heap) nikaal dete hain. End mein, heap mein bache k elements sabse bade hain, aur unme se sabse chhota (root) hi kth largest hai.</p>
+
+  <h3>9. Key Problem 2: Merge K Sorted Lists</h3>
+  <p>Ek Min Heap banao jisme har list ka current head daala jaaye. Baar-baar heap se minimum nikaalo (wo result mein jayega), aur uski list ka next element heap mein daal do. Time: O(N log k) jaha N = total elements, k = number of lists — bahut better than merging lists pairwise one at a time.</p>
+
+  <h3>10. When Should I Use a Heap? — Checklist</h3>
+  <div class="callout tip">
+    <div class="ctitle">🎯 Use Heap/Priority Queue when:</div>
+    <ul>
+      <li>"Kth largest/smallest" ka zikr ho</li>
+      <li>"Top K" elements chahiye</li>
+      <li>Multiple sorted sources ko merge karna hai</li>
+      <li>Task scheduling by priority</li>
+      <li>Median maintain karna hai ek streaming data mein (two heaps trick)</li>
+    </ul>
+  </div>
+
+  <h3>11. Common Mistakes</h3>
+  <div class="callout mistake">
+    <ul>
+      <li>Min Heap aur Max Heap confuse karna — "Kth largest" ke liye Min Heap (of size k) use hota hai, jo counter-intuitive lagta hai.</li>
+      <li>Heap ko "fully sorted" samajhna — sirf root guaranteed min/max hai, baaki elements kisi bhi order mein ho sakte hain.</li>
+      <li>bubbleUp/bubbleDown mein parent/child index formula galat lagana.</li>
+    </ul>
+  </div>
+
+  <h3>12. Interview Tips</h3>
+  <div class="callout tip">
+    "Top K" ya "Kth largest/smallest" sunte hi Heap bolo. Explain karo trade-off: "Poora sort karna O(n log n) hoga, lekin heap se main O(n log k) mein kar sakta hoon jo tab better hai jab k array size se bahut chhota ho."
+  </div>
+
+  <hr class="div">
+  <h2>Interview Questions — Heap</h2>
+
+  <h3>Easy</h3>
+
+  <div class="qcard"><div class="qhead"><b>Q1. Implement a Min Heap</b><span class="badge easy">Easy</span></div>
+    <div class="meta">Pattern: Basic implementation</div>
+    <p>Implement a Min Heap supporting insert, peek, and extractMin operations from scratch using an array.</p>
+    <p><b>Example:</b> insert(5), insert(2), insert(8) → peek() = 2</p>
+    <div class="hint"><b>Hint:</b> Use bubbleUp after insert and bubbleDown after extractMin, as shown above.</div>
+  </div>
+
+  <div class="qcard"><div class="qhead"><b>Q2. Kth Largest Element in a Stream</b><span class="badge easy">Easy</span></div>
+    <div class="meta">Pattern: Min Heap of size k</div>
+    <p>Design a class that continuously maintains the kth largest element as new elements arrive one at a time in a stream.</p>
+    <p><b>Example:</b> nums=[4,5,8,2], k=3, add(3) → returns 4</p>
+    <div class="hint"><b>Hint:</b> Maintain a min heap of size k; each new element gets inserted, then extract min if size exceeds k. The root is always the current kth largest.</div>
+  </div>
+
+  <div class="qcard"><div class="qhead"><b>Q3. Last Stone Weight</b><span class="badge easy">Easy</span></div>
+    <div class="meta">Pattern: Max Heap simulation</div>
+    <p>Given stone weights, repeatedly smash the two heaviest together (difference remains, both destroyed if equal); return the weight of the last stone left, or 0.</p>
+    <p><b>Example:</b> stones=[2,7,4,1,8,1] → 1</p>
+    <div class="hint"><b>Hint:</b> Use a max heap. Repeatedly extract the two largest stones and push the difference back in if non-zero.</div>
+  </div>
+
+  <div class="qcard"><div class="qhead"><b>Q4. K Closest Points to Origin</b><span class="badge easy">Easy</span></div>
+    <div class="meta">Pattern: Max Heap of size k</div>
+    <p>Given an array of points on the X-Y plane, return the k points closest to the origin.</p>
+    <p><b>Example:</b> points=[[1,3],[-2,2]], k=1 → [[-2,2]]</p>
+    <div class="hint"><b>Hint:</b> Maintain a max heap (ordered by distance) of size k; if a new point is closer than the heap's current max, swap it in.</div>
+  </div>
+
+  <div class="qcard"><div class="qhead"><b>Q5. Relative Ranks</b><span class="badge easy">Easy</span></div>
+    <div class="meta">Pattern: Max Heap with indices</div>
+    <p>Given scores of athletes, return their ranks — "Gold Medal", "Silver Medal", "Bronze Medal" for top 3, and numeric rank otherwise.</p>
+    <p><b>Example:</b> score=[5,4,3,2,1] → ["Gold Medal","Silver Medal","Bronze Medal","4","5"]</p>
+    <div class="hint"><b>Hint:</b> Push (score, original index) pairs into a max heap, pop in order to assign ranks back to original positions.</div>
+  </div>
+
+  <h3>Medium</h3>
+
+  <div class="qcard"><div class="qhead"><b>Q6. Kth Largest Element in an Array</b><span class="badge medium">Medium</span></div>
+    <div class="meta">Pattern: Min Heap of size k (or Quickselect)</div>
+    <p>Find the kth largest element in an unsorted array (not the kth distinct element).</p>
+    <p><b>Example:</b> nums=[3,2,1,5,6,4], k=2 → 5</p>
+    <div class="hint"><b>Hint:</b> See findKthLargest code above. Alternatively, Quickselect gives average O(n).</div>
+  </div>
+
+  <div class="qcard"><div class="qhead"><b>Q7. Top K Frequent Elements</b><span class="badge medium">Medium</span></div>
+    <div class="meta">Pattern: Frequency Map + Heap</div>
+    <p>Given an integer array, return the k most frequent elements.</p>
+    <p><b>Example:</b> nums=[1,1,1,2,2,3], k=2 → [1,2]</p>
+    <div class="hint"><b>Hint:</b> Build a frequency map, then use a min heap of size k (ordered by frequency) to keep only the top k most frequent.</div>
+  </div>
+
+  <div class="qcard"><div class="qhead"><b>Q8. Task Scheduler</b><span class="badge medium">Medium</span></div>
+    <div class="meta">Pattern: Max Heap + cooldown tracking</div>
+    <p>Given tasks and a cooldown period n between same tasks, find the minimum number of CPU intervals needed to finish all tasks.</p>
+    <p><b>Example:</b> tasks=["A","A","A","B","B","B"], n=2 → 8</p>
+    <div class="hint"><b>Hint:</b> Use a max heap ordered by task frequency; process the most frequent available tasks each cycle, tracking a cooldown queue for recently used tasks.</div>
+  </div>
+
+  <div class="qcard"><div class="qhead"><b>Q9. K Closest Points to Origin (matrix variant) — Kth Smallest Element in a Sorted Matrix</b><span class="badge medium">Medium</span></div>
+    <div class="meta">Pattern: Heap over matrix rows</div>
+    <p>Given an n x n matrix sorted ascending in rows and columns, find the kth smallest element in it.</p>
+    <p><b>Example:</b> matrix=[[1,5,9],[10,11,13],[12,13,15]], k=8 → 13</p>
+    <div class="hint"><b>Hint:</b> Push the first element of each row into a min heap with its (row, col); extract min and push the next element from that row, repeat k times.</div>
+  </div>
+
+  <div class="qcard"><div class="qhead"><b>Q10. Reorganize String</b><span class="badge medium">Medium</span></div>
+    <div class="meta">Pattern: Max Heap greedy rearrangement</div>
+    <p>Given a string, rearrange its characters so no two adjacent characters are the same; return any valid arrangement or empty string if impossible.</p>
+    <p><b>Example:</b> s="aab" → "aba"</p>
+    <div class="hint"><b>Hint:</b> Use a max heap by character frequency; repeatedly place the most frequent remaining character that isn't the same as the previous placed character.</div>
+  </div>
+
+  <h3>Hard</h3>
+
+  <div class="qcard"><div class="qhead"><b>Q11. Merge K Sorted Lists</b><span class="badge hard">Hard</span></div>
+    <div class="meta">Pattern: Min Heap across lists</div>
+    <p>Given k sorted linked lists, merge them into one sorted linked list.</p>
+    <p><b>Example:</b> lists=[[1,4,5],[1,3,4],[2,6]] → [1,1,2,3,4,4,5,6]</p>
+    <div class="hint"><b>Hint:</b> Heap of current heads from each list, always extracting the global minimum and advancing that list. See explanation above.</div>
+  </div>
+
+  <div class="qcard"><div class="qhead"><b>Q12. Find Median from Data Stream</b><span class="badge hard">Hard</span></div>
+    <div class="meta">Pattern: Two Heaps (Max Heap + Min Heap)</div>
+    <p>Design a data structure that supports adding numbers and finding the median of all numbers added so far.</p>
+    <p><b>Example:</b> addNum(1), addNum(2) → median=1.5; addNum(3) → median=2</p>
+    <div class="hint"><b>Hint:</b> Keep a max heap for the smaller half of numbers, and a min heap for the larger half, balanced in size (differ by at most 1).</div>
+  </div>
+
+  <div class="qcard"><div class="qhead"><b>Q13. Smallest Range Covering Elements from K Lists</b><span class="badge hard">Hard</span></div>
+    <div class="meta">Pattern: Min Heap sliding across sorted lists</div>
+    <p>Given k sorted lists, find the smallest range that includes at least one number from each list.</p>
+    <p><b>Example:</b> lists=[[4,10,15,24,26],[0,9,12,20],[5,18,22,30]] → [20,24]</p>
+    <div class="hint"><b>Hint:</b> Use a min heap holding one element from each list plus a tracked current max; each step extract the min, update the range, advance that list's pointer, and update max.</div>
+  </div>
+
+  <div class="qcard"><div class="qhead"><b>Q14. IPO (Maximize Capital)</b><span class="badge hard">Hard</span></div>
+    <div class="meta">Pattern: Two heaps (min heap by capital requirement + max heap by profit)</div>
+    <p>Given projects with capital requirements and profits, and initial capital, pick up to k projects to maximize final capital.</p>
+    <p><b>Example:</b> k=2, w=0, profits=[1,2,3], capital=[0,1,1] → 4</p>
+    <div class="hint"><b>Hint:</b> Sort projects by capital requirement; use a min heap to find affordable ones, push their profits into a max heap, and greedily pick the highest-profit affordable project k times.</div>
+  </div>
+
+  <hr class="div">
+  <div class="navlinks">
+    <a href="../Phase-10-Trees/01-trees.html">&larr; Prev: Trees</a>
+    <a href="../Phase-12-Graphs/01-graphs.html">Next: Graphs &rarr;</a>
+  </div>
+  <div class="home"><a href="../../index.html">&larr; Back to Index</a></div>
+
+</div>
+</body>
+</html>

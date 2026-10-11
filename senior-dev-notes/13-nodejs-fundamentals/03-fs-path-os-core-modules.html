@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Core Modules: fs, path, os — Node.js Fundamentals — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">Node.js Fundamentals</a><span class="sep">›</span>Core Modules: fs, path, os</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>Core Modules: fs, path, os</h1>
+      <p class="meta-line"><span>⏱ 2 hrs</span><span>📍 Chapter 3 of 6</span></p>
+      <p><strong>One-line summary:</strong> fs gives you three parallel APIs for the same operations (sync,
+      callback-based async, and promise-based) with real performance and correctness implications for which one
+      you reach for; path and os exist specifically so your code doesn't silently break the moment it runs on a
+      different OS than the one it was written on.</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>Every Node service that touches the filesystem — config loading, log writing, temp file handling, the
+      capstone's JSON-file storage — routes through this module. The senior-level distinction isn't "do you know
+      fs.readFile exists," it's: do you know exactly when a synchronous fs call is acceptable (startup/CLI
+      scripts) versus a request-path landmine (blocks the entire event loop for every concurrent request, see
+      <a href="../04-nodejs-advanced/01-event-loop.html">Event Loop Internals</a>), and do you reflexively build
+      file paths with <code>path.join</code> instead of string concatenation, which breaks the moment someone
+      runs your code on Windows or inside certain container base images.</p>
+      <div class="box why"><h4>Why</h4><p>String-concatenated paths (<code>dir + '/' + file</code>) are a classic
+      bug that passes code review and every test on a developer's Mac/Linux machine, then breaks for a Windows
+      contributor or a CI runner with different path-separator conventions. <code>path.join</code>/<code>path.resolve</code>
+      cost nothing and eliminate the entire bug class.</p></div>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>Comfortable with callbacks, Promises, and async/await. Related in this topic:
+      <a href="01-nodejs-basics-runtime-modules.html">Node.js Basics: Runtime &amp; Modules</a>,
+      <a href="04-http-module-and-basic-servers.html">HTTP Module &amp; Basic Servers</a> (the capstone's
+      file-based storage uses exactly this chapter's APIs). Related elsewhere:
+      <a href="../04-nodejs-advanced/01-event-loop.html">Event Loop Internals &amp; libuv</a> for precisely why
+      sync fs calls on the request path are dangerous, and
+      <a href="../04-nodejs-advanced/02-streams-buffers.html">Streams, Buffers &amp; Backpressure</a> for handling
+      files too large to read fully into memory.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="three-fs-apis">fs's three parallel APIs: sync, callback, and promises</h3>
+      <p>Every common fs operation exists in three forms. <strong>Sync</strong> (<code>fs.readFileSync</code>):
+      blocks the JS thread until the OS call completes — simple to reason about, but on a server handling
+      concurrent requests it stalls <em>every</em> in-flight request for the duration. <strong>Callback-based
+      async</strong> (<code>fs.readFile(path, cb)</code>): the original Node pattern, non-blocking, offloaded to
+      libuv's thread pool (file I/O has no universal OS-native async primitive, so Node uses worker threads under
+      the hood even though it "looks" async from your code's perspective). <strong>Promise-based</strong>
+      (<code>fs.promises.readFile</code>, or equivalently importing from <code>node:fs/promises</code>): the
+      modern default for anything you'll <code>await</code> — same underlying thread-pool mechanism as the
+      callback API, just wrapped in a Promise-returning interface that composes with async/await instead of
+      nested callbacks.</p>
+      <p>Rule of thumb for 2025-26 code: use <code>fs/promises</code> for all request-path and general
+      application code; reserve the sync API for startup-time config loading, one-off CLI scripts, or places
+      where you've deliberately decided blocking briefly is fine (e.g., reading a small config file once before
+      the server starts accepting connections at all).</p>
+
+      <h3 id="path-module">path: OS-aware path manipulation</h3>
+      <p><code>path.join(...)</code> concatenates segments using the current OS's correct separator and normalizes
+      the result (collapsing <code>..</code>/<code>.</code> segments). <code>path.resolve(...)</code> does the
+      same but always returns an absolute path, resolving from the current working directory if no absolute
+      segment is given — the key practical difference: <code>join</code> is purely textual, <code>resolve</code>
+      mimics how a shell resolves a sequence of <code>cd</code> commands. <code>path.basename</code>,
+      <code>path.dirname</code>, and <code>path.extname</code> pull apart a path's filename, directory, and
+      extension respectively. <code>path.sep</code> is the OS-specific separator (<code>/</code> on POSIX,
+      <code>\</code> on Windows) — you should essentially never hardcode a separator character yourself.</p>
+
+      <h3 id="os-module">os: querying the runtime environment</h3>
+      <p><code>os.platform()</code> returns the OS identifier (<code>'linux'</code>, <code>'darwin'</code>,
+      <code>'win32'</code>); <code>os.cpus()</code> returns per-core info (used for sizing worker pools/cluster
+      fork counts, see <a href="../04-nodejs-advanced/03-worker-threads.html">Worker Threads &amp; Clustering</a>);
+      <code>os.totalmem()</code>/<code>os.freemem()</code> report system memory; <code>os.tmpdir()</code> returns
+      the platform-correct temp directory (never hardcode <code>/tmp</code> — it doesn't exist on Windows);
+      <code>os.homedir()</code> returns the current user's home directory cross-platform.</p>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>Async fs operations are backed by libuv's thread pool (default size 4, see
+      <a href="../04-nodejs-advanced/01-event-loop.html">Event Loop Internals</a>) because, unlike network
+      sockets, most operating systems have no universal native async file I/O primitive Node can rely on
+      uniformly — so Node dispatches the actual <code>read</code>/<code>write</code> syscall to a worker thread
+      and the JS thread is notified via the event loop when it completes. This is why a burst of concurrent
+      <code>fs.promises.readFile</code> calls beyond the thread pool size queues the extras behind the first four,
+      even though each individual call is "non-blocking" from the JS thread's perspective.</p>
+      <p>File descriptors are a finite OS resource. Every <code>fs.open</code> (and internally, every
+      read/write-file call that doesn't explicitly close its handle) consumes one until closed; forgetting to
+      close handles in a long-running process is a real, slow-burning resource leak that eventually throws
+      <code>EMFILE: too many open files</code>. The promise and callback convenience methods
+      (<code>readFile</code>/<code>writeFile</code>) open and close the descriptor internally per call, so the
+      leak risk is specifically around manual <code>fs.open</code>/stream usage, not the convenience wrappers.</p>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+flowchart LR
+  A[fs.readFileSync] -->|blocks JS thread| B[Direct syscall, waits inline]
+  C[fs.readFile + callback] -->|non-blocking| D[libuv thread pool]
+  E[fs.promises.readFile / await] -->|non-blocking| D
+  D --> F[Completion queued back to JS thread via event loop]
+      </div>
+      <div class="mermaid">
+flowchart TD
+  A["path.join('a', '..', 'b', 'c.txt')"] --> B["Textual join + normalize<br/>→ 'b/c.txt'"]
+  C["path.resolve('a', '..', 'b', 'c.txt')"] --> D["Resolve from CWD like cd commands<br/>→ '/current/working/dir/b/c.txt'"]
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-javascript">import { readFile, writeFile, mkdir, readdir, stat } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
+
+// ---- BAD: sync fs call on a request handler path ----
+// app.get('/bookmarks', (req, res) => {
+//   const data = fs.readFileSync('./bookmarks.json', 'utf-8'); // blocks ALL concurrent requests
+//   res.json(JSON.parse(data));
+// });
+
+// ---- GOOD: promise-based, non-blocking ----
+async function loadBookmarks(filePath) {
+  try {
+    const raw = await readFile(filePath, 'utf-8');
+    return JSON.parse(raw);
+  } catch (err) {
+    if (err.code === 'ENOENT') return [];      // file doesn't exist yet — treat as empty
+    throw err;                                  // anything else is a real error, rethrow
+  }
+}
+
+async function saveBookmarks(filePath, bookmarks) {
+  const dir = path.dirname(filePath);
+  await mkdir(dir, { recursive: true });        // ensure directory exists, no error if it already does
+  await writeFile(filePath, JSON.stringify(bookmarks, null, 2), 'utf-8');
+}
+
+// ---- path: always build paths this way, never string concatenation ----
+const dataDir = path.join(process.cwd(), 'data');          // textual join, OS-correct separator
+const bookmarksFile = path.resolve(dataDir, 'bookmarks.json'); // absolute, resolved from CWD
+console.log(path.basename(bookmarksFile));   // 'bookmarks.json'
+console.log(path.extname(bookmarksFile));    // '.json'
+console.log(path.dirname(bookmarksFile));    // the data dir, absolute
+
+// ---- os: environment-aware config ----
+const workerCount = Math.max(1, os.cpus().length - 1);  // leave one core for the main process
+const tmpUploadDir = path.join(os.tmpdir(), 'myapp-uploads'); // cross-platform temp dir, never hardcode /tmp
+
+// ---- reading a directory ----
+async function listJsonFiles(dir) {
+  const entries = await readdir(dir, { withFileTypes: true });
+  return entries
+    .filter(e => e.isFile() && path.extname(e.name) === '.json')
+    .map(e => path.join(dir, e.name));
+}
+
+// ---- sync is fine here: one-time startup config, before server starts accepting traffic ----
+const configExists = existsSync('./config.json');
+</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4><p>A small internal tool (the kind that starts as "just a quick JSON
+      file, we'll add a real DB later") used <code>fs.readFileSync</code>/<code>writeFileSync</code> on every API
+      request to read and rewrite a shared JSON data file. It worked fine with a handful of users. When a company-wide
+      rollout brought concurrent usage from ~5 to ~200 users, p99 latency on <em>every</em> endpoint — not just the
+      file-backed ones — spiked badly, because each sync file operation blocked the entire single-threaded process
+      for the full read/write duration, serializing all concurrent requests behind each other regardless of which
+      endpoint they hit. The fix wasn't "add a database" immediately (that was the longer-term plan) — it was a
+      same-day change to <code>fs/promises</code> plus an in-memory write queue (serializing only the writes to
+      that one file to avoid corrupting it under concurrent writes, see Chapter 6's race-condition discussion),
+      which bought enough headroom to ship the real datastore migration without an outage in between.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Using any <code>*Sync</code> fs function inside a request handler
+      "because it was simpler to write." It blocks the entire process for every concurrent request for the
+      duration of that one disk operation — acceptable at startup, never on a hot request path.</p></div>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Building file paths with string concatenation
+      (<code>dir + '/' + filename</code>) instead of <code>path.join</code>. Breaks on Windows, breaks when
+      <code>dir</code> already has a trailing slash (double slash), and misses path normalization — always use
+      <code>path.join</code>/<code>path.resolve</code>.</p></div>
+      <ul>
+        <li>Check <code>err.code === 'ENOENT'</code> specifically rather than assuming any readFile failure means "file doesn't exist" — permission errors (EACCES), directory-vs-file mismatches (EISDIR), and others have distinct codes worth handling differently.</li>
+        <li>Prefer <code>{ recursive: true }</code> on <code>mkdir</code> to avoid manually checking existence first (and the TOCTOU race that check introduces).</li>
+        <li>Don't forget that concurrent writes to the same file from multiple requests can interleave/corrupt it — plain fs has no file-level locking; serialize writes yourself (an in-process queue) or use a real database.</li>
+        <li>Never hardcode <code>/tmp</code> or <code>C:\Users\...</code> — use <code>os.tmpdir()</code>/<code>os.homedir()</code>.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>fs.*Sync</td><td>Startup/config loading, one-off CLI scripts, before server accepts traffic</td><td>Any code on a concurrent request path</td><td>fs/promises</td></tr>
+        <tr><td>fs/promises (async/await)</td><td>Virtually all application code touching the filesystem in 2025-26</td><td>Extremely old codebases stuck on callback-style APIs for consistency</td><td>Callback-based fs for legacy consistency</td></tr>
+        <tr><td>JSON file storage via fs</td><td>Prototypes, small config, this topic's capstone/learning exercise</td><td>Any real concurrent-write production workload</td><td>A real database (SQLite for small/local, Postgres for scale)</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic"><h4>Basic</h4>
+      <details class="qa"><summary>Name the three forms of most fs operations.</summary><div class="answer"><p>Synchronous (blocking, e.g. readFileSync), callback-based asynchronous (e.g. readFile(path, cb)), and promise-based (fs/promises, usable with async/await).</p></div><div class="followup">Follow-up: which underlying mechanism do the async and promise versions share?</div></details>
+      <details class="qa"><summary>Why is path.join preferred over string concatenation for building file paths?</summary><div class="answer"><p>It uses the correct OS-specific path separator and normalizes the result (collapsing redundant slashes and .. segments), so code behaves correctly across operating systems instead of assuming a POSIX-style separator.</p></div><div class="followup">Follow-up: what's the difference between path.join and path.resolve?</div></details>
+      <details class="qa"><summary>What does os.tmpdir() give you, and why not just hardcode /tmp?</summary><div class="answer"><p>The platform-correct temporary directory path — /tmp on most POSIX systems, but a different path on Windows (no /tmp exists there), so hardcoding breaks cross-platform code.</p></div><div class="followup">Follow-up: name one other os module function useful for sizing a worker pool.</div></details>
+      <details class="qa"><summary>What error code do you check to detect "file does not exist" from an fs read call?</summary><div class="answer"><p>err.code === 'ENOENT' (Error NO ENTry).</p></div><div class="followup">Follow-up: name one other common fs error code and what it means.</div></details>
+      <details class="qa"><summary>What does { recursive: true } do on fs.mkdir?</summary><div class="answer"><p>Creates all missing parent directories in the path and does not throw if the target directory already exists, avoiding a manual existence check beforehand.</p></div><div class="followup">Follow-up: what race condition does this avoid compared to "check exists, then mkdir if not"?</div></details>
+      <details class="qa"><summary>When is using a synchronous fs call acceptable?</summary><div class="answer"><p>At process startup before the server begins accepting requests (e.g. loading a config file once), or in one-off CLI scripts with no concurrent request path to block.</p></div><div class="followup">Follow-up: why specifically is this safe when it's unsafe on a request path?</div></details>
+      </div>
+      <div class="qa-level medium"><h4>Medium</h4>
+      <details class="qa"><summary>Why does async fs.readFile still use a thread pool internally even though it "feels" async from your code?</summary><div class="answer"><p>Most operating systems lack a universal native async file I/O primitive comparable to epoll/kqueue for sockets, so Node dispatches the actual read/write syscall to one of libuv's worker pool threads; the JS thread is freed immediately and notified via the event loop once that worker thread's syscall completes. It's "non-blocking from the JS thread's perspective" via real OS threads underneath, not via a kernel-native async file API.</p></div><div class="followup">Follow-up: what happens to the 5th concurrent fs.readFile call if the thread pool size is 4 and all 4 are busy?</div></details>
+      <details class="qa"><summary>What's a file descriptor leak, and how do convenience methods like readFile/writeFile avoid it?</summary><div class="answer"><p>Every open file consumes a finite OS file descriptor; if you manually fs.open and never fs.close, descriptors accumulate until the process hits EMFILE ("too many open files"). readFile/writeFile open and close the descriptor internally per call, so the leak risk is specific to manual fs.open/stream usage, not these convenience wrappers.</p></div><div class="followup">Follow-up: what's a realistic scenario where even using readFile/writeFile you could still leak resources?</div></details>
+      <details class="qa"><summary>How would you safely handle concurrent writes to the same JSON file from multiple simultaneous requests?</summary><div class="answer"><p>Plain fs has no file-level locking, so interleaved writes can corrupt the file (partial overwrite). A practical in-process fix is an async write queue (serialize all writes to that file through a single in-memory promise chain/mutex) so only one write is in flight at a time; a cross-process fix requires actual file locking (proper-lockfile style libraries) or, better, migrating to a real database with transactional guarantees.</p></div><div class="followup">Follow-up: does an in-process write queue protect you if you run multiple Node processes (cluster mode) against the same file?</div></details>
+      <details class="qa"><summary>Explain the practical difference between path.join('/a', '../b') and path.resolve('/a', '../b').</summary><div class="answer"><p>Both normalize the .. segment the same way here since an absolute segment is present, resulting in '/b' for both — the real difference shows when no absolute segment is given: path.join('a', '../b') returns the textual 'b' relative path, while path.resolve('a', '../b') returns an absolute path resolved against process.cwd(), e.g. '/current/dir/b'.</p></div><div class="followup">Follow-up: when would you deliberately want join's relative-path behavior instead of resolve's absolute behavior?</div></details>
+      <details class="qa"><summary>Why might reading a very large file fully with fs.readFile be a bad idea even using the async/promise API?</summary><div class="answer"><p>readFile loads the entire file into memory as one Buffer/string before resolving — for very large files this can spike memory usage significantly and delay the first byte of processing until the whole file is read. A stream-based approach (fs.createReadStream) processes data incrementally with bounded memory and lets you start processing before the full file arrives.</p></div><div class="followup">Follow-up: at roughly what file size would you start reaching for streams instead of readFile, and why isn't there a hard universal number?</div></details>
+      <details class="qa"><summary>What's the risk of using fs.existsSync followed by a separate fs.readFile/writeFile call, and what's the better pattern?</summary><div class="answer"><p>This is a TOCTOU (time-of-check to time-of-use) race: the file's existence can change between the existsSync check and the subsequent operation (another process/request deletes or creates it in between), making the check meaningless under concurrency. Better: attempt the operation directly and handle the specific error code (ENOENT) in the catch block, which is also just fewer syscalls.</p></div><div class="followup">Follow-up: is this race condition realistic in a single-process Node app, or only relevant with multiple processes/external actors touching the file?</div></details>
+      </div>
+      <div class="qa-level advanced"><h4>Advanced</h4>
+      <details class="qa"><summary>Design a file-based storage layer (like the capstone's bookmarks.json) that's safe under concurrent writes within a single Node process, and explain its limits.</summary><div class="answer"><p>Maintain an in-memory queue/mutex: every write operation is appended as a function to a promise chain that resolves sequentially (e.g., `let queue = Promise.resolve(); function enqueueWrite(fn) { queue = queue.then(fn, fn); return queue; }`), guaranteeing writes to the file never interleave within that process. Reads can either go through the same queue (slower, always consistent) or read optimistically with the understanding they might occasionally read slightly stale data mid-write. Its fundamental limit: this only serializes writes within one process — a second Node process (another server instance, or cluster worker) touching the same file has its own independent queue and can still race with the first, so this pattern is only correct for a strictly single-process deployment.</p></div><div class="followup">Follow-up: how would you extend this to be safe across multiple processes/instances without migrating to a real database?</div></details>
+      <details class="qa"><summary>Explain exactly what happens at the libuv/OS level when 10 concurrent fs.promises.readFile calls are issued against a thread pool of size 4.</summary><div class="answer"><p>libuv dispatches the first 4 read operations to its 4 worker threads immediately; the remaining 6 are queued internally within libuv, waiting for a thread to free up. As each of the first 4 completes, its result is queued back to the JS thread via the event loop's poll phase, the worker thread becomes free, and libuv immediately assigns it the next queued request — so the 10 requests complete in roughly 3 waves of up to 4 concurrent operations rather than all in parallel, meaning wall-clock completion time for the batch scales with (10/4) rounded up, times the per-read duration, not with pure parallelism.</p></div><div class="followup">Follow-up: would raising UV_THREADPOOL_SIZE to 10 here definitely improve throughput? What else could bottleneck it (e.g., disk I/O contention itself)?</div></details>
+      <details class="qa"><summary>How would you benchmark and decide the threshold file size at which you should switch from fs.readFile to streaming for a specific production workload?</summary><div class="answer"><p>Benchmark actual memory and latency-to-first-byte under realistic concurrency for representative file sizes in your workload, tracking peak RSS and event-loop lag (monitorEventLoopDelay) during the read, not just wall-clock read time. The threshold isn't a fixed universal number — it depends on available container memory, expected concurrent request volume at that size, and whether downstream processing can genuinely benefit from incremental/streamed data (e.g., piping straight to an HTTP response) versus needing the whole buffer anyway (e.g., JSON.parse requires the complete string regardless, so streaming only helps the I/O phase, not the parse phase).</p></div><div class="followup">Follow-up: for a workload that must JSON.parse the full file content regardless, what does streaming actually buy you versus readFile?</div></details>
+      <details class="qa"><summary>Your service migrated from JSON-file storage to a real database, but a legacy batch job still reads the old file format for backward compatibility. How would you structure this transition period's code to minimize risk?</summary><div class="answer"><p>Keep the file-read path completely isolated behind the same repository/interface abstraction the database-backed path uses, so callers never know which backend served a given read — this lets you dual-write during a transition window (write to both store and file) and run a reconciliation job comparing them before fully cutting over reads. Treat the legacy file as read-only once the cutover begins (stop writing to it from the app, let the batch job finish consuming it on its own schedule), and set a hard decommission date for removing file-read code entirely rather than letting "backward compatibility" become permanent technical debt.</p></div><div class="followup">Follow-up: what's a concrete way to prove the database and file representations actually agree before fully decommissioning the file path?</div></details>
+      <details class="qa"><summary>Why can EMFILE errors appear seemingly randomly in production under load even when your code correctly closes every file handle it opens?</summary><div class="answer"><p>EMFILE is governed by a process-wide (and often OS-wide) file descriptor limit (ulimit -n on Linux) shared across every open file, socket, and pipe in the process — not just ones your fs code opens. A connection-handling bug elsewhere (leaked sockets, unclosed HTTP keep-alive connections, an accumulating log stream) can exhaust the same descriptor budget your fs calls draw from, making fs operations fail with EMFILE even though your fs-specific code is flawless. Diagnosing this requires looking at total open descriptors for the process (lsof -p &lt;pid&gt; on Linux), not just auditing fs.open call sites.</p></div><div class="followup">Follow-up: what's a production mitigation for this beyond "find and fix the leak" — is there a safe stopgap?</div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment"><span class="level-tag">Beginner (30-60 min)</span>
+      <h4>Build a small CLI file-stats tool</h4>
+      <p>Write a Node script (using fs/promises, path, and os) that takes a directory path as a CLI argument,
+      lists all files in it, and prints each file's name, size, and extension, plus a summary line using
+      os.platform() and os.totalmem().</p>
+      <ul><li>Must use path.join/path.extname, not string concatenation.</li><li>Must handle a non-existent directory gracefully (clear error message, not a stack trace dump).</li></ul>
+      <p><strong>Acceptance criteria:</strong> Runs correctly against a real directory and prints accurate per-file stats plus the OS summary line.</p>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>Use fs.promises.readdir with { withFileTypes: true } and fs.promises.stat per file for size.</p></div></details>
+      <p><strong>Bonus:</strong> Add a recursive mode that walks subdirectories too.</p>
+      </div>
+      <div class="assignment"><span class="level-tag">Intermediate (2-4 hrs)</span>
+      <h4>Implement a safe-write JSON store module</h4>
+      <p>Build a small module exposing `read()` and `write(data)` functions backed by a JSON file, where write()
+      is safe against concurrent calls within the same process (no interleaved/corrupted writes) using an
+      in-memory write queue. Prove correctness by firing 50 concurrent write() calls (each appending a unique
+      item) and verifying the final file contains exactly 50 well-formed, non-corrupted items.</p>
+      <ul><li>Must demonstrate the bug first without the queue (corrupted/lost writes under concurrency).</li><li>Must then show the queued version passing the same concurrency test cleanly.</li></ul>
+      <p><strong>Acceptance criteria:</strong> The 50-concurrent-write test passes reliably across multiple runs with the queue in place.</p>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>Chain each write operation onto a single module-level `let queue = Promise.resolve()` variable, reassigning it to `queue.then(doWrite)` for each new write.</p></div></details>
+      <p><strong>Bonus:</strong> Add a read-your-writes guarantee: a write() call's returned promise only resolves after that specific write has been durably flushed to disk.</p>
+      </div>
+      <div class="assignment"><span class="level-tag">Advanced (1-2 days)</span>
+      <h4>Benchmark sync vs async fs under concurrent load</h4>
+      <p>Build two versions of a tiny Express (or raw http) endpoint that reads a ~5MB JSON file on every request:
+      one using fs.readFileSync, one using fs/promises. Load test both with a tool like autocannon at a
+      realistic concurrency (e.g. 50 connections) and measure p50/p99 latency and throughput for each. Also add a
+      second, unrelated lightweight endpoint (e.g. a simple health check) and show how its latency degrades under
+      load from the sync version but not the async version.</p>
+      <ul><li>Must produce real before/after numbers from an actual load test, not theoretical reasoning alone.</li><li>Must demonstrate the "unrelated endpoint" latency contagion from the sync version specifically.</li></ul>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>Use autocannon with two separate terminal windows — one hammering the file-read endpoint, one hammering the health-check endpoint — and compare health-check latency between the sync and async server runs.</p></div></details>
+      <p><strong>Bonus:</strong> Add a worker_thread-backed version of the file read and show it also protects the unrelated endpoint's latency.</p>
+      </div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet"><ul>
+        <li>fs has 3 parallel APIs: sync (blocking), callback async, promise-based (fs/promises) — default to fs/promises for application code.</li>
+        <li>Async/promise fs calls still run on libuv's thread pool (default size 4) — not a kernel-native async file API.</li>
+        <li>Never use *Sync fs calls on a request path — only at startup or in CLI scripts.</li>
+        <li>Always build paths with path.join/path.resolve, never string concatenation — cross-platform correctness, free.</li>
+        <li>path.join: textual concat + normalize. path.resolve: always absolute, resolved from CWD like cd commands.</li>
+        <li>Check err.code (ENOENT, EACCES, EISDIR, EMFILE) rather than assuming every fs error means "missing file."</li>
+        <li>Use { recursive: true } on mkdir to avoid a TOCTOU existence-check race.</li>
+        <li>os.tmpdir()/os.homedir() instead of hardcoded /tmp or user paths — cross-platform correctness.</li>
+        <li>Plain fs has no file-level locking — concurrent writes to the same file need your own queue/mutex or a real database.</li>
+        <li>EMFILE errors draw from a process-wide fd limit shared with sockets/pipes — not only fs.open calls.</li>
+      </ul></div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://nodejs.org/api/fs.html">Node.js docs: File system (fs)</a></li>
+        <li><a href="https://nodejs.org/api/fs.html#promises-api">Node.js docs: fs — Promises API</a></li>
+        <li><a href="https://nodejs.org/api/path.html">Node.js docs: path</a></li>
+        <li><a href="https://nodejs.org/api/os.html">Node.js docs: os</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="02-npm-and-package-management.html"><span class="dir">← Previous</span>npm &amp; Package Management</a>
+        <a class="next" href="04-http-module-and-basic-servers.html"><span class="dir">Next →</span>HTTP Module &amp; Basic Servers</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · Node.js Fundamentals</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-javascript.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "13-nodejs-fundamentals", chapterKey: "03-fs-path-os-core-modules" });</script>
+</body>
+</html>

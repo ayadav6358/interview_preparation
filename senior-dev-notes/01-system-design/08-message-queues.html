@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Message Queues & Event-Driven — System Design — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">System Design</a><span class="sep">›</span>Message Queues & Event-Driven</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>Message Queues & Event-Driven Architecture: Kafka, RabbitMQ, BullMQ</h1>
+      <p class="meta-line"><span>⏱ 2.5 hrs</span><span>📍 Chapter 8 of 14</span></p>
+      <p><strong>One-line summary:</strong> Async messaging turns a brittle chain of synchronous calls into decoupled, independently-scalable producers and consumers — but it trades immediate consistency and simple debugging for durability, back-pressure handling, and the hard problem of delivery guarantees, which is exactly where senior candidates get tested.</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>Every "design a notification system" or "design an order processing pipeline" interview question hinges on whether you reach for a queue and, more importantly, <em>which</em> queue and why. Junior engineers say "we'll use Kafka" as a reflex; senior engineers ask what delivery guarantee the business actually needs, whether ordering matters, whether the workload is a stream of events or a pile of discrete jobs, and whether the team can operationally support a distributed log at all. You will also be asked to reason about failure: what happens when a consumer crashes mid-processing, when a message is delivered twice, or when a producer retries into a partition it no longer owns. If you can't explain idempotent consumers and at-least-once semantics with code, you will lose points here no matter how well you drew the boxes.</p>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>Read <a href="07-transactions.html">Transactions</a> first — outbox patterns and idempotency here build directly on ACID and distributed transaction tradeoffs. <a href="03-load-balancing.html">Load Balancing</a> is useful background for understanding consumer group rebalancing.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="why-async">Why asynchronous messaging at all</h3>
+      <p><strong>Decoupling:</strong> the producer doesn't need to know who consumes its events, how many consumers exist, or whether they're even online right now. A monolith emitting "order.created" doesn't care if it's the email service, the analytics pipeline, or a future fraud-detection service reading it — new consumers can be added with zero changes to the producer.</p>
+      <p><strong>Buffering bursts:</strong> a flash sale might generate 50,000 orders/minute for five minutes, then drop to 500/minute. A synchronous chain sized for average load falls over at the burst; a queue absorbs the burst and lets consumers drain it at a sustainable rate. This converts a capacity-planning problem ("provision for peak") into a latency problem ("how long can processing lag behind," which is usually fine for non-user-facing work).</p>
+      <p><strong>Back-pressure:</strong> when consumers can't keep up, a queue gives you an explicit, observable point of pressure (queue depth, consumer lag) instead of cascading timeouts through a synchronous call chain. You can alert on "Kafka consumer lag > 10,000" long before anything user-facing breaks — that signal doesn't exist in a synchronous architecture until it's already an outage.</p>
+
+      <h3 id="kafka-internals">Kafka internals: topics, partitions, consumer groups, offsets</h3>
+      <p>A Kafka <strong>topic</strong> is a named, append-only log, split into <strong>partitions</strong> for parallelism. Each partition is an ordered, immutable sequence of messages, each assigned a monotonically increasing <strong>offset</strong>. Ordering is guaranteed <em>only within a partition</em>, never across the whole topic — this is the single most-missed fact in interviews. If you need strict ordering for a given entity (e.g., all events for order #123 must be processed in order), you must route by a partition key (typically the entity ID) so all its events land on the same partition.</p>
+      <p><strong>Consumer groups</strong> let multiple consumer instances split the work of a topic: Kafka assigns each partition to exactly one consumer within a group, so a topic with 12 partitions can have up to 12 consumers in a group processing in parallel — a 13th consumer sits idle. Different consumer groups are fully independent; each group tracks its own committed offset per partition, so the same message can be reprocessed independently by an analytics group and a billing group.</p>
+      <p><strong>Replication:</strong> each partition has a leader broker and N follower replicas. Producers and consumers talk to the leader; followers replicate asynchronously (or synchronously depending on <code>acks</code> and <code>min.insync.replicas</code>). If the leader dies, a follower that is in the in-sync replica set (ISR) is elected leader. <code>replication.factor=3</code> with <code>min.insync.replicas=2</code> is the standard production baseline — it tolerates one broker failure without losing committed data.</p>
+      <p><strong>Offset commits</strong> are how a consumer group tracks progress. Auto-commit (commit on a timer, regardless of whether processing actually finished) is convenient but risks message loss (crash after commit, before processing finishes) or duplicate processing (crash after processing, before commit) — in practice you almost always want manual commit <em>after</em> successful processing, which gives you at-least-once delivery.</p>
+
+      <h3 id="delivery-semantics">Delivery guarantees: at-most-once, at-least-once, exactly-once</h3>
+      <p><strong>At-most-once:</strong> commit the offset before processing (or fire-and-forget with no retries). Fast, but any crash or error between commit and processing completion silently loses the message. Rarely what you want.</p>
+      <p><strong>At-least-once:</strong> process first, commit offset after. A crash after processing but before commit causes the message to be redelivered — safe for data loss, but the consumer <em>will</em> see duplicates eventually. This is the default pragmatic choice, provided your consumer logic is idempotent (see below).</p>
+      <p><strong>Exactly-once:</strong> the holy grail, genuinely hard in a distributed system. Kafka supports exactly-once <em>within Kafka</em> (producer to topic, or topic-to-topic via Kafka Streams) using idempotent producers plus transactional writes across partitions. It does <em>not</em> give you exactly-once for the side effect of "call a payment API" or "write to an external database" — the moment your consumer does anything outside Kafka's transactional boundary, you're back to at-least-once-plus-idempotency as the practical pattern. Be ready to say this explicitly in interviews — claiming "we'll just use exactly-once" without qualification is a tell.</p>
+      <p><strong>Idempotent producers</strong> (<code>enable.idempotence=true</code>) solve a narrower, real problem: network retries causing the same message to be written twice to a partition. Kafka assigns each producer a PID and sequence number per partition, and the broker dedupes based on that — this gives you exactly-once <em>produce</em> semantics, not exactly-once end-to-end.</p>
+
+      <h3 id="rabbitmq">RabbitMQ: exchanges, queues, routing</h3>
+      <p>RabbitMQ is a traditional message broker built around the AMQP model: producers publish to an <strong>exchange</strong>, never directly to a queue. The exchange routes the message to zero or more bound queues based on a <strong>routing key</strong> and the exchange type:</p>
+      <ul>
+        <li><strong>Direct exchange:</strong> routes to queues whose binding key exactly matches the routing key. Classic point-to-point or simple topic-based fanout.</li>
+        <li><strong>Topic exchange:</strong> routing key is a dot-separated pattern (e.g. <code>order.created.us</code>) matched against wildcard bindings (<code>order.*</code>, <code>order.#</code>). Good for "route by category" scenarios.</li>
+        <li><strong>Fanout exchange:</strong> ignores the routing key entirely, delivers to every bound queue — the simplest pub/sub primitive, equivalent to "broadcast to everyone listening."</li>
+      </ul>
+      <p>Unlike Kafka, RabbitMQ queues are typically <em>consumed and removed</em> — once acked, a message is gone (no replay from an offset, though streams/plugins can approximate this). RabbitMQ shines at per-message routing flexibility, priority queues, and complex workflow fan-out; Kafka shines at high-throughput, replayable, ordered event streams retained for days or forever. This is the core architectural distinction interviewers want you to articulate, not "Kafka is newer."</p>
+
+      <h3 id="bullmq">BullMQ: Node-native job queues on Redis</h3>
+      <p>BullMQ is a job queue library built on Redis, designed for application-level background work inside a Node.js codebase: sending emails, generating PDFs, processing image uploads, retrying webhook deliveries. It gives you job priorities, delayed jobs, repeatable (cron-like) jobs, concurrency control, and automatic retries with backoff — all with a much smaller operational footprint than running a Kafka cluster (you likely already run Redis for caching).</p>
+      <p>The key distinction for interviews: BullMQ is a <strong>task/job queue</strong> (each job is typically processed once, by one worker, and then it's done) whereas Kafka is an <strong>event stream</strong> (an immutable log that multiple independent consumer groups can replay and reprocess at will, retained regardless of consumption). Don't reach for Kafka just because "it's the industry standard" if your actual need is "run this background job reliably with retries" inside a single Node application — BullMQ is less infrastructure, faster to operate, and arguably the more senior choice precisely because it's not over-engineered.</p>
+
+      <h3 id="idempotent-consumers">Idempotent consumer patterns</h3>
+      <p>Since at-least-once delivery is the realistic default, your consumer must tolerate duplicate messages without causing duplicate side effects (double-charging a card, double-sending an email). The standard pattern: assign every message a unique idempotency key (often the producer-generated event ID), and before processing, check-and-record that key atomically in a store (Redis <code>SETNX</code>, or a unique DB constraint) — if it's already there, skip processing and just ack.</p>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>Trace a single order event through Kafka end to end: the producer serializes the event, computes <code>partition = hash(key) % numPartitions</code> (or uses a custom partitioner), and sends it to the leader broker for that partition. The leader appends it to its local log and, depending on <code>acks</code>, waits for followers in the ISR to replicate before acknowledging the producer. A consumer in a given group polls the assigned partition starting from its last committed offset, processes the batch, and commits the new offset back to Kafka's internal <code>__consumer_offsets</code> topic. If the consumer crashes before committing, the next poll (by this consumer or another one Kafka reassigns the partition to during rebalance) starts again from the last committed offset — reprocessing whatever wasn't committed, which is exactly where duplicates come from and why idempotency matters.</p>
+      <p>Consumer group <strong>rebalancing</strong> happens whenever a consumer joins, leaves, or is deemed dead (missed heartbeats). During a rebalance, partition ownership is reassigned, and depending on the rebalance strategy (eager vs cooperative sticky), consumers may briefly stop processing entirely — this is a real source of latency spikes in production Kafka clusters and worth mentioning if asked about Kafka operational pain points.</p>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+sequenceDiagram
+    participant P as Producer
+    participant B as Broker (Partition Leader)
+    participant F as Follower Replicas
+    participant CG as Consumer Group
+    participant C1 as Consumer 1
+    participant C2 as Consumer 2
+    P->>B: produce(key=orderId, value=event)
+    B->>B: append to partition log (offset N)
+    B->>F: replicate
+    F-->>B: ack (ISR)
+    B-->>P: ack (per acks config)
+    Note over CG,C2: Kafka assigns partitions across group members
+    C1->>B: poll (partition 0, from last committed offset)
+    C2->>B: poll (partition 1, from last committed offset)
+    B-->>C1: batch of messages
+    C1->>C1: process + idempotency check
+    C1->>B: commit offset (partition 0)
+      </div>
+      <div class="mermaid">
+flowchart TD
+    A["Need async messaging"] --> B{"Replayable event stream<br/>for multiple independent<br/>consumer groups?"}
+    B -->|Yes, high throughput,<br/>ordering per key, retention| C["Kafka"]
+    B -->|No| D{"Complex routing<br/>(topic/fanout/priority),<br/>flexible AMQP broker?"}
+    D -->|Yes| E["RabbitMQ"]
+    D -->|No| F{"App-level background jobs<br/>in a Node codebase,<br/>already running Redis?"}
+    F -->|Yes| G["BullMQ"]
+    F -->|No| H["Reconsider: maybe a simple<br/>DB-backed outbox + cron is enough"]
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-typescript">// Idempotent Kafka consumer using Redis SETNX as a dedupe guard
+import { Kafka } from "kafkajs";
+import Redis from "ioredis";
+
+const kafka = new Kafka({ clientId: "order-worker", brokers: ["kafka:9092"] });
+const consumer = kafka.consumer({ groupId: "order-processing-group" });
+const redis = new Redis();
+
+async function processOrderEvent(event: { eventId: string; orderId: string; amount: number }) {
+  // Atomic check-and-set: only one worker instance wins this key, ever (24h TTL is enough
+  // for realistic retry/redelivery windows — tune based on your max redelivery lag).
+  const isNew = await redis.set(`processed:${event.eventId}`, "1", "EX", 86_400, "NX");
+  if (!isNew) {
+    console.log(`Duplicate delivery of ${event.eventId}, skipping side effects`);
+    return; // already handled — safe to ack and move on
+  }
+  await chargeCard(event.orderId, event.amount); // the actual side effect, now guaranteed-once
+}
+
+async function run() {
+  await consumer.connect();
+  await consumer.subscribe({ topic: "order-events", fromBeginning: false });
+  await consumer.run({
+    eachMessage: async ({ message }) => {
+      const event = JSON.parse(message.value!.toString());
+      await processOrderEvent(event);
+      // kafkajs auto-commits by default on a timer; for stronger guarantees disable
+      // autoCommit and call consumer.commitOffsets() here, after processing succeeds.
+    },
+  });
+}
+
+async function chargeCard(orderId: string, amount: number) {
+  console.log(`Charging order ${orderId}: $${amount}`);
+}
+</code></pre>
+      <pre><code class="language-yaml"># Kafka topic config for a production order-events topic
+# replication.factor=3, min.insync.replicas=2 => tolerate 1 broker loss, no data loss
+# with acks=all on the producer
+topic: order-events
+partitions: 12          # supports up to 12 parallel consumers in one group
+replication.factor: 3
+config:
+  min.insync.replicas: 2
+  retention.ms: 604800000   # 7 days — consumers can replay within this window
+  cleanup.policy: delete
+</code></pre>
+      <pre><code class="language-typescript">// BullMQ: a Node-native job queue for sending transactional emails with retry/backoff
+import { Queue, Worker } from "bullmq";
+
+const connection = { host: "localhost", port: 6379 };
+const emailQueue = new Queue("emails", { connection });
+
+// Producer side — enqueue a job, no broker cluster to operate
+await emailQueue.add(
+  "welcome-email",
+  { userId: "u_123", template: "welcome" },
+  { attempts: 5, backoff: { type: "exponential", delay: 2000 }, removeOnComplete: true }
+);
+
+// Worker side — processes jobs with built-in concurrency control
+const worker = new Worker(
+  "emails",
+  async (job) => {
+    await sendEmail(job.data.userId, job.data.template); // throwing here triggers retry/backoff
+  },
+  { connection, concurrency: 10 }
+);
+
+async function sendEmail(userId: string, template: string) {
+  console.log(`Sending ${template} to ${userId}`);
+}
+</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4><p>An e-commerce platform processes order events through Kafka with 24 partitions keyed by <code>orderId</code>, consumed by three independent consumer groups: a billing service, an inventory-decrement service, and a data-warehouse sink connector. During a Black Friday traffic spike, producer throughput triples; because partitions are keyed by order ID and the key space is large and evenly distributed, load spreads evenly across all 24 partitions with no hot-partition problem. The inventory service briefly falls behind (consumer lag climbs to 40,000 messages) because its downstream Postgres write path is the bottleneck — this is visible immediately via lag monitoring, and because Kafka retains the log for 7 days, there's no data loss risk while the team temporarily scales the consumer group from 6 to 12 instances to drain the backlog faster. The billing service, which calls a third-party payment API, uses the Redis-SETNX idempotency pattern so that consumer-group rebalances (triggered by the scale-up) which cause brief reprocessing of recently-committed-but-unacked messages never result in double-charging a customer.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Assuming Kafka guarantees global ordering across a topic. It only guarantees ordering within a single partition — if you need ordered processing per entity, you must choose a partition key deliberately, and if you ever change the number of partitions, existing key-to-partition mappings shift and ordering guarantees for in-flight data can break.</p></div>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Treating "exactly-once" as a checkbox you enable, without realizing it only applies within Kafka's own transactional boundary. The instant your consumer calls an external API or writes to a different database, you need idempotency at that boundary regardless of what the Kafka config says.</p></div>
+      <ul>
+        <li>Always commit offsets <em>after</em> successful processing, not before, unless you've deliberately chosen at-most-once.</li>
+        <li>Monitor consumer lag as a first-class production metric — it's your early warning system for capacity problems before they become outages.</li>
+        <li>Don't default to Kafka because it's the "serious" choice — a Node monolith doing background jobs is usually better served, and better operated, by BullMQ on Redis you already run.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs: When to Use vs When NOT To</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>Kafka</td><td>High-throughput event streaming, multiple independent consumers, need replay/retention</td><td>Small team, simple job queue needs, low operational appetite</td><td>RabbitMQ or BullMQ</td></tr>
+        <tr><td>RabbitMQ</td><td>Complex routing logic, per-message priority, classic task distribution</td><td>Need long retention/replay or very high sustained throughput</td><td>Kafka</td></tr>
+        <tr><td>BullMQ</td><td>App-level background jobs in a Node codebase, already on Redis</td><td>Multi-language consumers, huge throughput, need durable replay across services</td><td>Kafka or RabbitMQ</td></tr>
+        <tr><td>At-least-once + idempotency</td><td>Default choice for correctness-sensitive consumers</td><td>Truly idempotent-by-nature operations where dedup overhead isn't worth it</td><td>At-most-once (rare)</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic"><h4>Basic</h4>
+        <details class="qa"><summary>What problem does a message queue solve that a direct API call doesn't?</summary><div class="answer"><p>It decouples producer and consumer in time and deployment — the producer doesn't block on the consumer being available or fast, and it absorbs traffic bursts so consumers can process at a sustainable rate instead of being overwhelmed synchronously.</p></div></details>
+        <details class="qa"><summary>What is a Kafka partition and why does it matter for ordering?</summary><div class="answer"><p>A partition is an ordered, append-only subset of a topic's data. Kafka guarantees order only within a single partition, not across the whole topic, so entities needing ordered processing must be routed to the same partition via a consistent key.</p></div></details>
+        <details class="qa"><summary>What's the difference between at-most-once and at-least-once delivery?</summary><div class="answer"><p>At-most-once risks losing a message if a failure happens after acknowledgment but before processing completes. At-least-once guarantees the message will eventually be processed but may deliver duplicates — it requires idempotent consumers.</p></div></details>
+        <details class="qa"><summary>What is a Kafka consumer group?</summary><div class="answer"><p>A set of consumers that cooperatively split the partitions of a topic, each partition owned by exactly one consumer in the group at a time, enabling parallel processing of a topic's load.</p></div></details>
+        <details class="qa"><summary>Name the three RabbitMQ exchange types and how they differ.</summary><div class="answer"><p>Direct (exact routing key match), topic (wildcard pattern match on a dot-separated key), and fanout (broadcasts to all bound queues, ignoring the routing key).</p></div></details>
+        <details class="qa"><summary>When would you pick BullMQ over Kafka?</summary><div class="answer"><p>When you need app-level background job processing (emails, PDFs, retries) inside a Node codebase, already run Redis, and don't need multi-consumer-group event replay or extreme throughput — BullMQ is far simpler to operate.</p></div></details>
+        <details class="qa"><summary>What does "committing an offset" mean in Kafka?</summary><div class="answer"><p>It's the consumer group recording, in Kafka's internal offsets topic, the position up to which it has successfully processed a partition, so that on restart or rebalance it knows where to resume.</p></div></details>
+      </div>
+      <div class="qa-level medium"><h4>Medium</h4>
+        <details class="qa"><summary>Explain how an idempotent producer prevents duplicate messages, and what it does NOT protect against.</summary><div class="answer"><p>It assigns a producer ID and per-partition sequence number so the broker can dedupe retried writes caused by network issues. It does not protect against the producer itself sending the same logical event twice (e.g., a bug causing two separate produce calls) — that requires application-level idempotency keys.</p></div></details>
+        <details class="qa"><summary>Why can't you get true end-to-end exactly-once semantics when a Kafka consumer calls an external payment API?</summary><div class="answer"><p>Kafka's exactly-once guarantees apply within its own transactional log boundary. The external API call is outside that boundary — a crash between processing and offset commit can cause redelivery and a duplicate API call, so you need an idempotency key at the API boundary regardless of Kafka's internal guarantees.</p></div></details>
+        <details class="qa"><summary>How does consumer group rebalancing cause temporary processing pauses, and how do cooperative sticky assignors help?</summary><div class="answer"><p>Eager rebalancing revokes all partitions from all consumers before reassigning, stopping all processing briefly. Cooperative sticky rebalancing only reassigns the specific partitions that need to move, letting unaffected consumers keep processing — reducing the pause's blast radius.</p></div></details>
+        <details class="qa"><summary>Design an idempotency mechanism for a consumer that charges a credit card, using Redis.</summary><div class="answer"><p>Use SETNX on a key derived from a unique event ID (not the order ID alone, since retries of the same order shouldn't be conflated with legitimately new charges) with a TTL covering the maximum plausible redelivery window; only proceed with the charge if the SETNX succeeds, and treat a failed SETNX as "already handled, just ack."</p></div></details>
+        <details class="qa"><summary>Why might you choose RabbitMQ over Kafka for a workflow with task priorities and complex routing?</summary><div class="answer"><p>RabbitMQ's exchange/binding model natively supports priority queues and flexible per-message routing (topic wildcards, fanout) that Kafka's simpler partition-based model doesn't offer directly — Kafka optimizes for throughput and replay, not routing flexibility.</p></div></details>
+        <details class="qa"><summary>What happens to in-flight ordering guarantees if you increase a Kafka topic's partition count?</summary><div class="answer"><p>The hash-to-partition mapping for existing keys changes (since it depends on partition count), so new messages for a given key may land on a different partition than older messages for the same key did — breaking strict per-key ordering across the transition. This is why partition counts are typically fixed at topic creation.</p></div></details>
+      </div>
+      <div class="qa-level advanced"><h4>Advanced</h4>
+        <details class="qa"><summary>Design the messaging architecture for an order-processing system that must never double-charge a customer but can tolerate a few seconds of processing delay.</summary><div class="answer"><p>Use Kafka with orderId-keyed partitioning for ordering, at-least-once delivery with manual offset commits after processing, and an idempotency key (unique per payment attempt, stored in Redis or a unique DB constraint) checked before calling the payment gateway. Pair this with a transactional outbox pattern on the producer side so "order created" and "event published" happen atomically, preventing lost events from a crash between DB write and Kafka publish.</p></div></details>
+        <details class="qa"><summary>How would you detect and handle a "poison pill" message that repeatedly crashes a Kafka consumer?</summary><div class="answer"><p>Track a per-message retry count (e.g., in a header or external store); after N failures, route the message to a dead-letter topic instead of retrying indefinitely, so the consumer group can keep advancing past it, and alert for manual inspection of the DLQ.</p></div></details>
+        <details class="qa"><summary>Compare the operational cost of running Kafka vs RabbitMQ vs BullMQ at a startup with 5 backend engineers.</summary><div class="answer"><p>Kafka requires the most operational investment (ZooKeeper/KRaft, broker tuning, partition rebalancing, monitoring lag) and is often overkill pre-scale. RabbitMQ is lighter but still a separate service to run, patch, and monitor. BullMQ piggybacks on Redis the team likely already operates, making it the lowest-overhead choice — the senior call is often "start with BullMQ, migrate to Kafka when you actually need multi-consumer-group replay at scale," not the reverse.</p></div></details>
+        <details class="qa"><summary>Explain the transactional outbox pattern and why it's needed alongside a message queue.</summary><div class="answer"><p>Writing to your database and publishing to a queue are two separate operations that can't be wrapped in one atomic transaction across two systems. The outbox pattern writes the event to an "outbox" table in the same DB transaction as the business write, then a separate relay process reads the outbox and publishes to Kafka/RabbitMQ, guaranteeing the event is never lost even if the publish step crashes — it will be retried from the outbox.</p></div><div class="followup">Follow-up: How do you avoid publishing the same outbox row twice?</div></details>
+        <details class="qa"><summary>A consumer group's lag spikes after a deploy. Walk through your debugging process.</summary><div class="answer"><p>Check if partition count vs consumer count changed (fewer active consumers after deploy = fewer partitions covered). Check per-partition lag, not just aggregate, to spot a hot partition from a skewed key. Check consumer processing time per message (did the deploy introduce a slow downstream call?). Check for rebalance storms (consumers flapping due to failed heartbeats from GC pauses or slow processing blocking the poll loop).</p></div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment"><span class="level-tag">Beginner (30-60 min)</span><h4>Pick the right tool</h4><p>For each of the following scenarios, state whether you'd use Kafka, RabbitMQ, or BullMQ, and justify in 2-3 sentences: (1) a Node app needs to send a confirmation email after signup with retries, (2) a fintech company needs an auditable, replayable stream of all account balance changes consumed by 4 different downstream teams, (3) a workflow needs to route support tickets to different queues based on urgency and category.</p><ul><li>Justify each choice using the decoupling/ordering/replay/operational-cost tradeoffs covered in this chapter.</li></ul><p><strong>Acceptance criteria:</strong> Each of the 3 picks is correct and justified with the relevant tradeoff, not just a tool name.</p><details class="qa"><summary>Hints</summary><div class="answer"><p>Think about: does this need replay by multiple independent consumers (Kafka), complex per-message routing (RabbitMQ), or is it a simple app-level background job (BullMQ)?</p></div></details><p><strong>Bonus:</strong> What would change your answer for scenario 2 if there were only 1 downstream consumer instead of 4?</p></div>
+      <div class="assignment"><span class="level-tag">Intermediate (2-4 hrs)</span><h4>Build an idempotent BullMQ worker</h4><p>Implement a BullMQ worker that processes "send-invoice" jobs, where the same job (by a unique invoiceId) might be enqueued twice due to an upstream retry bug. Use Redis to ensure the invoice is only actually generated and emailed once, even under duplicate enqueues or worker crashes mid-processing.</p><ul><li>Use the SETNX idempotency pattern from the Code Examples section.</li><li>Add retry/backoff configuration and demonstrate it handles a simulated transient failure (e.g., throw on the first attempt, succeed on retry).</li></ul><p><strong>Acceptance criteria:</strong> Running the same job twice (simulate by calling queue.add with the same invoiceId twice) results in exactly one email being "sent" (logged), verifiable in your test output.</p><details class="qa"><summary>Hints</summary><div class="answer"><p>Key the Redis SETNX on invoiceId, not on BullMQ's internal job ID, since the bug duplicates at the job-creation level.</p></div></details><p><strong>Bonus:</strong> Add a dead-letter mechanism — after 5 failed attempts, move the job data to a separate "failed-invoices" list for manual review instead of losing it.</p></div>
+      <div class="assignment"><span class="level-tag">Advanced (1-2 days)</span><h4>Design a Kafka-based order pipeline with exactly-once-feeling guarantees</h4><p>Design (no full code required, but pseudocode for critical paths) an order processing pipeline where: order creation writes to Postgres, publishes an "order.created" event via a transactional outbox, and is consumed by independent billing and inventory consumer groups, neither of which should ever double-process a given order even across consumer crashes and rebalances.</p><ul><li>Specify the partition key and justify it.</li><li>Specify exactly where and how idempotency is enforced in each consumer.</li><li>Describe how the outbox relay guarantees no event is lost even if it crashes mid-publish.</li></ul><p><strong>Acceptance criteria:</strong> A written design covering partitioning strategy, outbox relay mechanics, and per-consumer idempotency, with explicit reasoning for each choice tied back to a specific failure mode it prevents.</p><details class="qa"><summary>Hints</summary><div class="answer"><p>The outbox relay should track "last published outbox row ID" and use at-least-once semantics for its own publish step too — it's idempotent producers all the way down. Partition key should be orderId to preserve per-order ordering.</p></div></details><p><strong>Bonus:</strong> What changes if a third consumer group (data warehouse) is added a year later with no changes allowed to the producer side?</p></div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet"><ul>
+        <li>Queues decouple producers/consumers, buffer bursts, and expose back-pressure as an observable metric (lag/depth).</li>
+        <li>Kafka orders messages only within a partition, never across a topic — partition key choice determines ordering guarantees.</li>
+        <li>Consumer groups split partitions across instances; different groups track offsets independently and can replay.</li>
+        <li>At-least-once + idempotent consumer is the realistic default; true end-to-end exactly-once rarely exists once you leave Kafka's boundary.</li>
+        <li>Idempotent producers (enable.idempotence) dedupe retried writes at the broker, not application-level duplicate events.</li>
+        <li>RabbitMQ: exchange routes by key (direct/topic/fanout) to queues — better for complex routing, less for long retention/replay.</li>
+        <li>BullMQ: Node-native job queue on Redis — right tool for app-level background jobs, not for multi-consumer-group event streaming.</li>
+        <li>Transactional outbox pattern solves the "DB write + queue publish aren't atomic" problem.</li>
+        <li>Monitor consumer lag as a leading indicator of capacity problems, not just an operational curiosity.</li>
+      </ul></div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://kafka.apache.org/documentation/">Apache Kafka Documentation</a></li>
+        <li><a href="https://www.rabbitmq.com/tutorials">RabbitMQ Tutorials</a></li>
+        <li><a href="https://docs.bullmq.io/">BullMQ Documentation</a></li>
+        <li><a href="https://microservices.io/patterns/data/transactional-outbox.html">Transactional Outbox Pattern</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="07-transactions.html"><span class="dir">← Previous</span>Transactions</a>
+        <a class="next" href="09-microservices.html"><span class="dir">Next →</span>Microservices vs Monolith</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · System Design</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-typescript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-sql.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-yaml.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "01-system-design", chapterKey: "08-message-queues" });</script>
+</body>
+</html>

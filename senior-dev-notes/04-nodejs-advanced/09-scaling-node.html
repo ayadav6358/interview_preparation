@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Scaling Node in Production — Node.js Advanced — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">Node.js Advanced</a><span class="sep">›</span>Scaling Node in Production</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>Scaling Node in Production: PM2, Horizontal Scaling, Graceful Shutdown</h1>
+      <p class="meta-line"><span>⏱ 2.5 hrs</span><span>📍 Chapter 9 of 9</span></p>
+      <p><strong>One-line summary:</strong> Node's single-threaded event loop means scaling is never "just add more
+      CPU to one process" — it's about cluster/process-per-core, horizontal replication across machines, and
+      getting graceful shutdown's drain sequence exactly right, because a deploy that kills in-flight requests is
+      an outage you caused, not one that happened to you.</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>A senior engineer is expected to own the full lifecycle of a Node service in production, not just the
+      application code — how it's clustered across cores, how it scales horizontally across instances, and
+      critically, how it shuts down. Nearly every "why did we get 502s during the deploy" incident traces back to
+      a missing or incorrect graceful shutdown sequence. This is one of the highest-leverage topics for a
+      senior/staff interview because it tests operational maturity that most mid-level engineers have simply never
+      had to think about.</p>
+      <div class="box why"><h4>Why</h4><p>A single Node process uses one CPU core for its JS execution (the event
+      loop itself is single-threaded, even though libuv's thread pool handles some I/O concurrently) — so scaling
+      vertically by adding cores to a box does nothing for your throughput unless you actually run multiple Node
+      processes to use them. This is the foundational reason cluster mode / PM2 / container replica counts exist:
+      they're not optional tuning, they're the mechanism by which a multi-core machine's capacity becomes usable
+      by a single-threaded runtime at all.</p></div>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>Comfortable with the event loop model and process-level error handling. Related:
+      <a href="05-error-handling.html">Error Handling Strategy</a>, <a href="08-background-jobs.html">Background Jobs & Scheduling</a>,
+      <a href="01-event-loop.html">Event Loop Internals & libuv</a>.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="basics">Cluster mode: multi-process, not multi-thread</h3>
+      <p>Node's built-in <code>cluster</code> module (and PM2's cluster mode, which wraps it) forks N worker
+      processes, each with its own event loop and V8 instance, sharing the same listening port via the OS/master
+      process round-robining incoming connections across workers. This is <strong>process-level</strong>
+      parallelism, not shared-memory threading — each worker has its own heap, so there's no shared in-memory
+      state between them (a naive in-memory cache or rate-limiter will behave inconsistently across workers unless
+      backed by something external like Redis). The practical rule of thumb: run one worker per CPU core
+      (<code>os.cpus().length</code>), since more workers than cores just adds context-switching overhead without
+      added throughput.</p>
+
+      <h3 id="internals">Horizontal scaling: stateless design as the actual prerequisite</h3>
+      <p>Scaling beyond a single machine (horizontal scaling across containers/VMs behind a load balancer) only
+      works cleanly if your application is <strong>stateless</strong> — no in-memory session data, no local file
+      writes that other instances need to see, no in-process job scheduling that would duplicate across instances
+      (see the previous chapter's distributed-lock discussion). Session/auth state needs to live in a shared store
+      (Redis, a DB) or be entirely stateless (JWTs, per the authentication chapter) specifically so that any
+      instance can serve any request — this is the real prerequisite for horizontal scaling, and it's an
+      architectural decision made far earlier than the scaling conversation itself, which is why retrofitting
+      statelessness onto a service built assuming a single instance is often a significant rewrite.</p>
+
+      <h3 id="advanced">Graceful shutdown: the drain sequence that prevents deploy-time errors</h3>
+      <p>A graceful shutdown on receiving <code>SIGTERM</code> (what orchestrators like Kubernetes/PM2 send before
+      killing a process) must, in order: (1) stop accepting new connections (<code>server.close()</code>, or for a
+      load-balanced setup, first deregister from the load balancer/readiness check so it stops receiving new
+      traffic before even calling close), (2) allow in-flight requests to finish naturally within a bounded
+      timeout, (3) close downstream resources (DB pools, Redis connections, message queue consumers) only after
+      in-flight work has actually drained, and (4) exit. Skipping step 1's readiness-deregistration is a very
+      common subtle bug: you stop accepting new TCP connections, but the load balancer doesn't know yet and keeps
+      routing new requests to you for a window, which then fail outright rather than being gracefully redirected
+      elsewhere. Kubernetes specifically gives a configurable grace period (<code>terminationGracePeriodSeconds</code>)
+      between SIGTERM and a forceful SIGKILL — your drain sequence must complete within that window or in-flight
+      work gets hard-killed anyway.</p>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>PM2 cluster mode's master process forks N workers and uses the OS's SO_REUSEPORT (or a round-robin
+      dispatch, depending on platform) to distribute incoming connections. On a rolling restart, PM2 (and
+      Kubernetes rolling deployments at a higher level) brings up new instances/workers before tearing down old
+      ones, and tears down old ones gracefully — sending SIGTERM, waiting for the drain sequence, then SIGKILL
+      after a grace period if the process hasn't exited. The key correctness property your app must provide:
+      reacting to SIGTERM correctly (not ignoring it, not exiting immediately without draining) is entirely the
+      application's responsibility — the orchestrator sends the signal and waits, but doesn't know how to drain
+      your specific in-flight work; that logic has to be written into your process.</p>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+flowchart TD
+  A[Load Balancer] --> B[Node Instance 1 - cluster, N workers]
+  A --> C[Node Instance 2 - cluster, N workers]
+  A --> D[Node Instance 3 - cluster, N workers]
+  B --> E[(Shared Redis - sessions, cache, locks)]
+  C --> E
+  D --> E
+  B --> F[(Shared DB)]
+  C --> F
+  D --> F
+      </div>
+      <div class="mermaid">
+sequenceDiagram
+  participant O as Orchestrator
+  participant LB as Load Balancer
+  participant P as Node Process
+  O->>P: SIGTERM
+  P->>LB: Deregister / fail readiness check
+  LB->>LB: Stop routing new requests here
+  P->>P: server.close() - stop accepting new connections
+  P->>P: Wait for in-flight requests to finish (bounded timeout)
+  P->>P: Close DB pool, Redis, queue consumers
+  P->>O: process.exit(0)
+  Note over O: If grace period expires first, O sends SIGKILL
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-typescript">// --- PM2 cluster mode config (ecosystem.config.js) ---
+module.exports = {
+  apps: [{
+    name: 'api',
+    script: './dist/server.js',
+    instances: 'max',       // one worker per CPU core
+    exec_mode: 'cluster',
+    kill_timeout: 10000,    // ms PM2 waits after SIGTERM before SIGKILL - must exceed your drain time
+    wait_ready: true,       // wait for process.send('ready') before considering restart complete
+    listen_timeout: 8000,
+  }],
+};
+
+// --- Graceful shutdown sequence ---
+import http from 'http';
+
+const server = http.createServer(app);
+server.listen(3000, () => process.send?.('ready')); // tell PM2 this instance is actually ready
+
+let isShuttingDown = false;
+
+async function gracefulShutdown(signal: string) {
+  if (isShuttingDown) return; // idempotent - SIGTERM can arrive more than once
+  isShuttingDown = true;
+  logger.info({ signal }, 'shutdown initiated');
+
+  // Step 1: fail readiness checks immediately so the LB stops routing new traffic
+  isReady = false; // a /health/ready endpoint reads this and returns 503 once false
+
+  // Give the LB time to notice the failed readiness check before we stop accepting connections
+  await new Promise((r) => setTimeout(r, 2000));
+
+  // Step 2: stop accepting new connections, let in-flight ones finish
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+
+  // Step 3: close downstream resources only after HTTP has drained
+  await Promise.allSettled([
+    dbPool.end(),
+    redisClient.quit(),
+    queueWorker.close(),
+  ]);
+
+  logger.info('shutdown complete');
+  process.exit(0);
+}
+
+// Step 4: hard timeout - never hang indefinitely regardless of what's stuck
+function withHardTimeout(signal: string) {
+  gracefulShutdown(signal);
+  setTimeout(() => {
+    logger.fatal('graceful shutdown timed out, forcing exit');
+    process.exit(1);
+  }, 15000).unref(); // unref so this timer alone doesn't keep the process alive
+}
+
+process.on('SIGTERM', () => withHardTimeout('SIGTERM'));
+process.on('SIGINT', () => withHardTimeout('SIGINT'));
+
+// --- BAD: no drain, kills in-flight requests on every deploy ---
+// process.on('SIGTERM', () => process.exit(0)); // instantly kills active connections mid-response
+</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4><p>A team running Node on Kubernetes saw a consistent spike in 502s
+      during every rolling deploy, roughly matching pod termination timing. Root cause: the app had no SIGTERM
+      handler at all, so Kubernetes's default behavior (wait out the grace period, then SIGKILL) meant every
+      in-flight request on a terminating pod was simply dropped the instant the grace period expired, and worse,
+      the pod kept receiving new traffic from the Service for several seconds after SIGTERM because its readiness
+      probe wasn't wired to fail immediately on shutdown. The fix: a readiness endpoint that flips to failing the
+      instant SIGTERM is received (removing the pod from the Service's endpoint list quickly), combined with an
+      actual drain sequence closing the HTTP server only after a short buffer, eliminating the 502 spike entirely
+      on the next deploy.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Forgetting that cluster-mode workers don't share memory — an
+      in-process rate limiter, cache, or WebSocket connection registry built as a simple in-memory Map works fine
+      in dev (single process) and then behaves inconsistently in production the moment you run more than one
+      worker, because each worker has its own independent copy with no visibility into the others.</p></div>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Setting a shutdown grace period/timeout shorter than your actual
+      drain time (e.g., PM2's <code>kill_timeout</code> or Kubernetes's <code>terminationGracePeriodSeconds</code>
+      set to 5s while your longest in-flight request can legitimately take 20s) — the orchestrator SIGKILLs the
+      process before your graceful logic finishes, producing exactly the dropped-request problem you built the
+      drain sequence to prevent.</p></div>
+      <ul>
+        <li>Run one worker per CPU core in cluster mode — more doesn't help, it just adds context-switch overhead.</li>
+        <li>Make shutdown idempotent — SIGTERM can be delivered more than once; a second signal shouldn't restart the drain sequence or throw.</li>
+        <li>Always enforce a hard timeout on shutdown that force-exits regardless of what's hung, so a stuck cleanup step can't leave a zombie process the orchestrator has to forcibly kill anyway.</li>
+        <li>Fail your readiness probe immediately on SIGTERM, separately from and before closing the HTTP server — the load balancer needs time to notice before new traffic truly stops arriving.</li>
+        <li>Never assume in-memory state is safe once you're running more than one process instance — externalize shared state (Redis, DB) from the start if horizontal scaling is even a future possibility.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>PM2 cluster mode on a single/few VMs</td><td>Simpler ops, no container orchestration platform, moderate scale</td><td>Need multi-region, auto-scaling, or already standardized on Kubernetes</td><td>Containerized horizontal scaling (Kubernetes/ECS)</td></tr>
+        <tr><td>Kubernetes with multiple replicas</td><td>Need auto-scaling, multi-region, already using containers</td><td>Small team/service where k8s operational overhead isn't justified</td><td>PM2 cluster mode, managed PaaS (e.g., a container platform with simpler autoscaling)</td></tr>
+        <tr><td>No graceful shutdown handling</td><td>Never recommended for any production service receiving live traffic</td><td>Always, for any service behind a load balancer or orchestrator</td><td>Full SIGTERM drain sequence as described</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic"><h4>Basic</h4>
+      <details class="qa"><summary>Why doesn't adding more CPU cores to a server automatically make a single Node process faster?</summary><div class="answer"><p>A single Node process's JS execution runs on one thread (the event loop) regardless of how many cores are available — extra cores go unused unless you actually run multiple processes (cluster mode) to take advantage of them.</p></div><div class="followup">Follow-up: does this mean Node is single-threaded for everything? What's the exception?</div></details>
+      <details class="qa"><summary>What does PM2/Node's cluster module actually do under the hood?</summary><div class="answer"><p>It forks N worker processes, each with its own independent event loop and memory, and distributes incoming connections across them (round-robin or OS-level socket sharing) while sharing the same listening port.</p></div><div class="followup">Follow-up: do cluster workers share any memory with each other by default?</div></details>
+      <details class="qa"><summary>What signal does an orchestrator typically send to request a graceful shutdown, and what follows if the process doesn't exit in time?</summary><div class="answer"><p>SIGTERM is sent first, giving the process a grace period to shut down cleanly; if it hasn't exited by the end of that grace period, a SIGKILL forcibly terminates it, which does not allow any further cleanup.</p></div><div class="followup">Follow-up: what Kubernetes setting controls the length of this grace period?</div></details>
+      <details class="qa"><summary>Why is in-memory state (like a simple rate limiter Map) problematic once you run more than one Node process?</summary><div class="answer"><p>Each process has its own independent memory — state isn't shared between them, so a rate limiter tracking counts in a local Map will undercount actual request volume across all instances combined, allowing effectively N times the intended rate limit.</p></div><div class="followup">Follow-up: what's the typical fix for this?</div></details>
+      <details class="qa"><summary>What's the minimum correct first step when handling SIGTERM in an HTTP server?</summary><div class="answer"><p>Stop accepting new connections (via server.close()) while letting existing in-flight requests finish, rather than immediately exiting and dropping active requests.</p></div><div class="followup">Follow-up: what step should ideally happen even before that, in a load-balanced setup?</div></details>
+      <details class="qa"><summary>Why does stateless application design matter for horizontal scaling?</summary><div class="answer"><p>Horizontal scaling assumes any instance can serve any request — if session or other request-relevant state lives only in one instance's memory, requests routed to a different instance won't have access to it, breaking functionality unpredictably depending on load balancer routing.</p></div><div class="followup">Follow-up: where should session state live instead?</div></details>
+      </div>
+      <div class="qa-level medium"><h4>Medium</h4>
+      <details class="qa"><summary>Design a complete graceful shutdown sequence for a Node HTTP API behind a load balancer with health checks. Put the steps in the correct order and justify each.</summary><div class="answer"><p>1) On SIGTERM, immediately fail the readiness check (not the liveness check) so the load balancer stops routing new traffic — this needs a brief buffer since the LB takes some time to notice. 2) Call server.close() to stop accepting new connections while letting in-flight ones complete. 3) Await in-flight request completion up to a bounded timeout. 4) Close downstream resources (DB pool, Redis, queue consumers) only now, since closing them earlier would break in-flight requests still using them. 5) Exit. A parallel hard timeout force-exits regardless, in case any step hangs.</p></div><div class="followup">Follow-up: why specifically fail the readiness check rather than the liveness check?</div></details>
+      <details class="qa"><summary>Why should PM2's kill_timeout (or Kubernetes's terminationGracePeriodSeconds) be set with explicit knowledge of your longest realistic in-flight request duration?</summary><div class="answer"><p>If the grace period is shorter than how long a legitimate in-flight request can take, the orchestrator will SIGKILL the process before your graceful drain finishes, defeating the purpose of having graceful shutdown logic at all — the request gets hard-killed exactly as if you'd done nothing. The grace period must be set to comfortably exceed your actual drain time, including the readiness-check propagation buffer.</p></div><div class="followup">Follow-up: how would you determine a realistic value for this in a service with highly variable request durations?</div></details>
+      <details class="qa"><summary>What's the difference between vertical scaling, cluster mode, and horizontal scaling for a Node service, and when does each stop being sufficient?</summary><div class="answer"><p>Vertical scaling (bigger single machine) stops helping a single Node process past one core's worth of CPU, since JS execution is single-threaded — you need cluster mode to use more cores on that same machine. Cluster mode stops being sufficient once you've saturated a single machine's total capacity (cores, memory, network) or need redundancy across machine/availability-zone failure — that's when you need horizontal scaling across multiple machines/containers behind a load balancer, which in turn requires the application to be stateless.</p></div><div class="followup">Follow-up: can you combine cluster mode with horizontal scaling? What does that look like?</div></details>
+      <details class="qa"><summary>A service has graceful shutdown logic but no hard timeout fallback. What production risk does this create?</summary><div class="answer"><p>If any step in the drain sequence hangs (a DB pool that never resolves its close() call due to a stuck connection, a cleanup function with a bug), the process never exits — the orchestrator eventually SIGKILLs it after its own grace period anyway, but you've now lost the benefit of controlled logging/cleanup for whatever got stuck, and in environments without an orchestrator enforcing a hard kill, the process could hang indefinitely, consuming resources while appearing "stuck mid-deploy" to anyone watching rollout status.</p></div><div class="followup">Follow-up: how would you choose the hard timeout's duration relative to the orchestrator's own grace period?</div></details>
+      <details class="qa"><summary>Why can a readiness probe and a liveness probe require fundamentally different logic during shutdown?</summary><div class="answer"><p>Readiness should fail immediately on SIGTERM (tells the LB "stop sending me new traffic, I'm draining") while the process is still alive and healthy, actively finishing in-flight work — if liveness also failed at that same moment, the orchestrator might interpret the healthy-but-draining process as broken and kill it prematurely, cutting the drain short. Liveness should only fail if the process is genuinely stuck/unresponsive, not merely in the process of a controlled shutdown.</p></div><div class="followup">Follow-up: what would happen if you accidentally wired readiness and liveness to the same check?</div></details>
+      </div>
+      <div class="qa-level advanced"><h4>Advanced</h4>
+      <details class="qa"><summary>Design a zero-downtime rolling deploy strategy for a Node service with active WebSocket connections, where graceful HTTP shutdown alone isn't sufficient (you can't simply wait for a long-lived WebSocket connection to "finish naturally").</summary><div class="answer"><p>WebSocket connections need an explicit application-level close protocol, not just waiting: on shutdown signal, send a "server restarting, please reconnect" message to each connected client over the existing socket, give clients a short window to receive and act on it (reconnecting to a different, still-healthy instance via the load balancer), then forcibly close any sockets still open after that window rather than waiting indefinitely. The reconnect logic must be client-side aware (exponential backoff reconnect, ideally with the new connection able to resume any session state via a shared store) so the user experience is a brief reconnect blip, not a dropped feature. This also requires sticky-session-free load balancing or a shared state store, since the client may reconnect to a different instance than before.</p></div><div class="followup">Follow-up: how would you handle in-flight state within a WebSocket session (e.g., a half-completed multi-step interaction) across this reconnect?</div></details>
+      <details class="qa"><summary>Critique: "We run cluster mode with max instances and horizontal scaling across 20 containers, so our service is infinitely scalable." What's wrong with this claim?</summary><div class="answer"><p>Stateless compute scaling only addresses compute/connection-handling capacity — it does nothing for a shared bottleneck like a single DB instance, a Redis instance, or a downstream third-party API's rate limits, all of which don't scale just because you added more app instances calling into them. "Infinitely scalable" ignores that most real systems have a narrowest point (often the database) that becomes the actual ceiling well before app-layer compute does, and scaling the app layer past what the shared dependencies can handle just produces more concurrent load against an already-saturated bottleneck, worsening latency/errors rather than improving throughput.</p></div><div class="followup">Follow-up: how would you identify which component is the actual bottleneck before scaling the app layer further?</div></details>
+      <details class="qa"><summary>How would you design health/readiness checks for a Node service whose startup involves warming an in-memory cache from a slow downstream source, to avoid both premature traffic routing and unnecessarily slow rollouts?</summary><div class="answer"><p>Use a distinct "warming" state separate from both "not ready" and "ready" — readiness should fail (keep traffic away) until the cache warm completes, but you want visibility into warm progress (e.g., exposing % warmed or a timestamp) rather than a binary flag, so rollout tooling and on-call engineers can distinguish "still warming, expected" from "actually stuck." Set the deployment's readiness check initial delay/failure threshold generously enough to tolerate normal warm time, but add alerting if warm time exceeds a known-normal ceiling, since that itself signals a problem with the downstream source feeding the cache.</p></div><div class="followup">Follow-up: should a slow-warming instance be allowed to serve a subset of traffic (e.g., cache-miss-tolerant endpoints) before fully warm, or should it stay fully out of rotation?</div></details>
+      <details class="qa"><summary>A team's graceful shutdown works correctly in staging (tested with curl) but still drops requests under real production load during deploys. What are the most likely causes you'd investigate?</summary><div class="answer"><p>First, the readiness-check propagation delay: under real load with a load balancer that polls readiness every few seconds, there's a window between failing the check and the LB actually stopping new traffic that staging's low-traffic curl test wouldn't surface as a problem — under production concurrency, that window drops a meaningful number of requests. Second, connection keep-alive: if clients hold persistent HTTP keep-alive connections, server.close() alone won't close those idle-but-open sockets by default in older Node behavior, so you may need to explicitly track and close idle connections after the drain window. Third, check whether the grace period is actually long enough for production's real p99 request duration versus whatever staging's lighter load exhibited.</p></div><div class="followup">Follow-up: how would you reproduce this class of bug reliably in a pre-production environment instead of only discovering it in production?</div></details>
+      <details class="qa"><summary>How would you architect capacity planning and autoscaling policy for a Node service with highly spiky traffic (e.g., a flash-sale e-commerce endpoint), given cluster mode and horizontal scaling both take non-zero time to actually add capacity?</summary><div class="answer"><p>Reactive autoscaling (scale up when CPU/request-latency crosses a threshold) has an inherent lag — new instances take time to start, warm up (per the earlier cache-warming question), and register as ready, during which the spike has already hit existing capacity. For known, scheduled spikes (a flash sale with a known start time), pre-scale proactively ahead of the event rather than relying purely on reactive triggers. For unpredictable spikes, combine a lower reactive threshold (scale earlier, before saturation, accepting some over-provisioning cost) with request queuing/load shedding at the edge (reject or queue excess requests gracefully rather than letting them degrade every in-flight request's latency) as a buffer while new capacity comes online.</p></div><div class="followup">Follow-up: how would you decide which specific endpoints should have load-shedding versus which must never shed load (e.g., checkout completion)?</div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment"><span class="level-tag">Beginner (30-60 min)</span>
+      <h4>Set up PM2 cluster mode and observe worker distribution</h4>
+      <p>Run a simple Express/Fastify API under PM2 in cluster mode with multiple instances. Add an endpoint that
+      returns the worker's process ID, and demonstrate requests being distributed across different worker
+      processes.</p>
+      <ul><li>Must demonstrate at least 2 different worker PIDs responding across repeated requests.</li><li>Must demonstrate an in-memory counter behaving inconsistently across workers (to concretely observe the no-shared-memory gotcha).</li></ul>
+      <p><strong>Acceptance criteria:</strong> A short load test shows roughly even distribution across workers, and the in-memory counter demo clearly shows per-worker independent state.</p>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>Use `process.pid` in the response and hit the endpoint with several sequential curl calls or a tiny loop script.</p></div></details>
+      <p><strong>Bonus:</strong> Fix the counter gotcha by backing it with Redis and show consistent counts across workers.</p>
+      </div>
+      <div class="assignment"><span class="level-tag">Intermediate (2-4 hrs)</span>
+      <h4>Implement and load-test a full graceful shutdown sequence</h4>
+      <p>Build the complete SIGTERM drain sequence (readiness-fail, server.close, bounded wait, resource cleanup,
+      hard timeout fallback) from the code examples. Under a sustained load test, trigger SIGTERM mid-test and
+      prove zero failed requests during the drain window, then verify a deliberately-hung cleanup step still
+      force-exits via the hard timeout.</p>
+      <ul><li>Must demonstrate zero dropped/failed requests during a SIGTERM-triggered shutdown under load.</li><li>Must demonstrate the hard timeout correctly force-exiting when a cleanup step is made to hang deliberately.</li></ul>
+      <p><strong>Acceptance criteria:</strong> Load test output shows 100% success rate for requests in flight at the moment SIGTERM is sent, and the hard-timeout test shows the process exits within the configured timeout even with a hung cleanup step.</p>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>Use autocannon with a duration overlapping your manual `kill -TERM &lt;pid&gt;` call, and compare request success counts before/after.</p></div></details>
+      <p><strong>Bonus:</strong> Add the readiness-check propagation delay and measure how request failure rate changes if you skip it.</p>
+      </div>
+      <div class="assignment"><span class="level-tag">Advanced (1-2 days)</span>
+      <h4>Design and implement zero-downtime WebSocket-aware rolling deploys</h4>
+      <p>Extend a service with active WebSocket connections to handle graceful shutdown per the advanced interview
+      question's design: notify connected clients of impending restart, give them a reconnect window to a
+      different healthy instance (simulate at least 2 instances behind a basic load balancer), and force-close any
+      stragglers after the window. Verify no message/state loss for a client that reconnects mid-interaction.</p>
+      <ul><li>Must demonstrate a client receiving the restart notice and successfully reconnecting to a different instance.</li><li>Must demonstrate session state (stored externally) being correctly resumed after reconnect.</li></ul>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>Use Redis (or a similar shared store) for session state so reconnecting to any instance can resume it; don't rely on sticky sessions as your only mechanism.</p></div></details>
+      <p><strong>Bonus:</strong> Add metrics tracking reconnect latency and failed-reconnect rate across a simulated rolling deploy of all instances.</p>
+      </div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet"><ul>
+        <li>Node's event loop is single-threaded for JS execution — more cores need more processes (cluster mode), not just a bigger machine.</li>
+        <li>Cluster-mode workers don't share memory — in-memory caches/rate-limiters/counters need an external store (Redis) to behave consistently.</li>
+        <li>Horizontal scaling requires stateless app design — session/job-scheduling state must live externally, not in process memory.</li>
+        <li>Graceful shutdown order: fail readiness check → stop accepting new connections → drain in-flight work (bounded) → close downstream resources → exit.</li>
+        <li>Always enforce a hard timeout that force-exits regardless of what's hung in the drain sequence.</li>
+        <li>Set your shutdown grace period (PM2 kill_timeout / k8s terminationGracePeriodSeconds) comfortably longer than your real p99 request duration.</li>
+        <li>Readiness and liveness probes serve different purposes during shutdown — readiness fails fast, liveness shouldn't, during a controlled drain.</li>
+        <li>WebSocket/long-lived connections need an explicit app-level close protocol — "wait for it to finish naturally" doesn't apply like it does for short HTTP requests.</li>
+        <li>App-layer scaling (cluster + horizontal) doesn't scale shared bottlenecks (DB, Redis, third-party rate limits) — identify the real ceiling before assuming more instances helps.</li>
+      </ul></div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://nodejs.org/api/cluster.html">Node.js docs: Cluster module</a></li>
+        <li><a href="https://pm2.keymetrics.io/docs/usage/cluster-mode/">PM2 docs: Cluster mode</a></li>
+        <li><a href="https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/#pod-termination">Kubernetes docs: Pod termination lifecycle</a></li>
+        <li><a href="https://nodejs.org/api/net.html#serverclosecallback">Node.js docs: server.close()</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="08-background-jobs.html"><span class="dir">← Previous</span>Background Jobs & Scheduling</a>
+        <a class="next" href="../05-testing/index.html"><span class="dir">Next →</span>Testing</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · Node.js Advanced</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-typescript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "04-nodejs-advanced", chapterKey: "09-scaling-node" });</script>
+</body>
+</html>

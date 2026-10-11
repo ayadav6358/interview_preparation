@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Generative vs Discriminative AI</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <input class="searchbox" placeholder="Search topics..." />
+    <a href="../index.html">← Home</a>
+    <h3>00-AI-Fundamentals</h3>
+    <a href="ai-vs-ml-vs-dl-genai.html">AI vs ML vs DL vs GenAI</a>
+    <a href="ai-lifecycle.html">AI Lifecycle</a>
+    <a href="generative-vs-discriminative.html">Generative vs Discriminative AI</a>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumbs"><a href="../index.html">Home</a> / 00-AI-Fundamentals / Generative vs Discriminative</div>
+      <button class="theme-toggle" onclick="toggleTheme()">🌓 Theme</button>
+    </div>
+    <h1>Generative vs Discriminative AI</h1>
+    <span class="tag good">Stable concept</span><span class="tag">Last verified: 2026-10-06</span>
+
+    <div class="toc">
+      <b>On this page</b>
+      <a href="#what">1. What is this?</a>
+      <a href="#whyexist">2. Why does it exist?</a>
+      <a href="#whyimportant">3. Why is it important?</a>
+      <a href="#whereused">4. Where is it used?</a>
+      <a href="#prereq">5. Prerequisites</a>
+      <a href="#core">6. Core concepts</a>
+      <a href="#terms">7. Terminology</a>
+      <a href="#arch">8. Architecture</a>
+      <a href="#internal">9. How it works internally</a>
+      <a href="#steps">10. Step-by-step: classifying a model</a>
+      <a href="#simple">11. Simple example</a>
+      <a href="#real">12. Real-world example</a>
+      <a href="#code">13. Code example</a>
+      <a href="#advanced">14. Advanced example</a>
+      <a href="#mistakes">15. Common mistakes</a>
+      <a href="#best">16. Best practices</a>
+      <a href="#production">17. Production considerations</a>
+      <a href="#security">18. Security considerations</a>
+      <a href="#performance">19. Performance considerations</a>
+      <a href="#cost">20. Cost considerations</a>
+      <a href="#debug">21. Debugging/troubleshooting</a>
+      <a href="#related">22. Related concepts</a>
+      <a href="#comparison">23. Comparison with alternatives</a>
+      <a href="#exercise">24. Mini practical exercise</a>
+      <a href="#project">25. Practical project</a>
+      <a href="#projectarch">26. Project architecture</a>
+      <a href="#interview-b">27. Interview Questions — Beginner</a>
+      <a href="#interview-i">28. Interview Questions — Intermediate</a>
+      <a href="#interview-a">29. Interview Questions — Advanced</a>
+      <a href="#interview-s">30. Interview Questions — Senior/Architect</a>
+      <a href="#interview-sc">31. Scenario-Based Questions</a>
+      <a href="#revision">32. Quick revision notes</a>
+      <a href="#cheat">33. Cheat sheet</a>
+      <a href="#further">34. Further topics to learn</a>
+    </div>
+
+    <h2 id="what">1. What is this?</h2>
+    <p>A <b>discriminative</b> model learns the boundary between classes/outcomes: P(label | input). A <b>generative</b> model learns the underlying distribution of the data itself: P(input) or P(input | condition), and can be sampled to produce new, never-seen examples.</p>
+
+    <h2 id="whyexist">2. Why does it exist?</h2>
+    <p>This distinction predates deep learning — it comes from classical statistics, where some models were built to directly separate classes (discriminative) and others to model how data is generated in the first place (generative), enabling sampling, density estimation, and Bayesian inference. Modern GenAI inherited the "generative" name because LLMs/diffusion models are, in this precise statistical sense, learning to model and sample from a data distribution.</p>
+
+    <h2 id="whyimportant">3. Why is it important?</h2>
+    <p>Choosing the wrong category for a task wastes resources: using a generative LLM for a bounded classification task is usually slower, costlier, and less consistent than a purpose-built discriminative classifier; conversely, a discriminative model fundamentally cannot create new content, so content-generation products require a generative model.</p>
+
+    <h2 id="whereused">4. Where is it used?</h2>
+    <ul>
+      <li>Discriminative: fraud detection, spam filtering, ranking, toxicity classification, OCR label prediction.</li>
+      <li>Generative: chatbots, code generation, image/video synthesis, data augmentation, drafting content.</li>
+    </ul>
+
+    <h2 id="prereq">5. Prerequisites</h2>
+    <p><a href="ai-vs-ml-vs-dl-genai.html">AI vs ML vs DL vs GenAI</a>.</p>
+
+    <h2 id="core">6. Core concepts</h2>
+    <ul>
+      <li><b>Discriminative:</b> logistic regression, SVM, most classifiers, BERT-style encoders used for classification — model P(y|x) directly.</li>
+      <li><b>Generative (classic):</b> Naive Bayes, Gaussian Mixture Models, HMMs — model P(x|y) and P(y), can generate samples.</li>
+      <li><b>Generative (modern/GenAI):</b> GPT/Claude/Gemini (autoregressive text), diffusion models (images/video), GANs, VAEs — model the full data distribution well enough to sample realistic new content.</li>
+      <li>A generative model can, in principle, be used for classification via Bayes' rule, but this is rarely the efficient choice in practice.</li>
+    </ul>
+
+    <h2 id="terms">7. Terminology</h2>
+    <table>
+      <tr><th>Term</th><th>Meaning</th></tr>
+      <tr><td>Discriminative model</td><td>Learns P(label | input); draws a decision boundary between classes.</td></tr>
+      <tr><td>Generative model</td><td>Learns P(input) or P(input | condition); can sample new data.</td></tr>
+      <tr><td>Decision boundary</td><td>The learned surface separating classes in feature space (discriminative).</td></tr>
+      <tr><td>Sampling</td><td>Drawing a new instance from a learned probability distribution (generative).</td></tr>
+      <tr><td>Density estimation</td><td>Modeling how probable any given data point is under the learned distribution.</td></tr>
+    </table>
+
+    <h2 id="arch">8. Architecture</h2>
+    <pre><code>Discriminative:  Input x  →  Model  →  P(y | x)  →  Label
+
+Generative:      Condition/prompt  →  Model (learns P(x))  →  Sample  →  New content x</code></pre>
+
+    <h2 id="internal">9. How it works internally</h2>
+    <p>A discriminative classifier is trained to minimize classification error (e.g., cross-entropy between predicted and true label) directly — it never needs to model what "spam text in general" looks like, only what separates spam from non-spam. A generative model is trained to maximize the likelihood of the observed data under its learned distribution (e.g., next-token prediction likelihood for LLMs) — it implicitly must capture much more about the structure of the data to do this well, which is also why generative models typically need far more data/compute to train well.</p>
+
+    <h2 id="steps">10. Step-by-step: classifying a model</h2>
+    <ol>
+      <li>Ask: does the model's output define a decision/label/score given an input, or does it produce new data resembling the training distribution?</li>
+      <li>If decision/label → discriminative.</li>
+      <li>If new data/content → generative.</li>
+      <li>Check if it could, in principle, be sampled to generate novel examples of its training domain (even if that's not its deployed use) — this confirms the generative/discriminative label.</li>
+    </ol>
+
+    <h2 id="simple">11. Simple example</h2>
+    <p>A spam classifier (discriminative) only decides spam/not-spam. A model that can write a realistic spam email (generative) has learned the distribution of spam text well enough to produce new instances.</p>
+
+    <h2 id="real">12. Real-world example</h2>
+    <p>A resume-screening model that scores "fit: 0.82" is discriminative. An LLM that drafts a tailored cover letter from a resume is generative.</p>
+
+    <h2 id="code">13. Code example</h2>
+    <pre><code class="language-python"># Discriminative: predicts a label
+from sklearn.linear_model import LogisticRegression
+clf = LogisticRegression().fit(X_train, y_train)
+label = clf.predict(x_new)  # "spam" or "not spam"
+
+# Generative: produces new content conditioned on input
+from anthropic import Anthropic
+client = Anthropic()
+resp = client.messages.create(
+    model="claude-sonnet-5",
+    max_tokens=200,
+    messages=[{"role": "user", "content": "Write a short spam-style email about a fake prize."}]
+)
+new_text = resp.content[0].text  # brand-new text, sampled from the model's learned distribution
+</code></pre>
+
+    <h2 id="advanced">14. Advanced example</h2>
+    <p>Using a generative model's likelihood scores for discriminative-style out-of-distribution detection: compute the model's log-probability of an input and flag unusually low-likelihood inputs as anomalous — a case where a generative model's internal density estimate is repurposed for a discriminative-style decision without retraining.</p>
+    <pre><code class="language-python">logprob = generative_model.score(input_sample)  # log P(x) under the model
+if logprob < THRESHOLD:
+    flag_as_anomalous(input_sample)
+</code></pre>
+
+    <h2 id="mistakes">15. Common mistakes</h2>
+    <ul>
+      <li>Using an LLM (generative) for high-volume real-time binary classification when a discriminative classifier would be far cheaper and faster.</li>
+      <li>Assuming a generative model's fluent output implies calibrated confidence the way a discriminative classifier's probability output does.</li>
+      <li>Believing "generative" means "creative/random" and "discriminative" means "simple" — the distinction is about what's being modeled, not sophistication.</li>
+    </ul>
+
+    <h2 id="best">16. Best practices</h2>
+    <ul>
+      <li>Use discriminative models for narrow, stable classification/scoring tasks at scale.</li>
+      <li>Use generative models when the deliverable is genuinely new content or when zero-shot generalization across unseen categories matters more than per-call cost.</li>
+      <li>Consider hybrid pipelines: generative model's embeddings/features feeding a lightweight discriminative head for the final decision.</li>
+    </ul>
+
+    <h2 id="production">17. Production considerations</h2>
+    <p>Discriminative models are typically cheaper and lower-latency to serve at scale; generative models cost more per call and have higher, more variable latency due to autoregressive generation — factor this into SLA design when choosing between them for a given sub-task.</p>
+
+    <h2 id="security">18. Security considerations</h2>
+    <p>Generative models carry additional risks discriminative models don't: prompt injection, hallucinated/fabricated outputs presented as fact, and potential for misuse to generate harmful content at scale — discriminative classifiers mainly risk biased/adversarial-example-driven misclassification.</p>
+
+    <h2 id="performance">19. Performance considerations</h2>
+    <p>Discriminative inference is typically a single forward pass (fast, parallelizable). Generative inference (autoregressive) requires one forward pass per output token (sequential, slower) — a fundamental latency difference to design around.</p>
+
+    <h2 id="cost">20. Cost considerations</h2>
+    <p>Generative model API calls are priced per token (input+output) and are typically far more expensive per request than a discriminative model's single forward-pass inference — multiply by request volume before choosing.</p>
+
+    <h2 id="debug">21. Debugging/troubleshooting</h2>
+    <ul>
+      <li><b>"Classifier results are inconsistent run to run":</b> check if you accidentally swapped in a generative model prompted to output a label, instead of a true discriminative classifier — generative sampling introduces variance a discriminative model wouldn't have.</li>
+      <li><b>"Generation is too slow":</b> expected — generative inference is sequential; consider streaming for perceived latency or a smaller/faster model.</li>
+    </ul>
+
+    <h2 id="related">22. Related concepts</h2>
+    <p><a href="ai-vs-ml-vs-dl-genai.html">AI vs ML vs DL vs GenAI</a> · <a href="../05-LLM-Fundamentals/what-is-llm.html">What is an LLM</a></p>
+
+    <h2 id="comparison">23. Comparison with alternatives</h2>
+    <table>
+      <tr><th>Aspect</th><th>Discriminative</th><th>Generative</th></tr>
+      <tr><td>Learns</td><td>Decision boundary, P(y|x)</td><td>Data distribution, P(x) or P(x|prompt)</td></tr>
+      <tr><td>Output</td><td>Label, score, ranking</td><td>New content (text/image/audio/code)</td></tr>
+      <tr><td>Typical use</td><td>Classification, fraud detection, ranking</td><td>Chatbots, content creation, code gen, image synthesis</td></tr>
+      <tr><td>Data efficiency</td><td>Often needs less data for narrow task</td><td>Usually needs massive data to generalize well</td></tr>
+      <tr><td>Examples</td><td>Logistic regression, SVM, XGBoost, BERT-classifier</td><td>GPT/Claude, Stable Diffusion, GANs</td></tr>
+    </table>
+
+    <h2 id="exercise">24. Mini practical exercise</h2>
+    <p>Take any classification task you've worked on. Describe how you'd solve it discriminatively (direct classifier) versus generatively (prompting an LLM to output a label), and list one pro/con of each approach.</p>
+
+    <h2 id="project">25. Practical project</h2>
+    <p><b>Discriminative vs Generative Toxicity Filter:</b> build the same toxicity-detection task two ways — a fine-tuned small discriminative classifier and a zero-shot LLM prompt — compare latency, cost, and accuracy on a shared test set.</p>
+
+    <h2 id="projectarch">26. Project architecture</h2>
+    <pre><code>Labeled toxic/non-toxic comments
+ ├── Path A: embeddings → discriminative classifier → label (fast, cheap)
+ └── Path B: LLM prompt "is this toxic? yes/no" → label (flexible, slower, costlier)
+Compare: accuracy, p99 latency, $ per 1000 requests</code></pre>
+
+    <h2 id="interview-b">27. Interview Questions — Beginner</h2>
+    <div class="qa"><b>Q1.</b> Is ChatGPT/Claude discriminative or generative?<br><b>A.</b> Generative — it models the distribution of likely next tokens and samples from it to produce new text.</div>
+    <div class="qa"><b>Q2.</b> What does a discriminative model directly learn?<br><b>A.</b> P(label | input) — the boundary between classes given the input.</div>
+    <div class="qa"><b>Q3.</b> What does a generative model directly learn?<br><b>A.</b> The distribution of the data itself, P(input) or P(input | condition), so it can be sampled to produce new examples.</div>
+    <div class="qa"><b>Q4.</b> Name one classic discriminative algorithm.<br><b>A.</b> Logistic regression (or SVM).</div>
+    <div class="qa"><b>Q5.</b> Name one classic generative algorithm (pre-deep-learning).<br><b>A.</b> Naive Bayes (or Gaussian Mixture Models).</div>
+    <div class="qa"><b>Q6.</b> Can a generative model produce a classification label?<br><b>A.</b> Yes, indirectly (e.g., an LLM can be prompted to output a label), though it's often less efficient than a dedicated discriminative classifier.</div>
+    <div class="qa"><b>Q7.</b> Which type of model is typically faster at inference, discriminative or generative?<br><b>A.</b> Discriminative — typically one fast forward pass versus generative's sequential, multi-step token generation.</div>
+    <div class="qa"><b>Q8.</b> Does "generative" mean the model is more creative/intelligent than a discriminative one?<br><b>A.</b> No — it refers to what's being modeled (the data distribution vs. a decision boundary), not a measure of sophistication.</div>
+    <div class="qa"><b>Q9.</b> Would you use a discriminative or generative model to detect spam at massive scale in real time?<br><b>A.</b> Discriminative — faster, cheaper, more consistent for this high-volume, bounded classification task.</div>
+    <div class="qa"><b>Q10.</b> Would you use a discriminative or generative model to draft a personalized email reply?<br><b>A.</b> Generative — the task requires producing new, coherent content, not classifying.</div>
+
+    <h2 id="interview-i">28. Interview Questions — Intermediate</h2>
+    <div class="qa"><b>Q1.</b> How can Bayes' rule be used to turn a generative model into a classifier, and why is this rarely done in practice for modern tasks?<br><b>A.</b> P(y|x) = P(x|y)P(y) / P(x) — if you've learned P(x|y) and P(y) generatively, you can derive the discriminative posterior. In practice, directly learning P(y|x) via a discriminative model is usually more data-efficient and accurate for the specific classification task, since the generative model solves a strictly harder problem (modeling all of x) to get there.</div>
+    <div class="qa"><b>Q2.</b> Why do generative models typically require more training data than discriminative models for a comparable task?<br><b>A.</b> Generative models must capture the full structure/distribution of the data, a strictly harder objective than discriminative models, which only need to learn the (often much simpler) boundary that separates classes.</div>
+    <div class="qa"><b>Q3.</b> What's a practical reason to prefer a fine-tuned discriminative classifier over a zero-shot LLM prompt for a stable, high-volume classification task?<br><b>A.</b> Lower per-request cost and latency, more consistent/deterministic outputs, and easier auditing/calibration of confidence scores — all of which matter more at scale than the LLM's flexibility advantage, which isn't needed once the taxonomy is fixed.</div>
+    <div class="qa"><b>Q4.</b> Can discriminative models be deep learning models? Give an example.<br><b>A.</b> Yes — e.g., a BERT-based or CNN-based classifier is a deep, discriminative model; depth/architecture is orthogonal to the generative/discriminative distinction.</div>
+    <div class="qa"><b>Q5.</b> Why might a generative model's fluent, confident-sounding output be more dangerous in a classification-adjacent task than a discriminative model's explicit probability score?<br><b>A.</b> A discriminative model's probability output is typically directly calibrated to its training objective and easy to threshold; a generative model's fluency can create false confidence in a free-text answer that has no calibrated uncertainty signal attached, making errors harder to detect automatically.</div>
+
+    <h2 id="interview-a">29. Interview Questions — Advanced</h2>
+    <div class="qa"><b>Q1.</b> How would you use a generative language model's per-token log-probabilities for an out-of-distribution/anomaly-detection task, and what's the risk?<br><b>A.</b> Low likelihood under the model for a given input can signal it's unusual/out-of-distribution relative to training data; risk: likelihood doesn't always correlate with "this is wrong/anomalous" in the way you want — some rare-but-valid inputs (e.g., unusual but legitimate language) also score low, requiring careful thresholding and validation against labeled anomalies.</div>
+    <div class="qa"><b>Q2.</b> Why is "discriminative vs generative" a different axis than "classic ML vs deep learning," and can you have all four combinations?<br><b>A.</b> Yes — logistic regression (discriminative, classic ML), Naive Bayes (generative, classic ML), a BERT classifier (discriminative, DL), and an LLM (generative, DL) are all valid combinations; the two axes describe orthogonal properties (what is learned vs. how it's learned/architecture).</div>
+
+    <h2 id="interview-s">30. Interview Questions — Senior/Architect</h2>
+    <div class="qa"><b>Q1.</b> You need to detect toxic content in real time at high volume. Would you use an LLM (generative) or a discriminative classifier, and why?<br><b>A.</b> A discriminative classifier (e.g., a fine-tuned small encoder or classic ML model) — far lower latency and cost at high volume, more consistent/auditable decisions, and the task is a bounded classification problem. An LLM might be reserved for ambiguous edge cases escalated from the classifier, keeping the expensive generative path as a fallback, not the default.</div>
+    <div class="qa"><b>Q2.</b> How would you architect a hybrid system that uses a generative model's embeddings to improve a discriminative classifier, without incurring generative inference cost per request?<br><b>A.</b> Precompute embeddings from the generative/foundation model offline (or cache them per unique input), then train and serve a lightweight discriminative head (e.g., logistic regression) on those embeddings at inference time — paying the expensive generative cost once (or rarely), not per production request.</div>
+
+    <h2 id="interview-sc">31. Scenario-Based Questions</h2>
+    <div class="qa"><b>Scenario 1.</b> Your team replaced a fast fraud classifier with an LLM prompt "is this transaction fraudulent?" and latency/cost exploded. What do you recommend?<br><b>A.</b> Revert to a discriminative classifier for the core real-time decision; reserve the LLM (if needed at all) for generating human-readable explanations of flagged cases after the fast classifier has already made the call.</div>
+    <div class="qa"><b>Scenario 2.</b> Product wants a feature that both classifies support ticket urgency AND drafts a suggested reply. How do you architect this using the generative/discriminative distinction?<br><b>A.</b> Use a discriminative classifier (cheap, fast, consistent) for the urgency label, and a generative LLM call only for drafting the reply text — two different models for two different sub-tasks, each matched to the right category.</div>
+
+    <h2 id="revision">32. Quick revision notes</h2>
+    <ul>
+      <li>Discriminative = draws the line between classes (P(y|x)).</li>
+      <li>Generative = learns the data itself and can sample new examples (P(x)).</li>
+      <li>All modern "GenAI" (LLMs, diffusion) is generative by definition.</li>
+      <li>Discriminative models are usually cheaper/faster for narrow, stable classification.</li>
+    </ul>
+
+    <h2 id="cheat">33. Cheat sheet</h2>
+    <div class="callout">Discriminative = draws the line between classes (P(y|x)). Generative = learns the data itself and can sample new examples (P(x)). All modern "GenAI" (LLMs, diffusion) is generative by definition.</div>
+
+    <h2 id="further">34. Further topics to learn</h2>
+    <p><a href="../05-LLM-Fundamentals/what-is-llm.html">What is an LLM</a> → <a href="../02-Machine-Learning-Basics/">ML Basics (classification metrics)</a> → <a href="../35-AI-Evaluation/">AI Evaluation</a></p>
+
+    <div class="prevnext">
+      <a href="ai-lifecycle.html">← AI Lifecycle</a>
+      <a href="../05-LLM-Fundamentals/what-is-llm.html">Next: What is an LLM →</a>
+    </div>
+  </main>
+</div>
+<script src="../assets/app.js"></script>
+</body>
+</html>

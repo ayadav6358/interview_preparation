@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Evaluation Fundamentals</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <input class="searchbox" placeholder="Search topics..." />
+    <a href="../index.html">← Home</a>
+    <h3>35-AI-Evaluation</h3>
+    <a href="ai-evaluation-fundamentals.html">AI Evaluation Fundamentals</a>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumbs"><a href="../index.html">Home</a> / 35-AI-Evaluation</div>
+      <button class="theme-toggle" onclick="toggleTheme()">🌓 Theme</button>
+    </div>
+    <h1>AI Evaluation: Golden Datasets, LLM-as-Judge, RAG/Agent Metrics</h1>
+    <span class="tag good">Stable</span><span class="tag">Last verified: 2026-10-06</span>
+
+    <div class="toc">
+      <b>On this page</b>
+      <a href="#what">1. What is this?</a>
+      <a href="#whyexist">2. Why does it exist?</a>
+      <a href="#whyimportant">3. Why is it important?</a>
+      <a href="#whereused">4. Where is it used?</a>
+      <a href="#prereq">5. Prerequisites</a>
+      <a href="#core">6. Core concepts</a>
+      <a href="#terms">7. Terminology</a>
+      <a href="#arch">8. Architecture</a>
+      <a href="#internal">9. How it works internally (LLM-as-judge)</a>
+      <a href="#steps">10. Step-by-step: building an eval pipeline</a>
+      <a href="#simple">11. Simple example</a>
+      <a href="#real">12. Real-world example</a>
+      <a href="#code">13. Code example</a>
+      <a href="#advanced">14. Advanced example (agent evaluation)</a>
+      <a href="#mistakes">15. Common mistakes</a>
+      <a href="#best">16. Best practices</a>
+      <a href="#production">17. Production considerations</a>
+      <a href="#security">18. Security considerations</a>
+      <a href="#performance">19. Performance considerations</a>
+      <a href="#cost">20. Cost considerations</a>
+      <a href="#debug">21. Debugging/troubleshooting</a>
+      <a href="#related">22. Related concepts</a>
+      <a href="#comparison">23. Offline vs Online Evaluation</a>
+      <a href="#exercise">24. Mini practical exercise</a>
+      <a href="#project">25. Practical project</a>
+      <a href="#projectarch">26. Project architecture</a>
+      <a href="#interview-b">27. Interview Questions — Beginner</a>
+      <a href="#interview-i">28. Interview Questions — Intermediate</a>
+      <a href="#interview-a">29. Interview Questions — Advanced</a>
+      <a href="#interview-s">30. Interview Questions — Senior/Architect</a>
+      <a href="#interview-sc">31. Scenario-Based Questions</a>
+      <a href="#revision">32. Quick revision notes</a>
+      <a href="#cheat">33. Cheat sheet</a>
+      <a href="#further">34. Further topics to learn</a>
+    </div>
+
+    <h2 id="what">1. What is this?</h2>
+    <p>AI evaluation is the discipline of systematically measuring LLM/RAG/agent quality against defined metrics and golden datasets — covering offline evaluation (pre-deployment, against curated test sets), online evaluation (production monitoring), human evaluation, and LLM-as-judge techniques.</p>
+
+    <h2 id="whyexist">2. Why does it exist?</h2>
+    <p>"It looks good to me" is not a reliable way to assess or compare LLM application quality across prompt/model/retrieval changes — evaluation exists to replace subjective impressions with repeatable, quantifiable measurement, the same discipline classic ML has always required.</p>
+
+    <h2 id="whyimportant">3. Why is it important?</h2>
+    <p>Without evaluation, every prompt tweak, model upgrade, or RAG change is a gamble — evaluation is the foundation that makes iterative improvement and safe deployment of LLM systems possible, referenced throughout this entire knowledge base as "test against a golden set."</p>
+
+    <h2 id="whereused">4. Where is it used?</h2>
+    <p>Every serious LLM application: RAG systems, agents, prompt engineering workflows, model/provider migration decisions, continuous production monitoring.</p>
+
+    <h2 id="prereq">5. Prerequisites</h2>
+    <p><a href="../08-Prompt-Engineering/advanced-prompting-patterns.html">Advanced Prompting Patterns</a>, <a href="../12-RAG/rag-fundamentals.html">RAG Fundamentals</a>.</p>
+
+    <h2 id="core">6. Core concepts</h2>
+    <ul>
+      <li><b>Offline evaluation:</b> running the system against a static, curated dataset before deployment.</li>
+      <li><b>Online evaluation:</b> measuring real production traffic/outcomes continuously after deployment.</li>
+      <li><b>Golden dataset:</b> a curated set of representative inputs with known-correct/expected outputs.</li>
+      <li><b>LLM-as-judge:</b> using a separate LLM call to score/evaluate another LLM's output against defined criteria.</li>
+      <li><b>Human evaluation:</b> direct human judgment, the gold standard for subjective quality but expensive/slow to scale.</li>
+      <li><b>RAG metrics:</b> faithfulness (is the answer supported by retrieved context), relevance, context precision/recall, answer correctness, retrieval quality.</li>
+      <li><b>Agent metrics:</b> tool success rate, task completion rate, agent trajectory quality.</li>
+    </ul>
+
+    <h2 id="terms">7. Terminology</h2>
+    <table>
+      <tr><th>Term</th><th>Meaning</th></tr>
+      <tr><td>Faithfulness</td><td>Whether every claim in a generated answer is actually supported by the retrieved context.</td></tr>
+      <tr><td>Relevance</td><td>Whether the answer actually addresses the question asked.</td></tr>
+      <tr><td>Context precision</td><td>Of the retrieved chunks, what fraction are actually relevant.</td></tr>
+      <tr><td>Context recall</td><td>Of the truly relevant chunks that exist, what fraction were actually retrieved.</td></tr>
+      <tr><td>Answer correctness</td><td>Whether the final answer is factually correct, often compared against a reference answer.</td></tr>
+      <tr><td>Tool success rate</td><td>The fraction of agent tool calls that executed successfully and achieved their intended effect.</td></tr>
+      <tr><td>Ragas / DeepEval</td><td>Popular open-source libraries providing RAG-specific evaluation metrics.</td></tr>
+      <tr><td>LangSmith / Arize Phoenix / Braintrust</td><td>Platforms providing evaluation, tracing, and dataset management for LLM applications.</td></tr>
+    </table>
+
+    <h2 id="arch">8. Architecture</h2>
+    <pre><code>Golden dataset (inputs + expected outputs/criteria)
+ → Run system under test against each input
+ → Score each output:
+      - Exact/rule-based match (where applicable)
+      - LLM-as-judge (for open-ended quality)
+      - Human review (for highest-stakes/ambiguous cases)
+ → Aggregate metrics → compare against baseline/previous version
+ → Gate deployment on no regression (or require sign-off on regressions)</code></pre>
+
+    <h2 id="internal">9. How it works internally (LLM-as-judge)</h2>
+    <p>An LLM-as-judge call is given the original input, the system's output, and explicit scoring criteria/rubric (and often a reference answer), and asked to produce a score or pass/fail judgment with reasoning — this works because evaluating/critiquing a given answer is often an easier task for an LLM than generating the answer from scratch, though the judge itself requires calibration (validating its judgments against human-labeled examples) to trust its scores.</p>
+
+    <h2 id="steps">10. Step-by-step: building an eval pipeline</h2>
+    <ol>
+      <li>Define what "good" means for your task — specific, measurable criteria.</li>
+      <li>Curate a golden dataset of representative inputs (and reference outputs/criteria where feasible).</li>
+      <li>Choose scoring methods: exact match where possible, LLM-as-judge for open-ended quality, human review for calibration/high-stakes cases.</li>
+      <li>Run the pipeline, aggregate scores, and establish a baseline.</li>
+      <li>Re-run on every meaningful change (prompt, model, retrieval) and compare against baseline.</li>
+      <li>Extend to online evaluation: sample production traffic for ongoing quality monitoring.</li>
+    </ol>
+
+    <h2 id="simple">11. Simple example</h2>
+    <p>A golden dataset of 50 customer-support questions with reference answers; running a new prompt version against this set and scoring answer correctness via exact-match or LLM-as-judge before deploying the change.</p>
+
+    <h2 id="real">12. Real-world example</h2>
+    <p>A production RAG system uses Ragas to compute faithfulness and context precision/recall on a sample of real production queries weekly, alerting the team if faithfulness drops below a threshold — catching silent quality regressions from a provider model update or a retrieval pipeline change before they're reported by users.</p>
+
+    <h2 id="code">13. Code example</h2>
+    <pre><code class="language-python">def llm_judge(question, answer, context, reference=None):
+    prompt = f"""Question: {question}
+Context provided: {context}
+Generated answer: {answer}
+{"Reference answer: " + reference if reference else ""}
+
+Rate the answer's faithfulness to the context on a scale 1-5 (5=fully supported, 1=unsupported/hallucinated).
+Respond with just the number."""
+    resp = client.messages.create(
+        model="claude-sonnet-5", max_tokens=10, temperature=0,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    return int(resp.content[0].text.strip())
+
+def evaluate_golden_set(golden_set, rag_pipeline):
+    scores = []
+    for item in golden_set:
+        answer, context = rag_pipeline(item["question"])
+        score = llm_judge(item["question"], answer, context, item.get("reference"))
+        scores.append(score)
+    return sum(scores) / len(scores)
+</code></pre>
+
+    <h2 id="advanced">14. Advanced example (agent evaluation)</h2>
+    <pre><code class="language-python">def evaluate_agent_trajectory(task, agent_run_log):
+    tool_calls = [step for step in agent_run_log if step["type"] == "tool_call"]
+    successful_calls = [c for c in tool_calls if c["result"]["success"]]
+    tool_success_rate = len(successful_calls) / len(tool_calls) if tool_calls else 1.0
+
+    completion_judge = client.messages.create(
+        model="claude-sonnet-5", max_tokens=10, temperature=0,
+        messages=[{"role": "user", "content":
+            f"Task: {task}\nFinal result: {agent_run_log[-1]}\nWas the task fully completed? yes/no"}],
+    ).content[0].text.strip().lower()
+
+    return {"tool_success_rate": tool_success_rate, "task_completed": completion_judge == "yes",
+            "num_steps": len(agent_run_log)}
+</code></pre>
+
+    <h2 id="mistakes">15. Common mistakes</h2>
+    <ul>
+      <li>Shipping prompt/model/RAG changes without any evaluation, relying on subjective "looks fine" assessment.</li>
+      <li>Using too small or unrepresentative a golden dataset, overfitting improvements to it.</li>
+      <li>Trusting an uncalibrated LLM-as-judge without validating its judgments against human-labeled examples.</li>
+      <li>Only doing offline evaluation and never monitoring real production quality (online evaluation).</li>
+    </ul>
+
+    <h2 id="best">16. Best practices</h2>
+    <ul>
+      <li>Build a golden dataset early, even a small one — something is far better than nothing.</li>
+      <li>Calibrate LLM-as-judge against a sample of human-labeled judgments before trusting it at scale.</li>
+      <li>Combine offline evaluation (pre-deploy gate) with online evaluation (production monitoring).</li>
+      <li>Version and grow the golden dataset over time as new failure modes are discovered.</li>
+    </ul>
+
+    <h2 id="production">17. Production considerations</h2>
+    <p>Gate deployments on evaluation results (no regression beyond a defined threshold); sample and continuously evaluate production traffic, not just a static pre-deploy test — real-world input distributions drift and golden sets alone won't catch everything.</p>
+
+    <h2 id="security">18. Security considerations</h2>
+    <p>Evaluation datasets containing real user data need the same privacy/access controls as any sensitive data; be cautious about what production content gets logged/sampled for evaluation purposes.</p>
+
+    <h2 id="performance">19. Performance considerations</h2>
+    <p>LLM-as-judge evaluation adds its own LLM call cost/latency — run offline evaluation asynchronously (not blocking deployment pipelines unnecessarily) and sample (not evaluate 100% of) production traffic for online evaluation to manage cost.</p>
+
+    <h2 id="cost">20. Cost considerations</h2>
+    <p>Evaluation itself has real LLM API costs (judge calls) — budget for this as part of the development/operations cost, and balance evaluation frequency/coverage against that cost.</p>
+
+    <h2 id="debug">21. Debugging/troubleshooting</h2>
+    <ul>
+      <li><b>Evaluation scores don't match intuitive quality assessment:</b> the judge may be miscalibrated — review its scoring against a sample of manually-reviewed cases.</li>
+      <li><b>Golden dataset results look great but production complaints persist:</b> the golden set likely doesn't represent real production input diversity — expand it with real failure cases.</li>
+      <li><b>Inconsistent evaluation scores across runs:</b> ensure the judge call uses low/zero temperature for consistency.</li>
+    </ul>
+
+    <h2 id="related">22. Related concepts</h2>
+    <p><a href="../36-LLM-Observability/">LLM Observability</a> · <a href="../12-RAG/rag-fundamentals.html">RAG</a> · <a href="../17-AI-Agents/ai-agents-fundamentals.html">AI Agents</a></p>
+
+    <h2 id="comparison">23. Offline vs Online Evaluation</h2>
+    <table>
+      <tr><th>Aspect</th><th>Offline</th><th>Online</th></tr>
+      <tr><td>When</td><td>Before deployment</td><td>Continuously in production</td></tr>
+      <tr><td>Data</td><td>Static golden dataset</td><td>Real (sampled) production traffic</td></tr>
+      <tr><td>Purpose</td><td>Gate changes before shipping</td><td>Catch drift/regressions after shipping</td></tr>
+      <tr><td>Limitation</td><td>Doesn't reflect evolving real-world input distribution</td><td>Can't prevent a bad change from reaching users first</td></tr>
+    </table>
+
+    <h2 id="exercise">24. Mini practical exercise</h2>
+    <p>Build a 10-item golden dataset for a simple task, implement an LLM-as-judge scoring function, and run it against two different prompt versions to compare scores.</p>
+
+    <h2 id="project">25. Practical project</h2>
+    <p><b>RAG Evaluation Harness:</b> build an evaluation pipeline computing faithfulness, relevance, and context precision/recall for the RAG project from 12-RAG, using Ragas or a custom LLM-as-judge implementation, with a CI-style pass/fail gate.</p>
+
+    <h2 id="projectarch">26. Project architecture</h2>
+    <pre><code>golden_set.json (question, reference_answer)
+ → run RAG pipeline per question → (answer, retrieved_context)
+ → compute faithfulness, relevance, context_precision, context_recall
+ → aggregate_report.json
+ → CI gate: fail if faithfulness < threshold compared to last known-good baseline</code></pre>
+
+    <h2 id="interview-b">27. Interview Questions — Beginner</h2>
+    <div class="qa"><b>Q1.</b> What is a golden dataset?<br><b>A.</b> A curated set of representative inputs with known-correct or expected outputs, used to evaluate system quality.</div>
+    <div class="qa"><b>Q2.</b> What is LLM-as-judge?<br><b>A.</b> Using a separate LLM call to score or evaluate another LLM's output against defined criteria.</div>
+    <div class="qa"><b>Q3.</b> What's the difference between offline and online evaluation?<br><b>A.</b> Offline evaluation runs against a static dataset before deployment; online evaluation measures real production traffic continuously after deployment.</div>
+    <div class="qa"><b>Q4.</b> What is faithfulness in RAG evaluation?<br><b>A.</b> Whether every claim in a generated answer is actually supported by the retrieved context.</div>
+    <div class="qa"><b>Q5.</b> What is context precision?<br><b>A.</b> Of the retrieved chunks, what fraction are actually relevant.</div>
+    <div class="qa"><b>Q6.</b> What is context recall?<br><b>A.</b> Of the truly relevant chunks that exist, what fraction were actually retrieved.</div>
+    <div class="qa"><b>Q7.</b> Why shouldn't you trust an LLM-as-judge blindly?<br><b>A.</b> It can be miscalibrated; its judgments should be validated against human-labeled examples before being trusted at scale.</div>
+    <div class="qa"><b>Q8.</b> Name one popular RAG evaluation library.<br><b>A.</b> Ragas (or DeepEval).</div>
+    <div class="qa"><b>Q9.</b> What is tool success rate in agent evaluation?<br><b>A.</b> The fraction of agent tool calls that executed successfully and achieved their intended effect.</div>
+    <div class="qa"><b>Q10.</b> Why is "it looks good to me" not a reliable evaluation method?<br><b>A.</b> It's subjective, not repeatable, and doesn't scale to systematically compare changes across many examples.</div>
+
+    <h2 id="interview-i">28. Interview Questions — Intermediate</h2>
+    <div class="qa"><b>Q1.</b> Why does LLM-as-judge often work well even though the judge model might make similar mistakes to the model being evaluated?<br><b>A.</b> Evaluating/critiquing a given answer against explicit criteria is often an easier task than generating the answer from scratch, and providing the judge with the source context (for faithfulness checks) gives it a more constrained, verifiable task than open-ended generation — though this isn't foolproof, which is why calibration against human judgments matters.</div>
+    <div class="qa"><b>Q2.</b> Why might a system pass all offline golden-set evaluations but still receive user complaints in production?<br><b>A.</b> The golden dataset may not represent the actual diversity/distribution of real production inputs — offline evaluation only catches what it was designed to test; online evaluation and continuous golden-set expansion from real failure cases are needed to catch gaps offline testing missed.</div>
+    <div class="qa"><b>Q3.</b> How would you calibrate an LLM-as-judge to trust its scores at scale?<br><b>A.</b> Have humans independently score a sample of the same outputs the judge scored, compare agreement rates, and either adjust the judge's prompt/rubric to better align with human judgment or identify systematic biases (e.g., favoring longer answers) to correct for.</div>
+    <div class="qa"><b>Q4.</b> Why is context recall harder to measure than context precision in practice?<br><b>A.</b> Precision only requires judging the relevance of what was actually retrieved; recall requires knowing the complete set of truly relevant documents that exist in the corpus for a given query — information that's often not fully known without exhaustive manual labeling, making recall estimation inherently harder.</div>
+    <div class="qa"><b>Q5.</b> What's a practical reason to version and grow your golden dataset over time rather than treating it as fixed?<br><b>A.</b> Real production failure cases discovered over time represent genuine gaps in your original test coverage; incorporating them into the golden set prevents the same failure mode from silently regressing again in a future change, continuously strengthening the safety net.</div>
+
+    <h2 id="interview-a">29. Interview Questions — Advanced</h2>
+    <div class="qa"><b>Q1.</b> How would you design an evaluation pipeline that catches regressions from a model provider's silent model update (not a change you made)?<br><b>A.</b> Run scheduled (e.g., daily/weekly) evaluation against your golden set using the exact production model configuration, tracking scores over time even without any code changes on your side — a sudden score drop with no corresponding deployment on your end strongly suggests an upstream model behavior change, prompting investigation and potential pinning/rollback to a known-good model version.</div>
+    <div class="qa"><b>Q2.</b> What's a subtle risk of using the same model family for both generation and LLM-as-judge evaluation?<br><b>A.</b> Shared biases/blind spots between generator and judge (the same model family might consistently misjudge the same types of errors it's also prone to making) can mask systematic quality issues; using a different model or model family for judging, or incorporating rule-based/human-validated checks for known failure patterns, provides more independent verification.</div>
+
+    <h2 id="interview-s">30. Interview Questions — Senior/Architect</h2>
+    <div class="qa"><b>Q1.</b> Design a comprehensive evaluation strategy for a production multi-agent RAG platform spanning offline gating, online monitoring, and continuous golden-set improvement.<br><b>A.</b> Offline: maintain golden sets per component (retrieval quality, generation faithfulness, agent task completion) gating every deployment with defined regression thresholds; online: continuously sample production traffic for the same metrics via LLM-as-judge, with alerting on metric drift; feedback loop: route flagged production failures (low scores, user complaints) into a review queue that feeds confirmed failure cases back into the golden datasets, growing test coverage organically from real-world gaps; and periodically recalibrate judges against fresh human-labeled samples to prevent judge drift over time.</div>
+
+    <h2 id="interview-sc">31. Scenario-Based Questions</h2>
+    <div class="qa"><b>Scenario 1.</b> Your evaluation pipeline shows consistently high scores, but a major production incident revealed the system confidently gave wrong answers for weeks. What went wrong with your evaluation strategy?<br><b>A.</b> Likely an uncalibrated or too-lenient LLM-as-judge, an unrepresentative golden set missing the specific failure pattern, or no online evaluation catching the drift in real traffic — audit the judge's calibration against human review of the actual incident cases, and add the discovered failure pattern to the golden set and online monitoring.</div>
+    <div class="qa"><b>Scenario 2.</b> After a cloud LLM provider pushed a model update, your eval scores dropped 10% with zero code changes on your end. How do you respond?<br><b>A.</b> Confirm the regression is genuinely tied to the model update (compare before/after on identical inputs), consider pinning to the previous model version if available while investigating, and communicate the finding to the provider/community if it represents a broader quality regression — this is exactly the scenario continuous scheduled evaluation is designed to catch.</div>
+
+    <h2 id="revision">32. Quick revision notes</h2>
+    <ul>
+      <li>Offline (pre-deploy gate) + online (production monitoring) evaluation, together.</li>
+      <li>Golden dataset + LLM-as-judge (calibrated) + human review for highest stakes.</li>
+      <li>RAG metrics: faithfulness, relevance, context precision/recall, answer correctness.</li>
+      <li>Agent metrics: tool success rate, task completion rate.</li>
+      <li>Grow golden sets from real production failure cases over time.</li>
+    </ul>
+
+    <h2 id="cheat">33. Cheat sheet</h2>
+    <div class="callout">Golden dataset + LLM-as-judge (calibrated) + human review = offline gate. Sample production traffic = online monitoring. RAG: faithfulness, relevance, context precision/recall. Agents: tool success rate, task completion. Never ship without evaluation.</div>
+
+    <h2 id="further">34. Further topics to learn</h2>
+    <p><a href="../36-LLM-Observability/">LLM Observability</a> → <a href="../37-AI-Guardrails/">AI Guardrails</a></p>
+
+    <div class="prevnext">
+      <a href="../34-Coding-Agents/coding-agents-fundamentals.html">← Coding Agents</a>
+      <a href="../36-LLM-Observability/llm-observability-fundamentals.html">Next: LLM Observability →</a>
+    </div>
+  </main>
+</div>
+<script src="../assets/app.js"></script>
+</body>
+</html>

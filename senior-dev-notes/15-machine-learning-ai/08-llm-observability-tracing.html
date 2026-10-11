@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LLM Observability & Tracing — Machine Learning & AI — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">Machine Learning & AI</a><span class="sep">›</span>LLM Observability & Tracing</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>LLM Observability & Tracing</h1>
+      <p class="meta-line"><span>⏱ ~2 hrs</span><span>📍 Chapter 8 of 14</span></p>
+      <p><strong>One-line summary:</strong> Traditional APM tells you a request was slow or errored; LLM
+      observability has to additionally answer "why did the model say <em>that</em>, and would it say the same
+      thing again" — which means tracing full prompts, intermediate steps, and token-level cost through a
+      pipeline, not just a status code and a latency number.</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>Any senior engineer shipping LLM-powered features will own the on-call pager for them, and "the model
+      gave a wrong answer" is a fundamentally different debugging problem from "the API returned a 500." You
+      can't attach a debugger to a transformer's forward pass, and the same input can legitimately produce
+      different output on different calls (non-determinism from sampling). The skill that replaces "step through
+      the code" here is building and reading traces: a structured, replayable record of exactly what prompt,
+      context, and intermediate tool calls led to a given output. This is the operational discipline that sits
+      on top of everything in <a href="../09-ai-integration/01-how-llms-work.html">AI Integration</a> and
+      <a href="../09-ai-integration/04-rag.html">RAG</a> — those chapters cover building the pipeline; this one
+      covers knowing what it actually did in production and whether a change made it better or worse.</p>
+      <div class="box why"><h4>Why</h4><p>A normal API call has a fixed, deterministic contract: same input, same
+      output, and a stack trace pinpoints exactly where a bug lives. An LLM call has none of that: output is
+      sampled (non-deterministic even at fixed temperature in some serving setups), the "bug" might be in the
+      prompt template, the retrieved context, the model's training, the sampling parameters, or a cost/latency
+      tradeoff — and because every call costs real money and real latency, you also can't just "add more
+      logging" carelessly without a cost/performance consequence. Observability for LLM systems therefore has
+      to capture content (the actual prompts/completions), not just metadata, while still being disciplined
+      about cost and PII exposure.</p></div>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>Requires <a href="../09-ai-integration/01-how-llms-work.html">AI Integration: How LLMs Work</a> and
+      benefits from <a href="../09-ai-integration/04-rag.html">RAG</a> (multi-step pipelines are exactly what
+      you're tracing). Related: <a href="../07-observability-security/index.html">Observability & Security</a>
+      for general (non-LLM) tracing/logging fundamentals this chapter builds on.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="why-different">Why LLM calls need different observability than normal API calls</h3>
+      <ul>
+        <li><strong>Non-determinism</strong> — sampling-based generation means identical inputs can produce
+        different outputs across calls, so "it worked when I just tried it" is weak evidence that a bug is
+        fixed; you need traced evidence across many real calls, not a single manual retry.</li>
+        <li><strong>Cost per call</strong> — every call has a real, non-trivial dollar cost proportional to
+        input + output tokens, unlike a typical internal API call. Observability has to track token usage and
+        cost per request/feature/user as a first-class metric, not an afterthought, because cost regressions
+        (an accidentally bloated prompt, a runaway retry loop) are a production incident category of their own.</li>
+        <li><strong>Prompt versioning</strong> — the "code" that determines behavior includes the prompt
+        template itself, which changes far more often and far more informally than typical application code
+        (a one-line prompt tweak can change behavior as much as a logic change would). Traces need to record
+        which prompt version produced a given output, or you can't correlate a behavior change with its cause.</li>
+        <li><strong>Multi-step pipelines</strong> — a single user-facing request often involves several LLM
+        calls plus tool calls/retrieval steps chained together (see <a href="../09-ai-integration/05-ai-agents.html">
+        AI Agents</a>); a flat request log can't show which step in the chain introduced an error, you need a
+        structured trace of the whole chain.</li>
+      </ul>
+
+      <h3 id="tracing-pipeline">Tracing a multi-step LLM pipeline</h3>
+      <p>The standard pattern, borrowed from distributed tracing (think OpenTelemetry spans) but applied to LLM-
+      specific steps: each discrete step (a retrieval call, an LLM generation call, a tool/function call) becomes
+      a <strong>span</strong> nested under a parent <strong>trace</strong> representing the whole user-facing
+      request. Each span records its own inputs, outputs, latency, and (for LLM spans specifically) the full
+      prompt, the full completion, token counts, model name/version, and sampling parameters. Purpose-built tools
+      — <strong>LangSmith</strong> (tightly integrated with LangChain/LangGraph), <strong>Langfuse</strong>
+      (open-source, framework-agnostic), and increasingly plain <strong>OpenTelemetry with GenAI semantic
+      conventions</strong> (a standardized schema for naming LLM-specific span attributes like
+      <code>gen_ai.request.model</code>, <code>gen_ai.usage.input_tokens</code>, so LLM traces can live alongside
+      regular infrastructure traces in a standard observability backend) — all implement this same core idea:
+      nested spans, each capturing enough detail to replay or audit what actually happened at that step.</p>
+
+      <h3 id="logging-what">Logging prompts, completions, token usage, and latency</h3>
+      <p>At minimum, every LLM call in a traced pipeline should log: the exact prompt sent (post-templating, with
+      actual variable substitutions — not just the template), the exact completion received, model name and
+      version/snapshot, sampling parameters (temperature, top_p, max_tokens), input and output token counts
+      (the direct basis for cost), latency (time-to-first-token for streaming responses specifically, which
+      matters more for perceived UX than total completion time), and any tool calls made along with their
+      results. This is deliberately more verbose than typical API logging — logging full request/response bodies
+      is often avoided for normal APIs due to size/PII concerns, but for LLM calls the content <em>is</em> the
+      behavior being debugged, so redacting it away defeats the purpose; the PII handling instead needs to happen
+      via deliberate redaction/masking rules applied before storage, not by skipping content logging entirely.</p>
+
+      <h3 id="catching-regressions">Catching regressions from prompt or model changes</h3>
+      <p>Because prompt changes and model swaps are the two most common sources of silent behavior regression in
+      LLM systems, the standard mitigation is an <strong>eval/regression suite</strong> run against a fixed set
+      of representative inputs every time the prompt or model changes: capture current outputs as a baseline,
+      make the change, rerun the same inputs, and diff — either via an automated scorer (LLM-as-judge, exact/
+      fuzzy match for structured outputs, or a rule-based check) or human review for a sample. This converts "did
+      my prompt tweak break anything" from a vibes-based question into a measured one, and it's the LLM-pipeline
+      equivalent of a test suite catching a regression before it reaches production — except unlike traditional
+      unit tests, these evals are inherently probabilistic and need a tolerance threshold, not a pass/fail
+      boolean, baked into how you interpret results.</p>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>A traced request through a RAG + tool-using pipeline, concretely: (1) the incoming request opens a root
+      trace with a unique trace ID; (2) a query-rewrite LLM call opens a child span, logging its own prompt,
+      completion, tokens, latency, tagged with the trace ID and a parent span ID; (3) a retrieval step opens a
+      sibling span, logging the query sent to the vector DB and the chunk IDs/scores returned; (4) the final
+      generation call opens another span, logging the assembled prompt (including the retrieved context) and the
+      completion; (5) all spans are shipped (usually asynchronously, batched, to avoid adding latency to the
+      user-facing request) to the tracing backend, which reconstructs the full tree by trace ID and renders it as
+      a waterfall/timeline view; (6) when a user reports a bad answer, you look up the trace by request/user ID
+      and can see, in order, exactly what was retrieved, what prompt was actually sent, and what came back at
+      every step — the equivalent of a stack trace, but for a non-deterministic, content-driven pipeline.</p>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+flowchart TD
+  REQ[Incoming user request] --> ROOT[Root trace opened]
+  ROOT --> S1[Span: query rewrite LLM call]
+  ROOT --> S2[Span: retrieval vector DB]
+  ROOT --> S3[Span: generation LLM call]
+  S3 --> S4[Span: tool call if any]
+  S1 --> SHIP[Ship spans to tracing backend]
+  S2 --> SHIP
+  S3 --> SHIP
+  S4 --> SHIP
+  SHIP --> VIEW[Reconstructed trace tree / waterfall view]
+      </div>
+      <div class="mermaid">
+flowchart LR
+  BASE[Baseline: current prompt/model] --> RUN1[Run against fixed eval set]
+  RUN1 --> SCORE1[Score outputs, store as baseline]
+  CHANGE[Change prompt or swap model] --> RUN2[Rerun same eval set]
+  RUN2 --> SCORE2[Score outputs]
+  SCORE1 --> DIFF[Diff scores vs baseline]
+  SCORE2 --> DIFF
+  DIFF --> DECISION[Pass within tolerance / flag regression]
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-python">import time
+import uuid
+from dataclasses import dataclass, field
+
+# A minimal, framework-agnostic trace/span model illustrating the core idea
+# behind LangSmith/Langfuse/OpenTelemetry-GenAI-style tracing, without a specific
+# vendor SDK -- the structure is what matters, not the tool.
+
+@dataclass
+class Span:
+    name: str
+    trace_id: str
+    span_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    parent_span_id: str | None = None
+    start_time: float = field(default_factory=time.time)
+    end_time: float | None = None
+    attributes: dict = field(default_factory=dict)
+
+    def finish(self, **attrs):
+        self.end_time = time.time()
+        self.attributes.update(attrs)
+        return self
+
+class Tracer:
+    def __init__(self):
+        self.spans: list[Span] = []
+
+    def start_span(self, name, trace_id, parent_span_id=None):
+        span = Span(name=name, trace_id=trace_id, parent_span_id=parent_span_id)
+        self.spans.append(span)
+        return span
+
+    def export(self):
+        # In a real system this ships to LangSmith/Langfuse/an OTEL collector;
+        # here we just return the structured tree for inspection.
+        return [
+            {
+                "name": s.name, "trace_id": s.trace_id, "span_id": s.span_id,
+                "parent_span_id": s.parent_span_id,
+                "duration_ms": (s.end_time - s.start_time) * 1000 if s.end_time else None,
+                **s.attributes,
+            }
+            for s in self.spans
+        ]
+
+tracer = Tracer()
+
+def traced_llm_call(tracer, trace_id, parent_span_id, prompt, model="gpt-4o-mini", temperature=0.2):
+    span = tracer.start_span("llm_call", trace_id, parent_span_id)
+    # response = client.chat.completions.create(model=model, messages=[...], temperature=temperature)
+    response_text = "stub completion"   # replace with real API call
+    input_tokens, output_tokens = len(prompt.split()), len(response_text.split())  # stub token counting
+    span.finish(
+        prompt=prompt, completion=response_text, model=model, temperature=temperature,
+        input_tokens=input_tokens, output_tokens=output_tokens,
+        estimated_cost_usd=(input_tokens * 0.00001 + output_tokens * 0.00003),
+    )
+    return response_text, span
+
+def run_rag_pipeline(user_query: str):
+    trace_id = str(uuid.uuid4())
+    root = tracer.start_span("rag_pipeline", trace_id)
+
+    rewrite_prompt = f"Rewrite this search query for retrieval: {user_query}"
+    rewritten, _ = traced_llm_call(tracer, trace_id, root.span_id, rewrite_prompt)
+
+    retrieval_span = tracer.start_span("retrieval", trace_id, root.span_id)
+    retrieved_chunks = ["chunk-12", "chunk-47"]   # stub vector DB call
+    retrieval_span.finish(query=rewritten, retrieved_chunk_ids=retrieved_chunks)
+
+    final_prompt = f"Answer using context {retrieved_chunks}: {user_query}"
+    answer, _ = traced_llm_call(tracer, trace_id, root.span_id, final_prompt)
+
+    root.finish(user_query=user_query, final_answer=answer)
+    return answer, trace_id
+
+answer, trace_id = run_rag_pipeline("What's our refund policy for enterprise customers?")
+for span in tracer.export():
+    print(span)   # inspect the full reconstructed trace for this request
+</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4><p>A SaaS company's support-chatbot team ships a "small" prompt
+      tweak intended to make answers slightly more concise, and within a day sees a spike in a specific support
+      escalation category: customers reporting the bot now refuses to answer billing questions it previously
+      handled fine. Without tracing, this would be a multi-day investigation of re-running prompts by hand trying
+      to reproduce the regression. With tracing already in place, the team filters traces to the affected time
+      window and category, pulls 20 real failing traces, and sees the pattern immediately: the "more concise"
+      instruction, combined with an existing instruction to "decline if uncertain," made the model interpret
+      slightly ambiguous billing questions as "uncertain" more often than before, triggering the decline path. The
+      fix (rewording the conciseness instruction to not compound with the uncertainty instruction) is validated
+      by re-running the same 20 traced inputs through the new prompt and confirming the decline rate drops back
+      to baseline — the entire incident, from detection to validated fix, took hours specifically because full
+      prompt/completion tracing meant the root cause was directly visible rather than needing to be guessed at
+      and manually reproduced.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Logging only metadata (latency, status code, token count) and not
+      the actual prompt/completion content, on the theory that it's "just like a normal API log." For LLM calls,
+      the content is the behavior — a latency number tells you nothing about why an answer was wrong. Redact PII
+      deliberately rather than omitting content altogether.</p></div>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Treating a single successful manual retry as proof a bug is
+      fixed. Because generation is non-deterministic, one good output after a fix is weak evidence; validate
+      against a traced regression/eval set with enough samples to distinguish "actually fixed" from "got lucky
+      this time."</p></div>
+      <ul>
+        <li>Tag every span with a prompt version/hash so you can filter traces by exactly which prompt produced
+        them — essential for correlating a behavior change with a specific deploy.</li>
+        <li>Ship trace data asynchronously/batched so instrumentation doesn't add latency to the user-facing
+        request path.</li>
+        <li>Track cost per request/feature/user as a first-class dashboard metric, not something you only compute
+        at month-end from a billing invoice — cost regressions are a real incident category.</li>
+        <li>Build a fixed, versioned eval set of representative real inputs specifically so prompt/model changes
+        can be regression-tested before shipping, not just monitored for problems after the fact.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>LangSmith</td><td>Already using LangChain/LangGraph, want tight framework integration</td><td>Framework-agnostic stack, avoiding vendor lock-in</td><td>Langfuse or OpenTelemetry GenAI conventions</td></tr>
+        <tr><td>Langfuse (self-hosted)</td><td>Data residency/privacy requirements, framework-agnostic needs</td><td>Want a fully managed zero-ops solution</td><td>Langfuse Cloud, or LangSmith</td></tr>
+        <tr><td>Plain OpenTelemetry GenAI conventions</td><td>Already have a general observability stack (Datadog, Grafana, etc.), want LLM traces alongside infra traces</td><td>Need LLM-specific UX (prompt playground, dataset management) out of the box</td><td>A dedicated LLM observability tool</td></tr>
+        <tr><td>Metadata-only logging</td><td>Extremely cost/storage constrained, low-stakes internal tool</td><td>Any customer-facing or compliance-sensitive system</td><td>Full prompt/completion logging with deliberate PII redaction</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+
+      <div class="qa-level basic">
+        <h4>Basic</h4>
+        <details class="qa"><summary>Why does debugging a bad LLM output require a different approach than debugging a normal API bug?</summary><div class="answer"><p>LLM output is non-deterministic (sampling means the same input can produce different outputs), and the "bug" could live in the prompt template, retrieved context, sampling parameters, or the model itself — there's no stack trace pinpointing a single faulty line, so you need a traced record of the actual prompt/context/completion to diagnose it.</p></div><div class="followup">Follow-up: name one piece of information a traditional API log would have that's insufficient for diagnosing a bad LLM output.</div></details>
+        <details class="qa"><summary>What is a "span" in the context of LLM tracing?</summary><div class="answer"><p>A span represents one discrete step in a pipeline (an LLM call, a retrieval call, a tool call), recording its own inputs/outputs, latency, and metadata, nested under a parent trace representing the whole user-facing request.</p></div><div class="followup">Follow-up: what does a "trace" consist of, relative to spans?</div></details>
+        <details class="qa"><summary>Why does cost need to be tracked as a first-class observability metric for LLM systems specifically?</summary><div class="answer"><p>Every LLM call has a real, non-trivial dollar cost proportional to input and output tokens, unlike most internal API calls — an accidental prompt bloat or a runaway retry loop is a cost incident, not just a performance one, so cost needs the same monitoring rigor as latency or error rate.</p></div><div class="followup">Follow-up: what's one example of a bug that would show up as a cost spike before it shows up as an error rate spike?</div></details>
+        <details class="qa"><summary>What should be logged for a single LLM call, at minimum?</summary><div class="answer"><p>The exact prompt sent (post-templating), the exact completion received, model name/version, sampling parameters, input/output token counts, and latency — content, not just metadata, since the content is what determines whether the behavior was correct.</p></div><div class="followup">Follow-up: why is "time to first token" tracked separately from total completion time for streaming responses?</div></details>
+        <details class="qa"><summary>Name two purpose-built tools (or standards) used for LLM tracing.</summary><div class="answer"><p>LangSmith (tightly integrated with LangChain/LangGraph) and Langfuse (open-source, framework-agnostic) are two common dedicated tools; OpenTelemetry with GenAI semantic conventions is a vendor-neutral standard for the same purpose within a general observability stack.</p></div><div class="followup">Follow-up: what's the advantage of using OpenTelemetry GenAI conventions over a dedicated LLM-specific tool?</div></details>
+        <details class="qa"><summary>Why is "I retried it manually and it worked" weak evidence that an LLM bug is fixed?</summary><div class="answer"><p>Because generation is non-deterministic, a single successful retry could just be favorable sampling rather than an actual fix — you need to validate against a larger, traced sample of inputs (an eval/regression set) to distinguish a real fix from a lucky single sample.</p></div><div class="followup">Follow-up: what would a more rigorous validation approach look like?</div></details>
+      </div>
+
+      <div class="qa-level medium">
+        <h4>Medium</h4>
+        <details class="qa"><summary>Walk through how you'd use tracing to diagnose a specific bad output reported by a user, step by step.</summary><div class="answer"><p>Look up the trace by request/user/session ID, then walk the span tree in order: check the retrieval span (was the right context actually retrieved?), check the exact assembled prompt sent to the final generation call (was the retrieved context correctly inserted, any templating bug?), check the completion itself and sampling parameters used, and check for any tool-call spans that might have returned bad data upstream. This decomposes "bad answer" into a specific, inspectable failure point rather than a vague overall impression.</p></div><div class="followup">Follow-up: what would you look for specifically to distinguish a retrieval failure from a generation failure in the trace?</div></details>
+        <details class="qa"><summary>Why does prompt versioning matter as much as code versioning in an LLM system's observability setup?</summary><div class="answer"><p>Prompt templates change behavior as significantly as application logic does, but are often edited more informally and more frequently (a single wording tweak). Without tagging every traced call with the exact prompt version/hash that produced it, you can't correlate a behavior change observed in production with the specific prompt change that caused it, especially if several prompt edits happened close together in time.</p></div><div class="followup">Follow-up: how would you implement prompt versioning concretely — as a git-tracked file, a hash, a registry/service?</div></details>
+        <details class="qa"><summary>Explain the eval/regression-suite pattern for catching prompt or model-swap regressions, and why it needs a tolerance threshold rather than a strict pass/fail.</summary><div class="answer"><p>Capture baseline outputs on a fixed, representative input set before a change, rerun the same inputs after the change, and score both (via LLM-as-judge or rule-based checks) to diff. A tolerance threshold is needed because generation is probabilistic — two legitimate runs of the identical prompt/model can differ slightly even with no regression, so a strict byte-for-byte pass/fail would produce constant false-positive "regressions" and isn't a meaningful signal; the comparison needs to be against an aggregate score distribution, not exact output matching.</p></div><div class="followup">Follow-up: how would you set that tolerance threshold in practice, and what happens if it's set too loose vs. too tight?</div></details>
+        <details class="qa"><summary>Why is shipping trace data asynchronously/batched important, and what's the risk of not doing so?</summary><div class="answer"><p>If tracing instrumentation blocks on sending span data synchronously as part of the request path, it adds latency (and a new failure mode — a slow or down tracing backend could slow or break the user-facing request) directly to production traffic. Shipping asynchronously/batched (a background queue, a sidecar collector) decouples observability infrastructure health from the actual request-serving path.</p></div><div class="followup">Follow-up: what's a risk of asynchronous/batched export, in exchange for that latency benefit?</div></details>
+        <details class="qa"><summary>How would OpenTelemetry GenAI semantic conventions specifically help a team that already has a mature general observability stack (e.g. Datadog)?</summary><div class="answer"><p>GenAI conventions define a standardized attribute schema (e.g. <code>gen_ai.request.model</code>, <code>gen_ai.usage.input_tokens</code>) for LLM-specific span data, so LLM call traces can be ingested into the same existing observability backend and correlated directly with regular infrastructure spans (the API request that triggered the LLM call, the database query that followed it) in one unified trace view, rather than needing a separate LLM-specific tool and losing that end-to-end correlation.</p></div><div class="followup">Follow-up: what's a concrete scenario where correlating an LLM span with a surrounding infra span (e.g. a database call) would help diagnose an issue that LLM-only tracing would miss?</div></details>
+      </div>
+
+      <div class="qa-level advanced">
+        <h4>Advanced</h4>
+        <details class="qa"><summary>Design an alerting strategy for an LLM pipeline that distinguishes "the model's response quality degraded" from "the pipeline broke" — given that the former can't be detected with a simple error rate.</summary><div class="answer"><p>Error-rate/latency/cost alerting catches infrastructure-level breaks (API errors, timeouts, cost spikes) the same way any service's alerting would. Quality degradation needs a separate signal: run a continuous, sampled LLM-as-judge (or rule-based, where structured output allows it) scoring pass over a percentage of live production traces, aggregate the score over a rolling window, and alert on a statistically meaningful drop in that aggregate score versus a trailing baseline — treating quality score as its own time-series metric with its own alerting thresholds, separate from traditional infra SLOs, specifically because a pipeline can be fully "healthy" by infra metrics while silently producing worse answers.</p></div><div class="followup">Follow-up: how would you avoid the LLM-as-judge scoring pass itself becoming a significant new cost and latency burden on the production system?</div></details>
+        <details class="qa"><summary>A model provider silently updates the underlying weights behind a model identifier you call by name (common with hosted API "aliases" that point to a rolling latest version). How would your tracing/observability setup detect this before a user complaint does?</summary><div class="answer"><p>Tag every traced call with whatever model-version metadata the API response actually returns (many providers return a specific model snapshot ID in the response even when you request a generic alias), and alert on that version identifier changing unexpectedly in production traffic. Separately, run your fixed eval/regression suite on a recurring schedule (not just on your own deploys) against the live aliased model identifier, so a provider-side silent update gets caught by a quality-score shift in your own scheduled eval run even if nothing in your own code changed.</p></div><div class="followup">Follow-up: why might pinning to a specific model snapshot (rather than a rolling alias) not fully solve this, from an operational standpoint?</div></details>
+        <details class="qa"><summary>Design a tracing schema that supports both real-time production debugging and building a long-term fine-tuning/eval dataset from traced production traffic, without those two goals conflicting.</summary><div class="answer"><p>Separate hot-path storage (short-retention, full-fidelity traces optimized for fast lookup by trace/request ID, used for real-time debugging) from a longer-term, curated export pipeline that samples and anonymizes/redacts traces into a dataset store — critically, apply PII redaction and any necessary consent/compliance filtering during that export step, not in the hot path (where redaction could interfere with debugging the literal content that caused an issue). Tag exported examples with outcome labels (user feedback, downstream correction, eval score) so the resulting dataset is usable for both regression-eval and fine-tuning purposes, and version the export pipeline itself so you can reproduce exactly how a given dataset snapshot was built.</p></div><div class="followup">Follow-up: what's a specific risk of applying redaction too early (in the hot path) versus too late (only at export time)?</div></details>
+        <details class="qa"><summary>Your eval/regression suite passes after a prompt change, but a week later production users report a quality regression the suite didn't catch. Diagnose the likely causes and how you'd fix the suite itself.</summary><div class="answer"><p>Most likely, the eval set's input distribution doesn't represent the real production input distribution closely enough — a common failure when the eval set was built once, early, and never refreshed with new real traffic patterns, especially as user behavior shifts over time (distribution drift). Pull a fresh, recent sample of real production traces (ideally ones specifically flagged by user feedback or low implicit-quality signals) and add representative cases from that sample into the eval set, then rerun the regression comparison against the problematic prompt change retroactively to confirm the expanded suite now catches it. This also argues for treating the eval set as a living, continuously-refreshed artifact rather than a one-time deliverable.</p></div><div class="followup">Follow-up: how would you decide, systematically, when and how often to refresh the eval set with new production samples?</div></details>
+        <details class="qa"><summary>How would you instrument and reason about cost attribution in a multi-tenant LLM product where different customers use the pipeline very differently (some do simple Q&A, others trigger long multi-step agent chains)?</summary><div class="answer"><p>Tag every span (and the root trace) with tenant/customer ID and feature/workflow identifiers, and aggregate token usage and estimated cost at the trace level (summing all spans under one root trace) rather than per-call, since a single customer action can fan out into many LLM calls. Build cost dashboards segmented by tenant and by workflow type, not just a global aggregate, so a single high-usage tenant or an unexpectedly expensive workflow path doesn't get averaged away and hidden in an overall healthy-looking number — this is directly analogous to per-tenant resource attribution in any multi-tenant infrastructure cost model, just computed from token counts and model pricing instead of compute-hours.</p></div><div class="followup">Follow-up: how would you use this per-tenant cost attribution to inform pricing or usage-limit decisions for the product?</div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment">
+        <span class="level-tag">Beginner (30-60 min)</span>
+        <h4>Instrument a single LLM call with full tracing</h4>
+        <p>Wrap a single LLM API call (or a stub, if you don't want to spend on a real API call) with a tracer
+        that logs prompt, completion, model, token counts, latency, and a prompt-version tag.</p>
+        <ul>
+          <li>Make 5 calls with slightly different prompt versions (tagged accordingly) and print a clean,
+          tabular trace log at the end.</li>
+        </ul>
+        <p><strong>Acceptance criteria:</strong> a printed trace log where you could answer "which prompt version
+        produced this specific output" for any of the 5 calls just by reading the log.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>Start from the <code>Span</code>/<code>Tracer</code> classes in the code examples — you don't need a real tracing backend for this exercise, just the structured logging discipline.</p></div></details>
+        <p><strong>Bonus:</strong> add estimated cost per call based on a real pricing table for a model you've chosen, and sum total cost across the 5 calls.</p>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Intermediate (2-4 hrs)</span>
+        <h4>Build a nested trace for a multi-step RAG-like pipeline</h4>
+        <p>Extend the <code>run_rag_pipeline</code> example (or build your own) into a pipeline with at least 3
+        chained steps (e.g. query rewrite, retrieval, generation), with real nested trace/span structure, and
+        render the resulting trace as a readable waterfall (even just ASCII/text-based timing bars is fine).</p>
+        <ul>
+          <li>Each span must record enough detail (inputs, outputs, duration) to fully reconstruct what happened
+          at that step without re-running the pipeline.</li>
+          <li>Simulate one deliberately injected bug (e.g. the rewrite step mangles the query) and show how
+          reading the trace alone reveals the root cause.</li>
+        </ul>
+        <p><strong>Acceptance criteria:</strong> a rendered trace view, and a written walkthrough of diagnosing the
+        injected bug purely from reading the trace, without looking at the pipeline's source code.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>Keep each span's attributes dict as close as possible to what the real tool (LangSmith/Langfuse) attributes schema looks like — it'll make this exercise transfer directly if you later adopt one of those tools for real.</p></div></details>
+        <p><strong>Bonus:</strong> export your trace structure in OpenTelemetry GenAI semantic convention attribute names and compare against the real spec.</p>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Advanced (1-2 days)</span>
+        <h4>Build a prompt-change regression harness using traced baseline/comparison runs</h4>
+        <p>Build a small eval harness: a fixed set of 15-20 representative inputs, a baseline prompt version, and
+        a mechanism to rerun the same inputs against a changed prompt (or a different model) and score the
+        difference.</p>
+        <ul>
+          <li>Run the baseline prompt against all inputs, trace and store results (including an LLM-as-judge or
+          rule-based quality score per output).</li>
+          <li>Make a deliberate prompt change (or model swap) and rerun the same inputs.</li>
+          <li>Produce a diff report showing per-input and aggregate score changes, flagging any input where
+          quality measurably dropped.</li>
+        </ul>
+        <p><strong>Acceptance criteria:</strong> a working harness that, run against a deliberately-regressed
+        prompt change, correctly flags the regression with specific failing examples called out, not just an
+        aggregate score drop.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>Make your LLM-as-judge scoring prompt ask for a structured JSON score + justification, and log the judge's own reasoning in the trace too — if the harness ever disagrees with your own manual read of an example, you need the judge's reasoning visible to debug the harness itself, not just the pipeline under test.</p></div></details>
+        <p><strong>Bonus:</strong> add a statistical significance check (not just "the average score dropped") before flagging a regression, to avoid false alarms from normal sampling variance.</p>
+      </div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet">
+        <ul>
+          <li>LLM observability differs from normal APM because output is non-deterministic, cost is per-call and real, and the "code" includes prompt templates that change informally and often.</li>
+          <li>Trace = whole request; span = one step (LLM call, retrieval, tool call) — nest spans under a trace to reconstruct the full pipeline.</li>
+          <li>Log actual prompt/completion content, not just metadata — content is the behavior being debugged, redact PII deliberately rather than omitting content.</li>
+          <li>Tag every span with a prompt-version/hash so behavior changes can be correlated with specific prompt edits.</li>
+          <li>Track cost (token-based) per request/feature/tenant as a first-class metric — cost regressions are a real incident category.</li>
+          <li>LangSmith, Langfuse, and OpenTelemetry GenAI semantic conventions are the standard tracing tool choices — pick based on framework lock-in tolerance and existing observability stack.</li>
+          <li>Catch prompt/model-swap regressions with a fixed eval set, baseline vs. comparison scoring, and a tolerance threshold (not strict pass/fail, since generation is probabilistic).</li>
+          <li>A single successful manual retry is weak evidence of a fix — validate against a traced sample, not one lucky output.</li>
+        </ul>
+      </div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://opentelemetry.io/docs/specs/semconv/gen-ai/">OpenTelemetry Semantic Conventions for Generative AI</a></li>
+        <li><a href="https://docs.smith.langchain.com/">LangSmith documentation</a></li>
+        <li><a href="https://langfuse.com/docs">Langfuse documentation</a></li>
+        <li><a href="https://docs.ragas.io/">Ragas: evaluation framework (useful for the regression-suite scoring pattern)</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="07-huggingface-ecosystem.html"><span class="dir">← Previous</span>HuggingFace Ecosystem</a>
+        <a class="next" href="09-vector-databases-and-rag.html"><span class="dir">Next →</span>Vector Databases & RAG</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · Machine Learning & AI</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "15-machine-learning-ai", chapterKey: "08-llm-observability-tracing" });</script>
+</body>
+</html>

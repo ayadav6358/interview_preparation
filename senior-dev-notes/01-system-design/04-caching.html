@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Caching — System Design — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">System Design</a><span class="sep">›</span>Caching</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>Caching: Strategies, Eviction, CDN, Invalidation, Stampede Mitigation</h1>
+      <p class="meta-line"><span>⏱ 2.5 hrs</span><span>📍 Chapter 4 of 14</span></p>
+      <p><strong>One-line summary:</strong> Caching is the cheapest performance win in system design, but every cache introduces a new failure mode — staleness, stampedes, and invalidation bugs — and a senior engineer is judged on how they handle those failure modes, not on knowing that "Redis makes things faster."</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>Every HLD interview eventually gets to "how would you reduce load on the database," and the expected answer is caching — but a weak candidate stops at "add Redis." A strong candidate explains which caching strategy fits the read/write pattern, what happens when the cache and database disagree, how eviction actually works under memory pressure, and — critically — what happens when a hot key expires and 10,000 requests hit the database simultaneously (the stampede problem). This chapter builds on <a href="03-load-balancing.html">Load Balancing & Reverse Proxies</a> (consistent hashing reappears here for cache sharding) and feeds directly into <a href="05-databases.html">Databases</a> and <a href="06-database-scaling.html">Database Scaling</a>, where caching is the first line of defense before you reach for read replicas or sharding.</p>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>Read <a href="03-load-balancing.html">Load Balancing & Reverse Proxies</a> first — consistent hashing is reused here for distributing cache keys across nodes. Also useful: <a href="01-fundamentals.html">Fundamentals</a> for the CAP/PACELC vocabulary used when discussing cache staleness tradeoffs.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="strategies">Cache-aside, write-through, write-behind</h3>
+      <p><strong>Cache-aside (lazy loading):</strong> the application checks the cache first; on a miss, it reads from the database, then populates the cache before returning. Writes typically go straight to the database and either invalidate or update the corresponding cache entry. This is the most common pattern because the cache only ever holds data that's actually been requested (no wasted memory on unused data), and a cache outage degrades gracefully to "slower, but correct" (every request just falls through to the DB).</p>
+      <p><strong>Write-through:</strong> every write goes to the cache first (or simultaneously to cache and DB), and the cache write isn't considered complete until the DB write succeeds too — reads always hit a warm cache for recently-written data. Simpler read path (no miss-then-populate dance) but adds write latency (every write pays the cache-write cost too) and can fill the cache with data that's written often but read rarely, wasting memory.</p>
+      <p><strong>Write-behind (write-back):</strong> writes go to the cache immediately and are asynchronously flushed to the database later (batched, often via a queue). Lowest write latency and can batch/coalesce many writes into fewer DB operations, but risks data loss if the cache crashes before the async flush completes, and requires careful ordering logic if the same key is written multiple times before a flush (don't want to write stale data out of order).</p>
+
+      <h3 id="redis-structures">Redis data structures relevant to caching</h3>
+      <p>Beyond simple string GET/SET, Redis's data structures map directly onto common caching problems: <strong>Hashes</strong> (`HSET`/`HGET`) let you cache an object's fields individually, so updating one field doesn't require re-serializing and rewriting the whole object. <strong>Sorted sets</strong> (`ZADD`/`ZRANGE`) are the natural structure for leaderboards, rate limiting windows, or "most recently used" tracking by score. <strong>Sets</strong> (`SADD`/`SINTER`) suit deduplication and tag-based lookups (e.g., "all product IDs in category X"). <strong>Expiring keys</strong> (`EXPIRE`/`SET key val EX seconds`) are the TTL mechanism underlying most cache invalidation. Redis also supports `SETNX` (set-if-not-exists) which is the basis for a simple distributed lock, directly relevant to stampede mitigation below.</p>
+
+      <h3 id="eviction">Eviction algorithms: LRU and LFU, the actual mechanism</h3>
+      <p><strong>LRU (Least Recently Used)</strong> evicts whichever entry hasn't been accessed in the longest time. The textbook exact implementation uses a <strong>doubly linked list + hashmap</strong>: the hashmap gives O(1) lookup of a key's node; the doubly linked list keeps nodes ordered by recency, with the most-recently-used node moved to the head on every access (O(1) pointer relinking) and the least-recently-used node (the tail) evicted when the cache is full. This combination is why LRU can be implemented in true O(1) per operation — the structure most interviewers want you to derive when asked "implement an LRU cache."</p>
+      <p>In production, exact LRU across a large distributed cache is expensive (maintaining a perfectly ordered list across millions of keys, possibly sharded, has real overhead), so <strong>Redis uses approximate LRU</strong>: instead of maintaining a global order, each key has an access-time-ish field, and on eviction Redis randomly samples a small number of keys (default 5, configurable via `maxmemory-samples`) and evicts whichever sampled key looks oldest. This is far cheaper than exact LRU and in practice is close enough — increasing the sample size gets closer to true LRU at the cost of more CPU per eviction.</p>
+      <p><strong>LFU (Least Frequently Used)</strong> evicts whichever entry has been accessed the fewest times, which better protects "frequently used but not recently used" data (e.g., a reference dataset touched every 10 minutes by a batch job shouldn't get evicted just because something else was touched more recently). Redis implements LFU with a probabilistic counter (an 8-bit logarithmic counter per key, so it doesn't need to store large exact counts, and it decays over time so old popularity doesn't permanently pin a key) — pure exact LFU would need unbounded counters and manual decay logic, so this is a deliberate space/accuracy tradeoff.</p>
+      <p>Senior framing: LRU assumes recency predicts future access; LFU assumes frequency does. Real workloads often want a hybrid (Redis's `allkeys-lfu` policy exists for exactly this, and many production caches combine recency with a frequency floor so a key accessed 10,000 times isn't evicted just because it hasn't been touched in the last minute).</p>
+
+      <h3 id="cdn">CDN caching: edge caching, headers, stale-while-revalidate</h3>
+      <p>A CDN caches responses at <strong>edge</strong> nodes geographically close to users, so static (and some dynamic) content is served without a round trip to origin. Cache behavior is controlled by HTTP headers: <code>Cache-Control: max-age=3600</code> tells both browser and CDN how long to treat a response as fresh; <code>Cache-Control: no-store</code> disables caching entirely; <code>ETag</code>/<code>Last-Modified</code> enable conditional requests (`If-None-Match`) so a client can revalidate cheaply (a 304 Not Modified response with no body) instead of re-downloading unchanged content.</p>
+      <p><strong>stale-while-revalidate</strong> (a `Cache-Control` directive) lets the CDN serve a stale cached response immediately while asynchronously fetching a fresh one in the background to update the cache for the *next* request — the user who triggered the revalidation still gets a fast (if slightly stale) response, and nobody pays the full origin round trip synchronously. This is a major latency win for content that's "mostly fine slightly stale" (news feeds, product listings) and is one of the most underused headers by engineers who only know `max-age`.</p>
+
+      <h3 id="invalidation">Cache invalidation strategies</h3>
+      <p><strong>TTL-based expiry:</strong> simplest — every entry expires after a fixed time regardless of whether the underlying data changed. Guarantees bounded staleness with zero invalidation logic, but you're always trading off "how stale can we tolerate" against "how much extra DB load from more frequent refetches."</p>
+      <p><strong>Explicit purge/invalidation:</strong> the write path actively deletes or updates the corresponding cache entry when data changes (common in cache-aside: on write, `DEL` the cache key so the next read repopulates it fresh). More precise (no staleness window at all, assuming the invalidation fires reliably) but requires every write path to remember to invalidate — a missed invalidation path is one of the most common classes of "why is this cache showing old data" bugs.</p>
+      <p><strong>Versioned keys:</strong> instead of invalidating, include a version (or the data's hash, or a timestamp) in the cache key itself, e.g., <code>user:1042:v7</code>. A write bumps the version pointer; old versions simply age out via TTL/LRU without ever needing an explicit delete, and — crucially — this sidesteps race conditions where an invalidation and a concurrent read interleave badly (there's never a "half-invalidated" state, just old-version keys nobody references anymore).</p>
+
+      <h3 id="stampede">Cache stampede / thundering herd</h3>
+      <p>A <strong>cache stampede</strong> happens when a popular key expires (or the cache restarts cold) and a large burst of concurrent requests all miss simultaneously, all fall through to the database at once, overwhelming it — sometimes enough to cause a cascading outage. The core problem is redundant, uncoordinated work: N requests doing the exact same expensive recomputation when only 1 needed to.</p>
+      <p><strong>Mitigation 1 — locking/mutex (request coalescing):</strong> when a cache miss occurs, the first request to notice acquires a lock (e.g., Redis `SETNX` with a short TTL as the lock), computes the fresh value, writes it to cache, then releases the lock. Other concurrent requests for the same key either wait briefly and retry the cache (now warm) or get told to wait, rather than all hitting the DB independently.</p>
+      <p><strong>Mitigation 2 — probabilistic early expiration:</strong> instead of a hard expiry, each read has a small, increasing probability of proactively recomputing the value slightly *before* it actually expires, proportional to how close it is to expiry. This spreads recomputation across many individual requests over time instead of all of them colliding at the exact expiry instant — no single moment has a herd, because the herd never fully forms.</p>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>Trace a cache-aside read with stampede protection end to end: a request arrives for <code>product:555</code>. The app does `GET product:555` — miss. Instead of immediately querying the DB, it attempts `SETNX lock:product:555 1 EX 5` (acquire a short-lived lock). If it succeeds, it queries the DB, writes the result to cache with a TTL, deletes the lock, and returns. If the `SETNX` fails (someone else already holds the lock), the request either polls the cache for a short window (the other request will populate it shortly) or falls back to serving slightly stale data if available, or waits briefly and retries. This converts what would be N concurrent DB queries into effectively 1, with the other N-1 requests paying a small added latency instead of all hammering the database.</p>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+sequenceDiagram
+    participant C as Client
+    participant Cache as Cache (Redis)
+    participant DB as Database
+    C->>Cache: GET product:555
+    Cache-->>C: MISS
+    C->>DB: SELECT * FROM products WHERE id=555
+    DB-->>C: row data
+    C->>Cache: SET product:555 (value, TTL=300s)
+    Note over C,Cache: Next request within 300s hits cache directly
+    C->>Cache: GET product:555
+    Cache-->>C: HIT (fast path)
+      </div>
+      <div class="mermaid">
+sequenceDiagram
+    participant R1 as Request 1
+    participant R2 as Request 2 (concurrent)
+    participant Cache as Cache
+    participant DB as Database
+    Note over R1,R2: Hot key just expired — both miss at once
+    R1->>Cache: GET hot_key -> MISS
+    R2->>Cache: GET hot_key -> MISS
+    R1->>Cache: SETNX lock:hot_key (succeeds)
+    R2->>Cache: SETNX lock:hot_key (fails, already locked)
+    R2->>R2: wait/retry briefly, or serve stale
+    R1->>DB: expensive query (only once)
+    DB-->>R1: fresh value
+    R1->>Cache: SET hot_key + DEL lock
+    R2->>Cache: GET hot_key -> HIT (now warm)
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <p>Cache-aside with mutex-based stampede protection, then probabilistic early expiration, in TypeScript against a Redis client:</p>
+      <pre><code class="language-typescript">// Cache-aside read with lock-based stampede protection (request coalescing)
+import Redis from "ioredis";
+const redis = new Redis();
+
+async function getProduct(id: string): Promise<Product> {
+  const cacheKey = `product:${id}`;
+  const cached = await redis.get(cacheKey);
+  if (cached) return JSON.parse(cached);
+
+  const lockKey = `lock:${cacheKey}`;
+  // SETNX with a short TTL — only one concurrent caller wins the lock
+  const gotLock = await redis.set(lockKey, "1", "EX", 5, "NX");
+
+  if (!gotLock) {
+    // Someone else is already fetching — wait briefly and retry the cache,
+    // rather than also hitting the DB. Bounded retries to avoid infinite wait.
+    for (let i = 0; i < 10; i++) {
+      await new Promise((r) => setTimeout(r, 100));
+      const retry = await redis.get(cacheKey);
+      if (retry) return JSON.parse(retry);
+    }
+    // Fallback: give up waiting, query DB anyway (rare worst case)
+  }
+
+  try {
+    const fresh = await db.query("SELECT * FROM products WHERE id = $1", [id]);
+    await redis.set(cacheKey, JSON.stringify(fresh), "EX", 300);
+    return fresh;
+  } finally {
+    await redis.del(lockKey);
+  }
+}
+</code></pre>
+      <pre><code class="language-typescript">// Probabilistic early expiration (XFetch-style) — spreads recomputation
+// across many requests instead of one sharp expiry-moment collision.
+interface CacheEntry<T> { value: T; expiresAt: number; computeTimeMs: number; }
+
+async function getWithEarlyRecompute<T>(
+  key: string,
+  ttlMs: number,
+  compute: () => Promise<T>,
+  beta = 1.0 // tuning knob: higher = more aggressive early refresh
+): Promise<T> {
+  const raw = await redis.get(key);
+  const now = Date.now();
+
+  if (raw) {
+    const entry: CacheEntry<T> = JSON.parse(raw);
+    const timeLeft = entry.expiresAt - now;
+    // Probability of early recompute rises as timeLeft shrinks toward 0
+    const recomputeProbability = Math.exp(
+      (-beta * entry.computeTimeMs * Math.log(Math.random())) / Math.max(timeLeft, 1)
+    );
+    if (timeLeft > 0 && recomputeProbability < 1) {
+      return entry.value; // still fresh enough, most requests take this path
+    }
+  }
+
+  const start = Date.now();
+  const value = await compute();
+  const computeTimeMs = Date.now() - start;
+  const entry: CacheEntry<T> = { value, expiresAt: now + ttlMs, computeTimeMs };
+  await redis.set(key, JSON.stringify(entry), "PX", ttlMs);
+  return value;
+}
+</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4><p>A news site's homepage "trending articles" block was cached with a flat 60-second TTL, cache-aside, no stampede protection. At moderate traffic this was fine — at a traffic spike during a major news event, the key expired and roughly 40,000 concurrent requests missed within the same second, all recomputing an expensive aggregation query against the primary database simultaneously, which briefly exhausted the DB connection pool and caused a cascading slowdown across unrelated endpoints sharing that pool. The fix combined two mitigations: a short-lived mutex lock so only one request recomputes per expiry (the others serve the slightly-stale cached value for a few hundred extra milliseconds while waiting), and stale-while-revalidate semantics at the CDN layer in front of the app so even the mutex-losing requests never reached the origin at all during the brief recompute window. Post-fix, the same traffic spike pattern produced a single DB query instead of 40,000.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Setting a long TTL "to reduce DB load" on data that changes unpredictably, without any explicit invalidation path — this trades a known, bounded staleness window for an unbounded one whenever the TTL is longer than the actual rate of change, producing user-visible bugs that look like "the cache is broken" but are actually "the cache is working exactly as configured."</p></div>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Forgetting that approximate LRU in Redis (sampling-based) is not exact LRU — under memory pressure with a small `maxmemory-samples`, a genuinely hot key can occasionally get evicted by bad luck in the sample. If eviction precision matters, increase the sample size or switch policies; don't assume Redis behaves like a textbook doubly-linked-list LRU.</p></div>
+      <ul>
+        <li>Always add stampede protection (mutex or probabilistic early expiration) to any cache key that is both expensive to recompute and high-traffic — the combination is what makes expiry dangerous, not caching itself.</li>
+        <li>Prefer versioned keys over explicit delete-on-write when multiple writers/readers could race — it sidesteps invalidation ordering bugs entirely.</li>
+        <li>Treat cache outages as a capacity-planning question, not just a correctness question — "what happens to the DB if the cache disappears entirely" should have a tested, known answer before go-live.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs: When to Use vs When NOT To</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>Cache-aside</td><td>General purpose, read-heavy, cache can be cold-start safely</td><td>Need guaranteed-warm cache for every write immediately</td><td>Write-through</td></tr>
+        <tr><td>Write-through</td><td>Reads must always see latest write immediately</td><td>Write-heavy workload where write latency matters most</td><td>Write-behind (with durability tradeoff)</td></tr>
+        <tr><td>Write-behind</td><td>Very write-heavy, can batch/tolerate brief data-loss risk</td><td>Strong durability required per write</td><td>Write-through</td></tr>
+        <tr><td>TTL-only invalidation</td><td>Simple, staleness window is acceptable</td><td>Data changes unpredictably and staleness is costly</td><td>Explicit purge or versioned keys</td></tr>
+        <tr><td>LFU eviction policy</td><td>Workload has stable "hot set" accessed regularly but not continuously</td><td>Access pattern has no real frequency structure (nearly uniform)</td><td>LRU eviction policy</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic"><h4>Basic</h4>
+        <details class="qa"><summary>Explain cache-aside in one sentence.</summary><div class="answer"><p>The app checks the cache first; on a miss it reads from the DB and populates the cache before returning, so the cache only ever holds data that's actually been requested.</p></div></details>
+        <details class="qa"><summary>What's the main downside of write-through caching?</summary><div class="answer"><p>Every write pays the added latency of writing to the cache (not just the DB), and the cache may fill with data that's written often but rarely read, wasting memory.</p></div></details>
+        <details class="qa"><summary>What two data structures combine to give O(1) LRU operations?</summary><div class="answer"><p>A hashmap for O(1) key lookup plus a doubly linked list ordered by recency, with the accessed node moved to the head and the tail evicted when full.</p></div></details>
+        <details class="qa"><summary>What does Cache-Control: stale-while-revalidate do?</summary><div class="answer"><p>It lets the CDN/cache serve a stale response immediately while asynchronously refetching a fresh one in the background for subsequent requests, avoiding a synchronous origin round trip on every expiry.</p></div></details>
+        <details class="qa"><summary>What is a cache stampede?</summary><div class="answer"><p>When a popular cached key expires and many concurrent requests all miss at once, all falling through to the database simultaneously and potentially overwhelming it.</p></div></details>
+        <details class="qa"><summary>Name the three cache invalidation strategies discussed and one tradeoff of each.</summary><div class="answer"><p>TTL-based (simple, bounded staleness but no precision), explicit purge (precise but every write path must remember to invalidate), versioned keys (sidesteps race conditions but needs a version bump mechanism and eventual cleanup of old versions).</p></div></details>
+        <details class="qa"><summary>What's the difference between LRU and LFU eviction at a conceptual level?</summary><div class="answer"><p>LRU evicts based on recency (longest time since last access); LFU evicts based on frequency (fewest total accesses), which better protects data that's regularly but not continuously accessed.</p></div></details>
+      </div>
+      <div class="qa-level medium"><h4>Medium</h4>
+        <details class="qa"><summary>Why does Redis use approximate LRU instead of exact LRU, and how does the approximation work?</summary><div class="answer"><p>Maintaining a perfectly ordered recency list across millions of keys (possibly sharded) has real overhead at scale. Redis instead randomly samples a small number of keys (default 5, via maxmemory-samples) on eviction and evicts whichever sampled key looks oldest — cheaper than exact tracking, close enough in practice, and tunable via sample size.</p></div></details>
+        <details class="qa"><summary>Walk through the mutex-based stampede mitigation: what happens to the request that loses the lock race?</summary><div class="answer"><p>It doesn't query the DB; instead it either polls the cache briefly (since the lock winner will populate it shortly) or falls back to serving a slightly stale value if available. This converts N concurrent DB queries into effectively one, at the cost of a small added latency for the requests that lost the race.</p></div></details>
+        <details class="qa"><summary>Why do versioned cache keys avoid a class of invalidation race condition that explicit delete-on-write doesn't?</summary><div class="answer"><p>With explicit delete, there's a window between the delete and the next successful repopulation where a concurrent read could repopulate with stale data it read just before the write committed. With versioned keys, a write simply creates a new version pointer — there's no "half-invalidated" state; old-version keys just become unreferenced and age out, so no read can land in an inconsistent intermediate state.</p></div></details>
+        <details class="qa"><summary>How does probabilistic early expiration reduce stampede risk without any locking at all?</summary><div class="answer"><p>Each read has a small, rising probability of proactively recomputing the value before actual expiry, with probability increasing as the entry nears its expiry time. This spreads recomputation across many individual requests over time so no single instant has a sharp collision of simultaneous misses — the herd never forms because expiry isn't a hard cliff anymore.</p></div></details>
+        <details class="qa"><summary>Why might write-behind caching lose data, and how would you reduce that risk?</summary><div class="answer"><p>Writes are acknowledged from cache before being flushed to the DB; if the cache crashes before the async flush, that write is lost. Reduce risk with a durable queue (not just in-memory) backing the write-behind buffer, and/or periodic snapshotting, trading some of write-behind's latency advantage for durability.</p></div></details>
+        <details class="qa"><summary>Why is ETag-based conditional revalidation (304 Not Modified) more efficient than a short max-age TTL for content that rarely changes?</summary><div class="answer"><p>A short TTL forces periodic full re-downloads even when content hasn't changed. ETag revalidation sends a cheap conditional request; if unchanged, the server responds 304 with no body, saving bandwidth and client processing while still ensuring the client learns about an actual change immediately on the next request after it happens.</p></div></details>
+      </div>
+      <div class="qa-level advanced"><h4>Advanced</h4>
+        <details class="qa"><summary>Design a caching layer for a social media feed where each user's feed is personalized (not a shared cache key) but underlying posts are shared across many feeds. How do you avoid both stale posts and cache bloat?</summary><div class="answer"><p>Cache posts individually by post ID (shared, high reuse across many feeds) and cache each user's feed as an ordered list of post IDs with a short TTL, assembling the actual feed by fetching the cached post objects for those IDs at read time. This avoids duplicating full post content per-user (bloat) while letting a single post edit invalidate one shared cache entry instead of every feed that references it. The feed-ID-list cache can have a short TTL since it's cheap to regenerate the ordering, while the post-content cache can have a longer TTL since content changes less often.</p></div></details>
+        <details class="qa"><summary>Your mutex-based stampede protection uses a Redis SETNX lock, but the process holding the lock crashes before releasing it. What happens, and how do you prevent a permanent deadlock?</summary><div class="answer"><p>Always set the lock with a TTL (EX) when acquiring it, never rely on an explicit DEL alone — if the holder crashes, the lock expires on its own after the TTL and a subsequent request can acquire it. Choose the TTL to comfortably exceed the expected compute time so the lock doesn't expire mid-computation and let a second request start redundant work, but not so long that a crash causes an extended stampede-protection gap.</p></div></details>
+        <details class="qa"><summary>Explain why combining LRU with a frequency floor (hybrid LRU/LFU) might outperform either pure policy for a workload with both a stable hot set and bursty new content.</summary><div class="answer"><p>Pure LRU would evict a stable hot item just because something newer was touched more recently, even if the hot item is accessed far more often overall. Pure LFU would make it too hard for genuinely new, suddenly-popular content to ever displace long-accumulated frequency counts on old items. A hybrid policy (e.g., decay frequency counts over time, use recency as a tiebreaker among similar frequencies) better matches real traffic where both "proven hot" and "trending now" content need protection from premature eviction.</p></div></details>
+        <details class="qa"><summary>How would you detect a cache stampede is happening in production before it causes an outage, and what metrics would you alert on?</summary><div class="answer"><p>Watch for a sudden spike in cache miss rate correlated with a spike in DB query rate/latency for the same key pattern, and instrument lock-contention rate on your stampede-protection mutex (a spike in "lock acquisition failed, waiting" events is itself a leading indicator of an in-progress stampede). Alert on DB connection pool saturation and p99 query latency as the actual downstream harm signal, with the cache-miss-rate spike as the earlier, more specific warning.</p></div></details>
+        <details class="qa"><summary>You're deciding between TTL-based invalidation and explicit purge for a product-pricing cache in an e-commerce system where price changes must be reflected within 5 seconds for legal/compliance reasons. Which do you choose and why?</summary><div class="answer"><p>Explicit purge, because TTL-based invalidation gives a probabilistic bound (average staleness around TTL/2) but no hard guarantee — a request could theoretically read a cached price up to the full TTL duration before refresh. A compliance requirement needs a deterministic upper bound, so the write path must synchronously invalidate (or update) the cache entry at the moment of the price change, with TTL kept only as a safety-net fallback in case an invalidation is somehow missed.</p></div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment"><span class="level-tag">Beginner (30-60 min)</span><h4>Implement an exact LRU cache from scratch</h4><p>Implement an LRU cache class with `get(key)` and `put(key, value)` in O(1) time using a hashmap + doubly linked list, with a fixed capacity that evicts the least-recently-used entry when full.</p><ul><li>Demonstrate correctness with a test sequence of gets/puts that triggers an eviction and verify the right key was evicted.</li><li>State the time complexity of each operation and why your structure achieves it.</li></ul><p><strong>Acceptance criteria:</strong> Working O(1) get/put with a passing eviction test case.</p><details class="qa"><summary>Hints</summary><div class="answer"><p>The hashmap maps key to a node reference; the doubly linked list tracks order. On every get/put, unlink the node and re-insert it at the head; on eviction, remove the tail.</p></div></details><p><strong>Bonus:</strong> Extend it to approximate LFU by adding a simple access counter and compare eviction choices against your LRU implementation on a skewed access pattern.</p></div>
+      <div class="assignment"><span class="level-tag">Intermediate (2-4 hrs)</span><h4>Build and load-test stampede protection</h4><p>Implement the cache-aside-with-mutex pattern from the Code Examples section against a real Redis instance (or redis-mock), with a simulated "expensive" DB query (artificial delay). Write a load test that fires 500 concurrent requests for the same key right after it expires.</p><ul><li>Measure and report how many times the "expensive" query actually executes with vs without the mutex protection.</li><li>Measure the added p99 latency for the requests that lose the lock race.</li></ul><p><strong>Acceptance criteria:</strong> Concrete before/after numbers showing the mutex reduces redundant DB calls from ~500 to 1, with latency numbers for the waiting requests.</p><details class="qa"><summary>Hints</summary><div class="answer"><p>Use Promise.all to fire all 500 requests simultaneously; count actual DB calls with a simple counter inside your mock "expensive" function.</p></div></details><p><strong>Bonus:</strong> Implement probabilistic early expiration as a second strategy and compare its redundant-query count against the mutex approach under the same load test.</p></div>
+      <div class="assignment"><span class="level-tag">Advanced (1-2 days)</span><h4>Design the caching architecture for a flash-sale product page</h4><p>A single product goes on flash sale; traffic spikes to 500,000 requests/minute for that one product's page, including live (frequently changing) inventory count, while 99% of other traffic on the site is normal.</p><ul><li>Decide what's cacheable and what isn't (price? description? live inventory count?) and justify each choice given the consistency requirements (can't oversell, but description/images can tolerate staleness).</li><li>Design stampede protection specifically for the moment the sale starts (a hard time-based traffic cliff, not a gradual ramp) — what's different about protecting against a scheduled stampede vs an organic one?</li><li>Discuss CDN edge caching's role versus application-level caching (Redis) for this specific page, and how they interact.</li></ul><p><strong>Acceptance criteria:</strong> A written design that explicitly separates cacheable-with-staleness-tolerance data from correctness-critical data (inventory), with a concrete stampede mitigation plan for the known sale-start timestamp.</p><details class="qa"><summary>Hints</summary><div class="answer"><p>For a known future stampede (sale start time is known in advance), you can pre-warm the cache and pre-generate the page before the spike hits, rather than relying purely on reactive mutex locking — this is a case where you have information a typical organic stampede doesn't give you. Inventory count likely needs a separate, strongly-consistent path (not the same cache as the static page content) given the overselling risk.</p></div></details><p><strong>Bonus:</strong> What would you do differently if the sale start time leaked early and traffic started ramping before the official start?</p></div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet"><ul>
+        <li>Cache-aside: lazy, miss-then-populate, degrades gracefully. Write-through: always-warm reads, slower writes. Write-behind: fastest writes, durability risk.</li>
+        <li>LRU = hashmap + doubly linked list for O(1) ops; Redis uses sampling-based approximate LRU in production, not exact.</li>
+        <li>LFU protects frequently-but-not-recently used data; Redis implements it via a decaying probabilistic 8-bit counter.</li>
+        <li>stale-while-revalidate serves stale instantly while refreshing in the background — avoids synchronous origin round trips on expiry.</li>
+        <li>Invalidation options: TTL (simple, bounded staleness), explicit purge (precise, race-prone), versioned keys (race-free, needs cleanup).</li>
+        <li>Cache stampede = many concurrent misses hitting the DB at once on a hot key's expiry.</li>
+        <li>Mitigate stampedes with a SETNX-based mutex (request coalescing) or probabilistic early expiration (spreads recompute over time).</li>
+        <li>Always set a TTL on stampede-protection locks themselves, or a crashed lock-holder deadlocks everyone else.</li>
+        <li>Separate correctness-critical cached data (inventory counts) from staleness-tolerant data (descriptions/images) — they need different invalidation guarantees.</li>
+      </ul></div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://redis.io/docs/latest/develop/reference/eviction/">Redis — Key Eviction (LRU/LFU internals)</a></li>
+        <li><a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control">MDN — Cache-Control header reference</a></li>
+        <li><a href="https://www.vldb.org/pvldb/vol8/p886-vattani.pdf">Optimal Probabilistic Cache Stampede Prevention (Vattani et al.)</a></li>
+        <li><a href="https://redis.io/docs/latest/develop/data-types/">Redis — Data Types overview</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="03-load-balancing.html"><span class="dir">← Previous</span>Load Balancing & Reverse Proxies</a>
+        <a class="next" href="05-databases.html"><span class="dir">Next →</span>Databases</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · System Design</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-typescript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-sql.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-yaml.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "01-system-design", chapterKey: "04-caching" });</script>
+</body>
+</html>

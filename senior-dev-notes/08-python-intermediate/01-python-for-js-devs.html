@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Python for JS Developers — Python Intermediate — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">Python Intermediate</a><span class="sep">›</span>Python for JS Developers</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>Python for JS Developers</h1>
+      <p class="meta-line"><span>⏱ ~2 hrs</span><span>📍 Chapter 1 of 6</span></p>
+      <p><strong>One-line summary:</strong> Python and JS solve most of the same problems; the differences
+      that matter for a senior interview are the execution model (GIL, no event loop by default), the type
+      philosophy (duck typing + optional hints vs structural typing baked in), and the module/import system.</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>You don't need Python because your team is rewriting the Node backend in it. You need it because
+      every AI/ML-adjacent senior interview in 2025–26 assumes you can read a FastAPI service, a LangChain
+      agent, or a data pipeline script without translating syntax word by word. Interviewers will also probe
+      whether you understand Python's execution model well enough to reason about performance — "why is this
+      CPU-bound code slow even with threads?" is a real senior-level question, and "I don't know, I just write
+      JS" is not an acceptable answer anymore.</p>
+      <div class="box why"><h4>Why</h4><p>The fastest way to get fluent is to map every Python concept to its
+      closest JS/Node equivalent, then focus your attention only on the places where the mapping breaks down —
+      that's where the real learning (and the interview questions) live.</p></div>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>None beyond basic Python (you can already write a function, a loop, an if/else). Related chapters:
+      <a href="02-data-structures.html">Data Structures, Comprehensions, Generators</a>,
+      <a href="04-async-python.html">Async Python</a>.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="runtime-model">Runtime model: CPython, the GIL, and why "no event loop by default" matters</h3>
+      <p>Node has one thing to learn here: a single-threaded event loop, non-blocking I/O via libuv, and you
+      write async code constantly because that's the only way anything useful happens. Python's default
+      story is different and it trips people up:</p>
+      <ul>
+        <li><strong>CPython</strong> (the reference implementation, what you're using unless told otherwise)
+        runs with a <strong>Global Interpreter Lock (GIL)</strong> — only one thread executes Python bytecode
+        at a time, per process, full stop. This is not "like Node is single-threaded" by coincidence — it's a
+        much stronger constraint: even if you spawn 8 OS threads in Python, only one runs Python code at any
+        instant.</li>
+        <li>Node's single-threadedness is a <em>design choice</em> for the JS call stack, but I/O is handed
+        off to libuv's thread pool / the OS and parallelism happens there, invisibly to you. Python's GIL is
+        a <em>lock around the interpreter itself</em> — the constraint is different in kind, not just degree.</li>
+        <li>Python code is <strong>synchronous by default</strong>. Nothing is async unless you explicitly
+        write <code>async def</code> and run it on an event loop (<code>asyncio</code>) — there's no implicit
+        non-blocking I/O the way <code>fs.readFile</code> or a fetch call is in Node. A blocking
+        <code>requests.get()</code> call blocks the entire thread, including any asyncio loop running on it.</li>
+      </ul>
+      <table>
+        <tr><th>Concept</th><th>Node/JS</th><th>Python (CPython)</th></tr>
+        <tr><td>Default execution</td><td>Single-threaded event loop, non-blocking I/O baked in</td><td>Single-threaded, synchronous, blocking by default</td></tr>
+        <tr><td>True parallelism</td><td>Worker threads (separate heap, message passing) or child processes</td><td><code>multiprocessing</code> (separate processes, separate GIL each) — threads don't give CPU parallelism under the GIL</td></tr>
+        <tr><td>Concurrency for I/O</td><td>Automatic via event loop + callbacks/promises/async-await</td><td>Opt-in via <code>asyncio</code> + <code>async</code>/<code>await</code>, or OS threads (fine for I/O-bound work despite the GIL, since I/O releases it)</td></tr>
+        <tr><td>CPU-bound work</td><td>Blocks the event loop — must offload to worker_threads</td><td>Blocks the thread under the GIL — must offload to <code>multiprocessing</code> or a native extension that releases the GIL (numpy, etc.)</td></tr>
+      </table>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Python 3.13 shipped an experimental <strong>free-threaded build</strong>
+      (PEP 703) that can disable the GIL entirely — this is real and worth knowing exists for an interview, but
+      as of 2025–26 it is not the default build, most C extensions (including key scientific/web ones) aren't
+      fully compatible yet, and production teams are not running on it. Mention it, but don't claim "Python
+      doesn't have a GIL anymore" — that's wrong for anything you'll actually deploy today.</p></div>
+
+      <h3 id="syntax-mindset">Syntax and mindset differences that actually bite</h3>
+      <ul>
+        <li><strong>Significant whitespace</strong> — indentation is the block syntax, not braces. A mixed
+        tabs/spaces file is a <code>TabError</code>, not a style nit.</li>
+        <li><strong>No <code>const</code>/<code>let</code>/<code>var</code></strong> — everything is just a
+        name binding. There's no block scoping like <code>let</code> gives you in JS; Python has function
+        scope and module scope, and a <code>for</code> loop variable leaks into the enclosing scope.</li>
+        <li><strong>Truthiness differs</strong>: empty list/dict/string/0 are falsy (similar to JS), but
+        there's no <code>==</code> vs <code>===</code> split — Python's <code>==</code> checks value equality
+        (closer to a careful <code>===</code> with type-aware comparison) and <code>is</code> checks identity
+        (like JS's reference equality for objects).</li>
+        <li><strong>Everything is an object</strong>, including functions and classes — closer to JS than you
+        might expect, but there's no prototype chain. Python uses explicit MRO (Method Resolution Order, C3
+        linearization) for multiple inheritance instead.</li>
+        <li><strong>No <code>undefined</code> vs <code>null</code> split</strong> — just <code>None</code>.
+        Simpler, but you lose the "was this key ever set" signal unless you use <code>dict.get(key, sentinel)</code>
+        or check <code>in</code>.</li>
+        <li><strong>Duck typing without compile-time checking</strong> — type hints (<code>def f(x: int) -> str</code>)
+        are <em>not enforced at runtime</em> by default. They're documentation + tooling (mypy/pyright) input.
+        TypeScript erases at compile time too, but Python hints are commonly ignored at runtime entirely
+        unless you add a validation layer (Pydantic does this — see <a href="05-fastapi.html">FastAPI</a>).</li>
+        <li><strong>Modules, not bundlers</strong> — <code>import</code> resolves via <code>sys.path</code>
+        and the filesystem, not a bundler graph. There's no package.json-driven resolution; packaging is
+        covered in <a href="06-venv-packaging-pytest.html">chapter 6</a>.</li>
+      </ul>
+
+      <h3 id="functions-closures">Functions, closures, decorators vs higher-order functions/HOCs</h3>
+      <p>Closures work the same way conceptually (a function captures variables from its enclosing scope), but
+      mutation of an outer variable needs the explicit <code>nonlocal</code> keyword — Python defaults to
+      treating any assigned name inside a function as local, unlike JS where assignment to an outer-scope
+      variable "just works" via the scope chain.</p>
+      <p>Decorators (<code>@decorator</code> above a function) are exactly higher-order functions wrapping
+      another function — the same pattern as a React HOC or an Express middleware wrapper, just with special
+      syntax sugar. <code>@app.get("/users")</code> in FastAPI is no different in spirit from wrapping an
+      Express handler in a logging middleware.</p>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>CPython compiles your <code>.py</code> source to bytecode (cached as <code>.pyc</code> in
+      <code>__pycache__</code>), then the bytecode runs on a stack-based virtual machine — conceptually similar
+      to how V8 compiles JS to bytecode (Ignition) before optionally JIT-compiling hot paths (TurboFan). The
+      key divergence: V8's JIT aggressively optimizes hot code at runtime; CPython historically has had no JIT
+      in mainstream production use (3.13 introduced an experimental "Tier 2" / Zero-cost exceptions and a
+      copy-and-patch JIT groundwork, but it's not the dominant performance story yet — most of CPython's speed
+      comes from its C implementation of built-ins, not JIT'd Python code). This is part of why raw-loop
+      Python is typically slower than equivalent Node for the same CPU-bound task, and why performance-critical
+      Python code leans on C extensions (numpy, etc.) rather than "the interpreter will optimize it."</p>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+flowchart LR
+  subgraph Node["Node.js process"]
+    A[JS call stack\nsingle thread] -->|non-blocking I/O request| B[libuv thread pool / OS]
+    B -->|callback queued| A
+  end
+  subgraph Python["CPython process (default)"]
+    C[Python bytecode\nsingle thread, GIL held] -->|blocking I/O call| D[OS syscall\nGIL released during I/O]
+    D -->|returns, GIL reacquired| C
+    C -.->|CPU-bound work needs parallelism| E[multiprocessing: separate process, own GIL]
+  end
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-python">
+# ---- Scope: nonlocal vs JS's natural closure mutation ----
+def make_counter():
+    count = 0
+    def increment():
+        nonlocal count   # REQUIRED — without this, `count += 1` raises
+        count += 1       # UnboundLocalError (Python assumes local assignment)
+        return count
+    return increment
+
+counter = make_counter()
+print(counter(), counter(), counter())  # 1 2 3
+
+# JS equivalent needs no special keyword:
+# function makeCounter() {
+#   let count = 0;
+#   return () => ++count;   // mutating outer `count` just works
+# }
+
+# ---- Truthiness and equality ----
+a = [1, 2, 3]
+b = [1, 2, 3]
+print(a == b)   # True  -- value equality (like a deep compare)
+print(a is b)   # False -- different objects in memory
+print(a is a)   # True  -- same reference
+
+# ---- Decorator = higher-order function, same as Express middleware ----
+import time
+import functools
+
+def timed(fn):
+    @functools.wraps(fn)          # preserves fn.__name__/docstring, like Object.assign-ing metadata
+    def wrapper(*args, **kwargs):
+        start = time.perf_counter()
+        result = fn(*args, **kwargs)
+        print(f"{fn.__name__} took {time.perf_counter() - start:.4f}s")
+        return result
+    return wrapper
+
+@timed
+def slow_sum(n: int) -> int:
+    return sum(range(n))
+
+slow_sum(10_000_000)
+
+# BAD: type hints are NOT runtime validation -- this runs without error
+def add(a: int, b: int) -> int:
+    return a + b
+
+add("1", "2")   # returns "12" -- no TypeError, hints are ignored at runtime
+
+# GOOD: if you need runtime enforcement, validate explicitly or use Pydantic (ch. 5)
+def add_checked(a: int, b: int) -> int:
+    if not isinstance(a, int) or not isinstance(b, int):
+        raise TypeError("a and b must be int")
+    return a + b
+</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4><p>A data platform team ports a Node ingestion worker (reads
+      from Kafka, transforms, writes to a warehouse) to Python because the transformation logic needs to call
+      a pandas/numpy-based feature pipeline shared with the ML team. The naive port uses plain threads for
+      concurrent Kafka partition consumption, expecting Node-like concurrency — throughput barely improves
+      because the transform step is CPU-bound and the GIL serializes it across threads. The fix: a
+      <code>multiprocessing.Pool</code> of worker processes (one per CPU core) for the CPU-bound transform,
+      with <code>asyncio</code> only for the I/O-bound Kafka consume/warehouse-write boundary. This hybrid
+      model — async for I/O, processes for CPU — is the standard senior-level answer to "how do you get
+      parallelism in Python," and it's a direct consequence of the GIL constraint covered above.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Assuming <code>threading</code> in Python gives you the same
+      concurrency benefits as Node's event loop for CPU-bound work. It doesn't — Python threads are genuinely
+      useful for I/O-bound concurrency (the GIL is released during blocking I/O and C-extension calls that
+      opt out of it), but for CPU-bound Python code, threads buy you nothing and add overhead. Reach for
+      <code>asyncio</code> (I/O-bound, many concurrent operations) or <code>multiprocessing</code> (CPU-bound)
+      deliberately, not <code>threading</code> by habit.</p></div>
+      <ul>
+        <li>Don't mix tabs and spaces — configure your editor to insert spaces (4, by PEP 8 convention).</li>
+        <li>Mutable default arguments (<code>def f(items=[])</code>) are a classic trap — the list is created
+        once at function definition time and shared across calls. Use <code>None</code> as the sentinel and
+        create the list inside the function.</li>
+        <li>Don't shadow builtins (<code>list</code>, <code>dict</code>, <code>id</code>, <code>type</code>)
+        as variable names — it silently breaks later code that expects the builtin.</li>
+        <li>Remember <code>is</code> vs <code>==</code>: use <code>is</code> only for <code>None</code>,
+        <code>True</code>/<code>False</code>, and sentinel singletons — never for value comparison.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td><code>threading</code></td><td>I/O-bound concurrency, simpler mental model than asyncio, interfacing with blocking libraries</td><td>CPU-bound work (GIL serializes it)</td><td><code>asyncio</code> (I/O) or <code>multiprocessing</code> (CPU)</td></tr>
+        <tr><td><code>asyncio</code></td><td>Many concurrent I/O operations (HTTP calls, DB queries) on one thread, like Node</td><td>Any blocking call exists in the chain without being made async</td><td><code>threading</code> for simpler I/O-bound cases with legacy blocking libs</td></tr>
+        <tr><td><code>multiprocessing</code></td><td>CPU-bound parallel work, true multi-core use</td><td>Lightweight tasks (process spawn overhead dominates), heavy shared-state needs</td><td>Native extension (numpy/C) that releases the GIL internally</td></tr>
+        <tr><td>Free-threaded build (3.13+, experimental)</td><td>Experimenting, benchmarking future-proofing</td><td>Production today — ecosystem compatibility isn't there yet</td><td>Standard GIL build + multiprocessing</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic">
+        <h4>Basic</h4>
+        <details class="qa"><summary>What is the GIL and what does it actually lock?</summary><div class="answer"><p>
+        The Global Interpreter Lock is a mutex in CPython that allows only one thread to execute Python
+        bytecode at a time within a process. It doesn't lock "the CPU" — it locks the interpreter's internal
+        state (reference counts, object access) so multiple threads can't corrupt it concurrently. It's
+        released during blocking I/O and some C-extension calls, which is why threads still help for I/O-bound
+        work.</p></div><div class="followup">Follow-up: why does the GIL exist at all — why not just make CPython's objects thread-safe?</div></details>
+        <details class="qa"><summary>Is Python's threading model the same as Node's single-threaded model?</summary><div class="answer"><p>
+        No. Node has one thread for your JS and offloads I/O to libuv's pool, giving you implicit non-blocking
+        concurrency. Python threads are real OS threads, but the GIL means only one runs Python bytecode at a
+        time — so Python "fakes" single-threadedness for CPU-bound code even with multiple threads, whereas
+        Node is single-threaded by design with real parallelism hidden inside libuv.</p></div><div class="followup">Follow-up: how would you get true parallel execution of Python code?</div></details>
+        <details class="qa"><summary>Are Python type hints enforced at runtime?</summary><div class="answer"><p>
+        No, by default they are not. They're used by static type checkers (mypy, pyright) and IDEs, and
+        frameworks like Pydantic/FastAPI use them to build runtime validation, but plain <code>def f(x: int)</code>
+        will happily accept a string unless something explicitly checks.</p></div><div class="followup">Follow-up: how does FastAPI make hints "real" at the request boundary?</div></details>
+        <details class="qa"><summary>What's the Python equivalent of <code>const</code>/<code>let</code> scoping?</summary><div class="answer"><p>
+        There isn't a direct equivalent — Python has function scope and module (global) scope, no block
+        scope. A variable assigned inside an <code>if</code> or <code>for</code> block is visible after the
+        block ends, within the same function.</p></div><div class="followup">Follow-up: what problem does this cause with loop variables and closures?</div></details>
+        <details class="qa"><summary>Why is <code>def f(items=[])</code> a bug waiting to happen?</summary><div class="answer"><p>
+        Default argument values are evaluated once, at function definition time, and the same list object is
+        reused across every call that doesn't pass its own — so mutations accumulate across calls. Fix: default
+        to <code>None</code> and create a new list inside the function body.</p></div><div class="followup">Follow-up: does this apply to dicts and sets too? Why?</div></details>
+        <details class="qa"><summary>What's the difference between <code>==</code> and <code>is</code>?</summary><div class="answer"><p>
+        <code>==</code> calls <code>__eq__</code> and checks value equality (customizable per type).
+        <code>is</code> checks object identity — same memory reference. Small integers and interned strings
+        can make <code>is</code> "accidentally" work for values, which is why you should never rely on it
+        outside <code>None</code>/boolean/sentinel checks.</p></div><div class="followup">Follow-up: why does CPython sometimes make <code>1 is 1</code> True and other integers False?</div></details>
+        <details class="qa"><summary>How does Python resolve <code>import</code> without a bundler?</summary><div class="answer"><p>
+        It searches <code>sys.path</code> (current script dir, installed site-packages, PYTHONPATH entries)
+        in order, finds a matching module/package, compiles it to bytecode if not cached, and executes the
+        module body once, caching the result in <code>sys.modules</code> for subsequent imports.</p></div><div class="followup">Follow-up: what happens on a circular import, and how is that different from a CommonJS circular require?</div></details>
+      </div>
+      <div class="qa-level medium">
+        <h4>Medium</h4>
+        <details class="qa"><summary>Why don't threads speed up a CPU-bound Python loop, and what would?</summary><div class="answer"><p>
+        Because the GIL ensures only one thread executes bytecode at a time — adding threads to CPU-bound work
+        adds context-switch overhead without any real parallel execution. Use <code>multiprocessing</code>
+        (separate processes, each with its own interpreter and GIL) for true multi-core parallelism, or push
+        the hot loop into a C extension (numpy) that releases the GIL internally.</p></div><div class="followup">Follow-up: what's the overhead cost of multiprocessing vs threading, and when does it not pay off?</div></details>
+        <details class="qa"><summary>Explain <code>nonlocal</code> and why Python needs it but JS doesn't need an equivalent.</summary><div class="answer"><p>
+        Python determines a name's scope statically per function body: if you assign to a name anywhere in a
+        function, Python treats it as local for the whole function unless declared <code>nonlocal</code> (for
+        enclosing-function scope) or <code>global</code>. JS closures mutate outer-scope variables without any
+        keyword because JS's scope resolution walks the scope chain for every reference, not just
+        assignments, and lacks this "assignment implies local" rule.</p></div><div class="followup">Follow-up: what error do you get if you forget <code>nonlocal</code>, and why that specific error?</div></details>
+        <details class="qa"><summary>How would you decide between asyncio, threading, and multiprocessing for a given workload?</summary><div class="answer"><p>
+        Ask: is the bottleneck I/O (network/disk wait) or CPU? I/O-bound with many concurrent operations and
+        async-aware libraries → asyncio (best scalability, single thread). I/O-bound but using blocking
+        libraries you can't easily make async → threading. CPU-bound (parsing, number crunching, image
+        processing) → multiprocessing, or better, a native extension.</p></div><div class="followup">Follow-up: can you mix asyncio and multiprocessing in one service? How?</div></details>
+        <details class="qa"><summary>Walk through CPython's execution pipeline from source to running code.</summary><div class="answer"><p>
+        Source → tokenizer → AST → compiled to bytecode (cached as .pyc in __pycache__, keyed by source hash/mtime)
+        → executed by the CPython bytecode interpreter (a stack-based VM). No JIT compiles hot paths to
+        machine code in the way V8's TurboFan does for mainstream production Python; most of the speed in
+        built-ins comes from their C implementation, not from the interpreter optimizing your Python code.</p></div><div class="followup">Follow-up: what did Python 3.11–3.13 change about interpreter performance (adaptive specialization, Tier 2)?</div></details>
+        <details class="qa"><summary>What's the practical effect of type hints not being enforced, in a large codebase?</summary><div class="answer"><p>
+        You get documentation and IDE/static-analysis value (mypy/pyright catch mismatches before runtime) but
+        zero runtime safety net unless something validates at the boundary. This is why FastAPI/Pydantic
+        matters: it converts type hints into actual runtime validation at the one place it's most needed —
+        external input (HTTP requests). Internal function calls still rely on discipline + CI-enforced mypy.</p></div><div class="followup">Follow-up: would you run mypy in strict mode on a new project? What's the migration cost on an existing one?</div></details>
+        <details class="qa"><summary>Explain why <code>a == b</code> can be True while <code>a is b</code> is False for two lists.</summary><div class="answer"><p>
+        Lists implement <code>__eq__</code> to compare contents element-by-element, so two distinct list
+        objects with identical elements are <code>==</code>. They are different objects in memory (different
+        <code>id()</code>), so <code>is</code> is False. This mirrors JS's distinction between deep-equal
+        content and reference equality, except JS's <code>===</code> on objects/arrays is always reference
+        equality — there's no built-in deep <code>==</code> for arrays in JS the way Python gives you for free.</p></div><div class="followup">Follow-up: how does Python decide object identity for small integers and short strings (interning)?</div></details>
+      </div>
+      <div class="qa-level advanced">
+        <h4>Advanced</h4>
+        <details class="qa"><summary>Why does CPython still default to a GIL-bound build in 2025–26 despite PEP 703?</summary><div class="answer"><p>
+        PEP 703 (free-threaded CPython, available as an opt-in build since 3.13) removes the GIL by making
+        individual object operations thread-safe through finer-grained locking and biased reference counting,
+        but this has real single-threaded performance overhead and breaks the C-extension ABI assumptions
+        that huge parts of the ecosystem (numpy, many C-extension packages) rely on. Until the ecosystem
+        stabilizes around the new ABI and the single-threaded performance tax is acceptable, the GIL build
+        remains the safe default for production.</p></div><div class="followup">Follow-up: what specific guarantee did the GIL give C-extension authors "for free" that free-threading removes?</div></details>
+        <details class="qa"><summary>Design the concurrency model for a Python service that does both heavy JSON parsing/transformation and many outbound HTTP calls.</summary><div class="answer"><p>
+        Use asyncio for the outbound HTTP calls (httpx async client) so many requests are in flight on one
+        thread with minimal overhead. For the heavy transformation, if it's genuinely CPU-bound and blocks the
+        event loop for meaningful time, offload it to a <code>ProcessPoolExecutor</code> via
+        <code>loop.run_in_executor</code> rather than doing it inline in the async function — otherwise it
+        starves every other concurrent task sharing that event loop, the same failure mode as a synchronous
+        CPU-bound function blocking Node's event loop.</p></div><div class="followup">Follow-up: what's the serialization cost of handing data to a ProcessPoolExecutor, and when does that cost dominate?</div></details>
+        <details class="qa"><summary>Compare Python's reference-counting GC with JS engines' generational GC, and explain where the GIL and GC intersect.</summary><div class="answer"><p>
+        CPython uses reference counting as its primary memory reclamation (immediate, deterministic — object
+        freed the instant refcount hits zero) plus a generational cyclic garbage collector for reference
+        cycles refcounting can't resolve. V8 uses generational, tracing GC (no refcounting) with separate
+        young/old generations and different collection algorithms per generation. The GIL and refcounting are
+        historically intertwined: refcount updates on shared objects need to be atomic/serialized, which is
+        one of the original reasons the GIL existed — free-threaded builds had to solve this with biased
+        reference counting instead.</p></div><div class="followup">Follow-up: why can reference counting alone leak memory, and what does the cyclic collector do about it?</div></details>
+        <details class="qa"><summary>You inherit a Python service using threading.Lock around shared dict mutation across threads. A teammate says "we don't need this, Python's GIL makes everything thread-safe." Is that true?</summary><div class="answer"><p>
+        No — this is a common and dangerous misconception. The GIL guarantees that individual bytecode
+        operations are atomic, but a logical operation like <code>d[key] = d.get(key, 0) + 1</code> compiles
+        to multiple bytecode instructions, and the interpreter can switch threads between them (it does so
+        periodically, not just on I/O). Without a lock, two threads can interleave mid-operation and lose
+        updates — classic race condition, GIL notwithstanding. The GIL protects the interpreter's internals,
+        not your application's logical invariants.</p></div><div class="followup">Follow-up: what CPython mechanism controls when a thread switch can happen (the "check interval" / switch interval)?</div></details>
+        <details class="qa"><summary>How would you benchmark and justify a decision to move a hot path from Python to a native extension (Rust/C) for a senior design review?</summary><div class="answer"><p>
+        Profile first (cProfile/py-spy) to confirm the hot path is actually CPU-bound Python-level work, not
+        I/O or a single slow query masquerading as "Python is slow." Quantify with realistic production-shaped
+        data, not microbenchmarks. Compare against the cheaper alternatives first — vectorizing with numpy,
+        algorithmic fix, caching — before reaching for a native extension, since that adds a build toolchain,
+        cross-platform wheel complexity, and a maintenance burden the team needs to own. Only justify the
+        extension once you can show the win is large and the simpler options are exhausted.</p></div><div class="followup">Follow-up: what's the operational cost of shipping a package with compiled extensions across platforms (manylinux wheels, etc.)?</div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment">
+        <span class="level-tag">Beginner (30-60 min)</span>
+        <h4>Scope & mutation bug hunt</h4>
+        <p>Write five small Python functions that each contain one classic "Python surprises a JS dev" bug:
+        a mutable default argument, a missing <code>nonlocal</code>, a shadowed builtin, an <code>is</code>
+        used where <code>==</code> was meant, and a loop variable leak. Then fix each one and write a one-line
+        comment explaining the root cause.</p>
+        <ul><li>Each function must be runnable standalone with a small <code>if __name__ == "__main__":</code> demo.</li>
+        <li>Comments must name the actual Python language rule involved (e.g., "default args evaluated once").</li></ul>
+        <p><strong>Acceptance criteria:</strong> Running the script shows the buggy behavior first (as a comment
+        or printed note), then the fixed version producing correct output.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>For the mutable default, call the buggy function 3 times in a loop and print the accumulating list each
+        time to make the bug visible before fixing it.</p></div></details>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Intermediate (2-4 hrs)</span>
+        <h4>GIL demonstration: threads vs processes vs asyncio</h4>
+        <p>Write three versions of a program that (a) downloads 10 URLs and (b) computes a CPU-heavy checksum
+        over a large byte string, for each of: plain sequential code, <code>threading</code>, and
+        <code>multiprocessing</code> (for the checksum part) / <code>asyncio</code> + <code>httpx</code> (for
+        the downloads). Time each version.</p>
+        <ul><li>Use <code>time.perf_counter()</code> around each run.</li>
+        <li>Print a results table: approach, task type (I/O vs CPU), wall-clock time.</li>
+        <li>Written conclusion (3-5 sentences): which combination won for which task, and why, in your own words.</li></ul>
+        <p><strong>Acceptance criteria:</strong> Your measured results should show threading helping for the
+        I/O task but not the CPU task, and multiprocessing helping for the CPU task.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>Use <code>hashlib.sha256</code> in a loop over chunks as a cheap CPU-bound stand-in if you don't want to
+        pull in a real workload. For downloads, httpbin.org/delay/1 endpoints simulate I/O wait without needing
+        real external services to be fast.</p></div></details>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Advanced (1-2 days)</span>
+        <h4>Build a tiny "translate my Node mental model" cheat tool</h4>
+        <p>Build a CLI (plain Python, no framework) that takes a short Node.js code snippet (as a file) with
+        recognizable patterns (a closure counter, a callback, a <code>Promise.all</code>, an Express route
+        handler) and prints the idiomatic Python equivalent plus a one-line explanation of the biggest
+        conceptual difference for that pattern. You don't need to actually parse JS AST — pattern-match on a
+        handful of recognizable snippet shapes you define yourself.</p>
+        <ul><li>Support at least 4 distinct JS patterns with distinct Python translations.</li>
+        <li>CLI takes a file path argument and prints formatted output.</li>
+        <li>Include your own test fixtures (sample .js snippets) and a pytest suite asserting the right translation is chosen per snippet.</li></ul>
+        <p><strong>Acceptance criteria:</strong> Running against each sample fixture produces correct, consistent
+        output, and the pytest suite passes. No full solution here — this is meant to force you to actually think about the mapping, not follow a recipe.</p>
+      </div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet"><ul>
+        <li>GIL = only one thread runs Python bytecode at a time per process; released during blocking I/O.</li>
+        <li>Threads help for I/O-bound work; use multiprocessing or native extensions for CPU-bound work.</li>
+        <li>Python is synchronous/blocking by default — nothing is non-blocking unless you write async code.</li>
+        <li>Type hints are not enforced at runtime by plain Python — use mypy/pyright or Pydantic for real checks.</li>
+        <li>No block scoping — only function and module scope; use <code>nonlocal</code>/<code>global</code> to mutate outer names.</li>
+        <li><code>==</code> is value equality; <code>is</code> is identity — never use <code>is</code> for value comparison.</li>
+        <li>Mutable default arguments are evaluated once at def time — default to <code>None</code> instead.</li>
+        <li>Free-threaded (no-GIL) CPython exists since 3.13 but is experimental, not the production default.</li>
+        <li>Imports resolve via <code>sys.path</code> + <code>sys.modules</code> cache, not a bundler graph.</li>
+      </ul></div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://docs.python.org/3/glossary.html#term-global-interpreter-lock">Python docs: Global Interpreter Lock glossary entry</a></li>
+        <li><a href="https://peps.python.org/pep-0703/">PEP 703 — Making the Global Interpreter Lock Optional</a></li>
+        <li><a href="https://docs.python.org/3/tutorial/classes.html#python-scopes-and-namespaces">Python docs: Scopes and Namespaces</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="index.html"><span class="dir">← Previous</span>Topic Overview</a>
+        <a class="next" href="02-data-structures.html"><span class="dir">Next →</span>Data Structures, Comprehensions, Generators</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · Python Intermediate</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "08-python-intermediate", chapterKey: "01-python-for-js-devs" });</script>
+</body>
+</html>

@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Background Jobs & Scheduling — Node.js Advanced — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">Node.js Advanced</a><span class="sep">›</span>Background Jobs & Scheduling</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>Background Jobs, Scheduling, and Queues</h1>
+      <p class="meta-line"><span>⏱ 2.5 hrs</span><span>📍 Chapter 8 of 9</span></p>
+      <p><strong>One-line summary:</strong> A queue doesn't make your job processing reliable by itself — reliability
+      comes from idempotency and a correctly designed retry/backoff strategy, and the single most expensive bug in
+      production job systems is a "retry" that silently double-charges a customer because nobody thought about
+      what happens when the job succeeds but the acknowledgment is lost.</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>Almost every production system eventually needs work done outside the request/response cycle: sending
+      emails, processing payments, generating reports, syncing with third parties. Senior engineers are expected
+      to design this layer with the same rigor as the API layer — understanding exactly-once vs at-least-once
+      delivery semantics, designing idempotent job handlers, and choosing retry/backoff strategies that don't
+      amplify an outage into a self-inflicted thundering herd. This is a frequent "design a system" interview
+      topic precisely because it exposes whether you understand distributed systems failure modes, not just a
+      queue library's API.</p>
+      <div class="box why"><h4>Why</h4><p>Almost all real-world queues (BullMQ/Redis, SQS, RabbitMQ) provide
+      <strong>at-least-once</strong> delivery, not exactly-once — a job can and will be delivered/processed more
+      than once under real failure conditions (worker crashes after processing but before acknowledging, network
+      partition, visibility timeout expiry). Treating a job handler as "it runs once" is the single most common
+      and costly assumption error in background job systems; the correct mental model is "this handler WILL run
+      more than once eventually — design it so that's safe."</p></div>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>Comfortable with async/await, Redis basics, and the error-handling patterns from earlier chapters. Related:
+      <a href="05-error-handling.html">Error Handling Strategy</a>, <a href="06-production-apis.html">Production APIs</a>,
+      <a href="09-scaling-node.html">Scaling Node in Production</a>.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="basics">Queues vs cron vs event-driven triggers</h3>
+      <p><strong>Cron/scheduled jobs</strong> run on a time trigger regardless of external events (nightly report
+      generation, hourly cache warm) — simple, but naively run on every instance in a horizontally scaled
+      deployment unless you add distributed locking, causing duplicate execution. <strong>Queues</strong> (BullMQ
+      on Redis, SQS, RabbitMQ) decouple job creation from job execution: a producer enqueues work, independent
+      workers pull and process it, giving you natural load leveling, retry semantics, and horizontal worker
+      scaling. <strong>Event-driven</strong> triggers (a DB change, a webhook, a message on a pub/sub topic) kick
+      off work reactively rather than on a schedule — often implemented by producing onto the same queue
+      infrastructure once the triggering event is detected, keeping the processing layer uniform regardless of
+      what triggered it.</p>
+
+      <h3 id="internals">Idempotency: the property that makes retries safe</h3>
+      <p>A job handler is <strong>idempotent</strong> if processing the same job twice (with the same input)
+      produces the same end state as processing it once — no duplicate side effects. This is what makes
+      at-least-once delivery survivable: if your queue might redeliver a job, idempotency is what prevents that
+      redelivery from, say, charging a customer's card twice. Practical techniques: an idempotency key (a unique
+      ID per logical operation, stored and checked before executing — "have I already processed job X?"),
+      designing the side effect itself to be naturally idempotent (an upsert instead of an insert, a "set the
+      final state" instead of "increment a counter"), or using the target system's own idempotency support (most
+      payment APIs accept an idempotency key directly). Without one of these, every retry is a correctness risk,
+      not just a performance cost.</p>
+
+      <h3 id="advanced">Retry strategy, dead-letter queues, and scheduling precision</h3>
+      <p>A naive retry-immediately-on-failure strategy under a partial outage (e.g., a downstream API degraded,
+      not fully down) creates a <strong>thundering herd</strong>: every failed job retries instantly, hammering the
+      already-struggling dependency harder, often making the outage worse. <strong>Exponential backoff with
+      jitter</strong> (each retry waits roughly double the previous delay, plus randomization) spreads retry load
+      out over time and avoids synchronized retry storms across many workers. After a bounded number of retries, a
+      job should move to a <strong>dead-letter queue</strong> (DLQ) rather than retrying forever — a DLQ is a
+      holding area for jobs that have exhausted retries, visible for manual inspection/replay rather than silently
+      lost or infinitely retried. For scheduling, cron-style time triggers in a multi-instance deployment need a
+      <strong>distributed lock</strong> (e.g., Redis-based, or a scheduler library's built-in single-active-instance
+      guarantee) so the same scheduled job doesn't run N times, once per instance, at the same tick.</p>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>BullMQ (Redis-backed) models a job's lifecycle as a state machine: waiting → active (a worker picked it
+      up) → completed or failed. A failed job with retries remaining goes back to waiting after a computed backoff
+      delay; once retries are exhausted, it moves to the failed set, which you can configure to also populate a
+      DLQ for visibility. Workers use a "lock" (a per-job lease with a TTL) while processing — if a worker crashes
+      mid-job, the lock expires and another worker can pick the job back up, which is exactly the mechanism that
+      produces at-least-once (not exactly-once) semantics: the first worker may have actually completed the side
+      effect right before crashing, before it could mark the job complete, so the second worker's execution is a
+      genuine duplicate your handler must tolerate.</p>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+flowchart TD
+  A[Job enqueued] --> B[Waiting]
+  B --> C[Worker picks up job, acquires lock]
+  C --> D{Processing succeeds?}
+  D -->|Yes| E[Mark completed, release lock]
+  D -->|No| F{Retries remaining?}
+  F -->|Yes| G[Backoff with jitter, back to Waiting]
+  F -->|No| H[Move to Dead-Letter Queue]
+  C -.worker crashes mid-job.-> I[Lock TTL expires]
+  I --> J[Another worker picks up same job = duplicate delivery]
+      </div>
+      <div class="mermaid">
+sequenceDiagram
+  participant P as Producer (API)
+  participant Q as Queue (Redis/BullMQ)
+  participant W1 as Worker 1
+  participant W2 as Worker 2
+  P->>Q: Enqueue job (idempotencyKey=abc123)
+  Q->>W1: Deliver job
+  W1->>W1: Check idempotencyKey abc123 - not seen
+  W1->>W1: Execute side effect, record abc123 as done
+  Note over W1: Worker crashes before ack
+  Q->>W2: Redeliver same job (lock expired)
+  W2->>W2: Check idempotencyKey abc123 - ALREADY DONE
+  W2->>Q: Ack without re-executing side effect
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-typescript">// --- BullMQ: producer with idempotency key + worker with backoff ---
+import { Queue, Worker } from 'bullmq';
+
+const emailQueue = new Queue('emails', { connection: redisConnection });
+
+async function enqueueWelcomeEmail(userId: string) {
+  await emailQueue.add(
+    'welcome-email',
+    { userId },
+    {
+      jobId: \`welcome-\${userId}\`, // BullMQ dedupes by jobId - a cheap idempotency mechanism at enqueue time
+      attempts: 5,
+      backoff: { type: 'exponential', delay: 2000 }, // 2s, 4s, 8s, 16s, 32s + jitter handled internally
+      removeOnComplete: true,
+      removeOnFail: false, // keep failed jobs for DLQ-style inspection
+    },
+  );
+}
+
+const worker = new Worker('emails', async (job) => {
+  const { userId } = job.data;
+
+  // Idempotency check INSIDE the handler too - jobId dedup only protects enqueue-time duplicates,
+  // not "this specific execution attempt already completed the side effect before crashing."
+  const alreadySent = await emailLog.wasSent(userId, 'welcome-email');
+  if (alreadySent) return; // safe no-op on redelivery
+
+  await emailProvider.send(userId, 'welcome-email');
+  await emailLog.markSent(userId, 'welcome-email'); // record BEFORE returning, not after - see gotcha below
+}, { connection: redisConnection, concurrency: 10 });
+
+worker.on('failed', (job, err) => {
+  logger.error({ jobId: job?.id, err, attemptsMade: job?.attemptsMade }, 'job failed');
+});
+
+
+// --- BAD: increment-based side effect, not idempotent ---
+async function badChargeHandler(job: Job) {
+  await db.query('UPDATE wallets SET balance = balance - $1 WHERE user_id = $2', [job.data.amount, job.data.userId]);
+  // Redelivered job = double charge. No idempotency key, no upsert, no safeguard.
+}
+
+// --- GOOD: idempotency key checked against a ledger before mutating state ---
+async function goodChargeHandler(job: Job) {
+  const { idempotencyKey, userId, amount } = job.data;
+  const existing = await ledger.findByIdempotencyKey(idempotencyKey);
+  if (existing) return; // already processed, safe no-op
+  await db.transaction(async (tx) => {
+    await tx.query('INSERT INTO ledger (idempotency_key, user_id, amount) VALUES ($1, $2, $3)', [idempotencyKey, userId, amount]);
+    await tx.query('UPDATE wallets SET balance = balance - $1 WHERE user_id = $2', [amount, userId]);
+  });
+}
+
+
+// --- Distributed-lock-safe cron using a scheduler with single-active-instance support ---
+import { Queue } from 'bullmq';
+const scheduler = new Queue('nightly-report', { connection: redisConnection });
+await scheduler.add('generate', {}, { repeat: { pattern: '0 2 * * *' }, jobId: 'nightly-report-singleton' });
+// BullMQ's repeatable jobs are deduped across all instances sharing the same Redis - only one actual
+// job is created per tick regardless of how many app instances call this on startup.
+</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4><p>A billing worker processed "charge customer" jobs by directly
+      decrementing a wallet balance column. During a Redis failover, several in-flight jobs were redelivered after
+      their original worker's lock expired mid-processing (the worker had actually completed the DB write just
+      before the connection dropped, so it never got to ack). Customers were double-charged for the affected
+      window — a production incident requiring manual refunds and a public post-mortem. The fix: every
+      money-moving job now requires a caller-supplied idempotency key, checked against a ledger table inside a
+      transaction before any balance mutation, with the ledger insert and the balance update committed atomically
+      — a redelivered job with the same idempotency key becomes a safe no-op instead of a duplicate charge.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Marking a job "complete" (or recording its side effect as done) in a
+      way that can itself fail or be skipped after the actual side effect already happened — e.g., performing the
+      real action, then crashing before writing the "done" record. On redelivery, the handler re-checks "already
+      done?", sees false, and repeats the side effect. The side effect and its "done" marker must be atomic
+      (ideally the same DB transaction) or the idempotency check is theater.</p></div>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Running a naive <code>setInterval</code>-based "cron" directly in
+      application code across multiple horizontally-scaled instances with no distributed lock — every instance
+      fires the job independently at the same tick, causing N-times duplicate execution that often isn't noticed
+      until it causes a real problem (N duplicate report emails, N duplicate API calls to a partner).</p></div>
+      <ul>
+        <li>Assume every job handler WILL run more than once eventually — design for it, don't special-case it as a rare edge case.</li>
+        <li>Use exponential backoff with jitter for retries, never immediate retry-on-failure for anything calling an external dependency.</li>
+        <li>Always configure a bounded max retry count with a DLQ — infinite retry of a permanently-broken job wastes resources and hides the failure from anyone who should act on it.</li>
+        <li>Record idempotency state and the side effect itself in the same atomic transaction, not as two separate steps.</li>
+        <li>Monitor queue depth and job age, not just success/failure counts — a growing backlog with no failures is still an incident (workers can't keep up).</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>In-process setInterval/node-cron</td><td>Single-instance deployments, truly non-critical tasks</td><td>Any horizontally-scaled deployment, anything where duplicate runs matter</td><td>BullMQ repeatable jobs / a dedicated scheduler with distributed locking</td></tr>
+        <tr><td>Redis-backed queue (BullMQ)</td><td>Moderate scale, already using Redis, need rich retry/backoff/DLQ semantics</td><td>Extreme scale needing managed infra guarantees, or no Redis dependency wanted</td><td>Managed cloud queue (SQS, Cloud Tasks)</td></tr>
+        <tr><td>Managed cloud queue (SQS/RabbitMQ/Cloud Tasks)</td><td>Need managed durability/scaling guarantees, multi-language consumers</td><td>Simple needs where operational overhead of a separate managed service isn't justified</td><td>Redis-backed queue</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic"><h4>Basic</h4>
+      <details class="qa"><summary>What does "at-least-once delivery" mean, and why do most queues provide this instead of exactly-once?</summary><div class="answer"><p>At-least-once means a message/job may be delivered and processed more than once under failure conditions (worker crash, network partition). Exactly-once delivery is extremely difficult to guarantee in distributed systems without heavy coordination overhead, so most practical queues choose at-least-once and push the responsibility for safe duplicate handling onto the consumer via idempotency.</p></div><div class="followup">Follow-up: what would it take to approximate exactly-once in practice?</div></details>
+      <details class="qa"><summary>What is an idempotent job handler?</summary><div class="answer"><p>A handler where processing the same job twice with the same input produces the same end state as processing it once, with no duplicate side effects — this is what makes it safe to tolerate at-least-once delivery.</p></div><div class="followup">Follow-up: give a concrete example of a non-idempotent operation and how to make it idempotent.</div></details>
+      <details class="qa"><summary>What problem does exponential backoff with jitter solve?</summary><div class="answer"><p>It prevents a thundering herd: if every failed job retried immediately (or at the same fixed delay), many workers would retry in a synchronized burst, potentially worsening an already-degraded downstream dependency. Exponential growth spreads retries out over time, and jitter desynchronizes workers that would otherwise retry at the same moment.</p></div><div class="followup">Follow-up: what's a reasonable backoff ceiling, and why not let delays grow unbounded?</div></details>
+      <details class="qa"><summary>What is a dead-letter queue (DLQ) and why is it necessary?</summary><div class="answer"><p>A holding area for jobs that have exhausted their retry attempts — instead of retrying forever (wasting resources, hiding a permanent failure) or being silently dropped (losing the work and the failure signal), they're moved somewhere visible for manual inspection, alerting, or replay.</p></div><div class="followup">Follow-up: what kind of failure should go straight to a DLQ without retrying at all?</div></details>
+      <details class="qa"><summary>Why is a naive setInterval-based cron job unsafe in a horizontally scaled deployment?</summary><div class="answer"><p>Each instance runs its own independent timer, so a job meant to run once per interval actually runs N times (once per instance) at roughly the same moment, unless a distributed lock or a queue-based scheduler with built-in dedup prevents it.</p></div><div class="followup">Follow-up: how does BullMQ's repeatable job feature avoid this problem?</div></details>
+      <details class="qa"><summary>What's the difference between a queue-based job system and a purely event-driven trigger?</summary><div class="answer"><p>A queue decouples producer and consumer with durable storage and retry semantics built in; an event-driven trigger reacts to something happening (a webhook, a DB change) but in practice is often implemented by producing onto a queue once the event is detected, so the processing/retry layer is uniform regardless of trigger source.</p></div><div class="followup">Follow-up: why would you still want a queue even for event-driven work rather than processing inline in the event handler?</div></details>
+      </div>
+      <div class="qa-level medium"><h4>Medium</h4>
+      <details class="qa"><summary>Design an idempotent payment-charging job handler end to end, including what happens on redelivery.</summary><div class="answer"><p>The caller supplies (or the system generates deterministically from the logical operation, e.g., orderId) an idempotency key at enqueue time. The handler, inside a single DB transaction, first checks a ledger table for that key — if found, it's a safe no-op (already processed); if not found, it inserts the ledger record AND performs the balance mutation atomically, so a crash between those two steps is impossible (they're the same transaction). On redelivery after a crash, the same check-then-act logic correctly identifies the prior attempt (if it committed) or safely retries from scratch (if the transaction never committed).</p></div><div class="followup">Follow-up: what if the side effect is a call to an external payment API that doesn't support idempotency keys itself?</div></details>
+      <details class="qa"><summary>Why is "the job completed but the queue didn't receive the ack" a dangerous edge case, and how do idempotency keys address it?</summary><div class="answer"><p>If a worker performs the real side effect, then crashes or loses connectivity before acknowledging completion to the queue, the queue will redeliver the job to another worker, assuming it failed — producing a genuine duplicate execution. Idempotency keys address this not by preventing the redelivery (you generally can't, and shouldn't try to, since you can't distinguish "ack lost" from "actually failed" from the queue's perspective) but by making the duplicate execution harmless: the second worker's idempotency check finds the side effect already recorded and no-ops.</p></div><div class="followup">Follow-up: could you solve this by making the ack itself more reliable instead? Why or why not fully?</div></details>
+      <details class="qa"><summary>How would you design monitoring/alerting for a production job queue system, beyond simple success/failure counts?</summary><div class="answer"><p>Track queue depth over time (a growing backlog signals workers can't keep up, even with zero failures), job age/time-in-queue (a job sitting unprocessed for an abnormal duration signals a stuck worker pool or a poison-pill job), DLQ size growth rate, and per-job-type failure rate (to isolate whether a single job type's downstream dependency is degraded versus a systemic worker issue). Alerting purely on failure count misses "silently falling behind" scenarios entirely.</p></div><div class="followup">Follow-up: what specific metric would best detect a single poison-pill job blocking an entire queue?</div></details>
+      <details class="qa"><summary>Compare using a job's own jobId for deduplication (as in the BullMQ example) versus an application-level idempotency key checked inside the handler. Are they redundant?</summary><div class="answer"><p>No — jobId-based dedup at enqueue time prevents the same logical job from being added to the queue twice (e.g., two API requests both trying to enqueue "send welcome email for user X"). The in-handler idempotency key protects against a different failure mode: the SAME already-enqueued job being delivered and partially/fully processed more than once due to worker crashes or lock expiry. You need both — one protects against duplicate enqueuing, the other against duplicate processing of a single enqueued job.</p></div><div class="followup">Follow-up: could you rely on jobId dedup alone if your queue guaranteed exactly-once processing? What would you still be missing?</div></details>
+      <details class="qa"><summary>A scheduled nightly job needs to run exactly once across a 10-instance deployment. What are two different correct ways to guarantee this, and their tradeoffs?</summary><div class="answer"><p>(1) Use a queue-based scheduler with built-in dedup across instances sharing the same backing store (e.g., BullMQ repeatable jobs on shared Redis) — simplest if you already have the infra, and the queue itself handles the single-execution guarantee. (2) Run the schedule from a single designated instance/process (a separate lightweight "scheduler" service, not part of the horizontally-scaled app fleet) that enqueues the actual work — adds an extra moving part (a single point that must itself be monitored for liveness) but cleanly separates "when to run" from "how to execute," which some teams prefer architecturally.</p></div><div class="followup">Follow-up: what happens to approach (2) if that single scheduler instance crashes at the exact trigger time?</div></details>
+      </div>
+      <div class="qa-level advanced"><h4>Advanced</h4>
+      <details class="qa"><summary>Design a background job architecture for a multi-tenant SaaS processing customer-uploaded CSV imports (could be millions of rows) that must be resumable, idempotent, and give the customer visibility into progress. Walk through the full design.</summary><div class="answer"><p>Split the import into a parent job (tracks overall status, total/processed row counts in a DB record the customer-facing UI polls) and many child jobs (one per chunk of N rows), each child job idempotent via a deterministic key (tenantId + importId + chunk index) checked against a processed-chunks table before executing. On worker crash mid-chunk, the chunk-level idempotency means redelivery safely reprocesses only that chunk, not the whole import. The parent job's progress is updated via atomic increments keyed by chunk completion, not by trusting child jobs to self-report reliably, and the overall import is marked complete only when all expected chunks are confirmed processed, which naturally supports resumability (can enumerate incomplete chunks and re-enqueue just those after an outage).</p></div><div class="followup">Follow-up: how would you handle a single malformed row within an otherwise-valid chunk without failing the whole chunk?</div></details>
+      <details class="qa"><summary>Critique: "We added retries with exponential backoff, so our job system is now resilient to downstream outages." What's missing from this claim?</summary><div class="answer"><p>Retries with backoff handle transient failures well but can make a sustained outage worse if not paired with a circuit breaker — without one, workers keep attempting (even if spaced out) against a definitely-down dependency, consuming worker capacity and potentially contributing load right as the dependency starts recovering (a "retry storm" at the moment of recovery, even with jitter, if enough jobs backed up during the outage). True resilience needs: backoff for genuinely transient blips, a circuit breaker to stop attempting entirely during a confirmed sustained outage, and separate handling for "fail fast and DLQ" versus "worth retrying" based on the error type (a 400 Bad Request downstream should never retry; a 503 might).</p></div><div class="followup">Follow-up: how would you distinguish a transient failure from a sustained outage programmatically, not just by error type?</div></details>
+      <details class="qa"><summary>How would you migrate a production job queue system from one backing technology to another (e.g., BullMQ/Redis to SQS) with zero job loss and no duplicate processing during the cutover, given jobs are actively flowing?</summary><div class="answer"><p>Run both systems in parallel during a transition window: new jobs are dual-written to both queues (or written only to the new one once confidence is established), while a drain process ensures the old queue is fully emptied by its existing workers before being decommissioned. Workers on both systems must share the same idempotency mechanism (the same ledger/processed-state store) so that if a job somehow gets processed via both paths during the transition, the idempotency check still prevents a duplicate side effect — this is the actual safety net, not careful timing alone, since careful timing alone is fragile under real operational conditions.</p></div><div class="followup">Follow-up: how would you validate the migration succeeded before fully decommissioning the old system?</div></details>
+      <details class="qa"><summary>A job handler calls three downstream services in sequence (reserve inventory, charge payment, send confirmation) and isn't wrapped in a distributed transaction. How do you make this safe under at-least-once redelivery and partial failure?</summary><div class="answer"><p>This is a saga pattern problem: each step needs its own idempotency key and, critically, a defined compensating action if a later step fails (e.g., if payment charging fails after inventory was reserved, you need a "release inventory" compensation, not just an error log). Structure the handler so it can resume from wherever it left off on redelivery — check what's already been done (inventory reserved? payment charged? confirmation sent?) via state recorded after each step, rather than re-running the whole sequence from scratch, which would double-reserve inventory or double-charge if steps 1 and 2 already succeeded before a crash before step 3.</p></div><div class="followup">Follow-up: how would you decide which steps need compensating actions versus which can simply be safely retried?</div></details>
+      <details class="qa"><summary>How would you detect and handle a "poison pill" job — one that will never succeed regardless of retries (e.g., a malformed payload causing a deserialization crash) — before it exhausts your entire retry budget and delays other jobs behind it?</summary><div class="answer"><p>Classify errors at the handler level: deserialization/validation errors on the job payload itself are not transient and should fail fast to the DLQ on the first attempt, never consuming the configured retry budget, whereas errors from calling external dependencies are plausibly transient and should go through normal backoff. This requires the retry configuration to be error-aware rather than blanket (BullMQ supports this via throwing a specific non-retryable error type or checking error properties in a custom backoff strategy), and separately, queue-level concurrency/isolation (e.g., per-job-type worker pools) ensures one poison-pill-heavy job type doesn't starve worker capacity for unrelated, healthy job types.</p></div><div class="followup">Follow-up: how would you design the error classification to be maintainable as new downstream dependencies are added over time?</div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment"><span class="level-tag">Beginner (30-60 min)</span>
+      <h4>Build an idempotent job handler with BullMQ</h4>
+      <p>Set up a BullMQ queue and worker processing "send notification" jobs. Implement idempotency via a
+      processed-jobs table/set, and deliberately simulate redelivery (requeue the same job manually) to prove it
+      doesn't send a duplicate notification.</p>
+      <ul><li>Must configure retries with exponential backoff.</li><li>Must demonstrate the idempotency check preventing a duplicate side effect on simulated redelivery.</li></ul>
+      <p><strong>Acceptance criteria:</strong> Manually re-adding the same job twice results in exactly one notification being "sent" (logged), not two.</p>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>Use a simple in-memory Set keyed by jobId for this exercise — the important part is the check-before-act pattern, not the storage technology.</p></div></details>
+      <p><strong>Bonus:</strong> Add a DLQ handler that logs any job exhausting all retries to a separate "failed-jobs" list.</p>
+      </div>
+      <div class="assignment"><span class="level-tag">Intermediate (2-4 hrs)</span>
+      <h4>Build a resumable chunked import job</h4>
+      <p>Implement a CSV import feature split into a parent job and multiple child chunk jobs (per the advanced
+      interview question's design), with per-chunk idempotency and a progress record the "customer" can poll. Kill
+      a worker process mid-import and show the import correctly resumes without reprocessing completed chunks.</p>
+      <ul><li>Must track progress via chunk completion, not self-reported child job success alone.</li><li>Must demonstrate a killed worker's in-flight chunk being safely picked up by another worker without duplicating already-committed rows.</li></ul>
+      <p><strong>Acceptance criteria:</strong> After a simulated crash mid-import, the final imported row count exactly matches the source file's row count — no duplicates, no gaps.</p>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>Use a processed-chunks table with a unique constraint on (importId, chunkIndex) so a duplicate chunk completion attempt fails cleanly rather than double-counting.</p></div></details>
+      <p><strong>Bonus:</strong> Add a per-row error path that quarantines malformed rows into a separate table instead of failing the whole chunk.</p>
+      </div>
+      <div class="assignment"><span class="level-tag">Advanced (1-2 days)</span>
+      <h4>Implement a saga-style multi-step job with compensation</h4>
+      <p>Build the inventory-reserve / payment-charge / confirmation-send sequence from the advanced interview
+      question as a single resumable job handler, with per-step idempotency and a compensating action for payment
+      failure after inventory reservation. Simulate a payment failure after successful inventory reservation and
+      verify the inventory is correctly released.</p>
+      <ul><li>Must record state after each step so redelivery resumes from the correct point rather than restarting the whole sequence.</li><li>Must correctly distinguish retryable errors (retry the step) from terminal errors (trigger compensation).</li></ul>
+      <p><strong>Acceptance criteria:</strong> Simulated payment failure results in inventory being released exactly once, with no double-reservation if the job is redelivered during the compensation itself.</p>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>Model the job's state as an explicit enum (RESERVED, CHARGED, CONFIRMED, COMPENSATING, COMPENSATED) persisted after each transition, and have the handler's first action be reading current state to decide what to do next.</p></div></details>
+      <p><strong>Bonus:</strong> Write a short note on how this would change if the three steps were calls to three different third-party services with inconsistent idempotency key support.</p>
+      </div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet"><ul>
+        <li>Most real queues are at-least-once, not exactly-once — design every handler assuming it WILL run more than once.</li>
+        <li>Idempotency = same end state whether a job runs once or N times; achieved via idempotency keys, upserts, or check-then-act inside one transaction.</li>
+        <li>The side effect and its "done" marker must be atomic — recording completion separately from the action reopens the duplicate-execution hole.</li>
+        <li>Exponential backoff + jitter prevents thundering herds on retry; pair with a circuit breaker for sustained outages, not just backoff.</li>
+        <li>Bound retries and route exhausted jobs to a dead-letter queue — never retry forever, never silently drop.</li>
+        <li>Classify errors: terminal/validation errors should fail fast to the DLQ; transient dependency errors should retry with backoff.</li>
+        <li>Naive in-process cron (setInterval) duplicates N times across N horizontally-scaled instances — use a distributed-lock-aware scheduler.</li>
+        <li>Monitor queue depth and job age, not just failure counts — a silently growing backlog is an incident even with zero failures.</li>
+        <li>Multi-step job sequences without a distributed transaction need the saga pattern: per-step state tracking plus compensating actions for partial failure.</li>
+      </ul></div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://docs.bullmq.io/">BullMQ documentation</a></li>
+        <li><a href="https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-message-lifecycle.html">AWS SQS: message lifecycle and visibility timeout</a></li>
+        <li><a href="https://stripe.com/docs/api/idempotent_requests">Stripe API docs: idempotent requests</a></li>
+        <li><a href="https://microservices.io/patterns/data/saga.html">microservices.io: the Saga pattern</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="07-authentication.html"><span class="dir">← Previous</span>Authentication (JWT/OAuth2/SSO)</a>
+        <a class="next" href="09-scaling-node.html"><span class="dir">Next →</span>Scaling Node in Production</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · Node.js Advanced</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-typescript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "04-nodejs-advanced", chapterKey: "08-background-jobs" });</script>
+</body>
+</html>

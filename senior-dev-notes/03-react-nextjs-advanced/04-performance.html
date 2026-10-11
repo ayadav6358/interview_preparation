@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>React Performance — React & Next.js Advanced — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">React &amp; Next.js Advanced</a><span class="sep">›</span>React Performance</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>React Performance: memo, useMemo, useCallback, Profiling, Virtualization</h1>
+      <p class="meta-line"><span>⏱ 2.5 hrs</span><span>📍 Chapter 4 of 11</span></p>
+      <p><strong>One-line summary:</strong> React performance work is measure-first, fix-the-cause: almost every
+      real-world slowdown is either an unnecessary re-render cascade, an expensive render of too many DOM
+      nodes, or a genuinely expensive computation — and each has a distinct, specific fix.</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>Interviewers test this by handing you a janky component and asking you to fix it. The senior-level
+      answer always starts with the Profiler, not with sprinkling <code>memo</code> everywhere — demonstrating
+      that process is as important as knowing the APIs.</p>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>Read <a href="01-react-internals.html">React Internals</a> first — this chapter is the applied version
+      of the bailout mechanics described there. Related: <a href="05-concurrent-react.html">Concurrent React</a>.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="three-perf-problems">The three distinct performance problems</h3>
+      <ul>
+        <li><strong>Unnecessary re-renders:</strong> a component re-renders when its output would be identical.
+        Fix: stabilize props/state identity so <code>memo</code> bailouts can work, or restructure component
+        boundaries so state lives closer to where it changes.</li>
+        <li><strong>Expensive renders:</strong> a component legitimately needs to re-render but does too much
+        work doing so (huge DOM subtree, thousands of list items). Fix: virtualization, code-splitting the
+        subtree, or reducing DOM node count.</li>
+        <li><strong>Expensive computation:</strong> a pure function (sort, filter, aggregate) is genuinely slow
+        and re-runs every render. Fix: <code>useMemo</code>, or move the work off the main thread (Web Worker)
+        if it's heavy enough.</li>
+      </ul>
+      <p>Misdiagnosing which bucket a slowdown belongs to is the most common mistake — wrapping an expensive
+      render in <code>useMemo</code> does nothing (useMemo only caches a <em>value</em>, not a render), and
+      virtualizing a list that's already short wastes engineering time on a non-problem.</p>
+
+      <h3 id="memo-mechanics">memo, useMemo, useCallback — what they actually buy you</h3>
+      <p><code>React.memo(Component)</code> makes React compare new props to old (shallow <code>Object.is</code>
+      per prop, or a custom comparator) before calling the component function, bailing out if equal — see
+      Ch. 1 for the fiber-level mechanics. <code>useMemo(fn, deps)</code> caches the <em>return value</em> of
+      <code>fn</code> across renders while deps are unchanged; it does not prevent the component itself from
+      re-rendering. <code>useCallback(fn, deps)</code> is literally <code>useMemo(() => fn, deps)</code> — it
+      exists purely to give a function stable identity, which only matters if that identity feeds into a
+      dependency array or a memoized child's props.</p>
+
+      <h3 id="profiler">Using the React DevTools Profiler correctly</h3>
+      <p>Record a profiling session around the exact interaction that feels slow (not a full page load). The
+      flame graph shows every fiber that rendered during each commit, color-coded by render duration, with a
+      "why did this render" panel per component (props changed / state changed / parent rendered / context
+      changed / hooks changed). This is the single fastest way to confirm or deny a hypothesis about what's
+      actually re-rendering — guessing is a wasted interview signal.</p>
+
+      <h3 id="virtualization">Virtualization: rendering only what's visible</h3>
+      <p>For a list with thousands of rows, rendering all of them creates thousands of DOM nodes even though
+      only ~20 are visible in the viewport at once — both the initial render and every scroll-triggered
+      re-render pay that cost. Virtualization (via <code>@tanstack/react-virtual</code> or
+      <code>react-window</code>) renders only the rows currently in (and slightly beyond) the viewport,
+      measuring/tracking scroll offset and absolutely positioning a small rendered "window" of rows inside a
+      correctly-sized scroll container, recycling DOM nodes as the window moves.</p>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>A windowed/virtualized list keeps a single scroll container with a total height equal to
+      <code>rowCount × rowHeight</code> (or a measured estimate for variable-height rows), but only mounts
+      fiber subtrees for rows whose index falls in <code>[scrollTop / rowHeight - overscan, (scrollTop +
+      viewportHeight) / rowHeight + overscan]</code>. As the user scrolls, the library recomputes this range on
+      each scroll event (throttled to animation frames) and React's own reconciliation handles mounting newly
+      visible rows and unmounting ones that left the window — keyed by stable row ID so state doesn't leak
+      across recycled positions (the same key-identity concern from Ch. 1).</p>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+flowchart TD
+  A[Component feels slow] --> B[Profile the exact interaction]
+  B --> C{What does the flame graph show?}
+  C -->|Component re-rendered unnecessarily| D[Stabilize props/state identity + memo]
+  C -->|Component rendered correctly but slowly, many DOM nodes| E[Virtualize the list]
+  C -->|A pure computation inside render is slow| F[useMemo, or move off main thread]
+  C -->|Render itself is fast but commit/paint is slow| G[Reduce DOM complexity / CSS cost]
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-jsx">// Diagnosing: useMemo does NOT stop the component from rendering
+function Row({ item, onSelect }) {
+  // This memoizes the *value* `total`, not the render of <Row>.
+  // If Row's props change for any other reason, Row still re-renders;
+  // `total` just won't be recomputed if `item.qty`/`item.price` didn't change.
+  const total = useMemo(() => item.qty * item.price, [item.qty, item.price]);
+  return <li onClick={() => onSelect(item.id)}>{item.name}: {total}</li>;
+}
+
+// To actually stop Row from re-rendering when siblings change, memo + stable callback:
+const MemoRow = memo(function Row({ item, onSelect }) {
+  const total = useMemo(() => item.qty * item.price, [item.qty, item.price]);
+  return <li onClick={() => onSelect(item.id)}>{item.name}: {total}</li>;
+});
+
+function List({ items }) {
+  // useCallback here matters ONLY because MemoRow is memoized and receives
+  // this function as a prop -- without memo on Row, this useCallback is dead weight.
+  const handleSelect = useCallback((id) => console.log("selected", id), []);
+  return <ul>{items.map(item => <MemoRow key={item.id} item={item} onSelect={handleSelect} />)}</ul>;
+}
+
+// Virtualization with TanStack Virtual for a 50,000-row list
+import { useVirtualizer } from "@tanstack/react-virtual";
+import { useRef } from "react";
+
+function VirtualizedTable({ rows }) {
+  const parentRef = useRef(null);
+  const virtualizer = useVirtualizer({
+    count: rows.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => 40, // px per row
+    overscan: 8,
+  });
+
+  return (
+    <div ref={parentRef} style={{ height: 600, overflow: "auto" }}>
+      <div style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
+        {virtualizer.getVirtualItems().map(vRow => (
+          <div
+            key={rows[vRow.index].id}
+            style={{ position: "absolute", top: 0, left: 0, width: "100%",
+                     height: vRow.size, transform: `translateY(${vRow.start}px)` }}
+          >
+            {rows[vRow.index].name}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4>
+      <p>An internal admin tool rendering a 3,000-row order table (unvirtualized) took ~1.8s to become
+      interactive and janked on every filter keystroke. Profiling showed two separate problems stacked
+      together: (1) the filter input and the table shared a parent, so every keystroke re-rendered all 3,000
+      row components even though only the filtered subset changed, and (2) even the filtered render mounted
+      hundreds of real DOM nodes per keystroke. Fix: virtualized the table (only ~20 DOM rows ever mounted) and
+      moved the filter input's state into a sibling using <code>useDeferredValue</code> (Ch. 5) so typing stayed
+      responsive while the filtered list update was deprioritized. Interaction-to-next-paint dropped from
+      ~400ms to under 50ms, measured with the Profiler and Chrome's Performance panel.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4>
+      <p>Wrapping everything in <code>memo</code>/<code>useMemo</code>/<code>useCallback</code> "just in case"
+      has a real cost: every memoized value needs a comparison each render, and memoized components still
+      re-render when context or state they depend on changes — so unmeasured blanket memoization often adds
+      complexity and a small constant overhead without fixing anything. Profile first.</p></div>
+      <ul>
+        <li>Memoizing a component whose props change every render anyway (inline object/array/function props) — the comparison always fails, pure overhead.</li>
+        <li>Virtualizing a 50-row list — the engineering cost exceeds the (nonexistent) performance problem.</li>
+        <li>Using <code>useMemo</code> to "fix" a slow component render instead of a slow computation — it does nothing for render cost.</li>
+        <li>Not measuring before/after — "I added memo so it's faster" without Profiler numbers is not evidence.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>memo</td><td>Expensive child re-rendering with stable prop identity, confirmed via Profiler</td><td>Props change every render anyway</td><td>Fix prop identity, or restructure state location</td></tr>
+        <tr><td>useMemo</td><td>Genuinely expensive pure computation (sorting/filtering large arrays, derived aggregates)</td><td>Cheap computation — overhead exceeds savings</td><td>Compute inline</td></tr>
+        <tr><td>Virtualization</td><td>Lists/grids with hundreds+ of rows</td><td>Short lists; adds complexity (variable height, a11y focus management) for no gain</td><td>Pagination</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic"><h4>Basic</h4>
+      <details class="qa"><summary>What does React.memo do?</summary><div class="answer"><p>Skips re-rendering a component if its props are shallow-equal to the previous render's props (or pass a custom comparator), by bailing out during the fiber's beginWork step.</p></div><div class="followup">Follow-up: Does memo help if the component re-renders due to its own internal state change?</div></details>
+      <details class="qa"><summary>What's the difference between useMemo and useCallback?</summary><div class="answer"><p>useMemo caches a computed value; useCallback caches a function reference. useCallback(fn, deps) is equivalent to useMemo(() => fn, deps).</p></div><div class="followup">Follow-up: When does a stable function reference actually matter?</div></details>
+      <details class="qa"><summary>Why would you virtualize a list?</summary><div class="answer"><p>To avoid mounting DOM nodes for off-screen items, which otherwise costs memory and render/commit time proportional to total item count rather than visible count.</p></div><div class="followup">Follow-up: What's the tradeoff of virtualizing vs. paginating?</div></details>
+      <details class="qa"><summary>How do you find out why a component re-rendered?</summary><div class="answer"><p>React DevTools Profiler's "render reasons" panel, or manual console logging of props/state between renders, or `why-did-you-render` library in dev.</p></div><div class="followup">Follow-up: What does the Profiler flame graph's color intensity represent?</div></details>
+      <details class="qa"><summary>Does wrapping a component in useMemo make it render faster?</summary><div class="answer"><p>No — useMemo caches a value, not a render. To skip a component's render entirely you need memo (or avoid re-rendering the parent in the first place).</p></div><div class="followup">Follow-up: What's an example where this confusion leads to a wasted optimization?</div></details>
+      </div>
+      <div class="qa-level medium"><h4>Medium</h4>
+      <details class="qa"><summary>You added React.memo to a child component but it still re-renders every time. Walk through the likely causes.</summary><div class="answer"><p>Most likely an inline prop (object/array/function literal) created fresh every parent render breaking shallow equality; also possible: the child reads a Context whose value changed, or the child has its own internal state update, or the parent passes `children` as JSX which is itself a new element reference each render.</p></div><div class="followup">Follow-up: Does passing children as a render prop function fix the JSX-children issue?</div></details>
+      <details class="qa"><summary>Explain, step by step, how you'd diagnose a janky scroll in a list of 500 cards.</summary><div class="answer"><p>Profile the scroll interaction specifically; check whether cards are re-rendering during scroll (if state tied to scroll position lives too high in the tree) vs. purely a paint/layout cost from too many DOM nodes/expensive CSS (box-shadow, filters) — these need different fixes (memoization/state relocation vs. virtualization/CSS simplification). Chrome DevTools' Performance panel's "Rendering" and "Paint" flame sections distinguish JS-render cost from paint/composite cost.</p></div><div class="followup">Follow-up: What CSS properties are the most common composite/paint cost offenders?</div></details>
+      <details class="qa"><summary>What's the overscan parameter in a virtualizer and what tradeoff does it control?</summary><div class="answer"><p>The number of extra rows rendered beyond the visible viewport, in each direction. Higher overscan reduces blank-flash risk during fast scrolling (since more rows are pre-mounted) at the cost of more DOM nodes/render work per scroll frame; lower overscan is cheaper but can show empty space momentarily on fast scroll/fling.</p></div><div class="followup">Follow-up: How would variable row heights change the virtualizer's measurement strategy?</div></details>
+      <details class="qa"><summary>Why might adding useCallback actually make performance worse in some cases?</summary><div class="answer"><p>useCallback itself has a cost (storing the deps array, comparing it each render) and if nothing downstream depends on the function's reference identity (no memoized child consuming it, no effect depending on it), you've added overhead with zero benefit — the underlying function would've been garbage collected and recreated trivially cheaply anyway.</p></div><div class="followup">Follow-up: How would the React Compiler (React 19) change this calculus?</div></details>
+      </div>
+      <div class="qa-level advanced"><h4>Advanced</h4>
+      <details class="qa"><summary>Design a virtualized table that supports variable row heights, sticky headers, and column-level sort without breaking scroll-position stability during data updates.</summary><div class="answer"><p>Use a virtualizer that supports a measurement callback (e.g., `measureElement` in TanStack Virtual) rather than a fixed `estimateSize`, so row heights are measured after mount and the virtualizer recalculates offsets; keep the header in a separate non-scrolling (or `position: sticky`) container outside the virtualized row list so it's never unmounted/remounted by the windowing logic. For sort/update stability, key rows by stable entity ID (not index) so the virtualizer's internal position cache maps correctly to the same logical row even as its index shifts, and preserve scroll offset by anchoring to a specific row ID's measured position rather than a raw pixel offset when the dataset changes size.</p></div><div class="followup">Follow-up: What happens to scroll position if you key rows by index instead of ID after a sort?</div></details>
+      <details class="qa"><summary>A component passes `{...props}` spread through several wrapper components before reaching a memoized leaf. Why can this silently defeat memoization, and how would you detect it?</summary><div class="answer"><p>Spreading often re-creates new object/array/function values at each layer (e.g., a wrapper computing a derived prop inline, or JSX children being a new element each render), so even though the "same" data conceptually flows through, the actual reference reaching the memoized leaf changes every render. Detect it with the Profiler's render-reason panel on the leaf (it'll show "props changed" and list which prop), or temporarily log `Object.is` comparisons of each prop across renders at the boundary.</p></div><div class="followup">Follow-up: What's a structural fix that avoids this without manually memoizing every intermediate layer?</div></details>
+      <details class="qa"><summary>How does the React Compiler (React 19's optional compiler) change the manual memo/useMemo/useCallback calculus, and what does it NOT solve?</summary><div class="answer"><p>The compiler statically analyzes component code and automatically inserts memoization (effectively auto-generating the equivalent of memo/useMemo/useCallback) for values and sub-renders it can prove are safe to cache, removing the need to hand-write most of this chapter's APIs for compiler-compatible code. It does NOT solve algorithmic/structural problems: it can't virtualize an unbounded list for you, can't fix a bad component-boundary/state-location decision, and can't know a computation is "expensive enough to be worth caching" vs. negligible — it mechanizes correctness of memoization, not architectural judgment.</p></div><div class="followup">Follow-up: What coding patterns defeat the compiler's static analysis (force it to bail out of optimizing a component)?</div></details>
+      <details class="qa"><summary>Explain why "move expensive work to a Web Worker" is sometimes wrong even when the computation is provably slow.</summary><div class="answer"><p>Workers can't touch the DOM and serialization cost (structured clone) to move data in/out can itself dominate for large/complex objects, sometimes costing more than the computation saved; also, if the result is needed synchronously to avoid a layout flash (e.g., measuring before paint), a worker's inherent asynchrony reintroduces the problem you were trying to avoid. It's the right tool specifically when the computation is CPU-heavy, the input/output data is reasonably small/serializable, and a brief async delay before showing the result is acceptable.</p></div><div class="followup">Follow-up: What's an alternative to a full Web Worker for medium-weight computations that still need to stay on the main thread?</div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment"><span class="level-tag">Beginner (30-60 min)</span><h4>Profile and fix an over-rendering list</h4>
+      <p>Build a list of 50 memoized rows and a sibling "tick" counter button that re-renders the shared parent every click. Pass each row an inline arrow function as an `onClick` prop (breaking memoization) and confirm via Profiler that all 50 rows re-render on every tick. Fix with `useCallback` and re-profile.</p>
+      <p><strong>Acceptance criteria:</strong> Profiler shows zero row re-renders on tick after the fix.</p>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>The Profiler's "rendered because props changed" panel will name the exact prop.</p></div></details>
+      <p><strong>Bonus:</strong> Reproduce the same fix using a stable module-level function instead of useCallback, and explain when that's valid.</p></div>
+
+      <div class="assignment"><span class="level-tag">Intermediate (2-4 hrs)</span><h4>Build a virtualized, filterable 10,000-row table</h4>
+      <p>Using TanStack Virtual, render a 10,000-row dataset with a text filter input. Ensure typing in the filter stays responsive (no dropped frames) even while the filtered result set re-renders.</p>
+      <ul><li>Measure interaction-to-next-paint before and after virtualizing.</li><li>Use `useDeferredValue` for the filter text feeding the heavy filtered computation.</li></ul>
+      <p><strong>Acceptance criteria:</strong> Document measured before/after frame timings from the Performance panel.</p>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>Keep the raw input's state separate from the deferred value used to actually filter the 10,000 rows.</p></div></details>
+      <p><strong>Bonus:</strong> Add column sort without breaking virtualizer scroll-position stability.</p></div>
+
+      <div class="assignment"><span class="level-tag">Advanced (1-2 days)</span><h4>Build a performance regression test harness</h4>
+      <p>Using React's Profiler API (`<Profiler onRender>`) programmatically (not just the DevTools UI), instrument a complex component tree to record render counts/durations per component across a set of simulated interactions, and assert against budgets (e.g., "row components must not exceed N renders per filter keystroke") in an automated test.</p>
+      <ul><li>No full solution provided — design the harness architecture and budget-assertion strategy yourself.</li></ul>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>The `onRender` callback receives `actualDuration` and render phase info per commit; aggregate across a scripted interaction sequence.</p></div></details>
+      </div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet"><ul>
+        <li>Three distinct problems: unnecessary re-renders, expensive renders, expensive computations — different fixes.</li>
+        <li>Always profile the specific interaction before optimizing; guesses waste engineering time and interview credibility.</li>
+        <li>memo bails out of calling the component; useMemo caches a value; useCallback caches a function reference.</li>
+        <li>Inline object/array/function props defeat memo's shallow comparison every time.</li>
+        <li>Virtualize lists with hundreds+ of rows; don't bother for short lists.</li>
+        <li>Key virtualized/list rows by stable entity ID, never array index.</li>
+        <li>useMemo does not make a component's render faster — it only skips recomputing a value.</li>
+        <li>React 19's compiler automates most manual memoization for compiler-compatible code, but not architecture decisions.</li>
+      </ul></div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://react.dev/reference/react/memo">react.dev — memo</a></li>
+        <li><a href="https://tanstack.com/virtual/latest">TanStack Virtual docs</a></li>
+        <li><a href="https://react.dev/learn/react-compiler">react.dev — React Compiler</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="03-state-management.html"><span class="dir">← Previous</span>State Management</a>
+        <a class="next" href="05-concurrent-react.html"><span class="dir">Next →</span>Concurrent React</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · React &amp; Next.js Advanced</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-jsx.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-typescript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-tsx.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "03-react-nextjs-advanced", chapterKey: "04-performance" });</script>
+</body>
+</html>

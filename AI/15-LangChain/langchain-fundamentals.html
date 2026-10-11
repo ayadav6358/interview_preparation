@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LangChain Fundamentals</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <input class="searchbox" placeholder="Search topics..." />
+    <a href="../index.html">← Home</a>
+    <h3>15-LangChain</h3>
+    <a href="langchain-fundamentals.html">LangChain Fundamentals</a>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumbs"><a href="../index.html">Home</a> / 15-LangChain</div>
+      <button class="theme-toggle" onclick="toggleTheme()">🌓 Theme</button>
+    </div>
+    <h1>LangChain Fundamentals</h1>
+    <span class="tag good">Stable</span><span class="tag">Last verified: 2026-10-06</span>
+
+    <div class="toc">
+      <b>On this page</b>
+      <a href="#what">1. What is this?</a>
+      <a href="#whyexist">2. Why does it exist?</a>
+      <a href="#whyimportant">3. Why is it important?</a>
+      <a href="#whereused">4. Where is it used?</a>
+      <a href="#prereq">5. Prerequisites</a>
+      <a href="#core">6. Core concepts</a>
+      <a href="#terms">7. Terminology</a>
+      <a href="#arch">8. Architecture</a>
+      <a href="#internal">9. How it works internally (Runnable/LCEL)</a>
+      <a href="#steps">10. Step-by-step: building the 4 core apps</a>
+      <a href="#simple">11. Simple example (LLM app)</a>
+      <a href="#real">12. Real-world example</a>
+      <a href="#code">13. Code example (RAG + Tool-calling + Agent)</a>
+      <a href="#advanced">14. Advanced example (middleware/memory)</a>
+      <a href="#mistakes">15. Common mistakes</a>
+      <a href="#best">16. Best practices</a>
+      <a href="#production">17. Production considerations</a>
+      <a href="#security">18. Security considerations</a>
+      <a href="#performance">19. Performance considerations</a>
+      <a href="#cost">20. Cost considerations</a>
+      <a href="#debug">21. Debugging/troubleshooting</a>
+      <a href="#related">22. Related concepts</a>
+      <a href="#comparison">23. Comparison with alternatives</a>
+      <a href="#exercise">24. Mini practical exercise</a>
+      <a href="#project">25. Practical project</a>
+      <a href="#projectarch">26. Project architecture</a>
+      <a href="#interview-b">27. Interview Questions — Beginner</a>
+      <a href="#interview-i">28. Interview Questions — Intermediate</a>
+      <a href="#interview-a">29. Interview Questions — Advanced</a>
+      <a href="#interview-s">30. Interview Questions — Senior/Architect</a>
+      <a href="#interview-sc">31. Scenario-Based Questions</a>
+      <a href="#revision">32. Quick revision notes</a>
+      <a href="#cheat">33. Cheat sheet</a>
+      <a href="#further">34. Further topics to learn</a>
+    </div>
+
+    <h2 id="what">1. What is this?</h2>
+    <p>LangChain is a general-purpose framework for building LLM applications: it provides standardized abstractions for Models, Prompts, Messages, Output Parsers, Runnables/Chains, Retrievers, Tools, and Agents, plus integrations with hundreds of providers, vector stores, and external services, and LangSmith for observability.</p>
+
+    <h2 id="whyexist">2. Why does it exist?</h2>
+    <p>Before LangChain, every team building LLM applications reinvented the same plumbing (prompt templating, output parsing, chaining calls, tool integration) from scratch against each provider's distinct SDK. LangChain exists to standardize these patterns into reusable, composable abstractions and provide pre-built integrations.</p>
+
+    <h2 id="whyimportant">3. Why is it important?</h2>
+    <p>It's one of the most widely adopted LLM orchestration frameworks, meaning both its patterns (chains, agents, tools) and its specific APIs frequently appear in interviews and real production codebases — fluency with it is a practical, high-demand skill.</p>
+
+    <h2 id="whereused">4. Where is it used?</h2>
+    <p>RAG applications, agents, chatbots, tool-calling pipelines, any LLM application needing standardized provider abstraction and composability.</p>
+
+    <h2 id="prereq">5. Prerequisites</h2>
+    <p><a href="../08-Prompt-Engineering/prompt-engineering-fundamentals.html">Prompt Engineering</a>, <a href="../12-RAG/rag-fundamentals.html">RAG Fundamentals</a>, <a href="../16-Tool-Calling/">Tool Calling</a>.</p>
+
+    <h2 id="core">6. Core concepts</h2>
+    <ul>
+      <li><b>Models:</b> standardized wrappers over LLM providers' chat/completion APIs.</li>
+      <li><b>Prompts/Messages:</b> templated, structured representations of system/user/assistant messages.</li>
+      <li><b>Output Parsers:</b> convert raw LLM output into structured Python objects.</li>
+      <li><b>Runnable / LCEL (LangChain Expression Language):</b> a unified interface (`invoke`, `stream`, `batch`) letting components be composed with the `|` pipe operator into Chains.</li>
+      <li><b>Retrievers:</b> standardized interface over vector stores/search backends.</li>
+      <li><b>Tools:</b> functions the LLM can call, with structured schemas.</li>
+      <li><b>Agents:</b> LLM-driven loops that decide which tools to call and when.</li>
+      <li><b>Memory/persistence:</b> mechanisms for maintaining conversation state across turns.</li>
+      <li><b>LangSmith:</b> LangChain's companion observability/tracing/evaluation platform.</li>
+    </ul>
+
+    <h2 id="terms">7. Terminology</h2>
+    <table>
+      <tr><th>Term</th><th>Meaning</th></tr>
+      <tr><td>Runnable</td><td>LangChain's unified interface for any composable component (model, parser, retriever).</td></tr>
+      <tr><td>LCEL</td><td>LangChain Expression Language — the `|` pipe syntax for composing Runnables into chains.</td></tr>
+      <tr><td>Chain</td><td>A composed sequence of Runnables forming an end-to-end pipeline.</td></tr>
+      <tr><td>Tool</td><td>A function exposed to the LLM with a name, description, and argument schema.</td></tr>
+      <tr><td>Agent</td><td>A loop where the LLM decides, step by step, which tools to call to accomplish a task.</td></tr>
+      <tr><td>Middleware</td><td>Cross-cutting logic (logging, guardrails) applied around chain/agent execution.</td></tr>
+    </table>
+
+    <h2 id="arch">8. Architecture</h2>
+    <pre><code>Prompt Template → Model → Output Parser   (a simple Chain via LCEL: prompt | model | parser)
+
+Retriever → Prompt (with context) → Model → Parser   (RAG chain)
+
+Model + Tools → Agent Loop:
+   LLM decides tool → execute tool → feed result back → repeat until final answer</code></pre>
+
+    <h2 id="internal">9. How it works internally (Runnable/LCEL)</h2>
+    <p>Every LangChain component implements the `Runnable` interface (`invoke`, `batch`, `stream`, and async variants), which is what makes the `|` pipe operator work — `prompt | model | parser` is syntactic sugar for composing Runnables into a `RunnableSequence`, where each component's output becomes the next component's input, uniformly supporting streaming and batching across the whole chain.</p>
+
+    <h2 id="steps">10. Step-by-step: building the 4 core apps</h2>
+    <ol>
+      <li><b>Simple LLM app:</b> prompt template | model | output parser.</li>
+      <li><b>RAG app:</b> add a retriever step before prompt construction, injecting retrieved context.</li>
+      <li><b>Tool-calling app:</b> bind tools to the model, let it decide when to call them, execute and feed results back.</li>
+      <li><b>Agent app:</b> wrap tool-calling in a loop (via LangGraph, LangChain's recommended agent runtime) that continues until a final answer is reached.</li>
+    </ol>
+
+    <h2 id="simple">11. Simple example (LLM app)</h2>
+    <pre><code class="language-python">from langchain_anthropic import ChatAnthropic
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import StrOutputParser
+
+model = ChatAnthropic(model="claude-sonnet-5")
+prompt = ChatPromptTemplate.from_template("Explain {topic} in 2 sentences.")
+chain = prompt | model | StrOutputParser()
+
+print(chain.invoke({"topic": "RAG"}))
+</code></pre>
+
+    <h2 id="real">12. Real-world example</h2>
+    <p>A company's internal support bot is a LangChain RAG chain (retriever over their Qdrant vector store, piped into a prompt template, piped into Claude, piped into a citation-aware output parser) wrapped in a FastAPI endpoint — a direct, typical production use of the LCEL pattern.</p>
+
+    <h2 id="code">13. Code example (RAG + Tool-calling + Agent)</h2>
+    <pre><code class="language-python"># RAG chain
+from langchain_core.runnables import RunnablePassthrough
+
+retriever = vectorstore.as_retriever(search_kwargs={"k": 5})
+rag_prompt = ChatPromptTemplate.from_template(
+    "Answer using only this context:\n{context}\n\nQuestion: {question}"
+)
+rag_chain = (
+    {"context": retriever, "question": RunnablePassthrough()}
+    | rag_prompt | model | StrOutputParser()
+)
+print(rag_chain.invoke("What's our refund policy?"))
+
+# Tool-calling
+from langchain_core.tools import tool
+
+@tool
+def get_weather(city: str) -> str:
+    """Get current weather for a city."""
+    return f"Weather in {city}: sunny, 22C"
+
+model_with_tools = model.bind_tools([get_weather])
+response = model_with_tools.invoke("What's the weather in Paris?")
+print(response.tool_calls)
+
+# Agent (via LangGraph's prebuilt ReAct agent, the recommended path)
+from langgraph.prebuilt import create_react_agent
+
+agent = create_react_agent(model, tools=[get_weather])
+result = agent.invoke({"messages": [{"role": "user", "content": "Weather in Tokyo?"}]})
+</code></pre>
+
+    <h2 id="advanced">14. Advanced example (middleware/memory)</h2>
+    <pre><code class="language-python">from langchain_core.runnables.history import RunnableWithMessageHistory
+from langchain_community.chat_message_histories import ChatMessageHistory
+
+store = {}
+def get_history(session_id):
+    if session_id not in store:
+        store[session_id] = ChatMessageHistory()
+    return store[session_id]
+
+chain_with_memory = RunnableWithMessageHistory(
+    rag_chain, get_history,
+    input_messages_key="question", history_messages_key="history",
+)
+chain_with_memory.invoke({"question": "And what about international orders?"},
+                          config={"configurable": {"session_id": "user123"}})
+</code></pre>
+
+    <h2 id="mistakes">15. Common mistakes</h2>
+    <ul>
+      <li>Using legacy `Chain` classes (e.g., old `LLMChain`) instead of modern LCEL composition — current LangChain strongly favors LCEL/Runnables.</li>
+      <li>Building complex multi-step agents directly in LangChain instead of using LangGraph, which is the recommended tool for anything beyond simple tool-calling loops.</li>
+      <li>Not setting up LangSmith tracing, making chain debugging much harder.</li>
+      <li>Ignoring streaming support (`.stream()`) and defaulting to blocking `.invoke()` for user-facing latency-sensitive features.</li>
+    </ul>
+
+    <h2 id="best">16. Best practices</h2>
+    <ul>
+      <li>Use LCEL (`|` composition) for chains; use LangGraph for anything with loops/branching/state beyond a linear pipeline.</li>
+      <li>Enable LangSmith tracing from day one for debugging and evaluation.</li>
+      <li>Keep prompt templates and chain definitions version-controlled, not inline ad hoc strings.</li>
+      <li>Use `.batch()` for processing many independent inputs efficiently.</li>
+    </ul>
+
+    <h2 id="production">17. Production considerations</h2>
+    <p>Wrap chains with the same resilience patterns as any LLM API integration (timeouts, retries, fallback models via `.with_fallbacks()`); monitor via LangSmith or an equivalent observability tool.</p>
+
+    <h2 id="security">18. Security considerations</h2>
+    <p>Tool-calling/agent chains must validate tool arguments before execution (see <a href="../16-Tool-Calling/">Tool Calling</a>) and scope retriever access per tenant/user — LangChain doesn't enforce these automatically.</p>
+
+    <h2 id="performance">19. Performance considerations</h2>
+    <p>Use `.batch()` for bulk processing and `.stream()` for user-facing latency; LCEL chains support both uniformly across composed components.</p>
+
+    <h2 id="cost">20. Cost considerations</h2>
+    <p>Agent loops can make many LLM calls per task — monitor per-agent-run token usage via LangSmith and set iteration limits to bound worst-case cost.</p>
+
+    <h2 id="debug">21. Debugging/troubleshooting</h2>
+    <ul>
+      <li><b>Chain output doesn't match expected format:</b> inspect each Runnable's output independently (`.invoke()` on a sub-chain) to isolate where the format breaks.</li>
+      <li><b>Agent loops forever / hits iteration limit:</b> check tool definitions for clarity and whether the model has a clear path to a final answer; add an explicit max-iteration safeguard.</li>
+      <li><b>Hard to debug multi-step chains:</b> enable LangSmith tracing to visualize the full execution path.</li>
+    </ul>
+
+    <h2 id="related">22. Related concepts</h2>
+    <p><a href="../16-Tool-Calling/">Tool Calling</a> · <a href="../18-LangGraph/">LangGraph</a> · <a href="../14-LlamaIndex/llamaindex-fundamentals.html">LlamaIndex</a></p>
+
+    <h2 id="comparison">23. Comparison with alternatives</h2>
+    <table>
+      <tr><th>Framework</th><th>Best for</th></tr>
+      <tr><td>LangChain</td><td>Standardized model/prompt/tool abstractions, broad integrations, simple chains</td></tr>
+      <tr><td>LangGraph</td><td>Complex stateful, branching, multi-step agents (built by the same team, works with LangChain)</td></tr>
+      <tr><td>LlamaIndex</td><td>Retrieval/indexing-centric applications</td></tr>
+      <tr><td>Raw SDK calls</td><td>Very simple use cases where framework overhead isn't justified</td></tr>
+    </table>
+
+    <h2 id="exercise">24. Mini practical exercise</h2>
+    <p>Build a simple LCEL chain (`prompt | model | parser`) and then convert it to use `.batch()` on a list of 5 different inputs, comparing total time against calling `.invoke()` in a loop.</p>
+
+    <h2 id="project">25. Practical project</h2>
+    <p><b>Four-in-One LangChain Demo:</b> build all four core app types (simple LLM app, RAG app, tool-calling app, agent app) in one project sharing the same model configuration, demonstrating the progression from simple chain to full agent.</p>
+
+    <h2 id="projectarch">26. Project architecture</h2>
+    <pre><code>shared: model = ChatAnthropic(...)
+
+app1_simple.py:     prompt | model | parser
+app2_rag.py:         {context: retriever, question} | prompt | model | parser
+app3_tools.py:       model.bind_tools([...]) + manual tool-call execution loop
+app4_agent.py:        langgraph.prebuilt.create_react_agent(model, tools)</code></pre>
+
+    <h2 id="interview-b">27. Interview Questions — Beginner</h2>
+    <div class="qa"><b>Q1.</b> What is LangChain?<br><b>A.</b> A general-purpose framework providing standardized abstractions (models, prompts, chains, tools, agents) and integrations for building LLM applications.</div>
+    <div class="qa"><b>Q2.</b> What is LCEL?<br><b>A.</b> LangChain Expression Language — the `|` pipe syntax for composing Runnables into chains.</div>
+    <div class="qa"><b>Q3.</b> What is a Runnable?<br><b>A.</b> LangChain's unified interface (invoke/batch/stream) implemented by any composable component like models, parsers, or retrievers.</div>
+    <div class="qa"><b>Q4.</b> What is a Tool in LangChain?<br><b>A.</b> A function exposed to the LLM with a name, description, and argument schema, which the model can request to call.</div>
+    <div class="qa"><b>Q5.</b> What is an Agent?<br><b>A.</b> A loop where the LLM decides step by step which tools to call to accomplish a task, until reaching a final answer.</div>
+    <div class="qa"><b>Q6.</b> What is LangSmith?<br><b>A.</b> LangChain's companion platform for observability, tracing, and evaluation of LLM application runs.</div>
+    <div class="qa"><b>Q7.</b> What does an Output Parser do?<br><b>A.</b> Converts raw LLM text output into structured Python objects.</div>
+    <div class="qa"><b>Q8.</b> What's the recommended tool for building complex, stateful agents in the LangChain ecosystem?<br><b>A.</b> LangGraph.</div>
+    <div class="qa"><b>Q9.</b> What's the difference between `.invoke()` and `.stream()` on a Runnable?<br><b>A.</b> `.invoke()` returns the full result after completion; `.stream()` yields incremental results as they're produced.</div>
+    <div class="qa"><b>Q10.</b> Why would you use `.batch()` instead of calling `.invoke()` in a loop?<br><b>A.</b> `.batch()` can process multiple independent inputs more efficiently (e.g., concurrently), rather than sequentially waiting for each `.invoke()` call.</div>
+
+    <h2 id="interview-i">28. Interview Questions — Intermediate</h2>
+    <div class="qa"><b>Q1.</b> How does the `|` operator in LCEL actually compose components under the hood?<br><b>A.</b> It constructs a `RunnableSequence` where each component's `invoke` output is passed as the next component's input, with the composed sequence itself implementing the same Runnable interface, supporting uniform invoke/batch/stream semantics across the whole chain.</div>
+    <div class="qa"><b>Q2.</b> Why does LangChain recommend LangGraph over its own legacy agent executors for complex agents?<br><b>A.</b> LangGraph provides explicit state management, branching, cycles, and checkpointing suited to complex multi-step agent behavior, whereas legacy agent executors were simpler, more implicit loops less suited to production-grade control flow, debugging, and human-in-the-loop needs.</div>
+    <div class="qa"><b>Q3.</b> How would you add a fallback model to a LangChain chain in case the primary model fails?<br><b>A.</b> Use `.with_fallbacks([fallback_model])` on the Runnable, which automatically retries with the fallback if the primary raises an exception.</div>
+    <div class="qa"><b>Q4.</b> Why is it important to scope a RAG chain's retriever by tenant/user even though LangChain's retriever interface doesn't enforce this automatically?<br><b>A.</b> LangChain provides the retrieval abstraction but not business-specific access control logic — the application must configure the retriever (e.g., via metadata filters) to respect tenant/user boundaries, or risk cross-tenant data leakage.</div>
+    <div class="qa"><b>Q5.</b> How would you debug a LangChain agent that keeps calling the wrong tool?<br><b>A.</b> Inspect the tool's description and argument schema for ambiguity (the model relies entirely on these to decide when/how to call it), use LangSmith tracing to see the model's actual reasoning/tool-call decisions, and consider adding few-shot examples demonstrating correct tool selection.</div>
+
+    <h2 id="interview-a">29. Interview Questions — Advanced</h2>
+    <div class="qa"><b>Q1.</b> How would you design a LangChain-based system to support hot-swapping the underlying LLM provider without changing chain logic?<br><b>A.</b> Rely on LangChain's standardized Model interface (e.g., `ChatAnthropic`, `ChatOpenAI` all implement the same Runnable/chat-model interface) — chain logic built against the abstract interface rather than provider-specific details can swap the model instance via configuration, as long as provider-specific features (certain tool-calling nuances) are avoided or abstracted.</div>
+    <div class="qa"><b>Q2.</b> What's a subtle performance pitfall of composing many small Runnables in a long LCEL chain?<br><b>A.</b> Each step in the chain, even simple ones, adds a small amount of overhead (serialization, callback handling); for very long or high-throughput chains, this can accumulate — profiling via LangSmith traces helps identify whether chain-overhead or actual LLM latency dominates.</div>
+
+    <h2 id="interview-s">30. Interview Questions — Senior/Architect</h2>
+    <div class="qa"><b>Q1.</b> How would you decide, for a new complex agent application, whether to use LangChain's simple tool-calling pattern versus building the agent in LangGraph from the start?<br><b>A.</b> If the task is a single-step or simple linear tool-calling flow, LangChain's direct tool-binding is sufficient; if the task requires branching, cycles, persistent state across steps, human-in-the-loop interrupts, or multi-agent coordination, start directly in LangGraph — retrofitting a simple tool-calling pattern into a complex stateful agent later is more disruptive than starting with the right abstraction.</div>
+
+    <h2 id="interview-sc">31. Scenario-Based Questions</h2>
+    <div class="qa"><b>Scenario 1.</b> Your LangChain RAG chain's answers are inconsistent, and you can't tell if it's a retrieval or generation issue. How do you debug it?<br><b>A.</b> Enable LangSmith tracing (or manually invoke the retriever sub-component in isolation) to inspect exactly what context was retrieved for a given query, separating retrieval-quality issues from prompt/generation issues.</div>
+    <div class="qa"><b>Scenario 2.</b> An agent built with LangChain's legacy agent executor is hard to extend with a human-approval step. What do you recommend?<br><b>A.</b> Migrate the agent to LangGraph, which natively supports interrupts/human-in-the-loop checkpoints, rather than trying to retrofit that capability into the legacy executor pattern.</div>
+
+    <h2 id="revision">32. Quick revision notes</h2>
+    <ul>
+      <li>LCEL (`|`) composes Runnables (model, prompt, parser, retriever) into Chains.</li>
+      <li>Tools = functions the LLM can call; Agents = loops deciding which tools to call.</li>
+      <li>Use LangGraph for complex stateful/branching agents; LangChain for standardized abstractions and simple chains.</li>
+      <li>Enable LangSmith tracing for debugging and evaluation.</li>
+    </ul>
+
+    <h2 id="cheat">33. Cheat sheet</h2>
+    <div class="callout">LangChain: Model + Prompt + Output Parser composed via LCEL (`|`) into Chains. Retriever → RAG chain. Tools + Agent loop → tool-calling/agent apps. Use LangGraph for complex agents. Enable LangSmith for tracing/eval.</div>
+
+    <h2 id="further">34. Further topics to learn</h2>
+    <p><a href="../16-Tool-Calling/">Tool Calling</a> → <a href="../18-LangGraph/">LangGraph</a> → <a href="../17-AI-Agents/">AI Agents</a></p>
+
+    <div class="prevnext">
+      <a href="../14-LlamaIndex/llamaindex-fundamentals.html">← LlamaIndex</a>
+      <a href="../16-Tool-Calling/tool-calling-fundamentals.html">Next: Tool Calling →</a>
+    </div>
+  </main>
+</div>
+<script src="../assets/app.js"></script>
+</body>
+</html>

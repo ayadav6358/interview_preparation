@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Performance and Scaling Fundamentals</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <input class="searchbox" placeholder="Search topics..." />
+    <a href="../index.html">← Home</a>
+    <h3>41-AI-Performance-and-Scaling</h3>
+    <a href="performance-and-scaling-fundamentals.html">Performance and Scaling Fundamentals</a>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumbs"><a href="../index.html">Home</a> / 41-AI-Performance-and-Scaling</div>
+      <button class="theme-toggle" onclick="toggleTheme()">🌓 Theme</button>
+    </div>
+    <h1>AI Performance and Scaling: Latency, Throughput, Caching, Queues</h1>
+    <span class="tag good">Stable</span><span class="tag">Last verified: 2026-10-06</span>
+
+    <div class="toc">
+      <b>On this page</b>
+      <a href="#what">1. What is this?</a>
+      <a href="#whyexist">2. Why does it exist?</a>
+      <a href="#whyimportant">3. Why is it important?</a>
+      <a href="#whereused">4. Where is it used?</a>
+      <a href="#prereq">5. Prerequisites</a>
+      <a href="#core">6. Core concepts</a>
+      <a href="#terms">7. Terminology</a>
+      <a href="#arch">8. Architecture</a>
+      <a href="#internal">9. How it works internally</a>
+      <a href="#steps">10. Step-by-step: scaling an LLM application</a>
+      <a href="#simple">11. Simple example</a>
+      <a href="#real">12. Real-world example</a>
+      <a href="#code">13. Code example</a>
+      <a href="#advanced">14. Advanced example (circuit breaker)</a>
+      <a href="#mistakes">15. Common mistakes</a>
+      <a href="#best">16. Best practices</a>
+      <a href="#production">17. Production considerations</a>
+      <a href="#security">18. Security considerations</a>
+      <a href="#performance">19. Performance considerations (meta)</a>
+      <a href="#cost">20. Cost considerations</a>
+      <a href="#debug">21. Debugging/troubleshooting</a>
+      <a href="#related">22. Related concepts</a>
+      <a href="#comparison">23. Comparison of scaling approaches</a>
+      <a href="#exercise">24. Mini practical exercise</a>
+      <a href="#project">25. Practical project</a>
+      <a href="#projectarch">26. Project architecture</a>
+      <a href="#interview-b">27. Interview Questions — Beginner</a>
+      <a href="#interview-i">28. Interview Questions — Intermediate</a>
+      <a href="#interview-a">29. Interview Questions — Advanced</a>
+      <a href="#interview-s">30. Interview Questions — Senior/Architect</a>
+      <a href="#interview-sc">31. Scenario-Based Questions</a>
+      <a href="#revision">32. Quick revision notes</a>
+      <a href="#cheat">33. Cheat sheet</a>
+      <a href="#further">34. Further topics to learn</a>
+    </div>
+
+    <h2 id="what">1. What is this?</h2>
+    <p>Performance and scaling for AI applications covers the software-engineering layer around LLM calls: latency management, throughput under concurrency, rate limiting, retries, circuit breakers, caching, queue-based architecture, and async processing — making an inherently slow, rate-limited external dependency behave well at scale.</p>
+
+    <h2 id="whyexist">2. Why does it exist?</h2>
+    <p>LLM API calls are slow (seconds, not milliseconds) and rate-limited compared to typical internal service calls — standard scaling patterns from distributed systems (queues, circuit breakers, async processing) exist to absorb this fundamental characteristic without degrading the overall application's responsiveness.</p>
+
+    <h2 id="whyimportant">3. Why is it important?</h2>
+    <p>This is where general software engineering and AI engineering converge — the patterns here are standard distributed-systems practice applied specifically to the LLM-call bottleneck, essential for any AI feature serving real production traffic.</p>
+
+    <h2 id="whereused">4. Where is it used?</h2>
+    <p>Any production LLM application with meaningful concurrent traffic, especially agentic systems with multiple sequential LLM calls per user request.</p>
+
+    <h2 id="prereq">5. Prerequisites</h2>
+    <p><a href="../07-LLM-APIs-and-SDKs/llm-apis-and-sdks.html">LLM APIs and SDKs</a>.</p>
+
+    <h2 id="core">6. Core concepts</h2>
+    <ul>
+      <li><b>Latency:</b> time for a single request to complete — critical for user-facing features.</li>
+      <li><b>Throughput:</b> total requests/tokens processed per unit time across all traffic.</li>
+      <li><b>Concurrency:</b> handling many requests simultaneously without blocking each other unnecessarily.</li>
+      <li><b>Streaming:</b> returning partial results as they're generated, improving perceived latency.</li>
+      <li><b>Rate limiting (client-side):</b> proactively capping your own outbound request rate to stay within provider limits.</li>
+      <li><b>Retries with backoff:</b> handling transient failures gracefully.</li>
+      <li><b>Circuit breakers:</b> stopping requests to a failing dependency temporarily to avoid cascading failure.</li>
+      <li><b>Queue-based architecture:</b> decoupling request intake from processing for non-real-time workloads, smoothing load spikes.</li>
+      <li><b>Async processing:</b> using non-blocking I/O to maximize throughput per server resource.</li>
+    </ul>
+
+    <h2 id="terms">7. Terminology</h2>
+    <table>
+      <tr><th>Term</th><th>Meaning</th></tr>
+      <tr><td>p50/p99 latency</td><td>Median and 99th-percentile response time — p99 reveals tail latency issues p50 hides.</td></tr>
+      <tr><td>Backpressure</td><td>A system's mechanism for signaling it's overloaded and slowing/rejecting new work rather than collapsing.</td></tr>
+      <tr><td>Circuit breaker states</td><td>Closed (normal), Open (rejecting calls after failures), Half-Open (testing recovery).</td></tr>
+      <tr><td>Dead letter queue</td><td>Where permanently-failed queued jobs are routed for manual review rather than endless retry.</td></tr>
+    </table>
+
+    <h2 id="arch">8. Architecture</h2>
+    <pre><code>Real-time path (user-facing):
+ Request → rate limiter → LLM call (streaming) → response
+ → circuit breaker wraps the LLM call; fallback on open circuit
+
+Async/batch path (non-real-time):
+ Request → Queue → Worker pool (concurrent, rate-limited)
+ → LLM calls → results stored → notify/poll for completion</code></pre>
+
+    <h2 id="internal">9. How it works internally</h2>
+    <p>A circuit breaker tracks a rolling failure rate for calls to a dependency (the LLM API); once failures exceed a threshold within a time window, it "opens," immediately failing (or routing to fallback) further calls without even attempting them for a cooldown period — avoiding wasting time/resources on calls likely to fail and giving the struggling dependency room to recover, then periodically testing ("half-open") whether it has recovered before fully resuming normal traffic.</p>
+
+    <h2 id="steps">10. Step-by-step: scaling an LLM application</h2>
+    <ol>
+      <li>Measure baseline latency/throughput for your current implementation.</li>
+      <li>Add streaming for user-facing latency perception improvement.</li>
+      <li>Add client-side rate limiting matched to your actual provider tier limits.</li>
+      <li>Add retry-with-backoff and a circuit breaker for resilience.</li>
+      <li>For non-real-time/bulk workloads, move to a queue-based async architecture.</li>
+      <li>Load-test under realistic concurrent traffic and iterate.</li>
+    </ol>
+
+    <h2 id="simple">11. Simple example</h2>
+    <p>Using `asyncio.gather` with a concurrency-limiting semaphore to process a batch of 1000 independent LLM calls efficiently without exceeding the provider's rate limit.</p>
+
+    <h2 id="real">12. Real-world example</h2>
+    <p>A document-processing pipeline uses a queue (e.g., backed by Redis or SQS): incoming documents are queued, a pool of worker processes pulls from the queue at a controlled concurrency rate matching the LLM provider's rate limits, and results are stored for later retrieval — decoupling document submission (fast) from actual processing (slow, rate-limited) and smoothing out traffic spikes.</p>
+
+    <h2 id="code">13. Code example</h2>
+    <pre><code class="language-python">import asyncio
+from anthropic import AsyncAnthropic
+
+client = AsyncAnthropic()
+semaphore = asyncio.Semaphore(10)  # max 10 concurrent requests
+
+async def rate_limited_call(prompt):
+    async with semaphore:
+        return await client.messages.create(
+            model="claude-sonnet-5", max_tokens=200,
+            messages=[{"role": "user", "content": prompt}],
+        )
+
+async def process_batch(prompts):
+    return await asyncio.gather(*(rate_limited_call(p) for p in prompts))
+</code></pre>
+
+    <h2 id="advanced">14. Advanced example (circuit breaker)</h2>
+    <pre><code class="language-python">import time
+
+class CircuitBreaker:
+    def __init__(self, failure_threshold=5, cooldown=30):
+        self.failures = 0
+        self.failure_threshold = failure_threshold
+        self.cooldown = cooldown
+        self.opened_at = None
+
+    def call(self, fn, *args, **kwargs):
+        if self.opened_at:
+            if time.time() - self.opened_at < self.cooldown:
+                raise RuntimeError("Circuit open — failing fast")
+            self.opened_at = None  # half-open: try again
+        try:
+            result = fn(*args, **kwargs)
+            self.failures = 0
+            return result
+        except Exception as e:
+            self.failures += 1
+            if self.failures >= self.failure_threshold:
+                self.opened_at = time.time()
+            raise
+</code></pre>
+
+    <h2 id="mistakes">15. Common mistakes</h2>
+    <ul>
+      <li>Calling LLM APIs sequentially in a loop for independent, batchable work.</li>
+      <li>No client-side rate limiting, causing frequent 429 errors under load.</li>
+      <li>No circuit breaker, letting a struggling provider cause cascading failures across your application.</li>
+      <li>Using a synchronous real-time architecture for workloads that would be better served by a queue-based async design.</li>
+    </ul>
+
+    <h2 id="best">16. Best practices</h2>
+    <ul>
+      <li>Use async/concurrent calls with rate-limit-aware semaphores for batchable work.</li>
+      <li>Stream responses for user-facing latency improvement.</li>
+      <li>Implement circuit breakers around any LLM API dependency.</li>
+      <li>Move non-real-time workloads to a queue-based architecture to smooth load and decouple intake from processing.</li>
+    </ul>
+
+    <h2 id="production">17. Production considerations</h2>
+    <p>Monitor p50/p99 latency (not just average), queue depth/backlog for async systems, and circuit breaker state transitions as first-class production metrics.</p>
+
+    <h2 id="security">18. Security considerations</h2>
+    <p>Rate limiting also protects against abuse (a malicious or buggy client flooding your system with requests) — apply it per-user/tenant, not just globally, to prevent one bad actor from exhausting shared capacity.</p>
+
+    <h2 id="performance">19. Performance considerations (meta)</h2>
+    <p>Profile to find the actual bottleneck (LLM call latency vs. your own application overhead vs. network) before optimizing — premature optimization of the wrong layer wastes effort.</p>
+
+    <h2 id="cost">20. Cost considerations</h2>
+    <p>Better concurrency/throughput reduces wall-clock time for a given workload but doesn't reduce per-token cost — cost and performance optimization are related but distinct levers (see Cost Optimization for the cost-specific techniques).</p>
+
+    <h2 id="debug">21. Debugging/troubleshooting</h2>
+    <ul>
+      <li><b>Frequent 429 rate-limit errors:</b> implement/tighten client-side rate limiting to match actual provider limits.</li>
+      <li><b>Cascading failures during a provider outage:</b> add a circuit breaker to fail fast and protect the rest of the system.</li>
+      <li><b>Growing queue backlog:</b> check worker concurrency settings and whether processing rate is keeping up with intake rate.</li>
+    </ul>
+
+    <h2 id="related">22. Related concepts</h2>
+    <p><a href="../07-LLM-APIs-and-SDKs/llm-apis-and-sdks.html">LLM APIs and SDKs</a> · <a href="../40-Cost-Optimization/cost-optimization-fundamentals.html">Cost Optimization</a> · <a href="../42-AI-Infrastructure/">AI Infrastructure</a></p>
+
+    <h2 id="comparison">23. Comparison of scaling approaches</h2>
+    <table>
+      <tr><th>Approach</th><th>Best for</th></tr>
+      <tr><td>Synchronous real-time + streaming</td><td>User-facing chat/interactive features</td></tr>
+      <tr><td>Async concurrent (semaphore-limited)</td><td>Batch processing many independent items quickly</td></tr>
+      <tr><td>Queue-based async architecture</td><td>Non-real-time bulk workloads needing decoupling/smoothing</td></tr>
+    </table>
+
+    <h2 id="exercise">24. Mini practical exercise</h2>
+    <p>Implement the circuit breaker example above and simulate repeated failures to verify it correctly opens, then simulate a cooldown period and verify it attempts recovery.</p>
+
+    <h2 id="project">25. Practical project</h2>
+    <p><b>Resilient Batch Document Processor:</b> build a queue-based document-processing pipeline with rate-limited concurrent workers, a circuit breaker around the LLM call, and a dead-letter queue for permanently-failed items.</p>
+
+    <h2 id="projectarch">26. Project architecture</h2>
+    <pre><code>submit_document() → enqueue(doc)
+worker_pool (N workers, semaphore-limited)
+ → dequeue → circuit_breaker.call(process_with_llm, doc)
+ → success: store result | failure after retries: dead_letter_queue
+status_api: check processing status by document ID</code></pre>
+
+    <h2 id="interview-b">27. Interview Questions — Beginner</h2>
+    <div class="qa"><b>Q1.</b> What's the difference between latency and throughput?<br><b>A.</b> Latency is the time for a single request to complete; throughput is the total requests/tokens processed per unit time across all traffic.</div>
+    <div class="qa"><b>Q2.</b> What is a circuit breaker?<br><b>A.</b> A pattern that stops sending requests to a failing dependency after repeated failures, to avoid cascading overload, resuming after a cooldown.</div>
+    <div class="qa"><b>Q3.</b> Why does streaming improve perceived latency?<br><b>A.</b> It returns partial results as they're generated rather than waiting for the full response, so users see output start almost immediately.</div>
+    <div class="qa"><b>Q4.</b> What is client-side rate limiting?<br><b>A.</b> Proactively capping your own outbound request rate to stay within the provider's actual limits, rather than reactively handling 429 errors.</div>
+    <div class="qa"><b>Q5.</b> What's a queue-based architecture used for?<br><b>A.</b> Decoupling request intake from processing for non-real-time workloads, smoothing load spikes.</div>
+    <div class="qa"><b>Q6.</b> What does p99 latency mean?<br><b>A.</b> The response time below which 99% of requests complete — revealing tail latency issues that average/median latency can hide.</div>
+    <div class="qa"><b>Q7.</b> Why use async/concurrent calls instead of a sequential loop for batch processing?<br><b>A.</b> To process multiple independent requests in parallel, dramatically reducing total wall-clock time compared to waiting for each one sequentially.</div>
+    <div class="qa"><b>Q8.</b> What is a dead letter queue?<br><b>A.</b> Where permanently-failed queued jobs are routed for manual review rather than endless automatic retry.</div>
+    <div class="qa"><b>Q9.</b> Why might you rate-limit per-user/tenant rather than just globally?<br><b>A.</b> To prevent one user/tenant from exhausting shared capacity and degrading service for everyone else.</div>
+    <div class="qa"><b>Q10.</b> What are the three states of a circuit breaker?<br><b>A.</b> Closed (normal operation), Open (failing fast, rejecting calls), Half-Open (testing if the dependency has recovered).</div>
+
+    <h2 id="interview-i">28. Interview Questions — Intermediate</h2>
+    <div class="qa"><b>Q1.</b> Why might a circuit breaker's half-open state send only a limited number of test requests rather than immediately resuming full traffic?<br><b>A.</b> Immediately resuming full traffic risks overwhelming a dependency that's only partially recovered; sending a small number of test requests first verifies recovery with minimal additional risk before committing to full traffic resumption.</div>
+    <div class="qa"><b>Q2.</b> How would you decide the right concurrency limit (semaphore size) for a batch processing job calling an LLM API?<br><b>A.</b> Match it to the provider's actual rate limits for your account tier (requests per minute/tokens per minute), accounting for other concurrent traffic sharing that same rate limit, rather than picking an arbitrary number — exceeding the real limit just causes 429s and wasted retries.</div>
+    <div class="qa"><b>Q3.</b> Why might a queue-based architecture be preferable to a purely synchronous one even for moderately real-time workloads?<br><b>A.</b> It decouples intake from processing, letting the system absorb traffic spikes gracefully (requests queue rather than fail or time out) and enabling independent scaling of the worker pool based on queue depth, rather than the intake path being directly coupled to and limited by processing capacity.</div>
+    <div class="qa"><b>Q4.</b> What's a practical reason to monitor p99 latency separately from average latency?<br><b>A.</b> Average latency can mask a significant fraction of users experiencing much worse performance (tail latency); p99 reveals this, which matters because the worst-experienced users often drive support complaints and churn disproportionately to their small percentage of traffic.</div>
+    <div class="qa"><b>Q5.</b> How would backpressure be implemented in a queue-based LLM processing system approaching capacity?<br><b>A.</b> The intake API could start rejecting or delaying new submissions (returning a "try again later" signal) once queue depth exceeds a defined threshold, rather than accepting unlimited work the worker pool can't keep up with, preventing unbounded queue growth and resource exhaustion.</div>
+
+    <h2 id="interview-a">29. Interview Questions — Advanced</h2>
+    <div class="qa"><b>Q1.</b> How would you design a multi-tier rate-limiting system that fairly allocates a shared LLM API rate limit across many internal teams/features with different priority levels?<br><b>A.</b> Implement a token-bucket or similar rate-limiting scheme with per-team quotas summing to (but with some slack below) the overall provider limit, prioritize higher-priority features' requests when overall demand approaches the limit, and provide teams visibility into their own quota usage so they can self-manage rather than being surprised by throttling.</div>
+    <div class="qa"><b>Q2.</b> What's a subtle risk of applying a circuit breaker too aggressively (low failure threshold, long cooldown) to an LLM API dependency?<br><b>A.</b> Transient, brief error spikes (which LLM APIs can experience even when fundamentally healthy) could trigger an unnecessarily long full outage from the application's perspective, degrading availability more than the actual underlying issue warranted — threshold and cooldown tuning should be based on the dependency's actual observed failure patterns, not just defensively conservative defaults.</div>
+
+    <h2 id="interview-s">30. Interview Questions — Senior/Architect</h2>
+    <div class="qa"><b>Q1.</b> Design the full resilience and scaling architecture for a high-volume document-processing platform handling millions of LLM calls daily across bursty traffic patterns.<br><b>A.</b> Use a queue-based architecture (e.g., SQS/Kafka) decoupling intake from processing; scale worker pools dynamically based on queue depth; implement per-provider circuit breakers with fallback to a secondary provider on sustained failure; apply token-bucket rate limiting matched to each provider's actual limits with priority tiers for different workload types; route failed-after-retries items to a dead-letter queue with alerting for manual review; and monitor p50/p99 latency, queue depth, circuit breaker state, and throughput as core production dashboards with alerting on anomalies in any of them.</div>
+
+    <h2 id="interview-sc">31. Scenario-Based Questions</h2>
+    <div class="qa"><b>Scenario 1.</b> Your application experiences cascading failures whenever your LLM provider has even brief degraded performance. What's missing architecturally?<br><b>A.</b> Likely missing a circuit breaker — without one, continued retries against a struggling dependency compound the problem (each retry adds load to an already-struggling service and consumes your own resources waiting); add a circuit breaker to fail fast and protect the rest of the system during provider issues.</div>
+    <div class="qa"><b>Scenario 2.</b> A batch job processing 50,000 items via sequential LLM calls is projected to take 18 hours. How do you redesign it?<br><b>A.</b> Convert to async/concurrent processing with a semaphore matched to the provider's rate limits (dramatically reducing wall-clock time), and/or use the provider's Batch API if available for non-real-time bulk workloads at a cost/throughput advantage — sequential processing of independent, batchable work is almost always the wrong default for this scale.</div>
+
+    <h2 id="revision">32. Quick revision notes</h2>
+    <ul>
+      <li>Latency (per-request) vs throughput (aggregate) — different metrics, different optimizations.</li>
+      <li>Stream for perceived latency; rate-limit client-side; circuit-break for resilience.</li>
+      <li>Queue-based async architecture for non-real-time, bursty, or bulk workloads.</li>
+      <li>Monitor p99, not just average; monitor queue depth and circuit breaker state.</li>
+    </ul>
+
+    <h2 id="cheat">33. Cheat sheet</h2>
+    <div class="callout">Stream for perceived latency. Rate-limit client-side to match provider limits. Circuit-break for resilience. Queue + async workers for bulk/non-real-time workloads. Monitor p99, queue depth, circuit state — not just averages.</div>
+
+    <h2 id="further">34. Further topics to learn</h2>
+    <p><a href="../42-AI-Infrastructure/">AI Infrastructure</a> → <a href="../40-Cost-Optimization/cost-optimization-fundamentals.html">Cost Optimization</a></p>
+
+    <div class="prevnext">
+      <a href="../40-Cost-Optimization/cost-optimization-fundamentals.html">← Cost Optimization</a>
+      <a href="../42-AI-Infrastructure/ai-infrastructure-fundamentals.html">Next: AI Infrastructure →</a>
+    </div>
+  </main>
+</div>
+<script src="../assets/app.js"></script>
+</body>
+</html>

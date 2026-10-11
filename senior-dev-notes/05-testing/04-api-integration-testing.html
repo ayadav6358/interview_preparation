@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>API & Integration Testing — Testing — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">Testing</a><span class="sep">›</span>API & Integration Testing</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>API and Integration Testing (Supertest, Test Databases)</h1>
+      <p class="meta-line"><span>⏱ 2.5 hrs</span><span>📍 Chapter 4 of 6</span></p>
+      <p><strong>One-line summary:</strong> Integration tests earn their keep by exercising your routing, middleware,
+      serialization, and real database constraints together — the main engineering problem is designing a test
+      database lifecycle that's fast, fully isolated between tests, and doesn't silently mask bugs the way mocking
+      the DB would.</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>Most production incidents in CRUD-heavy backends happen at the boundary unit tests can't see: a validation
+      middleware that doesn't run in the order you assumed, a unique constraint that fires at the DB layer instead
+      of the application layer, a transaction that doesn't roll back when you expected it to, a serialization step
+      that silently drops a field. Interviewers probe integration testing because it reveals whether you understand
+      your own stack's request lifecycle well enough to test it realistically, and whether you can design test
+      infrastructure (DB lifecycle, fixtures, isolation) that scales to hundreds of tests without becoming the
+      slowest, flakiest part of CI — a very common real-world failure mode.</p>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>Read <a href="01-testing-strategy.html">Testing Strategy</a> and <a href="02-unit-testing.html">Unit
+      Testing</a> first. Related: <a href="../04-nodejs-advanced/06-production-apis.html">Production APIs</a>.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="what-integration-tests-for">What an integration test is actually verifying</h3>
+      <p>An integration test for an API route should exercise: routing (the right handler fires for the right
+      method+path+params), middleware (auth, validation, error handling) in the real order they're registered,
+      serialization (request body parsing, response shape), and — critically — the real database, including
+      constraints the application layer might assume but not itself enforce (unique indexes, foreign keys, NOT
+      NULL, check constraints). Mocking the database out of this test defeats its purpose: the entire value is in
+      catching bugs at exactly that boundary.</p>
+
+      <h3 id="supertest-mechanics">How Supertest actually works</h3>
+      <p>Supertest wraps your app instance (an Express/Fastify/Koa app, or any Node HTTP server) and, for each test
+      request, spins up the server on an ephemeral port (or binds directly without a real socket, for frameworks
+      that support it) and issues a real HTTP request against it — meaning the full middleware stack,
+      serialization, and routing logic run exactly as they would in production, not a simulated subset. This is the
+      key difference from calling a controller function directly in a unit test: Supertest validates everything in
+      front of the controller too (the auth middleware actually ran, the validation middleware actually rejected a
+      bad payload with the right status code). Under the hood, it uses `superagent` for the HTTP client calls and
+      chains assertions fluently (`.expect(200)`, `.expect('Content-Type', /json/)`), executing the real request
+      when the promise is awaited or a callback fires.</p>
+
+      <h3 id="test-db-lifecycle">Test database lifecycle strategies</h3>
+      <ul>
+        <li><strong>Dedicated test database, truncate between tests</strong> — simplest: run migrations once per
+        suite, truncate all tables (or specific ones) in a <code>beforeEach</code>/<code>afterEach</code>. Clear
+        mental model, but truncation cost scales with table count and can get slow for large schemas; also must
+        handle foreign-key-respecting truncate order or disable constraints temporarily.</li>
+        <li><strong>Transaction rollback per test</strong> — wrap each test in a DB transaction that's opened in a
+        <code>beforeEach</code> and rolled back in <code>afterEach</code>, so nothing the test wrote ever actually
+        commits. Fast and clean in theory, but requires your app code to use the <em>same</em> connection/transaction
+        the test opened — tricky if your app code acquires its own connection from a pool internally, since the
+        test's uncommitted writes won't be visible to a different connection (this is the single most common
+        reason this strategy "doesn't work" when first attempted).</li>
+        <li><strong>Fresh database/schema per test file or per test run</strong> — spin up an ephemeral Postgres
+        instance (Testcontainers, or Docker Compose in CI) and run migrations fresh. Strongest isolation guarantee,
+        highest setup cost per run; usually combined with one of the above for isolation <em>within</em> the run.</li>
+        <li><strong>SQLite in-memory for speed, real Postgres for fidelity</strong> — SQLite can be dramatically
+        faster for a fast local feedback loop, but if production runs Postgres, SQLite-only testing risks missing
+        Postgres-specific behavior (JSONB operators, specific constraint error codes, concurrency/locking
+        semantics) — a classic "tests pass, prod breaks" gap. The safer default is testing against the same engine
+        as production, accepting the speed cost, and optimizing speed via parallelization/Testcontainers reuse
+        instead of swapping engines.</li>
+      </ul>
+
+      <h3 id="seeding-and-fixtures">Seeding strategy and fixture design</h3>
+      <p>Prefer <strong>factory functions</strong> (a <code>createTestUser(overrides?)</code> helper that returns
+      sensible defaults, overridable per test) over large shared static fixture files. Shared fixtures that many
+      tests depend on become a coupling hazard — changing a fixture to support one new test can silently break
+      assertions in a dozen unrelated tests that happened to depend on its exact shape. Factories make each test's
+      actual dependencies explicit in the test body itself.</p>
+
+      <h3 id="contract-testing">Contract testing between services</h3>
+      <p>When two services communicate (a frontend BFF calling a backend API, or two backend services), unit tests
+      on each side independently can both pass while the real contract between them has silently diverged (field
+      renamed, type changed, a field that was always present becomes optional). <strong>Consumer-driven contract
+      testing</strong> (e.g., Pact) formalizes this: the consumer records the exact requests/responses it expects
+      as a "pact" file, and the provider's CI replays those expectations against its real implementation,
+      independently of the consumer's own test run — catching contract drift at the point it's introduced, on the
+      provider's side, without needing a slow full E2E test spanning both services.</p>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>The transaction-rollback isolation strategy depends on connection affinity, which is where most
+      implementations go wrong on the first attempt: a typical ORM (Prisma, TypeORM, Knex) grabs a connection from
+      an internal pool per query by default, not per logical "test." To make rollback-based isolation work, you
+      must either pass the test's transaction object explicitly through every repository/query call in your app
+      code (invasive, but fully correct), or use a library/pattern that monkey-patches the pool to always hand out
+      the same connection during a test run (e.g., wrapping the pool's <code>connect()</code> to return a single
+      held connection for the test's duration) — the latter is what most "transactional testing" helper libraries
+      for Prisma/Knex actually do internally. Understanding this is what lets you debug the classic symptom: "my
+      test writes data but a later query in the same test can't see it" — a signature of two different, unrelated
+      connections being used for the write and the read.</p>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+sequenceDiagram
+  participant T as Test
+  participant App as Express app (real middleware stack)
+  participant DB as Test database
+  T->>App: Supertest: POST /users real HTTP request
+  App->>App: auth middleware, validation middleware (real, unmocked)
+  App->>DB: INSERT (real query, real constraints)
+  DB-->>App: unique constraint violation (if duplicate)
+  App-->>T: 409 Conflict (real error-handling middleware)
+  T->>T: afterEach: ROLLBACK transaction / truncate tables
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-typescript">// users.routes.ts — real Express route under test (no mocking of DB or middleware)
+import { Router } from 'express';
+import { pool } from './db';
+
+export const router = Router();
+
+router.post('/users', async (req, res, next) => {
+  const { email, name } = req.body;
+  if (!email || !name) return res.status(400).json({ error: 'email and name are required' });
+  try {
+    const result = await pool.query(
+      'INSERT INTO users (email, name) VALUES ($1, $2) RETURNING id, email, name',
+      [email, name]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err: any) {
+    if (err.code === '23505') return res.status(409).json({ error: 'email already registered' }); // real Postgres unique violation
+    next(err);
+  }
+});
+
+// users.integration.test.ts — Supertest + a real test Postgres instance
+import request from 'supertest';
+import { app } from '../app';
+import { pool } from '../db';
+
+beforeEach(async () => {
+  await pool.query('BEGIN'); // transaction-rollback isolation strategy
+});
+
+afterEach(async () => {
+  await pool.query('ROLLBACK'); // nothing committed ever lands in the table
+});
+
+afterAll(async () => {
+  await pool.end();
+});
+
+describe('POST /users', () => {
+  it('creates a user and returns 201 with the real row shape', async () => {
+    const res = await request(app)
+      .post('/users')
+      .send({ email: 'ada@example.com', name: 'Ada Lovelace' })
+      .expect('Content-Type', /json/)
+      .expect(201);
+
+    expect(res.body).toMatchObject({ email: 'ada@example.com', name: 'Ada Lovelace' });
+    expect(res.body.id).toBeDefined();
+  });
+
+  it('returns 400 when required fields are missing — tests the real validation middleware', async () => {
+    await request(app).post('/users').send({ email: 'ada@example.com' }).expect(400);
+  });
+
+  it('returns 409 on a real unique-constraint violation, not just app-layer validation', async () => {
+    await request(app).post('/users').send({ email: 'dup@example.com', name: 'First' }).expect(201);
+    // second insert triggers the REAL database constraint — this is exactly what a unit test with a mocked DB cannot verify
+    await request(app).post('/users').send({ email: 'dup@example.com', name: 'Second' }).expect(409);
+  });
+});
+
+// Factory function over shared static fixtures
+function buildUser(overrides: Partial<{ email: string; name: string }> = {}) {
+  return { email: 'default@example.com', name: 'Default User', ...overrides };
+}
+// test('...', () => request(app).post('/users').send(buildUser({ email: 'specific@x.com' })) ...);</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4><p>A marketplace backend's unit tests mocked the ORM entirely,
+      asserting that the right query method was called with the right arguments. A migration added a composite
+      unique constraint (seller_id, sku) at the database level to prevent duplicate listings — enforced only in
+      the DB, not re-checked in application code, since the team assumed the DB constraint was sufficient. Every
+      unit test still passed, because they never touched a real database and had no way to exercise the
+      constraint. The bug shipped: under concurrent requests, two near-simultaneous "create listing" calls would
+      both pass app-layer validation, and only one would succeed at the DB layer — but the app didn't handle the
+      resulting constraint-violation error at all, so the second request crashed with an unhandled 500 instead of
+      a clean 409. The team added integration tests specifically for "two concurrent writes that violate a DB-only
+      constraint," run against the real test database, as a required category for every new unique/foreign-key
+      constraint going forward — a rule that exists specifically because that bug class is invisible to mocked
+      unit tests by construction.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Transaction-rollback isolation silently does nothing if your app
+      code and your test acquire <em>different</em> connections from the pool — the test's transaction is open on
+      connection A, the app writes via connection B, and the write genuinely commits (or worse, deadlocks waiting
+      on a lock the test's uncommitted transaction holds). Verify your setup actually forces connection affinity
+      before trusting that rollback is isolating anything — a quick sanity test ("insert a row, roll back, assert
+      it's gone in a fresh query") catches a broken setup immediately.</p></div>
+      <ul>
+        <li><strong>Mistake:</strong> running integration tests against a shared staging/dev database instead of
+        an isolated test database. Any test run can be polluted by, or pollute, concurrent test runs or human
+        usage of that environment — a major source of "works on my machine, fails in CI" and vice versa.</li>
+        <li><strong>Mistake:</strong> mocking the HTTP layer (supertest replaced by directly calling the controller
+        function) to make tests "faster," which silently skips the middleware stack — exactly the part most likely
+        to contain real bugs (auth, validation ordering).</li>
+        <li><strong>Mistake:</strong> not testing real database error codes/constraint violations, assuming
+        application-layer validation is sufficient — concurrent requests can always race past app-layer checks.</li>
+        <li><strong>Best practice:</strong> run migrations once per test suite (not per test) against a dedicated
+        test database/schema, and isolate only the data, not the schema, between individual tests for speed.</li>
+        <li><strong>Best practice:</strong> assert on status code, response shape, AND the actual persisted state
+        (query the DB directly after the request) for write operations — a 201 response with a bug in what
+        actually got written is a real, easy-to-miss gap if you only check the response body.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>Transaction rollback per test</td><td>App code can be made to use a single injectable connection/transaction for the test duration</td><td>Connection pooling makes affinity hard to guarantee, or code under test itself manages transactions (nested transaction conflicts)</td><td>Truncate between tests</td></tr>
+        <tr><td>Truncate between tests</td><td>Simple schema, moderate table count, straightforward FK order</td><td>Large schema where truncation becomes the slowest part of the suite</td><td>Transaction rollback</td></tr>
+        <tr><td>Testcontainers (fresh ephemeral DB per run)</td><td>Need strong isolation across parallel CI jobs, or multiple engine versions to test against</td><td>Local dev loop needing sub-second feedback — container startup cost dominates</td><td>A single shared test DB + good per-test isolation</td></tr>
+        <tr><td>SQLite for speed</td><td>Pure logic tests with minimal DB-specific behavior, fast local iteration</td><td>Production uses Postgres/MySQL-specific features (JSONB, specific locking/constraint behavior)</td><td>Test against the same engine as production</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic">
+        <h4>Basic</h4>
+        <details class="qa"><summary>What does Supertest actually do differently from calling a controller function directly in a test?</summary><div class="answer"><p>Supertest issues a real HTTP request against your actual app instance, exercising the full middleware stack (auth, validation, error handling), routing, and serialization — not just the controller's business logic in isolation.</p></div><div class="followup">Follow-up: why does this matter for testing an auth middleware bug?</div></details>
+        <details class="qa"><summary>Name two strategies for resetting a test database between tests.</summary><div class="answer"><p>Truncating all (or relevant) tables in beforeEach/afterEach, or wrapping each test in a transaction opened in beforeEach and rolled back in afterEach so writes never commit.</p></div><div class="followup">Follow-up: what's the main risk with the transaction-rollback approach?</div></details>
+        <details class="qa"><summary>Why would you test against a real database instead of mocking the database client?</summary><div class="answer"><p>To catch bugs that only exist at the real DB boundary — constraint violations, real query behavior, transaction semantics — which a mocked client can't surface because it never executes real queries against real constraints.</p></div><div class="followup">Follow-up: give an example of a bug class only a real database would catch.</div></details>
+        <details class="qa"><summary>What's a factory function in the context of test fixtures, and why prefer it over static shared fixtures?</summary><div class="answer"><p>A function that returns a valid default test object with overridable fields, called fresh in each test. It avoids the coupling hazard of many tests depending on one shared fixture's exact shape, where a change for one test's needs silently breaks others.</p></div><div class="followup">Follow-up: how would a shared fixture file cause a hard-to-diagnose test failure?</div></details>
+        <details class="qa"><summary>Should integration tests run against your team's shared staging database?</summary><div class="answer"><p>No — use a dedicated, isolated test database. A shared environment can be polluted by concurrent test runs or human usage, causing nondeterministic failures unrelated to the code under test.</p></div><div class="followup">Follow-up: how would you still get confidence that staging-specific config works correctly?</div></details>
+        <details class="qa"><summary>What should you assert on for a write operation (e.g., POST /users), beyond the HTTP response?</summary><div class="answer"><p>The response status and shape, plus the actual persisted state — query the database directly after the request to confirm the write happened correctly, since a correct-looking response doesn't guarantee correct persistence.</p></div><div class="followup">Follow-up: how would you test a write that's supposed to trigger a side effect in another table?</div></details>
+      </div>
+      <div class="qa-level medium">
+        <h4>Medium</h4>
+        <details class="qa"><summary>Explain mechanically why transaction-rollback test isolation can silently fail to isolate anything.</summary><div class="answer"><p>If the test opens its transaction on one connection from the pool, but the application code under test acquires a different connection for its own queries, the two are unrelated: the app's writes aren't part of the test's transaction, so rolling back the test's transaction does nothing to undo them — and depending on locking, the two connections can even deadlock. The fix requires forcing connection affinity, either by threading the transaction object explicitly through the app's query layer or patching the pool to hand out one held connection for the test's duration.</p></div><div class="followup">Follow-up: how would you write a quick sanity check to verify your isolation setup actually works before trusting it across hundreds of tests?</div></details>
+        <details class="qa"><summary>Your team wants faster integration tests and proposes switching from Postgres to SQLite for the test suite. What risks would you raise?</summary><div class="answer"><p>SQLite doesn't replicate Postgres-specific behavior: different constraint violation error codes/formats, no real support for JSONB operators or certain indexing strategies, different concurrency/locking semantics (SQLite's locking model is much simpler and less realistic under concurrent writes). Tests could pass against SQLite while the same code breaks against real Postgres in production — exactly the "tests pass, prod breaks" failure mode integration tests exist to prevent. Better to optimize Postgres test speed directly (Testcontainers reuse, parallelization, minimal migrations) than swap engines.</p></div><div class="followup">Follow-up: are there any parts of the test suite where SQLite would be a reasonable tradeoff?</div></details>
+        <details class="qa"><summary>How would you test a race condition where two concurrent requests might both pass application-layer validation but only one should succeed due to a DB constraint?</summary><div class="answer"><p>Fire two requests concurrently (e.g., `Promise.all` of two Supertest requests) against the same test database state, and assert that exactly one succeeds (201) and the other fails with the expected constraint-violation status (409), with the app correctly catching and translating the DB error rather than crashing with an unhandled 500. This directly tests the actual race, not just the app-layer validation that a sequential test would only exercise once.</p></div><div class="followup">Follow-up: how would you make this test deterministic rather than dependent on which request happens to "win" the race?</div></details>
+        <details class="qa"><summary>What is consumer-driven contract testing, and why would you reach for it instead of (or alongside) full E2E tests spanning two services?</summary><div class="answer"><p>The consumer service records the exact request/response shapes it depends on as a "pact"; the provider's own CI replays those expectations against its real implementation independently, without needing both services running together. It catches contract drift fast, at the point of introduction, on the provider's side — much cheaper and faster-feedback than a full E2E test spanning both real services, while still verifying the real contract rather than a potentially-stale mock.</p></div><div class="followup">Follow-up: what does contract testing NOT catch that a full E2E test would?</div></details>
+        <details class="qa"><summary>How would you structure integration tests for an endpoint that depends on an external third-party API your app calls server-side?</summary><div class="answer"><p>Mock the third-party API specifically (at the HTTP client boundary, e.g., via nock or msw's server-side request interception) while keeping everything else real — your own routing, middleware, and database. This keeps the test deterministic and avoids depending on a real third-party network call, while still verifying your own integration logic (how you call it, how you handle its various response shapes/errors) is correct.</p></div><div class="followup">Follow-up: how would you additionally guard against the third party's real contract drifting from your mock over time?</div></details>
+        <details class="qa"><summary>Why might running database migrations once per test suite, rather than once per test, be the right call — and what has to be true for that to be safe?</summary><div class="answer"><p>Migrations are typically slow (schema DDL operations) relative to data operations, so running them once per suite and only resetting data between tests is far faster. It's safe as long as no test mutates the schema itself and your data-reset strategy (truncate/rollback) correctly returns every table to a known-clean state, including sequences/auto-increment counters if tests depend on specific generated IDs.</p></div><div class="followup">Follow-up: what would break if a test depended on an auto-incremented ID being exactly 1?</div></details>
+      </div>
+      <div class="qa-level advanced">
+        <h4>Advanced</h4>
+        <details class="qa"><summary>Design a test database strategy for a monorepo with 15 microservices, each with its own schema, that needs to run thousands of integration tests in CI in under 10 minutes.</summary><div class="answer"><p>Use Testcontainers (or an equivalent ephemeral-container strategy) to spin up one shared Postgres instance per CI job, with one schema/database per service created at job start via a fast migration-replay step, cached/reused across the job's test files rather than per-file; parallelize test files across multiple CI runners/shards, with each shard getting its own container instance to avoid cross-shard contention; within a shard, use transaction-rollback isolation for test-level speed, falling back to truncate only for tests that genuinely need multi-connection behavior (e.g., concurrency tests). Measure and budget container startup cost explicitly — if it dominates, consider a long-lived shared Postgres server across the whole CI run with per-service schema namespacing instead of a fresh container per job.</p></div><div class="followup">Follow-up: how would you handle a service that needs a different database engine (e.g., one on MongoDB)?</div></details>
+        <details class="qa"><summary>How would you integration-test an endpoint whose correctness depends on a scheduled background job (e.g., an endpoint reads data that's only correct after a nightly reconciliation job runs)?</summary><div class="answer"><p>Don't make the integration test actually wait for or trigger the real scheduler — instead, directly invoke the job's logic as a function/module within the test (treating the job itself as a unit under integration test, separately from its scheduling trigger), seed the "before" state, run the job function, then make real API assertions against the "after" state via the endpoint. Test the scheduling/triggering mechanism itself (cron expression, queue trigger) as a separate, narrower test, since conflating "does the job produce correct results" with "does the job fire on schedule" makes failures hard to localize.</p></div><div class="followup">Follow-up: how would you test the job's idempotency if it accidentally runs twice in a row?</div></details>
+        <details class="qa"><summary>A critical bug shipped where application code assumed a foreign key constraint prevented orphaned rows, but a specific delete path bypassed the ORM's cascade logic and left orphans. How would you design a regression test, and what does this reveal about test boundaries?</summary><div class="answer"><p>Write an integration test that performs the exact delete path that bypassed cascade logic (e.g., a raw query or a bulk-delete operation that skips ORM hooks), then directly queries the database for orphaned child rows — asserting zero orphans — rather than only checking the HTTP response of the delete call. This reveals a boundary gap: ORM-level invariants (cascade behavior) are themselves app-layer assumptions that need the same "verify against the real database directly" treatment as any other business rule, not blind trust that the ORM's abstraction matches the real schema's behavior in every code path.</p></div><div class="followup">Follow-up: how would you systematically find other delete paths with the same bypass risk across the codebase?</div></details>
+        <details class="qa"><summary>How would you approach integration testing for an event-driven system where an API call publishes a message to a queue, and a separate consumer processes it asynchronously, ultimately updating a database row?</summary><div class="answer"><p>Split it into layered tests: (1) an integration test for the producer that asserts the message was published to the queue with the correct shape (using a real or lightweight in-memory broker, not mocking the publish call away entirely); (2) a separate integration test for the consumer that feeds it a known message directly and asserts the resulting database state, without needing the producer at all; (3) a thin end-to-end test that actually publishes via the real API and polls (bounded, with a timeout) for the eventual database state, to catch real wiring/schema-compatibility issues between the two — kept minimal since it's the most expensive and least deterministic layer, given the asynchronous, eventually-consistent nature of the flow.</p></div><div class="followup">Follow-up: how would you test the system's behavior on duplicate message delivery (at-least-once semantics)?</div></details>
+        <details class="qa"><summary>Your integration test suite takes 35 minutes in CI and contains both unit-test-shaped logic (e.g., validation rule coverage via many near-identical HTTP requests) and genuine integration concerns. How would you restructure it?</summary><div class="answer"><p>Audit each test's actual purpose: tests that are really exercising a validation rule's logic (many input variants) belong as unit tests directly against the validation function, run in milliseconds instead of full HTTP round-trips through Supertest and a real database; keep only one or two representative Supertest tests per route confirming the validation middleware is wired in correctly at all. This typically cuts the bulk of an inflated integration suite's runtime dramatically while losing zero actual confidence, since the fine-grained validation-rule coverage moves to a cheaper, equally capable layer.</p></div><div class="followup">Follow-up: how would you prevent the suite from drifting back into this shape over time?</div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment">
+        <span class="level-tag">Beginner (30-60 min)</span>
+        <h4>Supertest basics against a real route</h4>
+        <p>Build a tiny Express API with a <code>GET /health</code> and a <code>POST /items</code> (in-memory array
+        storage is fine for this one). Write Supertest tests.</p>
+        <ul>
+          <li>Test the health check returns 200 and the expected shape.</li>
+          <li>Test creating an item returns 201 and the item appears in a subsequent GET.</li>
+          <li>Test a missing required field returns 400.</li>
+        </ul>
+        <p><strong>Acceptance criteria:</strong> tests exercise real HTTP requests via Supertest, not direct
+        function calls; all three cases pass reliably in repeated runs.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>Reset the in-memory array between tests in a beforeEach to keep tests isolated from each other.</p></div></details>
+        <p><strong>Bonus:</strong> add a GET by id that returns 404 for an unknown id, and test it.</p>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Intermediate (2-4 hrs)</span>
+        <h4>Real Postgres integration tests with proper isolation</h4>
+        <p>Build a small Express + Postgres (or your DB of choice) API for a "bookmarks" resource with a unique
+        constraint on (user_id, url). Set up a real test database lifecycle.</p>
+        <ul>
+          <li>Implement either transaction-rollback or truncate-based isolation — verify it actually works with a sanity test first.</li>
+          <li>Write tests for create, list, delete, and the unique constraint violation (expect a clean 409, not a 500).</li>
+          <li>Add a factory function for building test bookmark payloads.</li>
+        </ul>
+        <p><strong>Acceptance criteria:</strong> running the full suite twice in a row produces identical results
+        (no leaked state between runs); the constraint-violation test actually exercises the real DB constraint.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>If using transaction rollback, make sure your DB client/pool is configured so the app code and the test share the same connection for the test's duration.</p></div></details>
+        <p><strong>Bonus:</strong> add a concurrency test firing two near-simultaneous duplicate-insert requests and assert exactly one succeeds.</p>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Advanced (1-2 days)</span>
+        <h4>Design and build a CI-ready integration test harness with Testcontainers</h4>
+        <p>Take the bookmarks API from the intermediate assignment and productionize the test setup for CI use.</p>
+        <ul>
+          <li>Use Testcontainers (or Docker Compose) to spin up a fresh Postgres instance for the test run.</li>
+          <li>Run real migrations against it at setup time.</li>
+          <li>Wire it into a GitHub Actions workflow that runs the full integration suite on every push.</li>
+          <li>Add a mocked third-party dependency (e.g., a fictional "link preview" service the API calls) using nock or msw, and test both its success and failure/timeout paths.</li>
+        </ul>
+        <p><strong>Acceptance criteria:</strong> the GitHub Actions workflow passes on a clean checkout with no
+        manual setup steps; the suite is fully deterministic across at least 10 CI re-runs.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>This is intentionally open-ended infrastructure work — the value is in getting the CI wiring and isolation genuinely correct, not in any one "right" code structure.</p></div></details>
+        <p><strong>Bonus:</strong> add a contract test (Pact or similar) for the third-party dependency's expected request/response shape.</p>
+      </div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet"><ul>
+        <li>Supertest issues real HTTP requests against your app — exercises real middleware, routing, serialization, unlike a direct controller call.</li>
+        <li>Integration tests should hit a real (test) database — mocking it away defeats the test's entire purpose.</li>
+        <li>Transaction-rollback isolation requires connection affinity between test and app code — verify it before trusting it.</li>
+        <li>Truncate-between-tests is simpler but slower at scale; respect FK order or disable constraints temporarily.</li>
+        <li>Test against the same DB engine as production (Postgres vs SQLite gap is a real "tests pass, prod breaks" risk).</li>
+        <li>Prefer factory functions over shared static fixtures to avoid cross-test coupling.</li>
+        <li>Assert persisted state directly via DB query for writes, not just the HTTP response shape.</li>
+        <li>Test real constraint violations (unique, FK) and concurrent-write races — these are invisible to mocked-DB unit tests.</li>
+        <li>Consumer-driven contract testing (Pact) catches cross-service contract drift faster and cheaper than full E2E.</li>
+        <li>Run migrations once per suite, reset only data between tests, for speed.</li>
+      </ul></div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://github.com/ladjs/supertest">Supertest — GitHub README</a></li>
+        <li><a href="https://testcontainers.com/">Testcontainers</a></li>
+        <li><a href="https://docs.pact.io/">Pact — Consumer-Driven Contract Testing</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="03-react-testing-library.html"><span class="dir">← Previous</span>React Testing Library</a>
+        <a class="next" href="05-e2e-playwright.html"><span class="dir">Next →</span>E2E Testing with Playwright</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · Testing</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-typescript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-jsx.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "05-testing", chapterKey: "04-api-integration-testing" });</script>
+</body>
+</html>

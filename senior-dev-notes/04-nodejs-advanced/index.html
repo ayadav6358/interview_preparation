@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Node.js Advanced — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span>Node.js Advanced</div>
+      <div class="topbar-actions"><button id="theme-toggle" class="icon-btn">🌙</button></div>
+    </div>
+    <div class="content">
+      <h1>Node.js Advanced</h1>
+      <p class="meta-line"><span>📚 9 chapters</span><span>⏱ ~21–25 hrs total</span></p>
+      <p>Node.js is the runtime most senior/lead interviews probe hardest once you claim "strong backend" — and most
+      candidates with 8-10 years of Express experience still can't explain what actually happens between a timer
+      firing and a promise resolving. This topic goes under the hood of the event loop and libuv, streams and real
+      backpressure, worker threads vs cluster vs child processes, V8's generational GC and leak hunting with heap
+      snapshots, error-handling architecture at scale, and the production concerns — API framework choice, auth
+      (JWT/OAuth2/SSO done correctly), background job queues, and horizontal scaling with PM2/K8s and graceful
+      shutdown.</p>
+
+      <h2 id="outcomes">Learning Outcomes</h2>
+      <ul>
+        <li>Explain the six libuv event loop phases and where microtasks are drained relative to each one — not the simplified "macrotask vs microtask" version.</li>
+        <li>Implement backpressure-correct streaming pipelines and diagnose why a naive <code>pipe()</code> or unthrottled write starves memory.</li>
+        <li>Choose between worker_threads, cluster, and child_process for a given CPU-bound or isolation problem, and justify the choice with numbers.</li>
+        <li>Read a V8 heap snapshot, identify a real memory leak (closures, listeners, caches, timers), and fix it.</li>
+        <li>Design an error-handling strategy (operational vs programmer errors, central error middleware, process-level handlers) that doesn't crash production silently.</li>
+        <li>Build a layered, production-grade API (controllers/services/repositories) and defend Express vs Fastify vs NestJS tradeoffs.</li>
+        <li>Implement JWT access/refresh token auth and OAuth2/OIDC flows correctly, including the security pitfalls interviewers probe for.</li>
+        <li>Design a reliable background job system (BullMQ) with retries, idempotency, and dead-letter handling.</li>
+        <li>Scale a Node service horizontally with PM2/Kubernetes, including zero-downtime deploys and graceful shutdown under in-flight requests.</li>
+      </ul>
+
+      <h2 id="chapters">Chapters</h2>
+      <table>
+        <tr><th>#</th><th>Chapter</th><th>Time</th></tr>
+        <tr><td>01</td><td><a href="01-event-loop.html">Event Loop Internals &amp; libuv</a></td><td>3 hrs</td></tr>
+        <tr><td>02</td><td><a href="02-streams-buffers.html">Streams, Buffers &amp; Backpressure</a></td><td>2.5 hrs</td></tr>
+        <tr><td>03</td><td><a href="03-worker-threads.html">Worker Threads, Child Processes &amp; Cluster</a></td><td>2.5 hrs</td></tr>
+        <tr><td>04</td><td><a href="04-memory-gc.html">Memory Management &amp; Garbage Collection</a></td><td>2.5 hrs</td></tr>
+        <tr><td>05</td><td><a href="05-error-handling.html">Error Handling Strategy at Scale</a></td><td>2 hrs</td></tr>
+        <tr><td>06</td><td><a href="06-production-apis.html">Production APIs: Express vs Fastify vs NestJS</a></td><td>2.5 hrs</td></tr>
+        <tr><td>07</td><td><a href="07-authentication.html">Authentication: Sessions, JWT, OAuth2, SSO</a></td><td>3 hrs</td></tr>
+        <tr><td>08</td><td><a href="08-background-jobs.html">Background Jobs, Scheduling &amp; Queues</a></td><td>2.5 hrs</td></tr>
+        <tr><td>09</td><td><a href="09-scaling-node.html">Scaling Node in Production</a></td><td>2.5 hrs</td></tr>
+      </table>
+
+      <div class="capstone">
+        <h3>🏆 Capstone Project: Build a Production-Grade Node.js API Service</h3>
+        <p><strong>Problem statement:</strong> Build a backend service (e.g., a task/notification platform) that
+        demonstrates every chapter in this topic working together: layered architecture, secure auth with refresh
+        tokens, async background processing, resilient I/O, and clean shutdown — then prove it survives load.</p>
+        <p><strong>Required features:</strong></p>
+        <ul>
+          <li>Layered architecture: HTTP layer (controllers) → services (business logic) → repositories (data access), with dependency injection so each layer is unit-testable in isolation.</li>
+          <li>JWT access tokens (short-lived) + refresh tokens (long-lived, rotated, stored hashed) with logout/revocation and refresh-token reuse detection.</li>
+          <li>A BullMQ-backed worker for an async task (e.g., sending emails, generating reports) with retries, exponential backoff, and a dead-letter queue.</li>
+          <li>Streaming endpoint (e.g., CSV/large JSON export) that respects backpressure instead of buffering the whole response in memory.</li>
+          <li>Graceful shutdown: in-flight requests finish, new connections are refused, the job worker finishes its current job, DB pool drains cleanly, all within a bounded timeout.</li>
+          <li>Structured JSON logging (request ID correlation) and a centralized error-handling middleware distinguishing operational vs programmer errors.</li>
+          <li>A load test (autocannon or k6) against the streaming and queue-producing endpoints, documenting what happens under backpressure/overload and what you changed to fix it.</li>
+        </ul>
+        <p><strong>Tech stack suggestion:</strong> Node.js 22 LTS + TypeScript, Fastify, BullMQ + Redis, Postgres (pg or Prisma), pino for logging, Docker Compose for local dev, autocannon or k6 for load testing.</p>
+        <p><strong>Milestones:</strong></p>
+        <ol>
+          <li>Scaffold layered architecture + health/readiness endpoints + structured logging with request-ID correlation.</li>
+          <li>Implement auth: register/login, JWT access + rotating refresh tokens, revocation list, protected routes.</li>
+          <li>Add the BullMQ worker with a real async job, retry/backoff policy, and dead-letter queue + a way to inspect failed jobs.</li>
+          <li>Add a streaming export endpoint built on Node streams, verified not to buffer the entire payload in memory (profile it).</li>
+          <li>Wire graceful shutdown (SIGTERM handling, connection draining, worker drain, DB pool close) and test it mid-request with a kill signal.</li>
+          <li>Load-test with autocannon/k6, capture latency/throughput under increasing concurrency, identify the actual bottleneck (event loop lag? DB pool? queue backlog?), fix it, and re-measure.</li>
+        </ol>
+        <p><strong>Evaluation checklist:</strong></p>
+        <ul>
+          <li>☐ Can explain exactly what happens, phase by phase, when a request triggers a DB call and a queued job.</li>
+          <li>☐ Refresh token rotation actually detects and blocks reuse of a stolen/old refresh token.</li>
+          <li>☐ Killing the process mid-request does not drop that request's response or corrupt an in-progress job.</li>
+          <li>☐ Heap usage during the streaming load test stays flat, not growing with payload size.</li>
+          <li>☐ Can show the load test numbers and explain the actual bottleneck found, not a guessed one.</li>
+        </ul>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · Node.js Advanced</footer>
+  </main>
+</div>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "04-nodejs-advanced" });</script>
+</body>
+</html>

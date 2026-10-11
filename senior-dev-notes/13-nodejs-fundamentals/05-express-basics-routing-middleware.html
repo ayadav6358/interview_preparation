@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Express Basics: Routing &amp; Middleware — Node.js Fundamentals — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">Node.js Fundamentals</a><span class="sep">›</span>Express Basics: Routing &amp; Middleware</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>Express Basics: Routing &amp; Middleware</h1>
+      <p class="meta-line"><span>⏱ 2 hrs</span><span>📍 Chapter 5 of 6</span></p>
+      <p><strong>One-line summary:</strong> Express is, at its core, exactly the middleware-array-plus-router
+      pattern you'd build yourself on raw http (Chapter 4) — the senior-level skill isn't knowing the API, it's
+      reasoning precisely about middleware <em>order</em>, because almost every "weird Express bug" is actually
+      an ordering bug.</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>You've used Express for years, but can you explain exactly why putting <code>app.use(authMiddleware)</code>
+      after your routes means it never runs for them? Can you explain why an error thrown inside an async route
+      handler doesn't automatically reach your error-handling middleware in Express 4.x without extra work, but
+      behaves differently in Express 5.x? These aren't edge cases — they're the actual cause of real incidents
+      (an auth check that silently never ran, an unhandled rejection crashing the process). This chapter is the
+      "say the mental model precisely" refresher, not an introduction to app.get.</p>
+      <div class="box why"><h4>Why</h4><p>Middleware order is not a style preference — it's the entire request
+      pipeline's control flow, executed top-to-bottom in registration order. A security-critical middleware
+      (auth, rate limiting) registered after the routes it's meant to protect provides zero protection; this is a
+      genuinely common real-world vulnerability, not a theoretical gotcha.</p></div>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>Comfortable with the raw <code>node:http</code> module's req/res model. Related in this topic:
+      <a href="04-http-module-and-basic-servers.html">HTTP Module &amp; Basic Servers</a> (what Express is
+      automating), <a href="06-rest-api-fundamentals.html">REST API Fundamentals</a> (applying this chapter's
+      routing to a well-designed API surface). Related elsewhere:
+      <a href="../04-nodejs-advanced/06-production-apis.html">Production APIs (Express/Fastify/Nest)</a> for
+      production hardening beyond these basics, and
+      <a href="../07-observability-security/05-secure-auth-secrets.html">Secure Auth, Secrets, CORS/CSP/XSS/CSRF</a>
+      for what real auth/security middleware needs to cover.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="app-and-middleware">The app object and the middleware chain</h3>
+      <p><code>express()</code> returns an <code>app</code> — itself a request handler function compatible with
+      <code>http.createServer(app)</code>, plus a routing/middleware API layered on top. Every
+      <code>app.use(fn)</code> and every route handler (<code>app.get/post/...</code>) is, under the hood, added
+      to the same ordered middleware chain. Express walks that chain top-to-bottom, in the exact order you
+      registered things, for every request — a middleware either calls <code>next()</code> to pass control
+      forward, or ends the response (<code>res.send/json/end</code>) to stop the chain there. If a middleware
+      does neither, the request hangs forever (same failure mode as Chapter 4's raw http handler that never calls
+      <code>res.end()</code>).</p>
+
+      <h3 id="middleware-signature">Middleware signatures: (req, res, next) vs error middleware</h3>
+      <p>A normal middleware/route handler has the signature <code>(req, res, next)</code>. An
+      <strong>error-handling</strong> middleware has <strong>four</strong> parameters: <code>(err, req, res,
+      next)</code> — Express detects this by function arity (checking <code>fn.length === 4</code>) and only
+      invokes such functions when <code>next(err)</code> was called somewhere upstream, skipping every normal
+      middleware in between. Error-handling middleware must be registered <em>last</em>, after all routes, or it
+      will never be reached for errors from routes registered after it.</p>
+
+      <h3 id="params-query-static">Route params, query strings, and static files</h3>
+      <p><code>app.get('/bookmarks/:id', handler)</code> populates <code>req.params.id</code> automatically —
+      exactly the manual segment-matching from Chapter 4, done for you. <code>req.query</code> gives you the
+      already-parsed query string as a plain object (<code>?tag=js&amp;sort=asc</code> → <code>{ tag: 'js', sort:
+      'asc' }</code>). <code>express.static(dir)</code> is itself just a middleware — mounted via
+      <code>app.use(express.static('public'))</code> — that checks if the request path matches a file in
+      <code>dir</code> and serves it directly, calling <code>next()</code> to fall through to your routes if no
+      matching file exists.</p>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>Express's router matches routes by converting each path pattern (including <code>:param</code> segments
+      and wildcards) into a regular expression internally (historically via the <code>path-to-regexp</code>
+      library), tested against the request path in registration order — the first matching route/middleware for
+      a given method+path wins and runs; later matching routes are simply never reached unless the earlier
+      handler calls <code>next()</code> instead of ending the response. This is why route <strong>order</strong>
+      matters even among routes, not just among middleware: a broad pattern registered before a more specific one
+      can "shadow" it.</p>
+      <p>Async error handling is a known sharp edge. In Express 4.x, if an <code>async</code> route handler throws
+      or its returned Promise rejects, Express does <strong>not</strong> automatically catch it and route it to
+      your error middleware — an unhandled rejection in a plain async function used as a handler can crash the
+      process (depending on your global unhandledRejection policy) rather than cleanly produce a 500. The
+      standard 4.x fix is wrapping every async handler (manually, or via a small helper/library) to catch
+      rejections and call <code>next(err)</code> explicitly. Express 5.x changes this: route handlers that return
+      a rejected Promise are automatically forwarded to <code>next(err)</code> for you, closing this gap at the
+      framework level — but understanding the 4.x behavior is still essential since a huge share of production
+      Express code in 2025-26 is still on the 4.x line.</p>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+flowchart TD
+  A[Incoming request] --> B[app.use logger]
+  B --> C[app.use express.json]
+  C --> D[app.use authMiddleware]
+  D --> E{Route matches?}
+  E -- "GET /bookmarks" --> F[route handler]
+  E -- no match --> G[404 handler]
+  F --> H{Error thrown/next(err)?}
+  G --> H
+  H -- yes --> I[Error-handling middleware<br/>4-arg signature, registered LAST]
+  H -- no --> J[Response sent, chain ends]
+      </div>
+      <div class="mermaid">
+sequenceDiagram
+  participant R as Route handler
+  participant N as next()
+  participant E as Error middleware
+  R->>R: try { await db.find() }
+  R->>R: catch (err)
+  R->>N: next(err)
+  N->>E: Express detects 4-arg signature, routes here
+  E->>E: log + send consistent error JSON
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-javascript">import express from 'express';
+
+const app = express();
+
+// ---- Middleware order matters: these run top-to-bottom for every matching request ----
+app.use((req, res, next) => {                 // 1) logging — runs first, always
+  const start = Date.now();
+  res.on('finish', () => {
+    console.log(`${req.method} ${req.originalUrl} ${res.statusCode} ${Date.now() - start}ms`);
+  });
+  next();
+});
+
+app.use(express.json({ limit: '1mb' }));       // 2) body parsing — must run before routes that read req.body
+
+// BAD: auth middleware registered AFTER the routes it's meant to protect — does nothing for them
+// app.get('/bookmarks', listBookmarks);
+// app.use(requireAuth);
+
+// GOOD: auth middleware registered BEFORE the routes it protects
+app.use('/bookmarks', requireAuth);            // 3) scoped to a path prefix
+
+function requireAuth(req, res, next) {
+  const token = req.headers.authorization;
+  if (!token) return res.status(401).json({ error: 'Missing Authorization header' });
+  next();                                       // pass control forward — don't forget this!
+}
+
+let bookmarks = [];
+let nextId = 1;
+
+app.get('/bookmarks', (req, res) => {
+  const { tag } = req.query;                   // already parsed — no manual URL parsing needed
+  const result = tag ? bookmarks.filter(b => b.tags?.includes(tag)) : bookmarks;
+  res.json(result);
+});
+
+app.get('/bookmarks/:id', (req, res) => {       // :id auto-populates req.params.id
+  const item = bookmarks.find(b => b.id === Number(req.params.id));
+  if (!item) return res.status(404).json({ error: 'Not found' });
+  res.json(item);
+});
+
+app.post('/bookmarks', (req, res) => {
+  const { url, title } = req.body;              // parsed by express.json() middleware above
+  if (!url || !title) return res.status(400).json({ error: 'url and title are required' });
+  const item = { id: nextId++, url, title };
+  bookmarks.push(item);
+  res.status(201).json(item);
+});
+
+// ---- Express 4.x: async handlers do NOT auto-catch rejections — wrap them ----
+function asyncHandler(fn) {
+  return (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
+}
+app.get('/bookmarks-from-db/:id', asyncHandler(async (req, res) => {
+  const item = await fakeDbLookup(req.params.id);   // if this rejects, asyncHandler forwards to next(err)
+  res.json(item);
+}));
+
+// ---- 404 fallback: must come after all real routes ----
+app.use((req, res) => res.status(404).json({ error: 'Route not found' }));
+
+// ---- Error-handling middleware: 4 args, MUST be registered last ----
+app.use((err, req, res, next) => {
+  console.error(err);
+  res.status(err.statusCode || 500).json({ error: err.message || 'Internal Server Error' });
+});
+
+app.listen(3000, () => console.log('Listening on http://localhost:3000'));
+</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4><p>A security review flagged that a newly added "export all data as
+      CSV" admin endpoint was reachable without authentication, despite the team being confident
+      <code>requireAuth</code> was applied globally. Root cause: the endpoint was added via
+      <code>app.get('/admin/export', exportHandler)</code> directly on the main app module, which was imported and
+      its routes registered <em>before</em> the shared <code>app.use(requireAuth)</code> line further down in the
+      bootstrap file — an easy mistake in a growing codebase where route registration got spread across multiple
+      files imported in a particular order. The fix was immediate (reorder), but the longer-term fix was
+      structural: the team moved to Express's <code>Router</code> objects per feature, with auth middleware
+      applied explicitly at the router-mount level (<code>app.use('/admin', requireAuth, adminRouter)</code>)
+      rather than relying on a single easily-misordered global middleware list, making the protection visually
+      obvious at every mount point instead of implicit in file-load order.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Registering auth/validation middleware after the routes it's
+      meant to protect. Express runs middleware strictly in registration order — a later <code>app.use</code>
+      provides zero protection to routes already matched and responded to above it.</p></div>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Assuming Express 4.x automatically catches a rejected Promise
+      from an async route handler. It doesn't — you must wrap async handlers (manually or with a helper) to
+      forward rejections to <code>next(err)</code>, or they can surface as an unhandled rejection instead of a
+      clean 500 response. Express 5.x fixes this specifically for route handlers, but check your actual version.</p></div>
+      <ul>
+        <li>Error-handling middleware (4-arg signature) must be registered last — after every route and every normal middleware — or errors from later-registered routes will never reach it.</li>
+        <li>Always call <code>next()</code> in a middleware that isn't ending the response — forgetting it hangs the request exactly like a raw http handler that never calls <code>res.end()</code>.</li>
+        <li>Prefer <code>Router</code> objects mounted with explicit middleware at the mount point over a single flat list of global <code>app.use</code> calls as the app grows — it makes protection scope visually unambiguous.</li>
+        <li>Don't forget <code>express.json()</code> only parses JSON bodies — a different content type (e.g. multipart form uploads) needs a different middleware (e.g. multer) entirely.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>Flat app.use chain</td><td>Small app, few routes, single file</td><td>Growing app with many features/teams — order becomes hard to audit</td><td>Router objects per feature, mounted with explicit middleware</td></tr>
+        <tr><td>Manual async-wrapper (asyncHandler)</td><td>Express 4.x, want explicit control and no extra dependency</td><td>You're already on Express 5.x (handles this natively)</td><td>express-async-errors library, or upgrade to Express 5.x</td></tr>
+        <tr><td>express.static for file serving</td><td>Simple static assets alongside an API</td><td>Need fine-grained access control per file, or serving from object storage/CDN</td><td>Dedicated static hosting/CDN, custom middleware with auth checks</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic"><h4>Basic</h4>
+      <details class="qa"><summary>What does calling next() in a middleware do?</summary><div class="answer"><p>It passes control to the next middleware/route handler in the chain; without calling it (and without ending the response another way), the request hangs with no response ever sent.</p></div><div class="followup">Follow-up: what are the two valid ways a middleware can "finish" handling a request?</div></details>
+      <details class="qa"><summary>How does Express distinguish a normal middleware from an error-handling middleware?</summary><div class="answer"><p>By function arity — a 4-parameter function (err, req, res, next) is treated as error-handling middleware, only invoked when next(err) was called upstream; a 3-parameter function (req, res, next) is normal middleware.</p></div><div class="followup">Follow-up: where must error-handling middleware be registered relative to your routes?</div></details>
+      <details class="qa"><summary>How do you access a route parameter like :id in Express?</summary><div class="answer"><p>Via req.params.id for a route registered as app.get('/bookmarks/:id', handler) — Express parses it automatically from the matched URL segment.</p></div><div class="followup">Follow-up: how do you access query string parameters instead?</div></details>
+      <details class="qa"><summary>Does middleware registration order matter in Express?</summary><div class="answer"><p>Yes — Express runs middleware strictly in the order it was registered for every matching request; a middleware registered after a route it was meant to guard provides no protection to that route.</p></div><div class="followup">Follow-up: give a concrete security consequence of getting this order wrong.</div></details>
+      <details class="qa"><summary>What does express.json() do and where must it be registered?</summary><div class="answer"><p>It's middleware that parses a JSON request body into req.body; it must be registered before any route handler that reads req.body, since middleware only affects requests that reach it after registration order.</p></div><div class="followup">Follow-up: what happens if you try to read req.body in a route without express.json() registered first?</div></details>
+      <details class="qa"><summary>What is express.static and how does it interact with next()?</summary><div class="answer"><p>It's middleware that serves files directly from a given directory if the request path matches a file; if no matching file exists, it calls next() to pass control to subsequent middleware/routes instead of responding with a 404 itself.</p></div><div class="followup">Follow-up: where would you typically register it relative to your API routes?</div></details>
+      </div>
+      <div class="qa-level medium"><h4>Medium</h4>
+      <details class="qa"><summary>Why doesn't Express 4.x automatically catch an error thrown inside an async route handler?</summary><div class="answer"><p>Express's internal route-dispatch call wraps synchronous handler execution in a try/catch, but when an async function is called, it returns a Promise immediately — a synchronous throw inside that function actually becomes a Promise rejection, not a synchronous exception Express's wrapper can see; Express 4.x's dispatcher doesn't attach a .catch() to that returned Promise, so the rejection goes unhandled unless the developer calls next(err) explicitly or wraps the handler.</p></div><div class="followup">Follow-up: what specifically changed in Express 5.x to fix this?</div></details>
+      <details class="qa"><summary>Explain why app.use('/admin', requireAuth, adminRouter) is a stronger pattern than a single global app.use(requireAuth) for a growing codebase.</summary><div class="answer"><p>Mounting middleware explicitly at the specific path prefix it protects makes the protection visually co-located with the routes it applies to, immune to ordering mistakes elsewhere in a large bootstrap file where routes might be registered across many imported modules. A single global app.use(requireAuth) relies on every future route being registered after that one line, in every file, forever — a fragile assumption at scale.</p></div><div class="followup">Follow-up: what's a scenario where a global middleware is still the better choice over per-route-group mounting?</div></details>
+      <details class="qa"><summary>How does Express's router decide which of two overlapping route patterns matches a given request?</summary><div class="answer"><p>Routes are matched in registration order; the first pattern (converted internally to a regex) that matches the request's method and path wins, and execution stops there unless that handler calls next() to fall through. A broadly-matching route registered before a more specific one can "shadow" it, which is why route-order among routes themselves (not just among middleware) can be a real bug source.</p></div><div class="followup">Follow-up: give an example of two route patterns where registration order changes which one actually handles a request.</div></details>
+      <details class="qa"><summary>What's the practical difference between express.json() and a hand-rolled body parser like the one you'd write on raw http?</summary><div class="answer"><p>Functionally similar (collect chunks, concatenate, JSON.parse), but express.json() adds production-necessary guardrails out of the box: a configurable size limit (protecting against unbounded memory growth from a malicious payload), correct Content-Type checking (only parses bodies actually claiming to be JSON), and consistent error forwarding (a parse failure calls next(err) with a proper error object rather than throwing raw).</p></div><div class="followup">Follow-up: what status code does express.json() typically produce for a payload exceeding its configured limit, and why that code specifically?</div></details>
+      <details class="qa"><summary>Why would a 404 handler registered via app.use((req,res) => ...) before your actual routes break your entire app?</summary><div class="answer"><p>Because it has no path restriction, it matches every request regardless of method or path, and since middleware runs in registration order, it would intercept and respond to every single request before any real route is ever reached — your routes would become entirely unreachable dead code.</p></div><div class="followup">Follow-up: why does it work correctly when registered as the very last app.use, after all real routes?</div></details>
+      <details class="qa"><summary>How would you test that your auth middleware is actually applied to every intended route, not just manually verify by reading the code?</summary><div class="answer"><p>Write integration tests that hit every protected route without an Authorization header and assert a 401, as part of the standard test suite — this converts "we're pretty sure auth is applied everywhere" into an automatically-enforced, regression-proof guarantee that fails CI the moment a new route is added without it, rather than relying on code review catching a misordered app.use.</p></div><div class="followup">Follow-up: how would you structure this test to automatically cover new routes added in the future without manually listing every path?</div></details>
+      </div>
+      <div class="qa-level advanced"><h4>Advanced</h4>
+      <details class="qa"><summary>Design a codebase convention/lint rule that makes "middleware registered in the wrong order" structurally hard to get wrong as a team scales past a handful of engineers.</summary><div class="answer"><p>Mandate Router-per-feature with explicit middleware passed at the mount point (app.use('/admin', requireAuth, adminRouter)) rather than ever calling bare global app.use(authMiddleware) in the main bootstrap file — this makes the protection visible at the single call site where a route group is wired in, rather than depending on file-import order elsewhere. Pair this with an automated test (as described in the medium section) that asserts every route under a given prefix actually 401s without credentials, run in CI, so a future engineer adding a route without realizing it needs protection gets caught immediately rather than in a security review months later.</p></div><div class="followup">Follow-up: how would you retrofit this convention onto an existing large Express app that currently uses flat global middleware, with minimal risk during the migration?</div></details>
+      <details class="qa"><summary>Explain precisely why an async route handler's unhandled rejection in Express 4.x can crash the entire process, and what Node-level mechanism is responsible.</summary><div class="answer"><p>A Promise rejection with no attached .catch() anywhere in its chain triggers Node's 'unhandledRejection' process event; depending on the Node version and configuration, the default behavior (since Node 15) is to terminate the process with a non-zero exit code if nothing handles that event, treating unhandled rejections roughly as seriously as uncaught exceptions. Since Express 4.x's route dispatcher doesn't attach a .catch() to an async handler's returned Promise, a thrown error inside it becomes exactly this kind of unhandled rejection unless the developer's own code (an asyncHandler wrapper, or Express 5.x's built-in handling) catches it first.</p></div><div class="followup">Follow-up: how would you add a last-resort global safety net for this without fixing every individual handler, and what are its limits?</div></details>
+      <details class="qa"><summary>How would you benchmark whether Express's middleware-chain overhead is meaningful for your specific service's latency budget, versus just assuming "Express is slower than Fastify" from blog posts?</summary><div class="answer"><p>Build a minimal representative endpoint in both frameworks doing your actual workload's typical work (a DB call, JSON serialization of a realistic payload size), load test both under your production-realistic concurrency with the same tooling (autocannon), and compare p50/p99 latency and throughput directly — framework dispatch overhead is usually dwarfed by I/O-bound work (a DB round trip) for typical CRUD APIs, so the generic "Fastify is faster" claim may be irrelevant to your actual bottleneck. Only treat framework overhead as a real optimization lever if profiling shows meaningful time spent specifically in framework dispatch code relative to your actual handler logic.</p></div><div class="followup">Follow-up: in what kind of workload would framework-level overhead actually become the dominant cost, making this optimization worth pursuing?</div></details>
+      <details class="qa"><summary>Design an error-handling middleware strategy that distinguishes operational errors (expected, e.g. validation failures, not-found) from programmer errors (bugs, e.g. a null reference), and explain why the distinction matters for production stability.</summary><div class="answer"><p>Create a custom error class hierarchy (e.g. AppError with a statusCode and isOperational flag) that route handlers throw/next() with for expected failure cases; the centralized error middleware checks isOperational — for true, it safely returns the error's message and status code to the client; for false (a genuine bug, e.g. a TypeError), it logs the full stack internally but returns a generic "Internal Server Error" to the client (never leaking internal error details/stack traces) and, depending on severity, may trigger a process-level alert or even a controlled restart, since an unexpected programmer error indicates the process may be in an unknown, potentially corrupted state that's riskier to keep serving traffic from indefinitely.</p></div><div class="followup">Follow-up: why is leaking a raw error message/stack trace to the client a real security concern, not just a cosmetic one?</div></details>
+      <details class="qa"><summary>You need to apply a middleware to every route except one specific public health-check endpoint. What are your options and their tradeoffs?</summary><div class="answer"><p>Option 1: register the health-check route before the middleware in the chain (order-based exclusion) — simple, but fragile if routes get reordered later. Option 2: use a path-based mount so the middleware only applies to a specific prefix the health check isn't under (e.g. mount auth only on '/api', leave '/healthz' outside it) — clearer intent, scales better. Option 3: have the middleware itself check req.path and call next() immediately for excluded paths — flexible but embeds exclusion logic inside the middleware rather than at the routing/composition level, which is harder to audit at a glance. Prefer path-based mounting (option 2) as the default for clarity; reserve in-middleware exclusion checks for cases where the exclusion logic is genuinely dynamic/conditional.</p></div><div class="followup">Follow-up: how would your answer change if the exclusion needed to be based on something only known at request time, like a feature flag?</div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment"><span class="level-tag">Beginner (30-60 min)</span>
+      <h4>Break and fix a middleware ordering bug</h4>
+      <p>Build a tiny Express app with a logging middleware, an auth-check middleware, and one protected route.
+      Deliberately register the auth middleware AFTER the route, demonstrate the route is reachable without
+      credentials, then fix the order and demonstrate it now correctly returns 401 without a token.</p>
+      <ul><li>Must show both the broken and fixed behavior with actual curl/HTTP output.</li><li>Must include a one-paragraph written explanation of why order caused the bug.</li></ul>
+      <p><strong>Acceptance criteria:</strong> Clear before/after demonstration with correct reasoning about Express's top-to-bottom middleware execution.</p>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>Express matches and runs middleware/routes in registration order — a route handler that already sent a response is simply never reached by middleware registered after it.</p></div></details>
+      <p><strong>Bonus:</strong> Refactor to use app.use('/protected', authMiddleware, protectedRouter) instead and explain why it's more robust against future ordering mistakes.</p>
+      </div>
+      <div class="assignment"><span class="level-tag">Intermediate (2-4 hrs)</span>
+      <h4>Express bookmarks CRUD API (part 2 of the capstone)</h4>
+      <p>Rebuild the raw-http bookmarks API from Chapter 4 in Express: proper routing with :id params,
+      express.json() for body parsing, a logging middleware, centralized 4-arg error-handling middleware
+      registered last, and a 404 fallback. Keep the file-based JSON storage from Chapter 3.</p>
+      <ul><li>All 5 endpoints functionally identical to the raw-http version from the client's perspective.</li><li>Every error path routes through the single centralized error middleware.</li></ul>
+      <p><strong>Acceptance criteria:</strong> The same curl test script from Chapter 4's assignment passes unmodified against this Express version.</p>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>Wrap async route handlers with an asyncHandler helper (or upgrade to Express 5.x) so thrown/rejected errors inside them correctly reach next(err).</p></div></details>
+      <p><strong>Bonus:</strong> Write a short README documenting, line by line, what Express saved you from writing by hand compared to the Chapter 4 raw version.</p>
+      </div>
+      <div class="assignment"><span class="level-tag">Advanced (1-2 days)</span>
+      <h4>Harden the API: validation, rate limiting, and structured logging</h4>
+      <p>Extend the Express bookmarks API with: request body validation middleware (reject malformed input with
+      a 400 and field-level error details, hand-rolled or using a library like zod), basic per-IP rate limiting
+      middleware (hand-rolled with an in-memory counter, or using express-rate-limit), and structured JSON
+      request logging (method, path, status, duration, a request ID) instead of plain console.log strings.</p>
+      <ul><li>Validation errors must return a consistent error shape matching this topic's REST conventions (see Chapter 6).</li><li>Rate limiting must return 429 with a clear error body once exceeded.</li></ul>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>Generate a request ID (crypto.randomUUID()) in your logging middleware and attach it to req for downstream handlers/error middleware to include in every log line for that request.</p></div></details>
+      <p><strong>Bonus:</strong> Add graceful shutdown handling (SIGTERM) that stops accepting new connections and lets in-flight requests finish before exiting.</p>
+      </div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet"><ul>
+        <li>Express middleware runs top-to-bottom in strict registration order — order is control flow, not cosmetic.</li>
+        <li>A middleware must call next() or end the response — doing neither hangs the request.</li>
+        <li>Error-handling middleware has 4 params (err, req, res, next); Express detects it by arity and only calls it after next(err).</li>
+        <li>Error-handling middleware must be registered LAST, after all routes and normal middleware.</li>
+        <li>req.params comes from :route segments; req.query comes from the parsed query string — both automatic, unlike raw http.</li>
+        <li>Express 4.x does NOT auto-catch async handler rejections — wrap with asyncHandler or call next(err) explicitly; Express 5.x fixes this for route handlers.</li>
+        <li>express.static calls next() when no matching file exists, falling through to your routes.</li>
+        <li>Prefer Router-per-feature mounted with explicit middleware over a single flat global app.use list as the app grows.</li>
+        <li>A 404 catch-all middleware with no path must be registered after every real route, or it swallows everything.</li>
+        <li>Test that protective middleware (auth, validation) is actually applied via integration tests, not code review alone.</li>
+      </ul></div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://expressjs.com/en/guide/using-middleware.html">Express docs: Using middleware</a></li>
+        <li><a href="https://expressjs.com/en/guide/error-handling.html">Express docs: Error handling</a></li>
+        <li><a href="https://expressjs.com/en/guide/routing.html">Express docs: Routing</a></li>
+        <li><a href="https://expressjs.com/en/5x/api.html">Express 5.x API reference</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="04-http-module-and-basic-servers.html"><span class="dir">← Previous</span>HTTP Module &amp; Basic Servers</a>
+        <a class="next" href="06-rest-api-fundamentals.html"><span class="dir">Next →</span>REST API Fundamentals</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · Node.js Fundamentals</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-javascript.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "13-nodejs-fundamentals", chapterKey: "05-express-basics-routing-middleware" });</script>
+</body>
+</html>

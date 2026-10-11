@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Observability & Security — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span>Observability &amp; Security</div>
+      <div class="topbar-actions"><button id="theme-toggle" class="icon-btn">🌙</button></div>
+    </div>
+    <div class="content">
+      <h1>Observability &amp; Security</h1>
+      <p class="meta-line"><span>📚 6 chapters</span><span>⏱ ~14–17 hrs total</span></p>
+      <p>Senior and Tech Lead interviews increasingly probe whether you can run a system in production, not just
+      design one. This topic covers the three pillars of observability (logs, metrics, traces), the OWASP Top 10
+      with real Node/React exploits and fixes, secure auth and secrets management, and how to run a blameless
+      incident post-mortem. Expect whiteboard questions like "walk me through debugging a latency spike across
+      five services" and "how would you have caught this SQL injection in code review."</p>
+
+      <h2 id="outcomes">Learning Outcomes</h2>
+      <ul>
+        <li>Design a structured logging strategy with correlation IDs that survives a multi-service request.</li>
+        <li>Instrument an app with Prometheus metrics (RED/USE methods) and write alerting rules that don't page on noise.</li>
+        <li>Propagate OpenTelemetry trace context across HTTP, queues, and async boundaries, and read a trace waterfall to find the real bottleneck.</li>
+        <li>Identify and fix real OWASP Top 10 vulnerabilities in Node/Express and React code — not just name them.</li>
+        <li>Implement secure auth (sessions vs JWT, refresh rotation), secrets management, CORS, CSP, and defenses against XSS/CSRF/SQLi.</li>
+        <li>Run a blameless incident post-mortem with a clear timeline, root cause, and actionable follow-ups.</li>
+      </ul>
+
+      <h2 id="chapters">Chapters</h2>
+      <table>
+        <tr><th>#</th><th>Chapter</th><th>Time</th></tr>
+        <tr><td>01</td><td><a href="01-logging.html">Logging: structured logs, centralized logging (ELK)</a></td><td>2.5 hrs</td></tr>
+        <tr><td>02</td><td><a href="02-metrics-monitoring.html">Metrics, monitoring and alerting (Prometheus, Grafana)</a></td><td>2.5 hrs</td></tr>
+        <tr><td>03</td><td><a href="03-distributed-tracing.html">Distributed tracing (OpenTelemetry)</a></td><td>2.5 hrs</td></tr>
+        <tr><td>04</td><td><a href="04-owasp-top-10.html">OWASP Top 10 with Node/React examples</a></td><td>3 hrs</td></tr>
+        <tr><td>05</td><td><a href="05-secure-auth-secrets.html">Secure auth, secrets management, CORS, CSP, XSS, CSRF, SQL injection</a></td><td>3 hrs</td></tr>
+        <tr><td>06</td><td><a href="06-incident-handling.html">Incident handling and post-mortems</a></td><td>2 hrs</td></tr>
+      </table>
+
+      <div class="capstone">
+        <h3>🏆 Capstone Project: Instrument, Attack, and Harden a Full-Stack App</h3>
+        <p><strong>Problem statement:</strong> Take a small Node/Express + React app (or build a minimal one: a
+        notes/todo API with login) and take it through the full observability + security lifecycle: instrument
+        it, deliberately break it, then fix and document it like a production incident would require.</p>
+        <p><strong>Required work:</strong></p>
+        <ul>
+          <li>Add structured JSON logging (Pino/Winston) with a request-scoped correlation ID propagated through every log line and downstream call.</li>
+          <li>Expose a <code>/metrics</code> endpoint with Prometheus client metrics following the RED method (rate, errors, duration) for every route, plus a Grafana dashboard JSON.</li>
+          <li>Instrument the app with OpenTelemetry: auto-instrument HTTP + DB calls, manually span one business operation, and propagate trace context to at least one downstream call (even a second local service or a mocked external call).</li>
+          <li>Deliberately introduce and then fix at least 5 real vulnerabilities: reflected/stored XSS, SQL injection (raw string query), broken auth (e.g., weak JWT secret or missing expiry check), CSRF (state-changing GET or missing token on a cookie-session form), and insecure secrets handling (hardcoded API key in source).</li>
+          <li>For each vulnerability: write the exploit (a real curl/script/payload that works against the vulnerable version), then the fix, then a short note on how you'd catch it next time (lint rule, test, code review checklist item).</li>
+          <li>Simulate one incident (e.g., trigger a slow DB query under load, or the auth bypass you just fixed) and write a full post-mortem: timeline with timestamps, detection method, root cause (5 Whys), blast radius, and 3+ blameless action items with owners.</li>
+        </ul>
+        <p><strong>Tech stack suggestion:</strong> Node.js + Express + TypeScript, React (Vite), Postgres or SQLite,
+        Pino, prom-client, @opentelemetry/sdk-node, Jaeger or Grafana Tempo for trace visualization, Docker Compose
+        for Prometheus + Grafana + Jaeger locally.</p>
+        <p><strong>Evaluation checklist:</strong></p>
+        <ul>
+          <li>☐ A single request's logs can be filtered end-to-end by one correlation ID.</li>
+          <li>☐ Metrics dashboard shows p50/p95/p99 latency and error rate per route, with at least one alert rule defined.</li>
+          <li>☐ A trace waterfall for the slow operation clearly shows which span dominates the latency.</li>
+          <li>☐ Every exploit was actually run against the vulnerable code and actually fails against the fixed code (not just described).</li>
+          <li>☐ The post-mortem has a real timeline, a root cause that isn't just "human error," and action items that are specific and assignable.</li>
+        </ul>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · Observability &amp; Security</footer>
+  </main>
+</div>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "07-observability-security" });</script>
+</body>
+</html>

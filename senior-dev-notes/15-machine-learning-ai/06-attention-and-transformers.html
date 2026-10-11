@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Attention & Transformers — Machine Learning & AI — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">Machine Learning & AI</a><span class="sep">›</span>Attention & Transformers</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>Attention & Transformers</h1>
+      <p class="meta-line"><span>⏱ ~4 hrs</span><span>📍 Chapter 6 of 14</span></p>
+      <p><strong>One-line summary:</strong> Self-attention lets every token look directly at every other token
+      and decide, via learned query/key/value projections, how much to borrow from each — this one mechanism,
+      stacked and parallelized, is the entire architectural basis of every modern LLM, and it is the single most
+      commonly asked deep-mechanism question in ML-adjacent senior interviews.</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>If an interviewer asks exactly one "explain the mechanism" ML question in a senior/staff-level interview
+      touching AI, it is very likely to be some version of "explain self-attention" or "why do we scale by
+      sqrt(d_k)?" This isn't trivia — it's a reliable proxy for whether you've actually studied how LLMs work
+      versus only used them via an API. You've likely already covered the applied, API-calling side of LLMs in
+      <a href="../09-ai-integration/01-how-llms-work.html">AI Integration: How LLMs Work</a>; this chapter is the
+      mechanism underneath that applied layer — the actual math and architecture that makes an LLM a specific,
+      analyzable piece of engineering rather than a black box you prompt.</p>
+      <div class="box why"><h4>Why</h4><p>Every architecture before attention (RNNs, CNNs applied to sequences)
+      had to either process tokens strictly in order or only see a small local window at a time. Self-attention
+      removes both constraints in one move: every token computes a direct, weighted relationship to every other
+      token in the sequence, in a single parallelizable operation, with a path length between any two tokens that
+      stays constant no matter how far apart they are. That combination — full parallelism during training, plus
+      unlimited-range direct connections — is precisely why attention-based models scaled to internet-sized
+      training corpora in a way recurrent models never could.</p></div>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>Requires <a href="03-neural-networks-from-scratch.html">Neural Networks from Scratch</a>,
+      <a href="04-pytorch-and-tensors.html">PyTorch & Tensors</a>, and
+      <a href="05-cnns-rnns-sequence-models.html">CNNs, RNNs & Sequence Models</a> (specifically the vanishing
+      gradient and parallelism discussion — this chapter is the direct answer to that chapter's final question).
+      For the applied/production angle on using the resulting models, see
+      <a href="../09-ai-integration/01-how-llms-work.html">AI Integration: How LLMs Work</a>.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="self-attention-mechanics">Self-attention mechanics: Q, K, V and scaled dot-product attention</h3>
+      <p>Every input token starts as an embedding vector. From that single embedding, the model learns three
+      separate linear projections (three separate weight matrices, <code>W_Q</code>, <code>W_K</code>,
+      <code>W_V</code>) producing three different vectors per token:</p>
+      <ul>
+        <li><strong>Query (Q)</strong> — "what am I looking for?", derived from the current token.</li>
+        <li><strong>Key (K)</strong> — "what do I offer?", derived from every token (including itself) that
+        could be attended to.</li>
+        <li><strong>Value (V)</strong> — "what information do I actually contribute if someone attends to me?",
+        also derived from every token.</li>
+      </ul>
+      <p>The attention computation for one query token against all tokens: take the dot product of that token's
+      Query vector with every token's Key vector (a similarity score — how relevant is this other token to what
+      I'm looking for?), scale, apply softmax to turn those scores into a probability distribution summing to 1,
+      then compute a weighted sum of all the Value vectors using those softmax weights. The result is a new
+      vector for that token: a blend of other tokens' information, weighted by relevance. In matrix form, for the
+      whole sequence at once:</p>
+      <p><code>Attention(Q, K, V) = softmax(QK^T / sqrt(d_k)) V</code></p>
+      <p><strong>Why the scaling factor <code>sqrt(d_k)</code> exists:</strong> the dot product of two vectors
+      grows in magnitude roughly proportional to their dimensionality <code>d_k</code> (summing more terms
+      produces a larger-magnitude result, assuming roughly independent, unit-variance components). Without
+      scaling, as <code>d_k</code> grows (e.g. 64 or 128 per head), the raw dot-product scores can become large
+      in magnitude, pushing softmax into a near-one-hot regime where the gradient with respect to most inputs is
+      close to zero (softmax saturates at extreme input magnitudes). Dividing by <code>sqrt(d_k)</code> keeps the
+      variance of the scores roughly constant regardless of dimensionality, keeping softmax in a well-behaved
+      range with usable gradients — this is purely a numerical-stability fix for training, not a change in what
+      the mechanism conceptually computes.</p>
+
+      <h3 id="multi-head">Multi-head attention</h3>
+      <p>Rather than computing one attention pattern per layer, the model splits Q, K, V into <code>h</code>
+      independent "heads" (e.g. 12 heads of dimension 64 each, from a 768-dimensional embedding), runs scaled
+      dot-product attention separately within each head's smaller subspace, then concatenates all heads' outputs
+      and projects back to the full embedding dimension with one more learned matrix. Each head can learn to
+      specialize in a different kind of relationship — one head might learn to track subject-verb agreement,
+      another might track coreference (which pronoun refers to which noun), another might attend mostly to the
+      immediately preceding token. A single attention head computing one softmax distribution per token can only
+      represent one "shape" of relationship at a time; multiple heads let the model represent several different
+      relevance patterns for the same token simultaneously, then combine them.</p>
+
+      <h3 id="positional-encoding">Positional encoding: why transformers need it, and sinusoidal vs. learned</h3>
+      <p>Self-attention as described is <strong>permutation-invariant</strong> — nothing in the Q/K/V dot-product
+      computation itself encodes token order; shuffling the input tokens would produce the same set of pairwise
+      relationships, just relabeled. But order obviously matters for language ("dog bites man" ≠ "man bites
+      dog"). Positional encoding injects order information directly into the input before attention ever runs,
+      typically by adding a position-dependent vector to each token's embedding.</p>
+      <ul>
+        <li><strong>Sinusoidal (original Transformer paper)</strong> — a fixed, non-learned function of
+        position using sine and cosine waves at different frequencies per embedding dimension. It generalizes to
+        sequence lengths longer than anything seen during training (it's just a mathematical function, not a
+        learned table), and nearby positions produce similar vectors while the relative-offset relationship
+        between any two positions is consistent and computable, which theoretically helps the model learn
+        relative-position reasoning.</li>
+        <li><strong>Learned positional embeddings</strong> — a trainable embedding table, one vector per
+        position, learned jointly with everything else (used by GPT-2 and many earlier models). Simpler, but
+        fixed to a maximum sequence length baked in at training time and doesn't naturally extrapolate beyond it.</li>
+        <li><strong>Modern alternatives (RoPE, ALiBi)</strong> — most current LLMs (Llama, GPT-4-class models,
+        most open models in 2025-26) use <strong>Rotary Positional Embeddings (RoPE)</strong>, which rotates
+        Q and K vectors by an angle proportional to position directly inside the attention computation rather
+        than adding a separate positional vector to the input embedding. This bakes relative position
+        directly into the dot-product score itself and generalizes to longer sequences noticeably better than
+        either original scheme, which is why it's now the dominant choice.</li>
+      </ul>
+
+      <h3 id="transformer-block">The full transformer block: attention + FFN + residual + layernorm</h3>
+      <p>One transformer block/layer is not just attention — it's a specific stack of sub-layers, each wrapped in
+      a residual connection and normalization:</p>
+      <ol>
+        <li><strong>Multi-head self-attention</strong> over the block's input.</li>
+        <li><strong>Residual connection</strong>: add the attention output back to the original input
+        (<code>x + Attention(x)</code>) — this gives gradients a direct, short path backward through every layer
+        (echoing the same "additive path helps gradient flow" idea from LSTMs in the previous chapter), and lets
+        a layer learn to only adjust the representation incrementally rather than having to reconstruct it
+        entirely.</li>
+        <li><strong>Layer normalization</strong>: normalize activations (zero mean, unit variance, per token,
+        across the feature dimension) to keep training stable across many stacked layers. Most modern
+        architectures use "pre-norm" (normalize before the sub-layer, not after) because it produces more stable
+        gradients in very deep stacks than the original "post-norm" design.</li>
+        <li><strong>Position-wise feed-forward network (FFN)</strong>: a two-layer MLP (typically expanding to
+        4x the embedding dimension and back down, with a nonlinearity like GELU in between) applied
+        independently to each token's vector. Attention mixes information <em>across</em> tokens; the FFN
+        processes each token's resulting vector further <em>independently</em> — the two sub-layers have
+        complementary jobs.</li>
+        <li>Another residual connection and layer norm around the FFN.</li>
+      </ol>
+      <p>A full transformer stacks many of these blocks (e.g. 12, 32, 96+ depending on model size), each one
+      refining every token's representation using the growing context gathered from previous blocks.</p>
+
+      <h3 id="encoder-decoder">Encoder, decoder, and decoder-only (GPT-style) architectures</h3>
+      <ul>
+        <li><strong>Encoder-only</strong> (e.g. BERT) — uses full, unmasked self-attention: every token can
+        attend to every other token in both directions. Good for understanding tasks where the whole input is
+        available at once (classification, embeddings, extraction) but not naturally suited to generation, since
+        it assumes the full sequence already exists.</li>
+        <li><strong>Encoder-decoder</strong> (e.g. the original Transformer for translation, T5) — an encoder
+        processes the full input with bidirectional attention; a decoder generates output tokens one at a time,
+        using causal self-attention over its own previously generated tokens plus "cross-attention" into the
+        encoder's output (Q from the decoder, K/V from the encoder) to stay grounded in the source. Good for
+        sequence-to-sequence tasks with a clearly distinct input and output (translation, summarization with a
+        fixed source document).</li>
+        <li><strong>Decoder-only</strong> (GPT-style — the architecture behind essentially all modern general-
+        purpose LLMs) — a single stack using <strong>causal (masked) self-attention</strong>: each token can only
+        attend to itself and earlier tokens, enforced by masking out (setting to -infinity before softmax) any
+        attention score pointing to a future position. This matches exactly how autoregressive generation works
+        (predict the next token given only what's been generated so far) and turned out to scale better and
+        generalize to more tasks via prompting than the encoder-decoder split, which is why it became the
+        dominant architecture for general-purpose LLMs.</li>
+      </ul>
+
+      <h3 id="kv-caching">KV-caching for inference</h3>
+      <p>During autoregressive generation, computing token N's output requires attending over all tokens 1
+      through N — but tokens 1 through N-1's Key and Value vectors were already computed in the previous
+      generation step and haven't changed (causal masking means earlier tokens never attend to later ones, so
+      their K/V vectors are fixed once computed). <strong>KV-caching</strong> stores these Key and Value vectors
+      from previous steps and reuses them, so generating each new token only requires computing Q/K/V for the one
+      new token and attending it against the cached K/V from all previous tokens, instead of recomputing
+      everything from scratch. This turns what would be O(n²) redundant work across a full generation into
+      roughly O(n) incremental work per new token — it's the single most important inference-time optimization
+      for autoregressive LLMs, and it's the direct reason generation memory usage grows with context length (the
+      KV cache itself consumes GPU memory proportional to sequence length × number of layers × number of heads).</p>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>End to end, for a decoder-only LLM generating one new token:</p>
+      <ol>
+        <li>Input tokens are embedded, and positional information (RoPE, applied inside attention, or an added
+        positional vector) is incorporated.</li>
+        <li>For each transformer block: compute Q, K, V for the current token(s); for cached generation, reuse
+        stored K/V for all previous tokens and only compute Q/K/V for the new token.</li>
+        <li>Compute causal scaled dot-product attention per head (new token's Q against all K up to and
+        including itself), softmax, weighted sum of V, concatenate heads, project.</li>
+        <li>Add the residual connection, apply layer norm, pass through the FFN, add another residual, apply
+        layer norm again.</li>
+        <li>Repeat through every block; the final block's output for the last position is projected through a
+        final linear layer (often tied to the input embedding matrix) to produce logits over the vocabulary.</li>
+        <li>A sampling strategy (greedy, temperature + top-k/top-p) picks the next token from those logits; it's
+        appended to the sequence, its K/V is cached, and the process repeats.</li>
+      </ol>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+flowchart TD
+  X[Token embeddings + positional info] --> WQ[Linear W_Q]
+  X --> WK[Linear W_K]
+  X --> WV[Linear W_V]
+  WQ --> Q[Query vectors]
+  WK --> K[Key vectors]
+  WV --> V[Value vectors]
+  Q --> DOT[Q times K^T]
+  K --> DOT
+  DOT --> SCALE[Scale by 1/sqrt d_k]
+  SCALE --> MASK[Causal mask if decoder]
+  MASK --> SOFT[Softmax -> attention weights]
+  SOFT --> WSUM[Weighted sum with V]
+  V --> WSUM
+  WSUM --> OUT[Attention output per token]
+      </div>
+      <div class="mermaid">
+flowchart TD
+  IN[Block input x] --> MHA[Multi-head self-attention]
+  IN --> RES1[Residual add]
+  MHA --> RES1
+  RES1 --> LN1[LayerNorm]
+  LN1 --> FFN[Feed-forward network GELU]
+  LN1 --> RES2[Residual add]
+  FFN --> RES2
+  RES2 --> LN2[LayerNorm]
+  LN2 --> NEXT[Output to next block]
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-python">import torch
+import torch.nn as nn
+import math
+
+class ScaledDotProductAttention(nn.Module):
+    """Single-head attention, implemented explicitly to show every step."""
+    def forward(self, Q, K, V, causal_mask=None):
+        d_k = Q.size(-1)
+        scores = Q @ K.transpose(-2, -1) / math.sqrt(d_k)   # (batch, seq, seq)
+        if causal_mask is not None:
+            scores = scores.masked_fill(causal_mask == 0, float("-inf"))
+        weights = torch.softmax(scores, dim=-1)             # rows sum to 1
+        return weights @ V, weights                          # (batch, seq, d_v)
+
+class MultiHeadAttention(nn.Module):
+    def __init__(self, embed_dim, num_heads):
+        super().__init__()
+        assert embed_dim % num_heads == 0
+        self.num_heads = num_heads
+        self.head_dim = embed_dim // num_heads
+        self.W_q = nn.Linear(embed_dim, embed_dim)
+        self.W_k = nn.Linear(embed_dim, embed_dim)
+        self.W_v = nn.Linear(embed_dim, embed_dim)
+        self.W_o = nn.Linear(embed_dim, embed_dim)
+        self.attn = ScaledDotProductAttention()
+
+    def split_heads(self, x):
+        batch, seq_len, embed_dim = x.shape
+        x = x.view(batch, seq_len, self.num_heads, self.head_dim)
+        return x.transpose(1, 2)   # (batch, heads, seq, head_dim)
+
+    def forward(self, x, causal_mask=None):
+        batch, seq_len, _ = x.shape
+        Q, K, V = self.split_heads(self.W_q(x)), self.split_heads(self.W_k(x)), self.split_heads(self.W_v(x))
+        out, _ = self.attn(Q, K, V, causal_mask)
+        out = out.transpose(1, 2).contiguous().view(batch, seq_len, -1)
+        return self.W_o(out)
+
+class TransformerBlock(nn.Module):
+    def __init__(self, embed_dim, num_heads, ffn_dim):
+        super().__init__()
+        self.attn = MultiHeadAttention(embed_dim, num_heads)
+        self.ln1 = nn.LayerNorm(embed_dim)
+        self.ffn = nn.Sequential(
+            nn.Linear(embed_dim, ffn_dim), nn.GELU(), nn.Linear(ffn_dim, embed_dim)
+        )
+        self.ln2 = nn.LayerNorm(embed_dim)
+
+    def forward(self, x, causal_mask=None):
+        x = x + self.attn(self.ln1(x), causal_mask)   # pre-norm + residual
+        x = x + self.ffn(self.ln2(x))                  # pre-norm + residual
+        return x
+
+def causal_mask(seq_len, device="cpu"):
+    # Lower-triangular mask: position i can attend to positions <= i only.
+    return torch.tril(torch.ones(seq_len, seq_len, device=device)).unsqueeze(0).unsqueeze(0)
+
+# Using HuggingFace for the real-world equivalent instead of reimplementing from scratch:
+from transformers import AutoModel, AutoTokenizer
+
+tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
+model = AutoModel.from_pretrained("bert-base-uncased")
+inputs = tokenizer("Attention lets every token look at every other token.", return_tensors="pt")
+outputs = model(**inputs, output_attentions=True)
+# outputs.attentions is a tuple of per-layer attention weight tensors:
+# (batch, num_heads, seq_len, seq_len) — exactly the "weights" matrix computed above,
+# inspectable directly to see which tokens each head actually attended to.
+print(outputs.attentions[0].shape)
+</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4><p>A team serving a customer-support LLM notices that per-token
+      generation latency grows noticeably as conversations get longer, and GPU memory usage on their inference
+      servers climbs steadily during long sessions until requests start failing with out-of-memory errors. The
+      root cause traces directly to KV-cache growth: every additional token in the growing conversation history
+      adds its Key and Value vectors to the cache for every layer and every head, and that memory is held for the
+      entire generation. The fix isn't a bug fix in the traditional sense — it's an architectural accommodation:
+      the team adds a sliding-window cache eviction policy (dropping the oldest cached tokens beyond a budget,
+      accepting some loss of very old context) and migrates to a model variant using grouped-query attention
+      (fewer K/V heads shared across multiple Q heads), which cuts KV-cache memory per token substantially without
+      a full multi-head-attention equivalent. Understanding that this was a KV-cache memory issue — not a "model
+      is slow" issue — is exactly the kind of mechanism-level debugging that separates "knows how to call an LLM
+      API" from "understands the system underneath it."</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Describing attention as "the model deciding which words are
+      important" without being able to say how — in an interview, that's the line between a surface-level and a
+      mechanistic answer. Be ready to say specifically: Q/K dot product produces relevance scores, softmax turns
+      them into weights, weighted sum of V produces the mixed output — and why scaling by sqrt(d_k) exists
+      (softmax saturation at high dot-product magnitude, not an arbitrary constant).</p></div>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Forgetting that self-attention alone is permutation-invariant and
+      has no sense of order — a surprising number of people can describe attention correctly but then can't
+      explain why positional encoding is necessary at all, which is a dead giveaway of memorized-but-not-
+      understood knowledge.</p></div>
+      <ul>
+        <li>Causal masking must be applied <em>before</em> softmax (setting masked positions to -infinity), not
+        after — masking the softmax output directly would leave the remaining weights not summing to 1.</li>
+        <li>Pre-norm (normalize before each sub-layer) is now standard over the original paper's post-norm,
+        because it trains far more stably at the depths (dozens to 100+ layers) modern LLMs use.</li>
+        <li>KV-cache memory, not raw compute, is frequently the actual bottleneck for long-context inference —
+        profile memory, don't just assume latency issues are purely FLOPs-bound.</li>
+        <li>RoPE/ALiBi generalize to longer sequences than they were trained on noticeably better than learned
+        absolute positional embeddings — relevant when discussing why a given open model handles long context
+        well or poorly.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>Encoder-only (BERT-style)</td><td>Classification, embeddings, extraction over a fixed input</td><td>Open-ended generation</td><td>Decoder-only LLM</td></tr>
+        <tr><td>Encoder-decoder</td><td>Clear input->output tasks (translation, fixed-source summarization)</td><td>General-purpose chat/instruction-following</td><td>Decoder-only LLM with the source in-context</td></tr>
+        <tr><td>Decoder-only (GPT-style)</td><td>General-purpose generation, chat, few-shot prompting</td><td>Pure embedding/classification workloads where a smaller encoder suffices</td><td>Encoder-only model for that sub-task</td></tr>
+        <tr><td>Learned positional embeddings</td><td>Fixed, known max sequence length</td><td>Need to generalize beyond training context length</td><td>RoPE / ALiBi</td></tr>
+        <tr><td>Full multi-head attention</td><td>Smaller models, training</td><td>Long-context inference serving at scale, memory-constrained</td><td>Grouped-query / multi-query attention</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+
+      <div class="qa-level basic">
+        <h4>Basic</h4>
+        <details class="qa"><summary>What are Query, Key, and Value vectors, in plain terms?</summary><div class="answer"><p>They're three separate learned linear projections of the same token embedding. Query represents what the current token is "looking for"; Key represents what each token (including itself) "offers" to be matched against; Value represents what information that token actually contributes if it's attended to.</p></div><div class="followup">Follow-up: are Q, K, and V computed with the same weight matrix or different ones?</div></details>
+        <details class="qa"><summary>Write out the scaled dot-product attention formula and explain each part.</summary><div class="answer"><p><code>Attention(Q,K,V) = softmax(QK^T / sqrt(d_k)) V</code>. QK^T computes similarity scores between every query and every key; dividing by sqrt(d_k) scales those scores to keep softmax well-behaved; softmax turns the scores into a probability distribution (weights summing to 1); multiplying by V produces a weighted blend of value vectors as the output.</p></div><div class="followup">Follow-up: what shape is the QK^T matrix for a sequence of length n?</div></details>
+        <details class="qa"><summary>Why is self-attention described as "permutation-invariant," and why is that a problem?</summary><div class="answer"><p>Nothing in the Q/K/V dot-product computation itself depends on token position — shuffling the input tokens produces the same pairwise relationships, just relabeled. This is a problem because order matters in language, so without additional information the model literally cannot distinguish "dog bites man" from "man bites dog."</p></div><div class="followup">Follow-up: what's the fix, at a high level?</div></details>
+        <details class="qa"><summary>What is multi-head attention, and why not just use one larger head?</summary><div class="answer"><p>Multi-head attention splits Q/K/V into several smaller independent subspaces (heads) and runs attention separately in each, then concatenates and projects the results. Multiple heads let the model represent several different kinds of relevance/relationship simultaneously (e.g. one head tracking syntax, another tracking coreference); a single softmax distribution per token can only express one such pattern at a time.</p></div><div class="followup">Follow-up: if embed_dim is 768 and there are 12 heads, what's the dimension of each head?</div></details>
+        <details class="qa"><summary>What's the difference between an encoder and a decoder in transformer terminology?</summary><div class="answer"><p>An encoder uses full, bidirectional self-attention — every token can attend to every other token in both directions, suited to understanding the whole input at once. A decoder uses causal/masked self-attention — each token can only attend to itself and earlier tokens, matching how autoregressive generation works.</p></div><div class="followup">Follow-up: which category does GPT-style architecture fall into?</div></details>
+        <details class="qa"><summary>What does a residual connection do in a transformer block, in plain terms?</summary><div class="answer"><p>It adds the sub-layer's input directly to its output (<code>x + SubLayer(x)</code>), giving gradients a short, direct path backward through every layer and letting each layer learn an incremental adjustment rather than having to reconstruct the full representation from scratch.</p></div><div class="followup">Follow-up: what's the analogous problem this solves, that we saw with a different architecture in the previous chapter?</div></details>
+        <details class="qa"><summary>What is KV-caching, in one sentence?</summary><div class="answer"><p>It's reusing the already-computed Key and Value vectors of previous tokens during autoregressive generation instead of recomputing them at every new generation step, since causal masking guarantees they never change once computed.</p></div><div class="followup">Follow-up: what resource does the KV cache consume, and how does it scale with context length?</div></details>
+      </div>
+
+      <div class="qa-level medium">
+        <h4>Medium</h4>
+        <details class="qa"><summary>Derive why the scaling factor in scaled dot-product attention is specifically sqrt(d_k), not some other constant.</summary><div class="answer"><p>Assuming Q and K components are roughly independent with unit variance, the dot product of two d_k-dimensional vectors has variance that grows linearly with d_k (sum of d_k independent products). Dividing by sqrt(d_k) normalizes the variance of the dot product back to approximately 1 regardless of dimensionality, preventing scores from growing large in magnitude as d_k increases — large-magnitude scores push softmax into a near-one-hot, low-gradient regime, which would hurt training.</p></div><div class="followup">Follow-up: what would you observe in practice (e.g. in training loss or attention weight patterns) if this scaling were omitted on a large model?</div></details>
+        <details class="qa"><summary>Explain causal masking mechanically: where in the computation does it apply, and why there specifically?</summary><div class="answer"><p>It's applied to the raw QK^T score matrix, before softmax: positions corresponding to "attending to a future token" are set to negative infinity. This must happen before softmax because softmax normalizes a row to sum to 1 — masking after softmax (e.g. zeroing out those weights post-hoc) would leave the remaining weights not summing to 1, breaking the probability-distribution interpretation and the weighted-average semantics of the output.</p></div><div class="followup">Follow-up: how is the causal mask typically represented/constructed as a tensor?</div></details>
+        <details class="qa"><summary>Why does the FFN sub-layer apply independently per token, and what complementary role does it play relative to attention?</summary><div class="answer"><p>Attention is the only sub-layer that mixes information <em>across</em> token positions; the FFN takes each token's post-attention vector and transforms it independently of every other token's vector (same weights applied per-position, no cross-token interaction). The division of labor is: attention decides what to gather from other tokens, FFN further processes/transforms what each token now individually "knows." Both are necessary — attention alone with no per-token nonlinear transformation would be a comparatively weak model.</p></div><div class="followup">Follow-up: why is the FFN typically expanded to 4x the embedding dimension internally rather than kept the same size?</div></details>
+        <details class="qa"><summary>Compare sinusoidal, learned, and rotary (RoPE) positional encodings on generalization to longer sequences than seen in training.</summary><div class="answer"><p>Learned absolute positional embeddings are a fixed-size lookup table trained only up to the maximum training sequence length, so they have no defined behavior (or very poor extrapolation) beyond it. Sinusoidal encodings are a fixed mathematical function of position, so they're technically defined for any length, but empirically still extrapolate only moderately well. RoPE encodes relative position directly into the attention dot-product via rotation, and empirically generalizes to longer contexts noticeably better than either, which is the main reason it's become the dominant choice in modern open LLMs.</p></div><div class="followup">Follow-up: why does encoding "relative" rather than "absolute" position tend to generalize better?</div></details>
+        <details class="qa"><summary>Why does KV-caching turn generation from O(n²) into roughly O(n) work across a full sequence, and what's the memory cost of that tradeoff?</summary><div class="answer"><p>Without caching, generating token n requires recomputing K/V for all n tokens and reattending, and doing this for every one of n generation steps is O(n²) total work. With caching, each step only computes Q/K/V for the one new token and reuses cached K/V for the rest, making each step O(n) and the full generation O(n²) → effectively O(n) amortized per token (still O(n²) total across the full generation due to attention itself scaling with context length, but avoiding the redundant recomputation). The cost is memory: the cache holds K and V vectors for every token, every layer, every head, for the duration of generation — memory usage grows linearly with context length.</p></div><div class="followup">Follow-up: what's one technique (besides shortening context) teams use to reduce KV-cache memory footprint?</div></details>
+        <details class="qa"><summary>Why did decoder-only architectures become the dominant choice for general-purpose LLMs over the original encoder-decoder design?</summary><div class="answer"><p>Decoder-only models unify understanding and generation into a single causal-attention stack: any task can be framed as "predict the next token" via prompting, without needing a separate encoder pass and cross-attention mechanism tailored to a fixed input/output split. This turned out to scale better empirically and generalizes far more flexibly to arbitrary tasks via prompting/few-shot examples than the encoder-decoder split, which is more naturally suited to tasks with a rigid, clearly distinct input and output (like translation).</p></div><div class="followup">Follow-up: in what scenario would an encoder-decoder (or encoder-only) architecture still be the better choice today?</div></details>
+      </div>
+
+      <div class="qa-level advanced">
+        <h4>Advanced</h4>
+        <details class="qa"><summary>Walk through, step by step, computing self-attention output for a 3-token sequence by hand (symbolically) — what are the shapes at each stage, and where would numerical instability most likely show up without the scaling factor?</summary><div class="answer"><p>For 3 tokens with embedding dim d and head dim d_k: Q, K, V are each (3, d_k) after projection. QK^T is (3,3) — a full pairwise similarity matrix. Without scaling, if d_k is large (e.g. 64+) and projections aren't tightly controlled, individual entries of QK^T can have large magnitude; softmax applied to rows with widely-spread large values saturates (near one-hot), and the gradient of softmax with respect to its input becomes very small wherever the output is near 0 or 1 for most entries — this is where training signal would vanish, concretely inside the softmax(QK^T) step, which is exactly what sqrt(d_k) scaling is designed to prevent by keeping the pre-softmax scores in a moderate range.</p></div><div class="followup">Follow-up: does this instability risk scale with sequence length too, or only with d_k? Why?</div></details>
+        <details class="qa"><summary>Explain grouped-query attention (GQA) and multi-query attention (MQA) and the specific problem they solve relative to standard multi-head attention.</summary><div class="answer"><p>Standard multi-head attention computes a separate set of Key and Value projections per head, meaning the KV-cache during inference must store K/V for every head independently — memory scales linearly with number of heads. Multi-query attention shares a single K/V projection across all Q heads (only Q is per-head), cutting KV-cache memory by roughly the head count while keeping most of the representational benefit of multiple query heads. Grouped-query attention is a middle ground: heads are grouped, and each group shares one K/V projection, trading off some of MQA's memory savings for better representational capacity than full MQA, closer to full multi-head quality. Both exist specifically to shrink KV-cache memory for long-context, high-throughput inference serving — a production/serving concern, not a training-quality concern.</p></div><div class="followup">Follow-up: would you expect GQA to hurt model quality noticeably compared to full multi-head attention? Under what circumstances might it not?</div></details>
+        <details class="qa"><summary>Why is attention's compute cost quadratic in sequence length, and what does that mean concretely for scaling context windows?</summary><div class="answer"><p>Computing QK^T requires comparing every query position against every key position, producing an n×n score matrix — the compute and memory for this step scale as O(n²) in sequence length n, independent of embedding dimension. Doubling the context window roughly quadruples the attention computation and memory for that step (though the FFN sub-layers remain linear in n), making very long contexts disproportionately expensive. This is the core motivation behind efficient-attention research (sparse attention, linear attention approximations, sliding-window attention, FlashAttention-style memory-efficient exact computation) — all attempts to avoid or mitigate the quadratic cost rather than simply accepting it.</p></div><div class="followup">Follow-up: does FlashAttention change the asymptotic complexity, or just the constant/memory-access pattern? Why does that distinction matter in practice?</div></details>
+        <details class="qa"><summary>Design an experiment to empirically verify that a specific attention head in a trained model has learned to track long-range coreference (e.g. pronoun-to-noun resolution) rather than just attending to nearby tokens.</summary><div class="answer"><p>Construct a labeled probe dataset of sentences with known pronoun-antecedent pairs at varying distances apart, run them through the model with <code>output_attentions=True</code>, and extract that specific head's attention weight matrix for each example. For each pronoun token's query position, check whether the attention weight is concentrated on the correct antecedent token's key position specifically (not just on nearby tokens by default), and measure this across examples with the antecedent placed at increasing distances — a head doing real coreference tracking should maintain high weight on the correct (possibly distant) antecedent regardless of distance, whereas a head just doing "attend to recent context" would show attention decaying with distance regardless of which token is the grammatically correct antecedent.</p></div><div class="followup">Follow-up: why is attention weight alone sometimes considered insufficient evidence for "what a head is doing," and what additional technique (e.g. from interpretability research) could corroborate the finding?</div></details>
+        <details class="qa"><summary>A team is fine-tuning a decoder-only LLM and observes that performance degrades sharply on inputs longer than the model's training context length, despite using RoPE. What's going on, and what are the standard mitigations?</summary><div class="answer"><p>RoPE improves extrapolation relative to learned absolute positional embeddings, but it is not unlimited — rotation angles at positions far beyond the trained range produce frequency patterns the model never saw during training, and attention score distributions can still degrade ("positional out-of-distribution" behavior), especially for the lowest-frequency rotation components. Standard mitigations: positional interpolation (rescaling position indices to compress a longer sequence into the model's originally trained positional range before applying RoPE), continued pretraining/fine-tuning at the target longer context length so the model actually sees those positions during training, or newer techniques (YaRN, dynamic NTK scaling) that adjust RoPE's frequency base specifically to extend effective context length with minimal degradation.</p></div><div class="followup">Follow-up: why does simply fine-tuning at a longer context length without any positional adjustment often still underperform compared to techniques that explicitly adjust the positional scheme?</div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment">
+        <span class="level-tag">Beginner (30-60 min)</span>
+        <h4>Implement scaled dot-product attention from scratch and verify against PyTorch's built-in</h4>
+        <p>Implement the <code>ScaledDotProductAttention</code> module from the code examples (or your own
+        version) in pure PyTorch tensor operations, then compare its output against
+        <code>torch.nn.functional.scaled_dot_product_attention</code> on the same random Q/K/V inputs.</p>
+        <ul>
+          <li>Verify the outputs match within floating-point tolerance.</li>
+          <li>Print the attention weight matrix for a small (4-token) example and confirm each row sums to 1.</li>
+        </ul>
+        <p><strong>Acceptance criteria:</strong> numerically matching output (<code>torch.allclose</code>) plus
+        a printed, visually inspected weight matrix with rows summing to 1.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>Use a fixed random seed and identical Q/K/V tensors for both implementations, and don't forget the causal mask parameter if comparing against the causal variant of the built-in function.</p></div></details>
+        <p><strong>Bonus:</strong> remove the sqrt(d_k) scaling and show how the attention weight distribution becomes visibly more peaked/one-hot as d_k increases.</p>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Intermediate (2-4 hrs)</span>
+        <h4>Build and train a tiny decoder-only transformer on a character-level task</h4>
+        <p>Using the <code>TransformerBlock</code> and causal masking from the code examples, build a small
+        (2-4 layer) decoder-only model and train it on a simple character-level next-token-prediction task (e.g.
+        learning to continue a small, repetitive text corpus).</p>
+        <ul>
+          <li>Implement the full training loop (loss, optimizer, backward pass).</li>
+          <li>After training, generate text autoregressively from a seed prompt, implementing KV-caching for
+          generation (reuse cached K/V rather than recomputing the whole sequence at every step).</li>
+          <li>Benchmark generation speed with and without KV-caching for a reasonably long generated sequence.</li>
+        </ul>
+        <p><strong>Acceptance criteria:</strong> the model visibly learns the training corpus's patterns (loss
+        decreases, generated text resembles the training distribution), and KV-caching measurably speeds up
+        generation versus the naive recompute-everything approach.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>For the non-cached baseline, simply re-run the full forward pass on the entire sequence-so-far at every generation step; for the cached version, store each layer's K/V tensors in a list and concatenate the new token's K/V onto them each step instead of recomputing from token 0.</p></div></details>
+        <p><strong>Bonus:</strong> visualize the attention weights of one head at one layer across the generated sequence, and try to identify what pattern (if any) that head appears to have learned.</p>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Advanced (1-2 days)</span>
+        <h4>Implement and benchmark multi-query attention against standard multi-head attention</h4>
+        <p>Extend your transformer implementation with a multi-query attention (MQA) variant (single shared K/V
+        projection across all Q heads) alongside your existing standard multi-head attention, and compare them.</p>
+        <ul>
+          <li>Train small models with each attention variant on the same task/data and compare final
+          loss/quality.</li>
+          <li>Measure and compare KV-cache memory footprint (in bytes, computed analytically from shapes) for a
+          given context length under both variants.</li>
+          <li>Measure actual generation throughput (tokens/sec) for both variants at a long context length.</li>
+        </ul>
+        <p><strong>Acceptance criteria:</strong> a clear report quantifying the memory savings of MQA versus the
+        quality tradeoff observed, with actual measured numbers, not just theoretical ones.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>KV-cache memory per token = 2 (K and V) × num_layers × num_kv_heads × head_dim × bytes_per_element — compute this directly from your model's config for both variants rather than only measuring empirically, so you can sanity-check empirical memory measurements against the theoretical formula.</p></div></details>
+        <p><strong>Bonus:</strong> implement grouped-query attention as a third variant and show where it lands between standard multi-head and MQA on both quality and memory.</p>
+      </div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet">
+        <ul>
+          <li>Attention(Q,K,V) = softmax(QK^T / sqrt(d_k)) V — Q="what I want", K="what I offer", V="what I contribute if attended to".</li>
+          <li>sqrt(d_k) scaling exists because raw dot-product variance grows with dimension, which would otherwise saturate softmax and kill gradients.</li>
+          <li>Multi-head attention runs several smaller attention computations in parallel subspaces so different heads can specialize in different relationship types.</li>
+          <li>Self-attention is permutation-invariant by default — positional encoding (sinusoidal, learned, or RoPE) injects order information.</li>
+          <li>RoPE is the dominant modern choice — encodes relative position directly in the attention dot-product, generalizes to longer contexts better than alternatives.</li>
+          <li>Transformer block = multi-head attention + residual + layernorm, then FFN + residual + layernorm; attention mixes across tokens, FFN processes each token independently.</li>
+          <li>Encoder = bidirectional (understanding); decoder = causal/masked (generation); decoder-only (GPT-style) dominates general-purpose LLMs.</li>
+          <li>KV-caching reuses previously computed Key/Value vectors during generation, avoiding O(n²) redundant recomputation — but costs memory proportional to context length.</li>
+          <li>Attention compute is quadratic in sequence length — the core motivation for GQA/MQA, sparse attention, and FlashAttention-style optimizations.</li>
+        </ul>
+      </div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://arxiv.org/abs/1706.03762">Attention Is All You Need (Vaswani et al., 2017)</a></li>
+        <li><a href="https://jalammar.github.io/illustrated-transformer/">Jay Alammar: The Illustrated Transformer</a></li>
+        <li><a href="https://huggingface.co/docs/transformers/en/model_doc/auto">HuggingFace: AutoModel / Transformers architecture docs</a></li>
+        <li><a href="https://arxiv.org/abs/2104.09864">RoFormer: Rotary Position Embedding (RoPE) paper</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="05-cnns-rnns-sequence-models.html"><span class="dir">← Previous</span>CNNs, RNNs & Sequence Models</a>
+        <a class="next" href="07-huggingface-ecosystem.html"><span class="dir">Next →</span>HuggingFace Ecosystem</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · Machine Learning & AI</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "15-machine-learning-ai", chapterKey: "06-attention-and-transformers" });</script>
+</body>
+</html>

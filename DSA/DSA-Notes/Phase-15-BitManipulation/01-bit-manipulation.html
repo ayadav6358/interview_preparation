@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Phase 15 — Bit Manipulation | DSA Notes</title>
+<style>
+  :root{
+    --ink:#12181B; --ink2:#1A2226; --ink3:#232C31;
+    --amber:#E8A33D; --amber-soft:#3A2E19;
+    --teal:#4FB3A9; --teal-soft:#12312D;
+    --rust:#D9695F; --rust-soft:#3A1F1C;
+    --slate:#8B9199;
+    --text:#E8E6E1; --text-dim:#A9AFAE;
+    --border: rgba(255,255,255,0.08);
+    --radius: 10px;
+    --mono: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{background:var(--ink); color:var(--text); font-family:var(--sans); line-height:1.65; font-size:16px;}
+  a{color:var(--amber);}
+  code, pre{font-family:var(--mono);}
+  #main{max-width:900px; margin:0 auto; padding:30px 24px 100px;}
+  h1{font-size:2rem; letter-spacing:-.01em; margin:0 0 6px;}
+  h2{font-size:1.5rem; margin-top:52px; padding-top:14px; border-top:1px solid var(--border); letter-spacing:-.01em;}
+  h2:first-of-type{border-top:none; margin-top:20px;}
+  h3{font-size:1.15rem; margin-top:30px; color:var(--amber);}
+  h4{font-size:1rem; margin-top:22px;}
+  .eyebrow{font-size:11px; text-transform:uppercase; letter-spacing:.12em; color:var(--teal); font-weight:700; margin-bottom:4px;}
+  .subtitle{color:var(--text-dim); font-size:15px; margin-bottom:28px;}
+  .callout{border-radius:var(--radius); padding:14px 16px; margin:18px 0; border:1px solid var(--border); font-size:14.5px;}
+  .callout .ctitle{font-weight:700; margin-bottom:4px; display:flex; gap:8px; align-items:center;}
+  .callout.concept{background:var(--teal-soft); border-color:var(--teal);}
+  .callout.concept .ctitle{color:var(--teal);}
+  .callout.example{background:var(--ink3);}
+  .callout.mistake{background:var(--rust-soft); border-color:var(--rust);}
+  .callout.mistake .ctitle{color:var(--rust);}
+  .callout.tip{background:var(--amber-soft); border-color:var(--amber);}
+  .callout.tip .ctitle{color:var(--amber);}
+  .codewrap{position:relative; margin:14px 0;}
+  pre{background:var(--ink3); border:1px solid var(--border); border-radius:var(--radius); padding:16px 18px; overflow-x:auto; font-size:13.5px; line-height:1.6;}
+  .lang-tag{font-size:10px; text-transform:uppercase; letter-spacing:.08em; color:var(--slate); margin-bottom:-4px; display:block;}
+  :not(pre) > code{background:var(--ink3); padding:2px 6px; border-radius:4px; font-size:.88em;}
+  table{width:100%; border-collapse:collapse; margin:16px 0; font-size:14px;}
+  th,td{border:1px solid var(--border); padding:9px 12px; text-align:left;}
+  th{background:var(--ink3); font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:var(--slate);}
+  .badge{display:inline-block; font-size:11px; font-weight:700; padding:3px 9px; border-radius:20px; text-transform:uppercase; letter-spacing:.03em;}
+  .badge.easy{background:var(--teal-soft); color:var(--teal);}
+  .badge.medium{background:var(--amber-soft); color:var(--amber);}
+  .badge.hard{background:var(--rust-soft); color:var(--rust);}
+  .qcard{border:1px solid var(--border); border-radius:var(--radius); padding:16px 18px; margin:14px 0; background:var(--ink2);}
+  .qcard .qhead{display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; gap:10px;}
+  .qcard .qhead b{font-size:14.5px;}
+  .qcard .meta{color:var(--text-dim); font-size:13px; margin:6px 0;}
+  .qcard .hint{font-size:13.5px; margin-top:8px;}
+  hr.div{border:none; border-top:1px solid var(--border); margin:40px 0;}
+  .navbar{display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; padding:14px 0; border-bottom:1px solid var(--border); font-size:13.5px;}
+  .navbar.bottom{border-bottom:none; border-top:1px solid var(--border); margin-top:50px;}
+  .navbar a{text-decoration:none; padding:6px 10px; border:1px solid var(--border); border-radius:8px; color:var(--text-dim);}
+  .navbar a:hover{border-color:var(--amber); color:var(--amber);}
+  ul{padding-left:22px;}
+</style>
+</head>
+<body>
+<div id="main">
+
+  <div class="navbar">
+    <a href="../Phase-14-DynamicProgramming/01-dynamic-programming.html">← Prev: Dynamic Programming</a>
+    <span>
+      <a href="../../index.html">🏠 Index</a>
+      <a href="../Phase-16-NumberTheory/01-number-theory.html">Next: Number Theory →</a>
+    </span>
+  </div>
+
+  <div class="eyebrow">Phase 15 · Bit Manipulation</div>
+  <h1>Bit Manipulation — Zero se Interview Tak ⚡</h1>
+  <p class="subtitle">Numbers ke individual bits ko directly manipulate karna — hardware-level fast operations jo O(1) space tricks enable karte hain.</p>
+
+  <h2 id="bits">1. What is it?</h2>
+  <p>Computer ke andar har number <b>binary</b> (0s aur 1s) mein store hota hai. Bit Manipulation matlab in individual bits ko directly read/change karna — jo bahut fast operations dete hain (hardware level par direct support hota hai inka).</p>
+
+  <h3>2. Binary Number System — Quick Refresher</h3>
+  <pre><code>Decimal 13 in binary:
+13 = 8 + 4 + 1 = 2³ + 2² + 2⁰
+
+Binary:  1   1   0   1
+Position: 3   2   1   0  (powers of 2)
+
+So 13 = 1101 in binary</code></pre>
+  <div class="codewrap"><pre><code>(13).toString(2)     // "1101" - decimal to binary
+parseInt("1101", 2)  // 13 - binary to decimal</code></pre></div>
+
+  <h3>3. Real-Life Analogy</h3>
+  <div class="callout example">
+    <div class="ctitle">📝 Light Switches</div>
+    Socho 8 light switches ek row mein — har switch ON (1) ya OFF (0) hai. Ye poori row ek 8-bit number represent karti hai. Bit operations "kaunsa switch on/off karo" jaisa direct control dete hain.
+  </div>
+
+  <h3>4. Why do we need it?</h3>
+  <p>Bit operations normal arithmetic se kaafi zyada fast hote hain (single CPU instruction), aur "constant extra space" wale problems mein (jaise duplicate dhundna bina HashSet ke) bahut useful hote hain.</p>
+
+  <h3>5. The Core Bitwise Operators</h3>
+  <table>
+    <tr><th>Operator</th><th>Symbol</th><th>Rule</th></tr>
+    <tr><td>AND</td><td><code>&amp;</code></td><td>1 only if BOTH bits are 1</td></tr>
+    <tr><td>OR</td><td><code>|</code></td><td>1 if AT LEAST ONE bit is 1</td></tr>
+    <tr><td>XOR</td><td><code>^</code></td><td>1 if bits are DIFFERENT</td></tr>
+    <tr><td>NOT</td><td><code>~</code></td><td>Flips every bit</td></tr>
+    <tr><td>Left Shift</td><td><code>&lt;&lt;</code></td><td>Shifts bits left, fills with 0 (multiplies by 2 per shift)</td></tr>
+    <tr><td>Right Shift</td><td><code>&gt;&gt;</code></td><td>Shifts bits right (divides by 2 per shift)</td></tr>
+  </table>
+
+  <h3>6. Visual Diagram</h3>
+  <pre><code>  5 = 0101
+  3 = 0011
+  ----------
+5 & 3 = 0001 = 1   (AND: both bits 1 only at position 0)
+5 | 3 = 0111 = 7   (OR: at least one bit 1)
+5 ^ 3 = 0110 = 6   (XOR: bits differ)
+
+5 << 1 = 1010 = 10  (shift left = multiply by 2)
+5 >> 1 = 0010 = 2   (shift right = divide by 2, floor)</code></pre>
+
+  <h3>7. Important Tricks with Code</h3>
+
+  <div class="lang-tag">Check Even or Odd</div>
+  <div class="codewrap"><pre><code>function isEven(n) {
+  return (n & 1) === 0; // last bit 0 = even, last bit 1 = odd
+}</code></pre></div>
+  <p><b>Why this works:</b> Binary mein, sirf last bit decide karta hai number even hai ya odd. <code>n & 1</code> sirf last bit ko "extract" karta hai.</p>
+
+  <div class="lang-tag">Check Power of 2</div>
+  <div class="codewrap"><pre><code>function isPowerOfTwo(n) {
+  return n > 0 && (n & (n - 1)) === 0;
+}</code></pre></div>
+  <div class="callout example">
+    <div class="ctitle">📝 Why n & (n-1) removes the last set bit</div>
+    8 = 1000, 7 = 0111 → 8 & 7 = 0000. Power of 2 ka sirf ek hi bit set hota hai, aur n-1 uss bit ko 0 kar deta hai aur baaki sab 1. AND karne par sab 0 ho jata hai — <b>sirf tabhi jab number power of 2 ho.</b>
+  </div>
+
+  <div class="lang-tag">Set, Clear, Toggle, Check a Bit</div>
+  <div class="codewrap"><pre><code>function setBit(n, i)    { return n | (1 << i); }   // turn bit i ON
+function clearBit(n, i)  { return n & ~(1 << i); }  // turn bit i OFF
+function toggleBit(n, i) { return n ^ (1 << i); }   // flip bit i
+function checkBit(n, i)  { return (n >> i) & 1; }   // read bit i (0 or 1)</code></pre></div>
+  <p><b>Line-by-line:</b> <code>1 << i</code> ek "mask" banata hai jisme sirf position <code>i</code> par 1 hai. <code>setBit</code> OR karta hai (force 1). <code>clearBit</code> mask invert karke AND karta hai (force 0). <code>toggleBit</code> XOR karta hai (flip). <code>checkBit</code> right shift karke last bit dekhta hai.</p>
+
+  <div class="lang-tag">Count Set Bits (Number of 1s) — Brian Kernighan's Algorithm</div>
+  <div class="codewrap"><pre><code>function countSetBits(n) {
+  let count = 0;
+  while (n > 0) {
+    n = n & (n - 1); // removes the last set bit each time
+    count++;
+  }
+  return count;
+}</code></pre></div>
+  <p><b>Why faster than checking each bit:</b> <code>n & (n-1)</code> directly removes the rightmost set bit — loop runs only as many times as there are set bits, not total bits.</p>
+
+  <div class="lang-tag">Find the Single Number (using XOR)</div>
+  <div class="codewrap"><pre><code>function singleNumber(arr) {
+  let result = 0;
+  for (const num of arr) {
+    result ^= num; // XOR-ing a number with itself cancels it out (a^a=0)
+  }
+  return result; // whatever's left is the number that appeared once
+}</code></pre></div>
+  <div class="callout tip">
+    <div class="ctitle">🎯 XOR's Magic Properties</div>
+    <code>a ^ a = 0</code> aur <code>a ^ 0 = a</code>. Isliye agar array mein har number do baar aaye except ek, sab pairs cancel ho jaate hain XOR mein, aur bacha hua answer wahi single number hota hai — O(n) time, O(1) space, bina kisi HashSet ke!
+  </div>
+
+  <h3>8. Dry Run — countSetBits(12)</h3>
+  <div class="callout example">
+    <div class="ctitle">📝 12 = 1100 in binary</div>
+    n=1100: n&(n-1) = 1100 & 1011 = 1000. count=1<br>
+    n=1000: n&(n-1) = 1000 & 0111 = 0000. count=2<br>
+    n=0, loop ends. Answer: <b>2</b> set bits ✅
+  </div>
+
+  <h3>9. Complexity</h3>
+  <p>Har bitwise operation: O(1) time (hardware directly support karta hai). Loops over bits (jaise countSetBits): O(log n) relative to value of n, or O(number of set bits) for Brian Kernighan trick.</p>
+
+  <h3>10. When Should I Use Bit Manipulation? — Checklist</h3>
+  <div class="callout tip">
+    <div class="ctitle">🎯 Checklist</div>
+    <ul>
+      <li>Problem mentions "without extra space" alongside numbers appearing multiple times → think XOR</li>
+      <li>"Power of 2" checks</li>
+      <li>Subset generation using bitmask (each bit = include/exclude) — alternative to recursive backtracking for small n (≤20)</li>
+      <li>Space optimization — packing multiple boolean flags into a single integer</li>
+    </ul>
+  </div>
+
+  <h3>Bonus: Bitmask for Subsets</h3>
+  <p>Har number 0 se 2ⁿ-1 tak, uska binary representation ek unique subset represent karta hai — jaha bit <code>i</code> set hai matlab element <code>i</code> included hai.</p>
+  <div class="codewrap"><pre><code>function allSubsetsBitmask(arr) {
+  const n = arr.length;
+  const result = [];
+  for (let mask = 0; mask < (1 << n); mask++) {
+    const subset = [];
+    for (let i = 0; i < n; i++) {
+      if (mask & (1 << i)) subset.push(arr[i]); // bit i is set
+    }
+    result.push(subset);
+  }
+  return result;
+}</code></pre></div>
+
+  <h3>Common Mistakes</h3>
+  <div class="callout mistake">
+    <ul>
+      <li><code>&amp;</code> (bitwise AND) aur <code>&amp;&amp;</code> (logical AND) ko confuse karna.</li>
+      <li>Negative numbers ke saath bit operations karte waqt two's complement representation samajhe bina confuse ho jaana.</li>
+      <li>Operator precedence bhool jaana — hamesha parentheses use karo: <code>(a & b) === c</code>.</li>
+    </ul>
+  </div>
+
+  <h3>Interview Tips</h3>
+  <div class="callout tip">
+    Jab bhi "constant extra space" ka strong requirement dikhe numbers ke saath, XOR ya bit tricks socho — ye interviewer ko dikhata hai tumhe low-level optimization ka pata hai.
+  </div>
+
+  <hr class="div">
+  <h2>Interview Questions — Bit Manipulation</h2>
+
+  <h3>Easy</h3>
+
+  <div class="qcard"><div class="qhead"><b>Q1. Single Number</b><span class="badge easy">Easy</span></div>
+    <div class="meta">Array mein har number do baar aata hai except ek. Wo dhundo — O(1) extra space.</div>
+    <p><b>Example:</b> Input: [4,1,2,1,2] → Output: 4</p>
+    <p class="hint"><b>Hint:</b> XOR all elements — duplicates cancel out to 0, leaving the unique number.</p>
+  </div>
+
+  <div class="qcard"><div class="qhead"><b>Q2. Counting Bits</b><span class="badge easy">Easy</span></div>
+    <div class="meta">0 se n tak har number ke set bits ka count return karo (array).</div>
+    <p><b>Example:</b> Input: n = 5 → Output: [0,1,1,2,1,2]</p>
+    <p class="hint"><b>Hint:</b> DP relation — bits(i) = bits(i >> 1) + (i & 1).</p>
+  </div>
+
+  <div class="qcard"><div class="qhead"><b>Q3. Power of Two</b><span class="badge easy">Easy</span></div>
+    <div class="meta">Diya gaya number power of 2 hai ya nahi, check karo.</div>
+    <p><b>Example:</b> Input: n = 16 → Output: true</p>
+    <p class="hint"><b>Hint:</b> A power of 2 has exactly one set bit — check n & (n-1) === 0.</p>
+  </div>
+
+  <div class="qcard"><div class="qhead"><b>Q4. Missing Number</b><span class="badge easy">Easy</span></div>
+    <div class="meta">Array mein 0 se n tak ke numbers hain, ek missing hai. Wo dhundo.</div>
+    <p><b>Example:</b> Input: [3,0,1] → Output: 2</p>
+    <p class="hint"><b>Hint:</b> XOR all indices 0..n with all array values — pairs cancel, missing number remains.</p>
+  </div>
+
+  <div class="qcard"><div class="qhead"><b>Q5. Get, Set, Clear, Toggle a Bit</b><span class="badge easy">Easy</span></div>
+    <div class="meta">Ek number ke i-th bit ko get/set/clear/toggle karne ke functions likho.</div>
+    <p><b>Example:</b> Input: n=10 (1010), i=0 → setBit → Output: 11 (1011)</p>
+    <p class="hint"><b>Hint:</b> Build a mask with 1 << i, then combine with OR / AND-NOT / XOR depending on the operation.</p>
+  </div>
+
+  <h3>Medium</h3>
+
+  <div class="qcard"><div class="qhead"><b>Q6. Sum of Two Integers Without + or -</b><span class="badge medium">Medium</span></div>
+    <div class="meta">Do integers add karo bina <code>+</code> ya <code>-</code> operator use kiye.</div>
+    <p><b>Example:</b> Input: a=2, b=3 → Output: 5</p>
+    <p class="hint"><b>Hint:</b> Use XOR for sum without carry and AND+shift for carry; loop until carry becomes 0.</p>
+  </div>
+
+  <div class="qcard"><div class="qhead"><b>Q7. Reverse Bits</b><span class="badge medium">Medium</span></div>
+    <div class="meta">32-bit unsigned integer ke bits reverse karo.</div>
+    <p><b>Example:</b> Input: 00000010...000 → Output: 01000000...000</p>
+    <p class="hint"><b>Hint:</b> Loop 32 times, shift result left and OR in the last bit of n each iteration, then shift n right.</p>
+  </div>
+
+  <div class="qcard"><div class="qhead"><b>Q8. Generate All Subsets Using Bitmask</b><span class="badge medium">Medium</span></div>
+    <div class="meta">Ek array ke saare subsets generate karo bitmask technique se.</div>
+    <p><b>Example:</b> Input: [1,2] → Output: [[],[1],[2],[1,2]]</p>
+    <p class="hint"><b>Hint:</b> Loop mask from 0 to 2^n - 1; include arr[i] if bit i of mask is set.</p>
+  </div>
+
+  <div class="qcard"><div class="qhead"><b>Q9. Two Non-Repeating Numbers (rest appear twice)</b><span class="badge medium">Medium</span></div>
+    <div class="meta">Array mein har number do baar aata hai except do numbers. Un dono ko dhundo.</div>
+    <p><b>Example:</b> Input: [1,2,1,3,2,5] → Output: [3,5]</p>
+    <p class="hint"><b>Hint:</b> XOR everything to get a^b, find any set bit to partition numbers into two groups, XOR each group.</p>
+  </div>
+
+  <div class="qcard"><div class="qhead"><b>Q10. Number of 1 Bits (Hamming Weight)</b><span class="badge medium">Medium</span></div>
+    <div class="meta">Ek unsigned integer mein kitne '1' bits hain, count karo.</div>
+    <p><b>Example:</b> Input: 00000000000000000000000000001011 → Output: 3</p>
+    <p class="hint"><b>Hint:</b> Use Brian Kernighan's n & (n-1) trick to strip the lowest set bit each iteration.</p>
+  </div>
+
+  <h3>Hard</h3>
+
+  <div class="qcard"><div class="qhead"><b>Q11. Maximum XOR of Two Numbers in an Array</b><span class="badge hard">Hard</span></div>
+    <div class="meta">Array diya hai — do numbers ka maximum possible XOR nikalo.</div>
+    <p><b>Example:</b> Input: [3,10,5,25,2,8] → Output: 28</p>
+    <p class="hint"><b>Hint:</b> Build a binary Trie of number bits (MSB first); for each number greedily try to go the opposite bit at each level.</p>
+  </div>
+
+  <div class="qcard"><div class="qhead"><b>Q12. Bitwise AND of Numbers Range</b><span class="badge hard">Hard</span></div>
+    <div class="meta">Do numbers m aur n diye hain (m ≤ n). Range [m, n] ke saare numbers ka bitwise AND nikalo.</div>
+    <p><b>Example:</b> Input: m=5, n=7 → Output: 4</p>
+    <p class="hint"><b>Hint:</b> Find the common binary prefix of m and n by right-shifting both until equal, then shift back left.</p>
+  </div>
+
+  <div class="qcard"><div class="qhead"><b>Q13. Subsets II (with duplicates) Using Bitmask + Dedup</b><span class="badge hard">Hard</span></div>
+    <div class="meta">Array mein duplicates ho sakte hain — saare unique subsets generate karo.</div>
+    <p><b>Example:</b> Input: [1,2,2] → Output: [[],[1],[1,2],[1,2,2],[2],[2,2]]</p>
+    <p class="hint"><b>Hint:</b> Sort first, use bitmask enumeration, and skip a mask if it would pick a duplicate element right after skipping its earlier occurrence.</p>
+  </div>
+
+  <div class="qcard"><div class="qhead"><b>Q14. Minimum Number of Flips to Make a OR b Equal to c</b><span class="badge hard">Hard</span></div>
+    <div class="meta">Teen integers a, b, c diye hain. Minimum bit flips chahiye a aur b mein taaki (a OR b) == c ho jaye.</div>
+    <p><b>Example:</b> Input: a=2, b=6, c=5 → Output: 3</p>
+    <p class="hint"><b>Hint:</b> Compare bit by bit; if c's bit is 1 need at least one of a/b's bit set (0 flips if already, else 1); if c's bit is 0, flip every set bit among a and b at that position.</p>
+  </div>
+
+  <div class="navbar bottom">
+    <a href="../Phase-14-DynamicProgramming/01-dynamic-programming.html">← Prev: Dynamic Programming</a>
+    <span>
+      <a href="../../index.html">🏠 Index</a>
+      <a href="../Phase-16-NumberTheory/01-number-theory.html">Next: Number Theory →</a>
+    </span>
+  </div>
+
+</div>
+</body>
+</html>

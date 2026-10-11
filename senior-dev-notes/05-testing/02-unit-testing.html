@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Unit Testing (Jest/Vitest) — Testing — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">Testing</a><span class="sep">›</span>Unit Testing (Jest/Vitest)</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>Unit Testing with Jest / Vitest, Mocking</h1>
+      <p class="meta-line"><span>⏱ 3 hrs</span><span>📍 Chapter 2 of 6</span></p>
+      <p><strong>One-line summary:</strong> Unit testing mastery at the senior level means understanding exactly
+      what a mock, stub, spy, and fake each do mechanically — module resolution hijacking, call recording, behavior
+      replacement — and knowing which flakiness-causing mistake you're about to make before you make it.</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>Almost every candidate can write <code>expect(x).toBe(y)</code>. What separates a senior candidate is
+      being able to explain <em>why</em> a mock didn't get called when they expected it to (usually a module
+      resolution / hoisting issue), why a test passes locally but fails in CI (usually shared mutable state or a
+      timer issue), and why over-mocking produces a test suite that gives false confidence. Interviewers probe this
+      because test code is the part of the codebase most likely to be sloppy — if you can reason precisely about
+      test internals, you can almost certainly reason precisely about the production code the tests exercise.</p>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>Read <a href="01-testing-strategy.html">Testing Strategy</a> first for vocabulary. Related:
+      <a href="04-api-integration-testing.html">API & Integration Testing</a>.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="doubles-vocab">Mocks, stubs, spies, fakes — the precise differences</h3>
+      <ul>
+        <li><strong>Stub</strong> — a replacement that returns canned/hardcoded data, with no behavior logic. Used
+        to control inputs to the code under test (e.g., a stubbed <code>getUser()</code> that always returns a
+        fixed user object).</li>
+        <li><strong>Spy</strong> — wraps a <em>real</em> function and records how it was called (arguments, call
+        count, order) while still (optionally) calling through to the real implementation. Used to assert
+        interactions happened, without necessarily changing behavior.</li>
+        <li><strong>Mock</strong> — a test double with pre-programmed expectations about how it <em>should</em> be
+        called, and behavior that can be asserted against afterward. In Jest/Vitest, <code>vi.fn()</code> /
+        <code>jest.fn()</code> functions are technically "mock functions" that can act as stub, spy, or both
+        depending on how you configure and assert on them — the library blurs the classical distinction.</li>
+        <li><strong>Fake</strong> — a working, simplified implementation of a real dependency (e.g., an in-memory
+        database that implements the same interface as the real one). Much closer to real behavior than a stub,
+        so it catches more bugs, at the cost of being more work to build and maintain.</li>
+      </ul>
+      <p>The classical ordering, from least to most "real behavior preserved": stub &lt; mock &lt; spy &lt; fake.
+      The less real behavior preserved, the faster and more isolated the test, but the more risk that the double's
+      assumed behavior has drifted from the real dependency's actual behavior — a classic cause of "tests pass,
+      production breaks."</p>
+
+      <h3 id="module-mocking">How module mocking actually works mechanically</h3>
+      <p>This is the part most engineers use without understanding, and it's a frequent interview probe.
+      <code>jest.mock('./db')</code> (and Vitest's <code>vi.mock('./db')</code>) does not patch the real module at
+      runtime like a monkey-patch — it intercepts the module resolution system itself. Both frameworks run on a
+      custom module loader: when your test file (or any file it imports) does <code>import db from './db'</code>,
+      the loader checks whether that specifier has a registered mock and, if so, resolves it to the mock factory's
+      return value instead of ever executing the real module's code. This is why <strong>hoisting</strong> matters:
+      Jest/Vitest hoist <code>jest.mock()</code>/<code>vi.mock()</code> calls to the top of the file (before
+      imports) via a babel/esbuild transform, specifically so the mock registration happens before any import
+      statement resolves — if it didn't, the real module would already be loaded and cached by the time the mock
+      was registered. Vitest in particular requires factory functions passed to <code>vi.mock</code> to not
+      reference out-of-scope variables unless prefixed with <code>vi.hoisted()</code>, precisely because of this
+      hoisting — a very common "why doesn't my mock work" bug.</p>
+
+      <h3 id="spyOn-vs-fn">spyOn vs fn vs manual mocks</h3>
+      <ul>
+        <li><code>vi.fn()</code> / <code>jest.fn()</code> — creates a brand-new mock function from scratch, useful
+        when you're passing a callback or replacing a property directly.</li>
+        <li><code>vi.spyOn(obj, 'method')</code> / <code>jest.spyOn(obj, 'method')</code> — replaces one method on
+        an existing object with a mock, while keeping a reference to the original so you can
+        <code>.mockRestore()</code> it later; by default it still calls through to the real implementation unless
+        you also call <code>.mockImplementation()</code>. This is the correct tool for "I want to verify
+        <code>console.error</code> was called" without fully replacing the module.</li>
+        <li><strong>Manual mocks</strong> (a <code>__mocks__/</code> folder, or a hand-written fake) — full control
+        over behavior, reusable across many test files, best for commonly-mocked modules like an HTTP client or an
+        ORM.</li>
+      </ul>
+
+      <h3 id="flaky-root-causes">Root causes of flaky tests — the real mechanics</h3>
+      <ul>
+        <li><strong>Shared mutable state between tests</strong> — a module-level variable, a singleton, or an
+        in-memory cache that one test mutates and a later test (in any order) depends on. Jest/Vitest run test
+        <em>files</em> in separate module registries by default (so state doesn't leak across files), but tests
+        <em>within</em> the same file share the module scope unless you reset it — this is the single most common
+        source of "fails only when run with other tests" / "fails only in a different order."</li>
+        <li><strong>Real timers</strong> — code using <code>setTimeout</code>/<code>setInterval</code>/<code>Date.now()</code>
+        without fake timers means test speed and correctness depend on real wall-clock timing, which is
+        nondeterministic under CI load (shared runners, throttled CPU). The fix is <code>vi.useFakeTimers()</code>
+        and manually advancing time with <code>vi.advanceTimersByTime()</code> — not <code>setTimeout</code>-based
+        <code>sleep()</code> calls in the test itself.</li>
+        <li><strong>Unawaited promises / missing <code>await</code></strong> — a test that kicks off an async
+        operation, doesn't await it, and asserts immediately; it passes when the microtask happens to resolve fast
+        enough and fails unpredictably otherwise. This is especially insidious because it often passes 99% of the
+        time locally and fails intermittently in CI's more constrained scheduler.</li>
+        <li><strong>Network calls that weren't actually mocked</strong> — a forgotten mock on one code path means
+        a "unit" test makes a real HTTP call, which is slow, depends on network availability, and can be rate-limited
+        by the real service during a CI burst.</li>
+        <li><strong>Test order dependence via global state</strong> — e.g., mocking <code>Date.now</code> globally
+        in one test and forgetting to restore it, silently breaking an unrelated later test that assumed real
+        time.</li>
+        <li><strong>Snapshot drift</strong> — snapshot tests that encode exact output (including things like
+        auto-generated IDs or timestamps) will flake or require constant re-approval unless those values are
+        normalized/mocked before snapshotting.</li>
+      </ul>
+
+      <h3 id="isolation-strategies">Test isolation strategies</h3>
+      <ul>
+        <li><code>beforeEach</code> resetting all mocks (<code>vi.clearAllMocks()</code> for call history,
+        <code>vi.resetAllMocks()</code> to also clear implementations, <code>vi.restoreAllMocks()</code> to put
+        spies back to their original implementation) — pick deliberately; <code>clearAllMocks</code> alone is a
+        common half-measure that leaves a custom <code>mockImplementation</code> from a previous test still active.</li>
+        <li>Fresh module registry per test when a module has internal singleton state you can't otherwise reset —
+        Vitest's <code>vi.resetModules()</code> / Jest's <code>jest.resetModules()</code> forces re-import on next
+        require, giving each test a clean copy of module-level state.</li>
+        <li>Dependency injection over module mocking where feasible — passing collaborators as constructor/function
+        arguments instead of importing them directly makes substitution explicit and avoids the whole
+        hoisting/module-registry class of bugs entirely.</li>
+      </ul>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>Jest and Vitest both maintain a per-test-file module registry — effectively a cache keyed by resolved
+      module path. The first <code>import</code>/<code>require</code> of a path executes that module's top-level
+      code once and caches the exports; every subsequent import in the same file gets the cached exports object,
+      not a fresh execution. This is exactly why module-level state (a counter, a singleton client) persists across
+      tests in the same file — it's the same cached object every time — and why Jest's parallelization model runs
+      each test <em>file</em> in its own worker process/module registry (so files can't leak state into each other)
+      while tests within a file are not isolated this way by default. Vitest's default pool (<code>threads</code>,
+      using worker threads, or <code>forks</code>, using child processes) makes the same per-file isolation
+      guarantee but with different underlying mechanics and different startup-cost/isolation tradeoffs — worker
+      threads are faster to spin up but share a process (so a genuinely corrupting bug, like a segfault in a native
+      addon, can take down more of the run); forks are slower but fully isolated at the OS process level.</p>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+sequenceDiagram
+  participant Test as test file
+  participant Loader as module loader
+  participant Mock as mock registry
+  participant Real as real ./db.ts
+  Test->>Loader: vi.mock('./db') (hoisted to top)
+  Test->>Loader: import db from './db'
+  Loader->>Mock: check: is './db' mocked?
+  Mock-->>Loader: yes -> return mock factory result
+  Loader-->>Test: db = mock object (Real module never executes)
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-typescript">// === Vitest: stub vs spy vs mock vs fake, shown concretely ===
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { sendWelcomeEmail } from './onboarding';
+import * as mailer from './mailer';
+
+// --- STUB: canned return value, no behavior, no call tracking used ---
+vi.mock('./config', () => ({ FEATURE_FLAG_NEW_TEMPLATE: true })); // hoisted automatically
+
+// --- SPY: wraps the real mailer.send, records calls, still works unless overridden ---
+describe('sendWelcomeEmail', () => {
+  let sendSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    sendSpy = vi.spyOn(mailer, 'send').mockResolvedValue({ status: 'sent' }); // now also a MOCK: controlled return
+  });
+
+  it('sends exactly one email with the user\'s address', async () => {
+    await sendWelcomeEmail({ id: 1, email: 'a@example.com' });
+    expect(sendSpy).toHaveBeenCalledTimes(1);
+    expect(sendSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ to: 'a@example.com', template: 'welcome' })
+    );
+  });
+
+  it('does not throw if the mailer rejects — logs and swallows', async () => {
+    sendSpy.mockRejectedValueOnce(new Error('smtp down'));
+    await expect(sendWelcomeEmail({ id: 1, email: 'a@example.com' })).resolves.not.toThrow();
+  });
+});
+
+// === FAKE: a working in-memory implementation, used for the repository layer ===
+class InMemoryUserRepo {
+  private users = new Map<number, { id: number; email: string }>();
+  async save(u: { id: number; email: string }) { this.users.set(u.id, u); return u; }
+  async findById(id: number) { return this.users.get(id) ?? null; }
+}
+// Using the fake preserves real behavior (state actually persists across calls within the test)
+// in a way a simple stub ("findById always returns X") cannot — closer to integration-test confidence
+// while still running in milliseconds with no real DB.
+
+// === Flaky-test anti-pattern vs fix: real timers ===
+// BAD — depends on real wall-clock timing, slow and occasionally flaky under CI load
+it('BAD: debounced save fires after 300ms', async () => {
+  const save = vi.fn();
+  const debounced = debounce(save, 300);
+  debounced();
+  await new Promise(r => setTimeout(r, 310)); // real sleep: slow + nondeterministic under load
+  expect(save).toHaveBeenCalledTimes(1);
+});
+
+// GOOD — fake timers: deterministic, instant
+it('GOOD: debounced save fires after 300ms', () => {
+  vi.useFakeTimers();
+  const save = vi.fn();
+  const debounced = debounce(save, 300);
+  debounced();
+  vi.advanceTimersByTime(300);
+  expect(save).toHaveBeenCalledTimes(1);
+  vi.useRealTimers();
+});
+
+// === Flaky-test anti-pattern vs fix: missing await ===
+// BAD — asserts before the async operation resolves
+it('BAD: user is created', () => {
+  createUser({ email: 'x@y.com' }); // returns a Promise, not awaited!
+  expect(getUserCount()).toBe(1); // may run before createUser's promise settles
+});
+// GOOD
+it('GOOD: user is created', async () => {
+  await createUser({ email: 'x@y.com' });
+  expect(getUserCount()).toBe(1);
+});</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4><p>An e-commerce team mocked their pricing service's HTTP client
+      entirely at the unit-test layer, stubbing it to always return a fixed price response shape. Six months later
+      the pricing service added a required <code>currency</code> field and the real API started rejecting requests
+      that omitted it — but every unit test kept passing because the stub never validated against the real
+      contract, it just handed back a hardcoded object. The break was only caught in staging, two days before a
+      release. The fix wasn't to abandon mocking — it was to add a thin contract test (using a schema shared with
+      the pricing service, validated against a recorded real response) that ran whenever the stub's shape was
+      defined, so the stub itself would fail fast if it silently drifted from the real contract. This is the
+      general lesson about mocking at scale: a mock encodes an assumption, and assumptions need a mechanism to
+      detect when they go stale, or the test suite's confidence silently decays over time.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4><p><code>vi.mock()</code> factory functions are hoisted above
+      imports, which means referencing an imported variable inside the factory throws a "cannot access before
+      initialization" error or silently uses <code>undefined</code> — you must use <code>vi.hoisted()</code> to
+      declare values that need to exist before the hoisted mock runs. This single mechanic causes more
+      "why is my mock not working" confusion than any other Vitest/Jest feature.</p></div>
+      <ul>
+        <li><strong>Mistake:</strong> over-mocking — replacing every collaborator of the unit under test, including
+        fast, pure, in-process helper functions. This produces tests that verify the function calls its
+        collaborators in the expected sequence, not that the feature actually works — a textbook case of testing
+        implementation details.</li>
+        <li><strong>Mistake:</strong> forgetting to restore spies/mocks between tests, causing order-dependent
+        failures. Always reset in a global <code>beforeEach</code>/<code>afterEach</code>, and prefer
+        <code>restoreAllMocks</code> over <code>clearAllMocks</code> when any test uses
+        <code>mockImplementation</code>.</li>
+        <li><strong>Mistake:</strong> asserting call <em>count</em> and <em>arguments</em> as a proxy for
+        behavior correctness instead of asserting the actual observable outcome (return value, side effect,
+        thrown error). Interaction-based assertions are useful but shouldn't be the only assertion in a test.</li>
+        <li><strong>Best practice:</strong> prefer a fake over a mock for anything with meaningful internal state
+        (a repository, a cache) — the extra one-time cost of writing a correct fake pays for itself across every
+        test that uses it, and catches real state-management bugs mocks cannot.</li>
+        <li><strong>Best practice:</strong> when a test fails only in combination with other tests or only with a
+        specific run order, suspect shared module state first — run the single test file with
+        <code>--randomize</code> (Vitest) to surface order dependence deliberately rather than by accident in CI.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>Module mock (<code>vi.mock</code>)</td><td>Replacing an entire external dependency (HTTP client, SDK) at the boundary</td><td>You need the mock's behavior to vary per-test in complex ways — gets unwieldy fast</td><td>Dependency injection + manual test double</td></tr>
+        <tr><td>spyOn with call-through</td><td>You want to verify a real function was called correctly without changing its behavior</td><td>The real function has expensive/nondeterministic side effects (network, DB)</td><td>spyOn + mockImplementation to also replace behavior</td></tr>
+        <tr><td>Fake (in-memory implementation)</td><td>Dependency has meaningful state/behavior worth preserving (repository, cache, queue)</td><td>Dependency is a thin, stateless call — a fake is overkill</td><td>Stub</td></tr>
+        <tr><td>Dependency injection instead of module mocking</td><td>New code, or a module being refactored — avoids hoisting/registry pitfalls entirely</td><td>Legacy code with deep import chains that can't be easily refactored</td><td>Module mocking</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic">
+        <h4>Basic</h4>
+        <details class="qa"><summary>What's the difference between a mock, a stub, and a spy?</summary><div class="answer"><p>A stub returns canned data with no behavior logic; a spy wraps a real function to record calls while optionally still calling through to the real implementation; a mock has pre-programmed expectations and controllable behavior that you assert against. In Jest/Vitest, <code>fn()</code>/<code>spyOn()</code> blur these into one flexible API.</p></div><div class="followup">Follow-up: what's a fake, and how is it different from a stub?</div></details>
+        <details class="qa"><summary>How do you mock a module's default export in Vitest or Jest?</summary><div class="answer"><p><code>vi.mock('./module', () => ({ default: vi.fn() }))</code> (or the Jest equivalent with <code>jest.mock</code>). The call is hoisted above imports automatically so the mock is registered before the module gets resolved.</p></div><div class="followup">Follow-up: why does the mock call get hoisted, and what breaks if it weren't?</div></details>
+        <details class="qa"><summary>What does `vi.clearAllMocks()` do, and how is it different from `resetAllMocks()`?</summary><div class="answer"><p><code>clearAllMocks</code> resets call history (calls, instances, results) but keeps any configured implementation; <code>resetAllMocks</code> also clears the implementation back to a plain no-op mock. Using only `clearAllMocks` when a previous test set a custom `mockImplementation` can leak that behavior into the next test.</p></div><div class="followup">Follow-up: what does `restoreAllMocks` do differently for spies specifically?</div></details>
+        <details class="qa"><summary>Why would you use fake timers in a unit test?</summary><div class="answer"><p>To make time-dependent code (debounce, throttle, retry backoff, timeouts) deterministic and instant in tests, instead of relying on real `setTimeout` sleeps that are slow and can flake under CI load. `vi.useFakeTimers()` plus `vi.advanceTimersByTime()` controls the clock explicitly.</p></div><div class="followup">Follow-up: what's a common bug when mixing fake timers with real Promise microtasks?</div></details>
+        <details class="qa"><summary>What's a common cause of a test that passes alone but fails when run with the full suite?</summary><div class="answer"><p>Shared mutable state at module scope (a singleton, a cache, a counter) that persists across tests within the same file and isn't reset between tests, causing order-dependent failures.</p></div><div class="followup">Follow-up: how would you reset module-level state between tests?</div></details>
+        <details class="qa"><summary>Why might a test that forgets `await` on an async call still sometimes pass?</summary><div class="answer"><p>Because the assertion can race ahead of the unresolved promise; if the microtask queue happens to flush before the assertion line runs (common with very fast operations or specific event-loop timing), it passes by coincidence. It's nondeterministic and will eventually fail, often only under different load conditions like CI.</p></div><div class="followup">Follow-up: how do linting rules help catch this class of bug before it ships?</div></details>
+        <details class="qa"><summary>When should you prefer `vi.spyOn` over `vi.fn()`?</summary><div class="answer"><p>When you want to keep the real implementation's behavior by default (call-through) while still being able to assert on calls, or selectively override it for specific test cases — `spyOn` operates on an existing object's method and can be restored, whereas `fn()` creates a standalone mock function with no "real" implementation to fall back to.</p></div><div class="followup">Follow-up: what happens if you forget to restore a spyOn after the test?</div></details>
+      </div>
+      <div class="qa-level medium">
+        <h4>Medium</h4>
+        <details class="qa"><summary>Explain mechanically how `vi.mock`/`jest.mock` intercepts an import, and why factory hoisting matters.</summary><div class="answer"><p>Both frameworks use a custom module loader with a per-test-file module registry; `vi.mock`/`jest.mock` register an override in that registry keyed by the resolved module specifier. The call is transform-hoisted to the top of the file (before any import statements) so the mock is registered before the real module is ever resolved/executed — if it ran after the import, the real module would already be cached and the mock would have no effect.</p></div><div class="followup">Follow-up: why does Vitest require `vi.hoisted()` for values referenced inside the mock factory?</div></details>
+        <details class="qa"><summary>Why is over-mocking (mocking every collaborator) considered an anti-pattern, even though each individual mock seems reasonable?</summary><div class="answer"><p>It turns the test into an assertion about the <em>wiring</em> between the unit and its collaborators (call sequence, arguments) rather than about actual behavior. It also means the test can't catch bugs in how those collaborators are actually used together, since none of the real logic between them ever executes — exactly the gap sociable unit tests are designed to close.</p></div><div class="followup">Follow-up: how would you decide which collaborators are safe to leave real vs which need a double?</div></details>
+        <details class="qa"><summary>Describe a concrete scenario where a stub masked a real production bug that a fake would have caught.</summary><div class="answer"><p>A stubbed cache (`get` always returns `null`, i.e. "cache miss") hides a bug in the cache-write path, since the test never actually exercises "write then read." A fake in-memory cache with real get/set semantics would catch the case where a value written isn't correctly retrievable due to a key-serialization bug, because the fake actually stores and looks up by the same logic path as the real cache's contract.</p></div><div class="followup">Follow-up: what's the added cost of maintaining that fake as the real cache's interface evolves?</div></details>
+        <details class="qa"><summary>What's the practical difference between Vitest's `threads` pool and `forks` pool, and when would you choose each?</summary><div class="answer"><p>`threads` runs test files in worker threads within shared processes — faster startup, lower memory overhead, but all threads in a process can be affected if something corrupts process-level state (e.g., a native addon crash). `forks` runs each file (or group) in a separate OS process — slower to start but fully isolated; safer when running flaky native code, or code that mutates global process state like `process.env` in ways that must not leak.</p></div><div class="followup">Follow-up: how does this choice interact with CI runner resource limits?</div></details>
+        <details class="qa"><summary>How would you unit test a function that depends on `Date.now()` without making the test flaky or tightly coupled to a specific timestamp?</summary><div class="answer"><p>Mock `Date.now` (via `vi.setSystemTime()` or a spy) to a fixed, known timestamp for the duration of the test, then assert against values derived from that fixed time. Avoid asserting against the real current time at all, and always restore the real clock afterward to prevent leaking into other tests.</p></div><div class="followup">Follow-up: what's a cleaner architectural alternative to directly calling `Date.now()` inside business logic?</div></details>
+        <details class="qa"><summary>A teammate wants to snapshot-test an API response object. What's the risk, and how would you mitigate it?</summary><div class="answer"><p>If the response includes non-deterministic fields (auto-generated IDs, timestamps, ordering of an unordered collection), the snapshot will flake or require constant re-approval, training the team to blindly accept snapshot diffs. Mitigate by normalizing/stripping those fields before snapshotting, or asserting on a narrower, deterministic subset of the object instead of the whole structure.</p></div><div class="followup">Follow-up: what's the broader risk of a team habitually running `--update-snapshots` without reviewing the diff?</div></details>
+        <details class="qa"><summary>How do you decide between dependency injection and module-level mocking for a given piece of legacy code?</summary><div class="answer"><p>If the code already imports its collaborator directly and refactoring to inject it is low-risk/low-cost, prefer DI — it's explicit and avoids the whole class of hoisting/registry bugs. If the import chain is deep or refactoring risks destabilizing legacy code you don't fully understand yet, module mocking is the pragmatic choice short-term, with a note to revisit once the module is better understood or under active development.</p></div><div class="followup">Follow-up: what's a low-risk intermediate step between "pure module mocking" and "full DI refactor"?</div></details>
+      </div>
+      <div class="qa-level advanced">
+        <h4>Advanced</h4>
+        <details class="qa"><summary>Design a strategy for keeping mocks of an external third-party API in sync with the real API's contract over time, without full E2E tests against the real service in CI.</summary><div class="answer"><p>Use consumer-driven contract testing: record real responses (or generate them from the provider's published schema/OpenAPI spec) into fixtures, validate your mocks against that schema in a scheduled (not per-PR) job that hits the real sandbox API, and fail that job loudly when the schema drifts — separate from the fast per-PR unit suite which keeps using the static mock. This gives fast, deterministic PR feedback while still catching contract drift on a slower cadence, rather than discovering it in production.</p></div><div class="followup">Follow-up: how would you handle a third-party API with no sandbox environment at all?</div></details>
+        <details class="qa"><summary>Your CI flake rate spiked after moving from Jest's default process-per-file isolation to Vitest's `threads` pool. Walk through how you'd diagnose whether the pool choice is the actual cause.</summary><div class="answer"><p>First reproduce locally by running with `--pool=forks` vs `--pool=threads` repeatedly and comparing flake rate directly — if forks is reliably more stable, suspect state leaking across worker-thread-shared process globals (e.g., a native module with process-level caching, or a library polyfilling a global incorrectly). Check for any native addons, global `process.env` mutation, or modules with top-level side effects that assume one-process-per-file. If forks fixes it, you've isolated it to shared-process state; if not, look at timing/resource contention (fake timers interacting oddly with real ones across threads) as a separate cause.</p></div><div class="followup">Follow-up: what's the tradeoff of just permanently switching to `forks` without finding the root cause?</div></details>
+        <details class="qa"><summary>How would you unit test a retry-with-exponential-backoff utility without the test taking the full real backoff duration or being flaky?</summary><div class="answer"><p>Inject the delay function (or use fake timers) so backoff waits are simulated, not real; use `vi.useFakeTimers()` and advance time explicitly between each retry attempt assertion, asserting both the retry count and the growing delay intervals (e.g., 100ms, 200ms, 400ms) against the fake clock rather than wall time. Also assert the terminal condition (gives up after N attempts, surfaces the last error) as a separate test case from the successful-eventually case.</p></div><div class="followup">Follow-up: how would you additionally test jitter in the backoff without making the test itself nondeterministic?</div></details>
+        <details class="qa"><summary>A module under test has an unavoidable top-level side effect (e.g., it opens a connection pool on import). How do you unit test code that depends on it without that side effect running in every test file?</summary><div class="answer"><p>Mock the module entirely at the boundary so the real top-level code never executes (the module loader resolves to the mock before the real file is ever evaluated) — this is actually the correct use case for module-level mocking rather than DI, since the side effect happens at import time, before any constructor injection could intervene. Longer-term, flag this as a design smell: side effects at module load time make the module hard to test and hard to reason about in general, and the real fix is to make connection-pool creation lazy/explicit (e.g., an exported `init()` function) rather than automatic on import.</p></div><div class="followup">Follow-up: how would you verify, in CI, that nobody reintroduces an import-time side effect later?</div></details>
+        <details class="qa"><summary>How would you approach testing a pure function versus an impure function differently, in terms of mocking strategy, and what does this imply about how you'd architect new code for testability?</summary><div class="answer"><p>A pure function needs zero test doubles — assert inputs to outputs directly, which is also the cheapest, most reliable, highest-value kind of test to have in bulk. An impure function needs test doubles exactly at its I/O boundaries. The architectural implication is the "functional core, imperative shell" pattern: push as much logic as possible into pure functions with no I/O, and keep the thin impure shell (I/O orchestration) as small and simple as possible so it needs the fewest, simplest mocks — this directly reduces both the quantity and fragility of mocking needed across the whole codebase.</p></div><div class="followup">Follow-up: how would you refactor a large impure function to apply this pattern incrementally without a risky big rewrite?</div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment">
+        <span class="level-tag">Beginner (30-60 min)</span>
+        <h4>Write unit tests for a pure validation function</h4>
+        <p>Write a function <code>validatePassword(pw: string): { valid: boolean; errors: string[] }</code>
+        enforcing length ≥ 8, at least one digit, at least one uppercase letter. Write a full Vitest test suite.</p>
+        <ul>
+          <li>Cover every rule independently and in combination.</li>
+          <li>Cover boundary cases (exactly 8 chars, empty string, only digits).</li>
+          <li>No mocks should be needed — if you find yourself wanting one, the function has a design problem.</li>
+        </ul>
+        <p><strong>Acceptance criteria:</strong> every branch in the function is exercised by at least one test;
+        test names describe the behavior, not the implementation.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>Use `it.each` / `test.each` for the combinatorial cases to avoid copy-pasted near-identical tests.</p></div></details>
+        <p><strong>Bonus:</strong> add a mutation-testing run (Stryker) and see which mutants survive — fix the gaps.</p>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Intermediate (2-4 hrs)</span>
+        <h4>Test a module with a mocked HTTP boundary, correctly</h4>
+        <p>Write a <code>WeatherService</code> class with a method <code>getTemperature(city: string)</code> that
+        calls a (fictional) HTTP weather API client. Write unit tests that mock only the HTTP client.</p>
+        <ul>
+          <li>Use `vi.mock` (or DI + a hand-written fake client) correctly, including hoisting-safe setup.</li>
+          <li>Test: success path, API returns an error status, API times out, API returns malformed JSON.</li>
+          <li>Reset mocks correctly between tests using `beforeEach`.</li>
+        </ul>
+        <p><strong>Acceptance criteria:</strong> no real network call ever happens; each failure mode has its own
+        test; tests pass in any run order (verify with `--randomize` or Jest's equivalent).</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>If you use `vi.mock`, remember the hoisting rule — don't reference variables declared with `const` inside the factory unless wrapped in `vi.hoisted()`.</p></div></details>
+        <p><strong>Bonus:</strong> convert the solution to use constructor-injected DI instead of module mocking and compare readability.</p>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Advanced (1-2 days)</span>
+        <h4>Find and fix a real flaky test</h4>
+        <p>Intentionally write 3 flaky tests, each exhibiting a different root cause from this chapter (shared
+        module state, real timers, unawaited promise). Run each 50 times in a loop and record the failure rate.</p>
+        <ul>
+          <li>Document the failure rate and exact failure mode for each.</li>
+          <li>Fix each one using the correct technique (state reset, fake timers, proper await) and re-run 50 times to confirm 0% failure.</li>
+          <li>Write a short postmortem-style note for each: root cause, fix, and how you'd catch this in code review next time.</li>
+        </ul>
+        <p><strong>Acceptance criteria:</strong> measurable before/after failure rates; postmortems identify the
+        true root cause, not just a workaround.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>This assignment is deliberately open-ended — the value is in the measurement and the written root-cause analysis, which is exactly what you'd be asked to produce after a real CI flake incident.</p></div></details>
+        <p><strong>Bonus:</strong> add a CI check that runs any new/changed test file N times before merge to catch new flakiness pre-emptively.</p>
+      </div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet"><ul>
+        <li>Stub = canned data, no logic. Spy = wraps real fn, records calls. Mock = programmable expectations + behavior. Fake = working simplified implementation.</li>
+        <li>`vi.mock`/`jest.mock` intercepts module resolution, not runtime monkey-patching — and is hoisted above imports.</li>
+        <li>Use `vi.hoisted()` for any value a hoisted mock factory needs to reference.</li>
+        <li>`clearAllMocks` resets call history only; `resetAllMocks` also clears implementations; `restoreAllMocks` puts spies back to the real function.</li>
+        <li>Flaky-test root causes: shared module state, real timers, unawaited promises, un-mocked network calls, snapshot drift.</li>
+        <li>Fake timers (`useFakeTimers` + `advanceTimersByTime`) replace real sleeps for deterministic, instant timing tests.</li>
+        <li>Prefer sociable unit tests (real fast collaborators) over mocking everything — over-mocking tests wiring, not behavior.</li>
+        <li>Prefer DI over module mocking for new code — avoids the whole hoisting/registry pitfall class.</li>
+        <li>A mock encodes an assumption about a dependency's contract — that assumption can go stale; pair with contract tests for critical external APIs.</li>
+        <li>"Functional core, imperative shell": push logic into pure functions needing zero doubles; keep the impure I/O shell thin.</li>
+      </ul></div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://vitest.dev/api/vi.html">Vitest — vi API reference (mock, spyOn, timers, hoisted)</a></li>
+        <li><a href="https://jestjs.io/docs/mock-functions">Jest — Mock Functions</a></li>
+        <li><a href="https://martinfowler.com/articles/mocksArentStubs.html">Martin Fowler — Mocks Aren't Stubs</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="01-testing-strategy.html"><span class="dir">← Previous</span>Testing Strategy & Pyramid</a>
+        <a class="next" href="03-react-testing-library.html"><span class="dir">Next →</span>React Testing Library</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · Testing</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-typescript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-jsx.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "05-testing", chapterKey: "02-unit-testing" });</script>
+</body>
+</html>

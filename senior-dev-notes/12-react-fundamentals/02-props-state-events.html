@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Props, State &amp; Events — React Fundamentals — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">React Fundamentals</a><span class="sep">›</span>Props, State &amp; Events</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>Props, State &amp; Events: The Data-Flow Contract</h1>
+      <p class="meta-line"><span>⏱ 2 hrs</span><span>📍 Chapter 2 of 6</span></p>
+      <p><strong>One-line summary:</strong> Props flow one direction (parent → child, read-only), state is
+      private memory owned by a component that triggers a re-render when changed, events are how a child
+      tells a parent "something happened" — and "lifting state up" is the single pattern that resolves 90% of
+      "how do two sibling components share data" interview questions.</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>Almost every "my UI is out of sync" bug a senior dev debugs in practice is a data-flow modeling
+      mistake, not a React bug: state living in the wrong component, a prop being mutated instead of flowing
+      down immutably, or an event handler not actually notifying the right ancestor. Interviewers probe this
+      constantly with "two sibling components need to share X, how do you wire it up" — the correct, confident
+      answer ("lift the state to the nearest common ancestor") separates people who've internalized
+      unidirectional data flow from people who reach for a state library reflexively.</p>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>Requires <a href="01-react-basics-jsx-components.html">React Basics: JSX &amp; Components</a>. Feeds
+      directly into <a href="03-hooks-basics.html">Hooks Basics</a> (state is implemented via the
+      <code>useState</code> hook) and <a href="04-forms-and-controlled-components.html">Forms &amp; Controlled
+      Components</a> (controlled inputs are this chapter's pattern applied to form fields). For the deeper
+      "why does state update trigger exactly this much re-rendering" mechanics, see
+      <a href="../03-react-nextjs-advanced/01-react-internals.html">React Internals</a>.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="props-contract">Props: the read-only, one-directional contract</h3>
+      <p>Props are the arguments a parent passes to a child — plain data, functions, elements, anything.
+      The contract is strict: <strong>a component must never mutate its own props.</strong> Not "should not" —
+      React doesn't runtime-enforce it in production, but violating it breaks the fundamental assumption every
+      other part of React relies on (that a parent's data and a child's view of that data stay consistent).
+      Props always flow down; there is no mechanism for a child to "write back" to a parent's props directly —
+      that's what callback props (events, below) are for.</p>
+      <pre><code class="language-jsx">// BAD: mutating a prop directly
+function Cart({ items }) {
+  items.push({ id: 99, name: "surprise" }); // mutates the parent's array in place
+  return &lt;ul&gt;{items.map(i =&gt; &lt;li key={i.id}&gt;{i.name}&lt;/li&gt;)}&lt;/ul&gt;;
+}
+
+// GOOD: derive new data, never mutate what was passed in
+function Cart({ items, onAdd }) {
+  return (
+    &lt;&gt;
+      &lt;ul&gt;{items.map(i =&gt; &lt;li key={i.id}&gt;{i.name}&lt;/li&gt;)}&lt;/ul&gt;
+      &lt;button onClick={() =&gt; onAdd({ id: 99, name: "surprise" })}&gt;Add&lt;/button&gt;
+    &lt;/&gt;
+  );
+}</code></pre>
+
+      <h3 id="state-ownership">State: private memory with a re-render contract</h3>
+      <p>State is data a component owns, that can change over time, and whose change should cause the UI to
+      update. <code>useState</code> is the primitive: <code>const [value, setValue] = useState(initial)</code>.
+      Two things senior candidates must state precisely: (1) calling the setter schedules a re-render — it does
+      not mutate <code>value</code> in place synchronously, so reading <code>value</code> immediately after
+      calling <code>setValue</code> in the same function body still gives you the old value; (2) state is
+      scoped to the component instance — each time you render a component at a given position in the tree, it
+      keeps its own independent state, but unmounting and remounting (e.g. via a changed <code>key</code> or a
+      conditional that removes then re-adds it) resets that state entirely.</p>
+
+      <h3 id="events">Events: how a child reports upward</h3>
+      <p>React wraps native DOM events in a cross-browser <strong>SyntheticEvent</strong> (in React 17+, these
+      are attached at the root container and use native event delegation, not per-node listeners — detail
+      covered in topic 03). From a fundamentals standpoint, what matters: event handler props are just regular
+      callback props by convention named <code>onX</code> (e.g. <code>onClick</code>, or a custom
+      <code>onAdd</code>/<code>onSubmit</code> for your own components), and the standard way for a child to
+      "talk to" a parent is to accept a callback prop and call it with relevant data — the parent decides what
+      to do, keeping the child "dumb" and reusable.</p>
+      <pre><code class="language-jsx">function FavoriteButton({ recipeId, onToggleFavorite }) {
+  return (
+    &lt;button onClick={() =&gt; onToggleFavorite(recipeId)}&gt;
+      ☆ Favorite
+    &lt;/button&gt;
+  );
+}</code></pre>
+
+      <h3 id="lifting-state-up">Lifting state up: the canonical fix for "siblings need to share data"</h3>
+      <p>When two sibling components both need access to (or both need to modify) the same piece of data, the
+      state does not belong in either sibling — it belongs in their nearest common ancestor, which then passes
+      the current value down as props to both and passes callback props down so either child can request a
+      change. This is "lifting state up," and it's the default-correct answer before reaching for Context or
+      an external state library — those exist to avoid prop-drilling <em>many levels</em>, not to replace this
+      pattern at shallow depth.</p>
+      <pre><code class="language-jsx">function SearchableRecipeList({ recipes }) {
+  const [query, setQuery] = useState("");
+  const filtered = recipes.filter(r =&gt; r.name.toLowerCase().includes(query.toLowerCase()));
+
+  return (
+    &lt;&gt;
+      {/* SearchBar doesn't own the query -- it's lifted to the common parent */}
+      &lt;SearchBar value={query} onChange={setQuery} /&gt;
+      &lt;RecipeList recipes={filtered} /&gt;
+    &lt;/&gt;
+  );
+}</code></pre>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>When <code>setQuery("pasta")</code> runs inside an <code>onChange</code> handler:</p>
+      <ol>
+        <li>React enqueues the update against <code>SearchableRecipeList</code>'s internal state slot for
+        that <code>useState</code> call (not against the DOM, not against the child components directly).</li>
+        <li>React schedules a re-render of <code>SearchableRecipeList</code> (and, by default, its subtree —
+        <code>SearchBar</code> and <code>RecipeList</code> both get called again with their new props).</li>
+        <li><code>SearchableRecipeList</code>'s function body re-runs top to bottom: <code>query</code> is now
+        <code>"pasta"</code>, <code>filtered</code> is recomputed fresh, and new elements are produced for both
+        children with the new props.</li>
+        <li>React diffs the new element tree against the previous one and patches only the DOM nodes that
+        actually changed (e.g., the list items, not the search input's unrelated siblings).</li>
+      </ol>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+flowchart TD
+  A[User types in SearchBar input] --> B[onChange fires, calls onChange prop]
+  B --> C[Parent's setQuery runs]
+  C --> D[React schedules re-render of parent]
+  D --> E[Parent function re-runs: recomputes filtered list]
+  E --> F[New props flow down to SearchBar and RecipeList]
+  F --> G[React diffs and patches only changed DOM]
+      </div>
+      <div class="mermaid">
+graph TD
+  Parent["SearchableRecipeList (owns query state)"]
+  Parent -->|value, onChange| SearchBar
+  Parent -->|filtered recipes| RecipeList
+  SearchBar -.->|calls onChange callback| Parent
+  RecipeList --> RecipeCard
+  RecipeCard -.->|calls onToggleFavorite callback| Parent
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-jsx">// Full lifted-state example: two siblings (Filter + List) share state
+// owned by their parent, communicating purely via props and callbacks.
+import { useState } from "react";
+
+function FavoritesToggle({ isFavorite, onToggle }) {
+  return &lt;button onClick={onToggle}&gt;{isFavorite ? "★" : "☆"}&lt;/button&gt;;
+}
+
+function RecipeRow({ recipe, isFavorite, onToggleFavorite }) {
+  return (
+    &lt;li&gt;
+      {recipe.name}
+      &lt;FavoritesToggle isFavorite={isFavorite} onToggle={() =&gt; onToggleFavorite(recipe.id)} /&gt;
+    &lt;/li&gt;
+  );
+}
+
+function RecipeBook({ recipes }) {
+  const [favoriteIds, setFavoriteIds] = useState(() =&gt; new Set());
+
+  function handleToggleFavorite(id) {
+    setFavoriteIds(prev =&gt; {
+      const next = new Set(prev); // never mutate prev state directly
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }
+
+  return (
+    &lt;ul&gt;
+      {recipes.map(r =&gt; (
+        &lt;RecipeRow
+          key={r.id}
+          recipe={r}
+          isFavorite={favoriteIds.has(r.id)}
+          onToggleFavorite={handleToggleFavorite}
+        /&gt;
+      ))}
+    &lt;/ul&gt;
+  );
+}</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4>
+      <p>A checkout flow had a "quantity stepper" component that kept its own local state for the current
+      quantity <em>and</em> a parent cart summary that separately tracked item totals from props passed down at
+      mount time. The two fell out of sync whenever the stepper changed quantity because the stepper's local
+      state was never propagated back up via a callback — it was "fire and forget" UI state with no single
+      source of truth. The fix was textbook lifting-state-up: the cart (parent) became the sole owner of
+      quantities; the stepper became fully controlled (value + onChange props, no internal state at all),
+      guaranteeing the displayed total always matched what was rendered. This is the exact failure mode
+      interviewers are probing for when they ask "where should this state live?"</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4>
+      <p>Reading state right after calling its setter and expecting the new value: <code>setCount(count + 1); console.log(count)</code>
+      logs the OLD value — the setter schedules an update for the next render, it doesn't mutate the variable
+      in your current closure. If you need the next value immediately in the same function, compute it into a
+      local variable first, or use the updater-function form (<code>setCount(c =&gt; c + 1)</code>) when the new
+      value depends on the previous one.</p></div>
+      <ul>
+        <li>Storing derived data in state instead of computing it on each render (e.g., storing
+        <code>filteredRecipes</code> in <code>useState</code> instead of deriving it from <code>recipes</code>
+        and <code>query</code> every render) — causes stale-derived-data bugs when the source changes but you
+        forget to re-sync the derived state.</li>
+        <li>Initializing state from props and assuming it stays in sync: <code>useState(props.value)</code>
+        only uses <code>props.value</code> on the <em>first</em> render — later prop changes do not update that
+        state automatically; this needs either full lifting (preferred) or an explicit effect/key reset.</li>
+        <li>Passing a brand-new inline function/object as a prop on every render when the child is wrapped in
+        <code>memo</code> — defeats the memoization because reference equality fails every time (full mechanics
+        in topic 03's Internals chapter, but the fundamentals-level fix is the same: keep prop references
+        stable with <code>useCallback</code>/<code>useMemo</code> when it matters).</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>Local component state</td><td>Data only that component (and maybe its direct children) needs</td><td>Multiple distant components need the same data</td><td>Lift state up, or Context for deep trees</td></tr>
+        <tr><td>Lifting state to nearest common ancestor</td><td>A handful of siblings/cousins need shared data, shallow tree</td><td>Many deeply nested consumers — causes prop-drilling pain</td><td>Context API, or a state library</td></tr>
+        <tr><td>Storing derived values in state</td><td>The computation is genuinely expensive and needs caching</td><td>Cheap derivations that can just be recomputed inline</td><td>Compute inline during render, or <code>useMemo</code> if proven expensive</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic"><h4>Basic</h4>
+      <details class="qa"><summary>What's the difference between props and state?</summary><div class="answer"><p>Props are passed in from a parent and are read-only from the child's perspective; state is private data a component owns and manages itself, and changing it triggers a re-render.</p></div><div class="followup">Follow-up: Can a component change its own props?</div></details>
+      <details class="qa"><summary>Why shouldn't you mutate props directly?</summary><div class="answer"><p>It breaks the parent's data consistency (the parent's data silently changes without the parent's knowledge) and violates the one-directional data flow React's model depends on. The fix is to call a callback prop so the parent can update its own state intentionally.</p></div><div class="followup">Follow-up: What would go wrong specifically if you mutated an array prop in place?</div></details>
+      <details class="qa"><summary>What does calling a `useState` setter actually do?</summary><div class="answer"><p>It schedules a state update and a re-render; it does not synchronously mutate the variable you destructured, so code immediately after the call still sees the old value in that render's closure.</p></div><div class="followup">Follow-up: How do you get the next value immediately within the same handler?</div></details>
+      <details class="qa"><summary>What is "lifting state up"?</summary><div class="answer"><p>Moving state from a child component up to its nearest common ancestor so that multiple children can read and modify it consistently via props and callbacks, instead of each keeping an out-of-sync local copy.</p></div><div class="followup">Follow-up: When would you NOT lift state, even with two components needing related data?</div></details>
+      <details class="qa"><summary>How does a child component communicate an event back to its parent?</summary><div class="answer"><p>Via a callback prop passed down by the parent (e.g. `onToggleFavorite`); the child calls it with relevant data, and the parent decides what state change, if any, results.</p></div><div class="followup">Follow-up: Is this different from how native DOM events like onClick work?</div></details>
+      </div>
+      <div class="qa-level medium"><h4>Medium</h4>
+      <details class="qa"><summary>Why does `useState(props.value)` not keep local state synced to prop changes?</summary><div class="answer"><p>The argument to `useState` is only used to compute the INITIAL state on the component's first render (technically, first mount of that fiber) -- it's ignored on every subsequent render. So if `props.value` changes later, the already-initialized state variable keeps its old value unless something explicitly re-syncs it.</p></div><div class="followup">Follow-up: What are the two common fixes, and what's the tradeoff between them?</div></details>
+      <details class="qa"><summary>Why is storing derived/computed data in state usually a mistake?</summary><div class="answer"><p>It creates two sources of truth: the source data and the derived copy. Any code path that updates the source but forgets to also update the derived state produces a stale-UI bug. Deriving fresh on every render (or memoizing with useMemo if proven expensive) guarantees the derived value can never go stale relative to its inputs.</p></div><div class="followup">Follow-up: When is caching a derived value with useMemo actually justified?</div></details>
+      <details class="qa"><summary>What's the difference between controlled "dumb" components and components that manage their own internal state, in terms of lifting?</summary><div class="answer"><p>A fully controlled component has no internal state of its own for the value in question -- it receives `value` and `onChange` and is purely a rendering/event-reporting layer; the owning state lives entirely in an ancestor. A self-managing component keeps that state internally and only reports out when something crosses a boundary (e.g., form submission). The controlled approach keeps a single source of truth but adds prop-plumbing; the self-managed approach is simpler locally but risks the "two sources of truth" sync bug if the parent also needs to know the value.</p></div><div class="followup">Follow-up: Which approach does a form input library typically default to, and why?</div></details>
+      <details class="qa"><summary>Why does passing a new inline arrow function as a callback prop on every render matter even if the child isn't wrapped in `memo`?</summary><div class="answer"><p>If the child isn't memoized, it re-renders regardless of prop reference equality, so in isolation a fresh function reference costs only a trivial allocation per render -- not a correctness issue. It only becomes a performance issue once memoization (or a dependency array elsewhere, like an effect) is relying on that reference staying stable, which is why the "fix" (useCallback) is a targeted response to a measured problem, not a default habit.</p></div><div class="followup">Follow-up: Give a concrete case where an inline function prop breaks correctness, not just performance.</div></details>
+      </div>
+      <div class="qa-level advanced"><h4>Advanced</h4>
+      <details class="qa"><summary>Two sibling components are both children of a router-rendered route and need shared state, but they're on different routes (not simultaneously mounted). Does "lift state up" still apply?</summary><div class="answer"><p>Lifting works only while both consumers are simultaneously mounted under the common ancestor holding the state -- if they're on different routes and never co-exist in the tree, lifting to a shared ancestor that stays mounted across route changes (e.g., a layout route) still works, since React state persists in a fiber as long as that fiber (and the state hook's position in it) stays mounted, even if the fiber's rendered children change via routing. If the common ancestor itself unmounts between visits, the state needs to live outside the component tree's lifecycle entirely (URL state, localStorage, or a store) rather than in component state.</p></div><div class="followup">Follow-up: Why does URL state (route params/query string) solve this particular case elegantly for shareable/bookmarkable state?</div></details>
+      <details class="qa"><summary>Explain precisely why batched state updates inside one event handler don't each trigger a separate render.</summary><div class="answer"><p>React groups all state updates triggered synchronously within a single event handler invocation (and, since React 18, within promises/timeouts/native event handlers too via automatic batching) into one render pass -- multiple `setX` calls in the same handler enqueue multiple updates against the fiber, but React only re-renders once after the handler finishes, applying all queued updates in order first. This is why `setCount(c=&gt;c+1)` called twice in one handler increments by 2 in a single render, while two separate `setCount(count+1)` calls (reading the same stale `count` closure) only increment by 1.</p></div><div class="followup">Follow-up: What's the exact difference in outcome between the updater-function form and the direct-value form when called twice in one handler?</div></details>
+      <details class="qa"><summary>Is it ever architecturally correct to have the "same" logical state exist in two different components simultaneously?</summary><div class="answer"><p>Yes, when one is a deliberate, intentionally-desynced local draft (e.g., an uncontrolled form field holding in-progress edits) that only syncs to the canonical state on an explicit commit action (submit/blur) -- this is a valid, common pattern, not a bug, as long as the "source of truth" moment is well-defined and both the UI and the team understand which copy is authoritative at any given time.</p></div><div class="followup">Follow-up: How does this relate to the controlled-vs-uncontrolled forms distinction in Chapter 4?</div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment"><span class="level-tag">Beginner (30-60 min)</span><h4>Fix a props-mutation bug</h4>
+      <p>Given a small provided component that mutates an array/object prop directly (e.g., pushing to a
+      `items` prop array), rewrite it to never mutate props, deriving new arrays/objects instead and
+      communicating changes via a callback prop to the parent.</p>
+      <p><strong>Acceptance criteria:</strong> No prop is ever mutated; React DevTools shows the parent's state
+      updating correctly after the child's action.</p>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>Use spread syntax or array methods that return new arrays (`map`, `filter`, `[...arr, x]`) instead of in-place methods (`push`, `splice`).</p></div></details>
+      <p><strong>Bonus:</strong> Add a prop-types or TypeScript readonly annotation to make the mutation a compile-time error.</p></div>
+
+      <div class="assignment"><span class="level-tag">Intermediate (2-4 hrs)</span><h4>Build a lifted-state favorites system</h4>
+      <p>Build a recipe list and a separate "favorites summary" sidebar as true siblings (not parent/child),
+      sharing favorite-recipe state lifted to their common parent, with toggle buttons on each recipe card.
+      Add a counter showing total favorites, computed as derived data (not stored state).</p>
+      <p><strong>Acceptance criteria:</strong> Toggling a favorite in the list instantly updates the sidebar
+      count and list, with state living in exactly one place.</p>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>A `Set` of favorite IDs is often cleaner than an array for toggle/has-membership checks.</p></div></details>
+      <p><strong>Bonus:</strong> Persist the favorites to localStorage via a custom hook (preview of later chapters).</p></div>
+
+      <div class="assignment"><span class="level-tag">Advanced (1-2 days)</span><h4>Wire the capstone's core data flow</h4>
+      <p>Extend the capstone's component shell from Chapter 1: add state for search query and favorites at the
+      appropriate ancestor level, wire up all the callback props between RecipeCard → RecipeList →
+      SearchableRecipeList, and ensure zero prop is ever mutated and zero piece of derived data is
+      accidentally stored as separate state.</p>
+      <ul><li>No full solution provided — this directly extends the ongoing capstone project.</li></ul>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>Write down, before coding, exactly which component "owns" each piece of state — if you can't answer that in one sentence per state variable, it's in the wrong place.</p></div></details>
+      </div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet"><ul>
+        <li>Props: read-only, flow parent → child only. Never mutate them.</li>
+        <li>State: private, triggers re-render on change, scoped to the component instance/fiber.</li>
+        <li>Calling a state setter doesn't synchronously update the variable in the current closure.</li>
+        <li>Events = callback props by convention (<code>onX</code>); child calls, parent decides.</li>
+        <li>Lifting state up = move shared state to the nearest common ancestor of the components that need it.</li>
+        <li>Derived data should be computed on render, not duplicated into its own state.</li>
+        <li><code>useState(initialArg)</code> only uses <code>initialArg</code> on first mount, never again.</li>
+        <li>Multiple setState calls in one handler are batched into a single re-render.</li>
+        <li>A fully controlled child has no internal state for the controlled value — it's 100% owned by the parent.</li>
+      </ul></div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://react.dev/learn/passing-props-to-a-component">react.dev — Passing Props to a Component</a></li>
+        <li><a href="https://react.dev/learn/state-a-components-memory">react.dev — State: A Component's Memory</a></li>
+        <li><a href="https://react.dev/learn/sharing-state-between-components">react.dev — Sharing State Between Components</a></li>
+        <li><a href="https://react.dev/learn/responding-to-events">react.dev — Responding to Events</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="01-react-basics-jsx-components.html"><span class="dir">← Previous</span>React Basics: JSX &amp; Components</a>
+        <a class="next" href="03-hooks-basics.html"><span class="dir">Next →</span>Hooks Basics (useState/useEffect)</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · React Fundamentals</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-jsx.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-typescript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-tsx.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "12-react-fundamentals", chapterKey: "02-props-state-events" });</script>
+</body>
+</html>

@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Graph RAG Fundamentals</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <input class="searchbox" placeholder="Search topics..." />
+    <a href="../index.html">← Home</a>
+    <h3>31-Graph-RAG</h3>
+    <a href="graph-rag-fundamentals.html">Graph RAG Fundamentals</a>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumbs"><a href="../index.html">Home</a> / 31-Graph-RAG</div>
+      <button class="theme-toggle" onclick="toggleTheme()">🌓 Theme</button>
+    </div>
+    <h1>Graph RAG Fundamentals</h1>
+    <span class="tag good">Stable</span><span class="tag">Last verified: 2026-10-06</span>
+
+    <div class="toc">
+      <b>On this page</b>
+      <a href="#what">1. What is this?</a>
+      <a href="#whyexist">2. Why does it exist?</a>
+      <a href="#whyimportant">3. Why is it important?</a>
+      <a href="#whereused">4. Where is it used?</a>
+      <a href="#prereq">5. Prerequisites</a>
+      <a href="#core">6. Core concepts</a>
+      <a href="#terms">7. Terminology</a>
+      <a href="#arch">8. Architecture</a>
+      <a href="#internal">9. How it works internally</a>
+      <a href="#steps">10. Step-by-step: implementing Graph RAG</a>
+      <a href="#simple">11. Simple example</a>
+      <a href="#real">12. Real-world example</a>
+      <a href="#code">13. Code example</a>
+      <a href="#advanced">14. Advanced example</a>
+      <a href="#mistakes">15. Common mistakes</a>
+      <a href="#best">16. Best practices</a>
+      <a href="#production">17. Production considerations</a>
+      <a href="#security">18. Security considerations</a>
+      <a href="#performance">19. Performance considerations</a>
+      <a href="#cost">20. Cost considerations</a>
+      <a href="#debug">21. Debugging/troubleshooting</a>
+      <a href="#related">22. Related concepts</a>
+      <a href="#comparison">23. Traditional RAG vs Graph RAG</a>
+      <a href="#exercise">24. Mini practical exercise</a>
+      <a href="#project">25. Practical project</a>
+      <a href="#projectarch">26. Project architecture</a>
+      <a href="#interview-b">27. Interview Questions — Beginner</a>
+      <a href="#interview-i">28. Interview Questions — Intermediate</a>
+      <a href="#interview-a">29. Interview Questions — Advanced</a>
+      <a href="#interview-s">30. Interview Questions — Senior/Architect</a>
+      <a href="#interview-sc">31. Scenario-Based Questions</a>
+      <a href="#revision">32. Quick revision notes</a>
+      <a href="#cheat">33. Cheat sheet</a>
+      <a href="#further">34. Further topics to learn</a>
+    </div>
+
+    <h2 id="what">1. What is this?</h2>
+    <p>Graph RAG retrieves information via knowledge graph traversal (and often combined with vector search) rather than pure embedding similarity — enabling questions that require understanding relationships and connections between entities, not just finding semantically similar text chunks.</p>
+
+    <h2 id="whyexist">2. Why does it exist?</h2>
+    <p>Traditional vector-based RAG struggles with questions requiring multi-hop reasoning across relationships ("what products did customers who complained about X also buy?") because embedding similarity captures semantic closeness, not relational structure — Graph RAG exists to answer exactly this class of question.</p>
+
+    <h2 id="whyimportant">3. Why is it important?</h2>
+    <p>As RAG systems mature, teams increasingly hit the ceiling of pure vector retrieval for relationship-heavy domains (legal precedent chains, organizational structures, supply chains) — Graph RAG is the established answer, and a frequent "advanced RAG" interview topic.</p>
+
+    <h2 id="whereused">4. Where is it used?</h2>
+    <p>Legal research (case precedent chains), enterprise knowledge management (org/project relationships), biomedical research (gene/protein/disease relationships), supply chain analysis.</p>
+
+    <h2 id="prereq">5. Prerequisites</h2>
+    <p><a href="../30-Knowledge-Graphs/knowledge-graphs-fundamentals.html">Knowledge Graphs</a>, <a href="../12-RAG/rag-fundamentals.html">RAG Fundamentals</a>.</p>
+
+    <h2 id="core">6. Core concepts</h2>
+    <ul>
+      <li><b>Traditional RAG vs Graph RAG:</b> traditional RAG retrieves by embedding similarity; Graph RAG retrieves by graph traversal (and often combines both).</li>
+      <li><b>Knowledge graph extraction:</b> building the underlying graph from source documents (see Knowledge Graphs).</li>
+      <li><b>Graph retrieval:</b> given a query, identify relevant starting entities, then traverse relationships to assemble a relevant subgraph as context.</li>
+      <li><b>Graph reasoning:</b> the LLM reasons over the retrieved subgraph structure (entities + relationships), not just flat text chunks.</li>
+    </ul>
+
+    <h2 id="terms">7. Terminology</h2>
+    <table>
+      <tr><th>Term</th><th>Meaning</th></tr>
+      <tr><td>Subgraph retrieval</td><td>Extracting a relevant, connected portion of the full knowledge graph for a given query.</td></tr>
+      <tr><td>Entity linking</td><td>Mapping mentions in a query to specific entities/nodes in the knowledge graph.</td></tr>
+      <tr><td>Community detection</td><td>Grouping densely connected nodes into clusters, used in some Graph RAG approaches (e.g., Microsoft's GraphRAG) for hierarchical summarization.</td></tr>
+      <tr><td>Hybrid Graph RAG</td><td>Combining vector similarity search with graph traversal for retrieval.</td></tr>
+    </table>
+
+    <h2 id="arch">8. Architecture</h2>
+    <pre><code>Query
+ → Entity linking (identify relevant starting entities in the query)
+ → Graph traversal (follow relationships N hops from starting entities)
+ → Assemble subgraph context (entities + relationships + optionally linked text chunks)
+ → Prompt construction (structured graph context + question)
+ → LLM → Answer reasoning over relationships</code></pre>
+
+    <h2 id="internal">9. How it works internally</h2>
+    <p>Graph RAG first identifies which entities in the knowledge graph are relevant to the query (via exact matching, embedding similarity on entity names, or an LLM-based entity-extraction step on the query itself), then traverses the graph outward from those entities to collect connected, relevant context — the retrieved "context" is structurally richer than flat text chunks, often including the explicit relationship types connecting entities, which the LLM can directly reason over rather than inferring connections from prose alone.</p>
+
+    <h2 id="steps">10. Step-by-step: implementing Graph RAG</h2>
+    <ol>
+      <li>Build/maintain a knowledge graph from your source data (see Knowledge Graphs).</li>
+      <li>At query time, extract/link entities mentioned in the user's question.</li>
+      <li>Traverse the graph from those entities (bounded depth) to collect a relevant subgraph.</li>
+      <li>Optionally combine with vector search over linked text chunks for additional context.</li>
+      <li>Format the subgraph (entities + relationships) into the prompt alongside the question.</li>
+      <li>Generate the answer, instructing the model to reason over the provided relationships.</li>
+    </ol>
+
+    <h2 id="simple">11. Simple example</h2>
+    <p>Query: "Who are Alice's teammates on projects related to Project X?" — traditional vector RAG would struggle to assemble this multi-hop relationship; Graph RAG traverses Alice → projects → teammates directly.</p>
+
+    <h2 id="real">12. Real-world example</h2>
+    <p>A legal research tool uses Graph RAG to trace citation chains between case precedents — a query about a specific ruling can traverse "cited by" and "overturned by" relationships to surface the full precedent lineage, something pure semantic search over case text would miss entirely.</p>
+
+    <h2 id="code">13. Code example</h2>
+    <pre><code class="language-python">def graph_rag_retrieve(query, driver, max_hops=2):
+    entities = extract_query_entities(query)  # LLM or NER-based
+    with driver.session() as session:
+        subgraph = session.run("""
+            MATCH (start:Entity)-[r*1..$hops]-(connected:Entity)
+            WHERE start.name IN $entities
+            RETURN start, r, connected
+        """, entities=entities, hops=max_hops)
+        return [record.data() for record in subgraph]
+
+def graph_rag_answer(query, driver):
+    subgraph = graph_rag_retrieve(query, driver)
+    context = format_subgraph_as_text(subgraph)  # e.g., "Alice WORKS_ON ProjectX; Bob WORKS_ON ProjectX"
+    prompt = f"Relationships:\n{context}\n\nQuestion: {query}\nAnswer using only these relationships."
+    return client.messages.create(
+        model="claude-sonnet-5", max_tokens=400,
+        messages=[{"role": "user", "content": prompt}],
+    ).content[0].text
+</code></pre>
+
+    <h2 id="advanced">14. Advanced example</h2>
+    <pre><code class="language-python"># Hybrid: combine vector search (for semantic relevance) with graph traversal (for relationships)
+def hybrid_graph_rag(query, driver, vector_store):
+    text_chunks = vector_store.search(embed(query), top_k=5)
+    entities = extract_entities_from_chunks(text_chunks) + extract_query_entities(query)
+    subgraph = graph_rag_retrieve_from_entities(entities, driver)
+    combined_context = format_text_chunks(text_chunks) + format_subgraph_as_text(subgraph)
+    return generate_answer(query, combined_context)
+</code></pre>
+
+    <h2 id="mistakes">15. Common mistakes</h2>
+    <ul>
+      <li>Using Graph RAG for queries that don't actually need relationship reasoning (added complexity with no benefit over simpler vector RAG).</li>
+      <li>Unbounded graph traversal depth, retrieving an overwhelming, mostly-irrelevant subgraph.</li>
+      <li>Poor entity linking, causing traversal to start from the wrong entities entirely.</li>
+      <li>Not validating that the underlying knowledge graph itself is accurate (garbage in, garbage out).</li>
+    </ul>
+
+    <h2 id="best">16. Best practices</h2>
+    <ul>
+      <li>Use Graph RAG specifically for relationship-centric queries; default to simpler vector RAG otherwise.</li>
+      <li>Bound traversal depth and subgraph size to keep context relevant and manageable.</li>
+      <li>Combine with vector search (hybrid) for queries needing both semantic and relational signal.</li>
+      <li>Invest in knowledge graph quality/validation — Graph RAG is only as good as the underlying graph.</li>
+    </ul>
+
+    <h2 id="production">17. Production considerations</h2>
+    <p>Graph RAG adds both knowledge-graph maintenance and graph-query-performance considerations on top of standard RAG infrastructure — budget for this additional operational complexity relative to simpler vector-only RAG.</p>
+
+    <h2 id="security">18. Security considerations</h2>
+    <p>Apply tenant/access-scoping to graph traversal queries just as rigorously as vector retrieval filtering — an unscoped traversal can surface connected entities across tenant boundaries.</p>
+
+    <h2 id="performance">19. Performance considerations</h2>
+    <p>Bounded-depth traversal keeps queries fast; unbounded or very deep traversal on a densely connected graph can be expensive — profile and bound accordingly.</p>
+
+    <h2 id="cost">20. Cost considerations</h2>
+    <p>Beyond standard RAG costs, Graph RAG adds knowledge graph construction/maintenance cost (often LLM-based extraction) — factor this recurring cost into the overall system budget.</p>
+
+    <h2 id="debug">21. Debugging/troubleshooting</h2>
+    <ul>
+      <li><b>Retrieved subgraph is irrelevant:</b> check entity linking accuracy — the traversal may be starting from the wrong entities.</li>
+      <li><b>Answers miss obvious relationships:</b> check traversal depth/bounds, and verify the relationship actually exists correctly in the underlying graph.</li>
+      <li><b>Slow retrieval:</b> bound traversal depth and verify appropriate graph indexing.</li>
+    </ul>
+
+    <h2 id="related">22. Related concepts</h2>
+    <p><a href="../30-Knowledge-Graphs/knowledge-graphs-fundamentals.html">Knowledge Graphs</a> · <a href="../12-RAG/rag-fundamentals.html">RAG</a> · <a href="../13-Advanced-RAG/advanced-rag-techniques.html">Advanced RAG</a></p>
+
+    <h2 id="comparison">23. Traditional RAG vs Graph RAG</h2>
+    <table>
+      <tr><th>Aspect</th><th>Traditional RAG</th><th>Graph RAG</th></tr>
+      <tr><td>Retrieval mechanism</td><td>Embedding similarity</td><td>Graph traversal (+ optionally embeddings)</td></tr>
+      <tr><td>Best for</td><td>"What does the document say about X"</td><td>"How is X connected to Y"</td></tr>
+      <tr><td>Infrastructure</td><td>Vector DB</td><td>Graph DB (+ often a vector DB for hybrid)</td></tr>
+      <tr><td>Setup complexity</td><td>Lower</td><td>Higher (requires knowledge graph construction)</td></tr>
+    </table>
+
+    <h2 id="exercise">24. Mini practical exercise</h2>
+    <p>Using the org knowledge graph project from 30-Knowledge-Graphs, write a Graph RAG prompt that answers "who should I talk to about Project X" by traversing and formatting the relevant subgraph as context.</p>
+
+    <h2 id="project">25. Practical project</h2>
+    <p><b>Legal Citation Graph RAG:</b> build a small knowledge graph of case citations (CASE_A CITES CASE_B), and a Graph RAG pipeline answering "what cases led to the ruling in Case X" by traversing citation chains.</p>
+
+    <h2 id="projectarch">26. Project architecture</h2>
+    <pre><code>cases.csv (case_id, citing_case_id) → load into Neo4j as CITES relationships
+query → entity_link(case_name) → traverse CITES chain (bounded depth)
+ → format subgraph as text → LLM answer with citation chain explanation</code></pre>
+
+    <h2 id="interview-b">27. Interview Questions — Beginner</h2>
+    <div class="qa"><b>Q1.</b> What is Graph RAG?<br><b>A.</b> A RAG approach that retrieves information via knowledge graph traversal, enabling reasoning over relationships between entities, not just semantic text similarity.</div>
+    <div class="qa"><b>Q2.</b> What problem does Graph RAG solve that traditional RAG struggles with?<br><b>A.</b> Questions requiring multi-hop relationship reasoning (e.g., "who are X's colleagues on related projects"), which pure embedding similarity doesn't naturally capture.</div>
+    <div class="qa"><b>Q3.</b> What is entity linking in Graph RAG?<br><b>A.</b> Mapping mentions in a query to specific entities/nodes in the knowledge graph, as the starting point for traversal.</div>
+    <div class="qa"><b>Q4.</b> What is subgraph retrieval?<br><b>A.</b> Extracting a relevant, connected portion of the full knowledge graph for a given query.</div>
+    <div class="qa"><b>Q5.</b> Should you always use Graph RAG instead of traditional RAG?<br><b>A.</b> No — use it specifically for relationship-centric queries; traditional vector RAG is simpler and sufficient for most semantic lookup questions.</div>
+    <div class="qa"><b>Q6.</b> What is hybrid Graph RAG?<br><b>A.</b> Combining vector similarity search with graph traversal for retrieval, capturing both semantic and relational signal.</div>
+    <div class="qa"><b>Q7.</b> Why does bounding traversal depth matter in Graph RAG?<br><b>A.</b> Unbounded traversal on a densely connected graph can retrieve an overwhelming, mostly-irrelevant, and expensive-to-compute subgraph.</div>
+    <div class="qa"><b>Q8.</b> What's a real-world use case for Graph RAG?<br><b>A.</b> Legal research tracing citation chains between case precedents.</div>
+    <div class="qa"><b>Q9.</b> Is Graph RAG dependent on having a good knowledge graph?<br><b>A.</b> Yes — Graph RAG's quality is only as good as the underlying knowledge graph's accuracy and completeness.</div>
+    <div class="qa"><b>Q10.</b> What additional infrastructure does Graph RAG typically require beyond standard RAG?<br><b>A.</b> A graph database (e.g., Neo4j) and a knowledge graph construction/maintenance pipeline.</div>
+
+    <h2 id="interview-i">28. Interview Questions — Intermediate</h2>
+    <div class="qa"><b>Q1.</b> Why might entity linking accuracy be the most critical factor determining Graph RAG's overall retrieval quality?<br><b>A.</b> If the traversal starts from the wrong entities (due to misidentification or ambiguity), the entire subgraph retrieved will be irrelevant regardless of how good the graph structure or traversal logic itself is — entity linking is the entry point that determines everything downstream.</div>
+    <div class="qa"><b>Q2.</b> When would a hybrid Graph RAG + vector RAG approach outperform either approach alone?<br><b>A.</b> For queries needing both semantic relevance (which documents/chunks discuss a topic) and relational reasoning (how entities mentioned in those chunks connect to each other) — e.g., "summarize what's been said about the partnership between Company A and Company B," which benefits from both finding relevant text and understanding the explicit relationship.</div>
+    <div class="qa"><b>Q3.</b> How would you format a retrieved subgraph into a prompt in a way the LLM can effectively reason over?<br><b>A.</b> Represent relationships explicitly and simply, e.g., as subject-relation-object triples or short natural-language statements ("Alice WORKS_ON ProjectX"), rather than a raw graph data structure the model wasn't trained to parse directly — clarity of relationship representation in the prompt directly affects reasoning quality.</div>
+    <div class="qa"><b>Q4.</b> Why might community detection (clustering densely connected nodes) be useful for Graph RAG over very large knowledge graphs?<br><b>A.</b> It enables hierarchical summarization — pre-computing summaries of densely connected entity clusters lets queries retrieve a relevant high-level summary first, then drill into specific entities only as needed, avoiding the cost of traversing the full graph for broad, high-level questions.</div>
+    <div class="qa"><b>Q5.</b> What's a practical reason Graph RAG setup complexity is often not justified for a simple document Q&A system?<br><b>A.</b> If the actual query patterns are mostly "what does this document say about X" (semantic lookup) rather than "how are X and Y connected" (relational reasoning), the added cost and complexity of knowledge graph construction and maintenance isn't earning its keep — validate the actual query distribution before committing to Graph RAG's added complexity.</div>
+
+    <h2 id="interview-a">29. Interview Questions — Advanced</h2>
+    <div class="qa"><b>Q1.</b> How would you evaluate whether Graph RAG is actually outperforming traditional vector RAG for your specific use case?<br><b>A.</b> Build an evaluation set specifically containing relationship-heavy questions representative of real user queries, run both approaches, and compare answer accuracy/completeness — if traditional RAG already handles the actual query distribution adequately, the added Graph RAG investment isn't justified regardless of its theoretical advantages for relationship questions.</div>
+    <div class="qa"><b>Q2.</b> What's a subtle failure mode where a technically correct subgraph retrieval still produces a wrong or incomplete answer?<br><b>A.</b> The retrieved subgraph may be correct but incomplete — e.g., missing a relevant relationship type the traversal query didn't account for, or bounded too shallow to capture a relationship one hop further out — the LLM can only reason over what's actually in the retrieved subgraph, so retrieval completeness directly caps answer quality regardless of generation capability.</div>
+
+    <h2 id="interview-s">30. Interview Questions — Senior/Architect</h2>
+    <div class="qa"><b>Q1.</b> Design a Graph RAG system for an enterprise where both graph construction accuracy and query performance at scale are critical concerns.<br><b>A.</b> Separate the ingestion pipeline (validated LLM-based extraction with human review sampling for quality assurance) from the serving path (optimized graph queries with bounded traversal depth and appropriate indexing); implement a hybrid retrieval layer combining vector search for semantic relevance and graph traversal for relationships, with query-time entity linking validated against a curated entity registry rather than relying purely on fuzzy matching; and continuously evaluate both graph accuracy (via sampled audits) and end-to-end answer quality (via a golden Q&A set) as the graph grows.</div>
+
+    <h2 id="interview-sc">31. Scenario-Based Questions</h2>
+    <div class="qa"><b>Scenario 1.</b> Your Graph RAG system gives technically correct but incomplete answers to relationship questions. What do you investigate?<br><b>A.</b> Check if the traversal depth bound is too shallow to capture the full relevant relationship chain, and verify the knowledge graph itself contains all the expected relationship types/edges for the entities in question — incompleteness often traces back to either an overly conservative depth limit or gaps in the underlying graph data.</div>
+    <div class="qa"><b>Scenario 2.</b> A stakeholder wants to add Graph RAG to an existing simple document Q&A system "to make it smarter." How do you evaluate this request?<br><b>A.</b> Analyze actual historical query logs to determine what fraction of real questions are genuinely relationship-centric versus simple semantic lookups; if relationship questions are rare, recommend against the added complexity, or propose a targeted pilot only for the specific query patterns that would actually benefit.</div>
+
+    <h2 id="revision">32. Quick revision notes</h2>
+    <ul>
+      <li>Graph RAG = retrieval via graph traversal, for relationship-centric queries.</li>
+      <li>Entity linking determines traversal starting point — critical for quality.</li>
+      <li>Hybrid (vector + graph) often best for mixed semantic+relational queries.</li>
+      <li>Only adopt when query patterns genuinely need relationship reasoning.</li>
+    </ul>
+
+    <h2 id="cheat">33. Cheat sheet</h2>
+    <div class="callout">Graph RAG: entity link → bounded graph traversal → format subgraph as relationships → LLM reasons over them. Use for "how is X connected to Y" questions, not simple semantic lookup. Hybrid with vector search for mixed query types.</div>
+
+    <h2 id="further">34. Further topics to learn</h2>
+    <p><a href="../13-Advanced-RAG/advanced-rag-techniques.html">Advanced RAG</a> → <a href="../35-AI-Evaluation/">AI Evaluation</a></p>
+
+    <div class="prevnext">
+      <a href="../30-Knowledge-Graphs/knowledge-graphs-fundamentals.html">← Knowledge Graphs</a>
+      <a href="../32-Voice-AI/voice-ai-fundamentals.html">Next: Voice AI →</a>
+    </div>
+  </main>
+</div>
+<script src="../assets/app.js"></script>
+</body>
+</html>

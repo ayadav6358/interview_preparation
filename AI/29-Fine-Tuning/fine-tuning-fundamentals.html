@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fine-Tuning Fundamentals</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <input class="searchbox" placeholder="Search topics..." />
+    <a href="../index.html">← Home</a>
+    <h3>29-Fine-Tuning</h3>
+    <a href="fine-tuning-fundamentals.html">Fine-Tuning Fundamentals</a>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumbs"><a href="../index.html">Home</a> / 29-Fine-Tuning</div>
+      <button class="theme-toggle" onclick="toggleTheme()">🌓 Theme</button>
+    </div>
+    <h1>Fine-Tuning: SFT, LoRA, QLoRA, PEFT</h1>
+    <span class="tag good">Stable</span><span class="tag">Last verified: 2026-10-06</span>
+
+    <div class="toc">
+      <b>On this page</b>
+      <a href="#what">1. What is this?</a>
+      <a href="#whyexist">2. Why does it exist?</a>
+      <a href="#whyimportant">3. Why is it important?</a>
+      <a href="#whereused">4. Where is it used?</a>
+      <a href="#prereq">5. Prerequisites</a>
+      <a href="#core">6. Core concepts</a>
+      <a href="#terms">7. Terminology</a>
+      <a href="#arch">8. Architecture</a>
+      <a href="#internal">9. How it works internally (LoRA)</a>
+      <a href="#steps">10. Step-by-step: prompting vs RAG vs fine-tuning decision</a>
+      <a href="#simple">11. Simple example</a>
+      <a href="#real">12. Real-world example</a>
+      <a href="#code">13. Code example</a>
+      <a href="#advanced">14. Advanced example (QLoRA)</a>
+      <a href="#mistakes">15. Common mistakes</a>
+      <a href="#best">16. Best practices</a>
+      <a href="#production">17. Production considerations</a>
+      <a href="#security">18. Security considerations</a>
+      <a href="#performance">19. Performance considerations</a>
+      <a href="#cost">20. Cost considerations</a>
+      <a href="#debug">21. Debugging/troubleshooting</a>
+      <a href="#related">22. Related concepts</a>
+      <a href="#comparison">23. Prompting vs RAG vs Fine-Tuning</a>
+      <a href="#exercise">24. Mini practical exercise</a>
+      <a href="#project">25. Practical project</a>
+      <a href="#projectarch">26. Project architecture</a>
+      <a href="#interview-b">27. Interview Questions — Beginner</a>
+      <a href="#interview-i">28. Interview Questions — Intermediate</a>
+      <a href="#interview-a">29. Interview Questions — Advanced</a>
+      <a href="#interview-s">30. Interview Questions — Senior/Architect</a>
+      <a href="#interview-sc">31. Scenario-Based Questions</a>
+      <a href="#revision">32. Quick revision notes</a>
+      <a href="#cheat">33. Cheat sheet</a>
+      <a href="#further">34. Further topics to learn</a>
+    </div>
+
+    <h2 id="what">1. What is this?</h2>
+    <p>Fine-tuning further trains a pretrained model's weights on a smaller, task-specific dataset to change its behavior, style, or domain knowledge — ranging from full fine-tuning (updating all weights) to parameter-efficient methods like LoRA/QLoRA (updating only a small set of additional parameters).</p>
+
+    <h2 id="whyexist">2. Why does it exist?</h2>
+    <p>Prompting and RAG can't change a model's underlying behavior patterns, output style, or deeply ingrained domain reasoning — fine-tuning exists for cases where you need to durably teach the model a new skill, format, or tone that persists without needing to re-specify it in every prompt.</p>
+
+    <h2 id="whyimportant">3. Why is it important?</h2>
+    <p>Knowing when fine-tuning is (and isn't) the right tool — versus prompting or RAG — is one of the most consequential architecture decisions in AI engineering, since fine-tuning is the most expensive and operationally heavy of the three options.</p>
+
+    <h2 id="whereused">4. Where is it used?</h2>
+    <p>Domain-specific assistants needing a particular reasoning style, models needing to reliably produce a custom output format, cost optimization (fine-tuning a small model to match a larger model's behavior on a narrow task).</p>
+
+    <h2 id="prereq">5. Prerequisites</h2>
+    <p><a href="../00-AI-Fundamentals/ai-lifecycle.html">AI Lifecycle</a>, <a href="../26-Open-Source-LLMs/open-source-models.html">Open-Source LLMs</a>.</p>
+
+    <h2 id="core">6. Core concepts</h2>
+    <ul>
+      <li><b>When to use prompting:</b> the task just needs better instructions/examples — try this first, always.</li>
+      <li><b>When to use RAG:</b> the task needs fresh/verifiable external knowledge the model doesn't have.</li>
+      <li><b>When to fine-tune:</b> the task needs a durable behavior/format/style change, or the specific reasoning pattern can't be reliably elicited via prompting alone.</li>
+      <li><b>SFT (Supervised Fine-Tuning):</b> training on (input, ideal output) pairs to directly teach a behavior.</li>
+      <li><b>LoRA (Low-Rank Adaptation):</b> freezes the original model weights and trains a small number of additional low-rank matrices, dramatically reducing training cost/memory versus full fine-tuning.</li>
+      <li><b>QLoRA:</b> combines LoRA with quantization of the frozen base model, further reducing memory requirements.</li>
+      <li><b>PEFT (Parameter-Efficient Fine-Tuning):</b> the broader category of techniques (including LoRA) that update only a small fraction of parameters.</li>
+    </ul>
+
+    <h2 id="terms">7. Terminology</h2>
+    <table>
+      <tr><th>Term</th><th>Meaning</th></tr>
+      <tr><td>SFT</td><td>Supervised Fine-Tuning — training on labeled (input, ideal output) examples.</td></tr>
+      <tr><td>LoRA</td><td>Low-Rank Adaptation — trains small additional matrices instead of all original weights.</td></tr>
+      <tr><td>QLoRA</td><td>LoRA combined with quantizing the frozen base model for further memory savings.</td></tr>
+      <tr><td>PEFT</td><td>Parameter-Efficient Fine-Tuning — umbrella term for LoRA and similar low-resource fine-tuning methods.</td></tr>
+      <tr><td>Hugging Face TRL</td><td>A library providing training utilities (SFT, RLHF/DPO) for fine-tuning open models.</td></tr>
+      <tr><td>Unsloth</td><td>A library optimizing fine-tuning speed/memory efficiency, especially for LoRA/QLoRA workflows.</td></tr>
+    </table>
+
+    <h2 id="arch">8. Architecture</h2>
+    <pre><code>Base pretrained model (frozen, in LoRA/QLoRA)
+ + small trainable LoRA adapter matrices (injected into specific layers)
+ → train on task-specific dataset
+ → at inference: base model forward pass + LoRA adapter's small contribution merged in
+ → behavior adapted without touching the vast majority of original weights</code></pre>
+
+    <h2 id="internal">9. How it works internally (LoRA)</h2>
+    <p>LoRA inserts, alongside each targeted weight matrix in the model, two small low-rank matrices whose product approximates the weight update that full fine-tuning would have made — since the rank is much smaller than the full matrix dimensions, the number of trainable parameters is a tiny fraction of the full model, dramatically reducing memory and compute needed for training while the frozen base model still provides its full original capability as a foundation.</p>
+
+    <h2 id="steps">10. Step-by-step: prompting vs RAG vs fine-tuning decision</h2>
+    <ol>
+      <li>Try prompting first — can better instructions/examples solve this?</li>
+      <li>If the issue is missing/stale knowledge → use RAG.</li>
+      <li>If the issue is a persistent behavior/style/format problem prompting can't reliably fix → consider fine-tuning.</li>
+      <li>If fine-tuning: start with LoRA/QLoRA (cheaper, faster) before considering full fine-tuning.</li>
+      <li>Evaluate the fine-tuned model against a held-out test set and against the prompting/RAG baseline.</li>
+    </ol>
+
+    <h2 id="simple">11. Simple example</h2>
+    <p>Fine-tuning a model to always respond in a specific JSON schema for a classification task, when prompting alone produced inconsistent formatting across edge cases.</p>
+
+    <h2 id="real">12. Real-world example</h2>
+    <p>A company fine-tunes a small open model via LoRA on thousands of examples of their specific customer-support tone and resolution patterns, achieving consistent, on-brand responses at a fraction of the cost of repeatedly sending long few-shot examples to a larger API model on every request.</p>
+
+    <h2 id="code">13. Code example</h2>
+    <pre><code class="language-python">from peft import LoraConfig, get_peft_model
+from transformers import AutoModelForCausalLM, AutoTokenizer, TrainingArguments
+from trl import SFTTrainer
+
+model = AutoModelForCausalLM.from_pretrained("mistralai/Mistral-7B-Instruct")
+tokenizer = AutoTokenizer.from_pretrained("mistralai/Mistral-7B-Instruct")
+
+lora_config = LoraConfig(
+    r=16, lora_alpha=32, target_modules=["q_proj", "v_proj"],
+    lora_dropout=0.05, task_type="CAUSAL_LM",
+)
+model = get_peft_model(model, lora_config)
+
+trainer = SFTTrainer(
+    model=model, train_dataset=dataset,
+    args=TrainingArguments(output_dir="./out", per_device_train_batch_size=4, num_train_epochs=3),
+)
+trainer.train()
+</code></pre>
+
+    <h2 id="advanced">14. Advanced example (QLoRA)</h2>
+    <pre><code class="language-python">from transformers import BitsAndBytesConfig
+
+bnb_config = BitsAndBytesConfig(
+    load_in_4bit=True, bnb_4bit_quant_type="nf4", bnb_4bit_compute_dtype="bfloat16",
+)
+model = AutoModelForCausalLM.from_pretrained(
+    "mistralai/Mistral-7B-Instruct", quantization_config=bnb_config, device_map="auto",
+)
+# Apply LoRA on top of the quantized base model (QLoRA)
+model = get_peft_model(model, lora_config)
+</code></pre>
+
+    <h2 id="mistakes">15. Common mistakes</h2>
+    <ul>
+      <li>Fine-tuning to "teach the model new facts" when RAG would be the right tool and far cheaper to update.</li>
+      <li>Using too small or low-quality a training dataset, causing overfitting or inconsistent learned behavior.</li>
+      <li>Skipping a held-out evaluation set, unable to verify the fine-tune actually improved anything.</li>
+      <li>Jumping straight to full fine-tuning when LoRA/QLoRA would achieve the goal at a fraction of the cost.</li>
+    </ul>
+
+    <h2 id="best">16. Best practices</h2>
+    <ul>
+      <li>Always try prompting and RAG first — fine-tune only when those genuinely can't solve the problem.</li>
+      <li>Start with LoRA/QLoRA before considering full fine-tuning.</li>
+      <li>Maintain a held-out evaluation set to objectively measure improvement.</li>
+      <li>Curate high-quality, representative training examples over sheer quantity.</li>
+    </ul>
+
+    <h2 id="production">17. Production considerations</h2>
+    <p>Fine-tuned models need the same serving infrastructure as any self-hosted model (see <a href="../28-LLM-Inference/llm-inference-fundamentals.html">LLM Inference</a>); version and evaluate fine-tunes like any other model artifact before promoting to production.</p>
+
+    <h2 id="security">18. Security considerations</h2>
+    <p>Training data can leak into model outputs in rare cases (memorization) — avoid including sensitive/confidential data in fine-tuning datasets unless you've specifically validated against this risk.</p>
+
+    <h2 id="performance">19. Performance considerations</h2>
+    <p>LoRA/QLoRA dramatically reduce training time and memory requirements compared to full fine-tuning, often enabling fine-tuning on a single consumer/prosumer GPU rather than requiring a multi-GPU cluster.</p>
+
+    <h2 id="cost">20. Cost considerations</h2>
+    <p>LoRA/QLoRA fine-tuning is orders of magnitude cheaper than full fine-tuning or pretraining; weigh this against the ongoing cost of achieving the same result purely through longer/repeated prompting (e.g., large few-shot examples sent on every API call).</p>
+
+    <h2 id="debug">21. Debugging/troubleshooting</h2>
+    <ul>
+      <li><b>Fine-tuned model performs worse than the base model on general tasks:</b> likely overfit to the narrow fine-tuning dataset ("catastrophic forgetting") — consider a lower learning rate, fewer epochs, or mixing in general-purpose data.</li>
+      <li><b>No measurable improvement after fine-tuning:</b> check training data quality/quantity, and verify the evaluation set actually reflects the intended behavior change.</li>
+      <li><b>Training loss doesn't decrease:</b> check learning rate, LoRA rank, and target module selection.</li>
+    </ul>
+
+    <h2 id="related">22. Related concepts</h2>
+    <p><a href="../12-RAG/rag-fundamentals.html">RAG</a> · <a href="../08-Prompt-Engineering/prompt-engineering-fundamentals.html">Prompt Engineering</a> · <a href="../26-Open-Source-LLMs/open-source-models.html">Open-Source LLMs</a></p>
+
+    <h2 id="comparison">23. Prompting vs RAG vs Fine-Tuning</h2>
+    <table>
+      <tr><th>Approach</th><th>Changes</th><th>Best for</th><th>Cost</th></tr>
+      <tr><td>Prompting</td><td>Nothing persists; steers per-call</td><td>Format/instruction clarity issues</td><td>Lowest</td></tr>
+      <tr><td>RAG</td><td>Nothing persists; injects knowledge per-call</td><td>Fresh/verifiable external knowledge</td><td>Low-moderate</td></tr>
+      <tr><td>Fine-tuning (LoRA/QLoRA)</td><td>Model weights (small adapter)</td><td>Durable behavior/style/format change</td><td>Moderate</td></tr>
+      <tr><td>Full fine-tuning</td><td>All model weights</td><td>Fundamental capability change, rarely needed</td><td>Highest</td></tr>
+    </table>
+
+    <h2 id="exercise">24. Mini practical exercise</h2>
+    <p>Prepare a small (20-example) dataset of (input, ideal output) pairs for a narrow formatting task, and outline the LoRA config you'd use to fine-tune a small open model on it.</p>
+
+    <h2 id="project">25. Practical project</h2>
+    <p><b>LoRA Fine-Tuning for Custom Output Style:</b> fine-tune a small open model via LoRA on a curated dataset to consistently produce a specific response format/tone, then evaluate against the base model with few-shot prompting on the same task.</p>
+
+    <h2 id="projectarch">26. Project architecture</h2>
+    <pre><code>dataset.jsonl (input/output pairs)
+ → train LoRA adapter (PEFT + TRL)
+ → evaluate fine-tuned model vs base model + few-shot prompt on held-out test set
+ → compare: format consistency, latency, cost per request</code></pre>
+
+    <h2 id="interview-b">27. Interview Questions — Beginner</h2>
+    <div class="qa"><b>Q1.</b> What is fine-tuning?<br><b>A.</b> Further training a pretrained model's weights on a smaller, task-specific dataset to change its behavior, style, or knowledge.</div>
+    <div class="qa"><b>Q2.</b> What is SFT?<br><b>A.</b> Supervised Fine-Tuning — training on labeled (input, ideal output) examples.</div>
+    <div class="qa"><b>Q3.</b> What is LoRA?<br><b>A.</b> Low-Rank Adaptation — a technique that freezes the original model weights and trains only a small number of additional low-rank matrices.</div>
+    <div class="qa"><b>Q4.</b> What is QLoRA?<br><b>A.</b> LoRA combined with quantizing the frozen base model, further reducing memory requirements.</div>
+    <div class="qa"><b>Q5.</b> When should you try prompting before fine-tuning?<br><b>A.</b> Always — prompting is the cheapest, fastest lever and should be tried first before considering fine-tuning.</div>
+    <div class="qa"><b>Q6.</b> When should you use RAG instead of fine-tuning?<br><b>A.</b> When the issue is missing or outdated knowledge, not a behavior/style/format problem.</div>
+    <div class="qa"><b>Q7.</b> What is PEFT?<br><b>A.</b> Parameter-Efficient Fine-Tuning — the umbrella term for techniques like LoRA that update only a small fraction of model parameters.</div>
+    <div class="qa"><b>Q8.</b> Why is LoRA cheaper than full fine-tuning?<br><b>A.</b> It trains a much smaller number of additional parameters instead of updating all of the model's original weights.</div>
+    <div class="qa"><b>Q9.</b> What is catastrophic forgetting?<br><b>A.</b> When fine-tuning on a narrow dataset degrades the model's general capabilities outside that narrow task.</div>
+    <div class="qa"><b>Q10.</b> Should you fine-tune to teach a model new facts?<br><b>A.</b> Generally no — RAG is the better tool for injecting knowledge; fine-tuning is better suited to behavior/style/format changes.</div>
+
+    <h2 id="interview-i">28. Interview Questions — Intermediate</h2>
+    <div class="qa"><b>Q1.</b> How does LoRA's low-rank matrix approach reduce trainable parameters while still effectively adapting model behavior?<br><b>A.</b> It approximates the full weight update a fine-tune would need using the product of two much smaller matrices (rank r, much less than the full dimension), capturing most of the useful adaptation signal with far fewer trainable parameters than updating the full weight matrix directly.</div>
+    <div class="qa"><b>Q2.</b> Why might QLoRA be necessary rather than plain LoRA for fine-tuning a large model on limited hardware?<br><b>A.</b> Even with LoRA's reduced trainable parameters, the frozen base model's full-precision weights still need to be loaded into memory; QLoRA additionally quantizes the frozen base model, substantially reducing the memory footprint needed just to hold the base model during training.</div>
+    <div class="qa"><b>Q3.</b> What's a practical sign that a team should consider fine-tuning instead of continuing to iterate on prompting?<br><b>A.</b> When prompting (including extensive few-shot examples) still can't reliably achieve the needed consistency/format/behavior across the full range of real inputs, and/or when the cost of sending large few-shot context on every single API call exceeds the amortized cost of fine-tuning for a high-volume use case.</div>
+    <div class="qa"><b>Q4.</b> Why is curating a smaller, high-quality fine-tuning dataset often better than a larger, noisier one?<br><b>A.</b> Fine-tuning datasets directly teach the model's behavior; noisy or inconsistent examples teach inconsistent behavior, whereas a smaller set of carefully curated, consistent examples more reliably shapes the intended behavior without introducing conflicting signals.</div>
+    <div class="qa"><b>Q5.</b> How would you evaluate whether a fine-tuned model has suffered catastrophic forgetting?<br><b>A.</b> Test the fine-tuned model against a general-capability evaluation set (unrelated to the fine-tuning task) in addition to the task-specific evaluation set, and compare against the base model's performance on that same general set — a significant regression indicates forgetting.</div>
+
+    <h2 id="interview-a">29. Interview Questions — Advanced</h2>
+    <div class="qa"><b>Q1.</b> How would you decide the appropriate LoRA rank (r) for a given fine-tuning task, and what's the trade-off?<br><b>A.</b> Lower rank means fewer trainable parameters (faster, cheaper, less prone to overfitting on small datasets) but less capacity to capture complex behavior changes; higher rank increases capacity at the cost of more parameters/compute and higher overfitting risk on small datasets — typically tuned empirically starting from common defaults (e.g., r=8 or 16) and adjusted based on validation performance.</div>
+    <div class="qa"><b>Q2.</b> What's a subtle risk of fine-tuning a model on a narrow, company-specific dataset without any general-capability data mixed in?<br><b>A.</b> The model can overfit to the narrow distribution, losing general reasoning/language capabilities it had before fine-tuning (catastrophic forgetting) even while excelling at the narrow task — mitigated by mixing in some general-purpose instruction data alongside the task-specific data, or using techniques that constrain how far the fine-tune can drift from the base model's original behavior.</div>
+
+    <h2 id="interview-s">30. Interview Questions — Senior/Architect</h2>
+    <div class="qa"><b>Q1.</b> A team wants to fine-tune a model to "know about" their constantly-changing product catalog. How do you redirect this decision, and what would you actually recommend?<br><b>A.</b> Explain that fine-tuning bakes knowledge into frozen weights at training time, making it a poor fit for frequently-changing information — every catalog update would require re-fine-tuning, which is slow and expensive compared to updating a RAG retrieval corpus; recommend RAG for the catalog knowledge, reserving fine-tuning (if needed at all) for something durable like a consistent response format or domain-specific reasoning style that doesn't change with each catalog update.</div>
+
+    <h2 id="interview-sc">31. Scenario-Based Questions</h2>
+    <div class="qa"><b>Scenario 1.</b> After fine-tuning, your model performs great on the specific task but noticeably worse on general conversation. What happened and how do you fix it?<br><b>A.</b> Likely catastrophic forgetting from overfitting on the narrow fine-tuning dataset; fix by reducing training epochs/learning rate, mixing in general-purpose instruction data, or using a lower LoRA rank to limit how much the model's behavior can drift from its original general capability.</div>
+    <div class="qa"><b>Scenario 2.</b> Your fine-tuned model's training loss looked great, but production users report it doesn't actually follow the intended format consistently. What do you investigate?<br><b>A.</b> Check whether the training data itself was consistent and representative of real production inputs (training loss only reflects fit to the training distribution, not necessarily generalization to real-world input variety), and build a held-out evaluation set from actual production-like inputs to properly measure real-world consistency rather than relying on training loss alone.</div>
+
+    <h2 id="revision">32. Quick revision notes</h2>
+    <ul>
+      <li>Prompting first, then RAG for knowledge, then fine-tuning for durable behavior/format/style change.</li>
+      <li>LoRA/QLoRA = cheap, parameter-efficient fine-tuning; full fine-tuning rarely needed.</li>
+      <li>Fine-tuning is NOT the right tool for frequently-changing knowledge — use RAG.</li>
+      <li>Always evaluate against a held-out set; watch for catastrophic forgetting.</li>
+    </ul>
+
+    <h2 id="cheat">33. Cheat sheet</h2>
+    <div class="callout">Prompting → RAG → Fine-tuning (LoRA/QLoRA first, full fine-tune rarely). Fine-tune for durable behavior/style/format, not facts (use RAG for facts). Watch for catastrophic forgetting; always evaluate against a held-out set.</div>
+
+    <h2 id="further">34. Further topics to learn</h2>
+    <p><a href="../28-LLM-Inference/llm-inference-fundamentals.html">LLM Inference</a> → <a href="../35-AI-Evaluation/">AI Evaluation</a> → <a href="../12-RAG/rag-fundamentals.html">RAG</a></p>
+
+    <div class="prevnext">
+      <a href="../28-LLM-Inference/llm-inference-fundamentals.html">← LLM Inference</a>
+      <a href="../30-Knowledge-Graphs/knowledge-graphs-fundamentals.html">Next: Knowledge Graphs →</a>
+    </div>
+  </main>
+</div>
+<script src="../assets/app.js"></script>
+</body>
+</html>

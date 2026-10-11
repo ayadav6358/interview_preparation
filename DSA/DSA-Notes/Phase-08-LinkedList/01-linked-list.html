@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Linked List — DSA Notes</title>
+<style>
+  :root{
+    --ink:#12181B; --ink2:#1A2226; --ink3:#232C31;
+    --amber:#E8A33D; --amber-soft:#3A2E19;
+    --teal:#4FB3A9; --teal-soft:#12312D;
+    --rust:#D9695F; --rust-soft:#3A1F1C;
+    --slate:#8B9199;
+    --text:#E8E6E1; --text-dim:#A9AFAE;
+    --border: rgba(255,255,255,0.08);
+    --radius: 10px;
+    --mono: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{background:var(--ink); color:var(--text); font-family:var(--sans); line-height:1.65; font-size:16px;}
+  a{color:var(--amber);}
+  code, pre{font-family:var(--mono);}
+  #main{max-width:900px; margin:0 auto; padding:30px 22px 100px;}
+  h1{font-size:2rem; letter-spacing:-.01em; margin:0 0 6px;}
+  h2{font-size:1.5rem; margin-top:52px; padding-top:14px; border-top:1px solid var(--border); letter-spacing:-.01em;}
+  h2:first-of-type{border-top:none; margin-top:20px;}
+  h3{font-size:1.15rem; margin-top:30px; color:var(--amber);}
+  h4{font-size:1rem; margin-top:22px;}
+  .eyebrow{font-size:11px; text-transform:uppercase; letter-spacing:.12em; color:var(--teal); font-weight:700; margin-bottom:4px;}
+  .subtitle{color:var(--text-dim); font-size:15px; margin-bottom:28px;}
+  .callout{border-radius:var(--radius); padding:14px 16px; margin:18px 0; border:1px solid var(--border); font-size:14.5px;}
+  .callout .ctitle{font-weight:700; margin-bottom:4px; display:flex; gap:8px; align-items:center;}
+  .callout.concept{background:var(--teal-soft); border-color:var(--teal);}
+  .callout.concept .ctitle{color:var(--teal);}
+  .callout.example{background:var(--ink3);}
+  .callout.mistake{background:var(--rust-soft); border-color:var(--rust);}
+  .callout.mistake .ctitle{color:var(--rust);}
+  .callout.tip{background:var(--amber-soft); border-color:var(--amber);}
+  .callout.tip .ctitle{color:var(--amber);}
+  .codewrap{position:relative; margin:14px 0;}
+  pre{background:var(--ink3); border:1px solid var(--border); border-radius:var(--radius); padding:16px 18px; overflow-x:auto; font-size:13.5px; line-height:1.6;}
+  .copybtn{position:absolute; top:8px; right:8px; background:var(--ink); color:var(--text-dim); border:1px solid var(--border); border-radius:6px; padding:4px 9px; font-size:11px; cursor:pointer; font-family:var(--sans);}
+  .copybtn:hover{color:var(--amber); border-color:var(--amber);}
+  .lang-tag{font-size:10px; text-transform:uppercase; letter-spacing:.08em; color:var(--slate); margin-bottom:-4px; display:block;}
+  :not(pre) > code{background:var(--ink3); padding:2px 6px; border-radius:4px; font-size:.88em;}
+  table{width:100%; border-collapse:collapse; margin:16px 0; font-size:14px;}
+  th,td{border:1px solid var(--border); padding:9px 12px; text-align:left;}
+  th{background:var(--ink3); font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:var(--slate);}
+  .badge{display:inline-block; font-size:11px; font-weight:700; padding:3px 9px; border-radius:20px; text-transform:uppercase; letter-spacing:.03em;}
+  .badge.easy{background:var(--teal-soft); color:var(--teal);}
+  .badge.medium{background:var(--amber-soft); color:var(--amber);}
+  .badge.hard{background:var(--rust-soft); color:var(--rust);}
+  .qcard{border:1px solid var(--border); border-radius:var(--radius); padding:16px 18px; margin:14px 0; background:var(--ink2);}
+  .qcard .qhead{display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; gap:10px;}
+  .qcard .qhead b{font-size:14.5px;}
+  .qcard .meta{color:var(--text-dim); font-size:13px; margin:6px 0;}
+  .qcard .hint{color:var(--text-dim); font-size:13.5px; margin-top:8px; padding-top:8px; border-top:1px dashed var(--border);}
+  .qcard .hint b{color:var(--amber);}
+  hr.div{border:none; border-top:1px solid var(--border); margin:40px 0;}
+  .navlinks{display:flex; justify-content:space-between; gap:12px; font-size:14px; margin:18px 0; flex-wrap:wrap;}
+  .navlinks a{text-decoration:none; border:1px solid var(--border); padding:8px 14px; border-radius:8px; background:var(--ink2);}
+  .navlinks a:hover{border-color:var(--amber);}
+  .home{font-size:13px; color:var(--text-dim); margin-bottom:10px; display:inline-block;}
+</style>
+</head>
+<body>
+<div id="main">
+
+<a class="home" href="../index.html">&larr; Back to Index</a>
+<div class="navlinks">
+  <a href="../Phase-07-Recursion-Backtracking/01-recursion-backtracking.html">&larr; Prev: Recursion &amp; Backtracking</a>
+  <a href="../Phase-09-Stack-Queue/01-stack.html">Next: Stack &rarr;</a>
+</div>
+
+<div class="eyebrow">Phase 8 · Linked List</div>
+<h1>Linked List</h1>
+<p class="subtitle">Ek data structure jahan elements memory mein bikhre hote hain, bas ek doosre ko "pointer" ke through jodte hain. Array ke opposite trade-offs — slow random access, but fast insert/delete.</p>
+
+<h2>Concept</h2>
+
+<h3>1. What is it?</h3>
+<p>Linked List ek data structure hai jisme elements ("nodes") memory mein <b>kahin bhi</b> ho sakte hain (contiguous nahi, array ki tarah) — har node apne data ke saath <b>agle node ka address (pointer)</b> bhi store karta hai.</p>
+
+<h3>2. Why do we need it (vs Array)?</h3>
+<p>Array mein beech mein insert/delete karna O(n) hai (sabko shift karna padta hai). Linked List mein, agar tumhare paas position ka pointer hai, insert/delete sirf O(1) mein ho sakta hai — bas pointers rewire karne hain, kuch shift nahi karna.</p>
+
+<h3>3. Real-Life Analogy</h3>
+<div class="callout example">
+  <div class="ctitle">📝 Treasure Hunt</div>
+  Ek treasure hunt mein, har clue tumhe batata hai agla clue kahan hai — clues khud ek order mein "physically" nahi rakhe hote, bas ek doosre ko point karte hain. Waise hi linked list ke nodes memory mein bikhre ho sakte hain, bas ek doosre ko "point" karte hain.
+</div>
+
+<h3>4. Node, Head, Next Pointer + Diagram</h3>
+<pre><code>Node = { value, next }
+
+head
+ ↓
+[10 | next] → [20 | next] → [30 | next] → null
+                                            ↑
+                                       end of list (next = null)</code></pre>
+
+<div class="lang-tag">JavaScript — Node &amp; Basic Linked List</div>
+<div class="codewrap"><button class="copybtn" onclick="copyCode(this)">Copy</button>
+<pre><code>class Node {
+  constructor(value) {
+    this.value = value;
+    this.next = null;
+  }
+}
+
+class LinkedList {
+  constructor() {
+    this.head = null;
+  }
+
+  // Insert at end - O(n) without tail pointer, O(1) with tail pointer
+  append(value) {
+    const newNode = new Node(value);
+    if (!this.head) { this.head = newNode; return; }
+    let curr = this.head;
+    while (curr.next) curr = curr.next;
+    curr.next = newNode;
+  }
+
+  // Insert at beginning - O(1)
+  prepend(value) {
+    const newNode = new Node(value);
+    newNode.next = this.head;
+    this.head = newNode;
+  }
+
+  // Search - O(n)
+  find(value) {
+    let curr = this.head;
+    while (curr) {
+      if (curr.value === value) return curr;
+      curr = curr.next;
+    }
+    return null;
+  }
+
+  // Delete a value - O(n)
+  delete(value) {
+    if (!this.head) return;
+    if (this.head.value === value) { this.head = this.head.next; return; }
+    let curr = this.head;
+    while (curr.next && curr.next.value !== value) curr = curr.next;
+    if (curr.next) curr.next = curr.next.next; // skip over the node
+  }
+}</code></pre></div>
+
+<h3>Types of Linked Lists</h3>
+<table>
+  <tr><th>Type</th><th>Structure</th><th>Use Case</th></tr>
+  <tr><td>Singly Linked List</td><td>Each node → next only</td><td>Simple sequences, stacks</td></tr>
+  <tr><td>Doubly Linked List</td><td>Each node → next AND previous</td><td>Need backward traversal (e.g. browser history, LRU Cache)</td></tr>
+  <tr><td>Circular Linked List</td><td>Last node points back to head</td><td>Round-robin scheduling, circular buffers</td></tr>
+</table>
+<pre><code>Singly:   [10] → [20] → [30] → null
+
+Doubly:   null ← [10] ⇄ [20] ⇄ [30] → null
+
+Circular: [10] → [20] → [30] ─┐
+            ↑                  │
+            └──────────────────┘</code></pre>
+
+<h3>Key Problem 1: Reverse a Linked List</h3>
+<p><b>Idea:</b> Har node ke <code>next</code> pointer ki direction palat do — teen pointers use karke: <code>prev</code>, <code>curr</code>, <code>next</code>.</p>
+<div class="codewrap"><button class="copybtn" onclick="copyCode(this)">Copy</button>
+<pre><code>function reverseList(head) {
+  let prev = null, curr = head;
+  while (curr) {
+    const nextTemp = curr.next; // save next before we overwrite it
+    curr.next = prev;            // reverse the pointer
+    prev = curr;                 // move prev forward
+    curr = nextTemp;             // move curr forward
+  }
+  return prev; // prev is now the new head
+}</code></pre></div>
+<div class="callout example">
+  <div class="ctitle">📝 Dry Run: 1→2→3→null</div>
+  <table>
+    <tr><th>curr</th><th>Action</th><th>List so far (reversed part)</th></tr>
+    <tr><td>1</td><td>1.next=null, prev=1, curr=2</td><td>null←1</td></tr>
+    <tr><td>2</td><td>2.next=1, prev=2, curr=3</td><td>null←1←2</td></tr>
+    <tr><td>3</td><td>3.next=2, prev=3, curr=null</td><td>null←1←2←3</td></tr>
+  </table>
+  Loop ends (curr=null). Return prev = <b>3</b> → new head. Final: 3→2→1→null ✅
+</div>
+<p>Time: O(n), Space: O(1) — iterative approach, no extra data structure.</p>
+
+<h3>Key Problem 2: Detect a Cycle (Floyd's Algorithm)</h3>
+<p><b>Idea:</b> Do pointers use karo — ek "slow" (1 step) aur ek "fast" (2 steps). Agar list mein cycle hai, fast pointer eventually slow ko "lap" kar lega (mil jayenge). Agar cycle nahi hai, fast pointer null tak pahunch jayega.</p>
+<div class="codewrap"><button class="copybtn" onclick="copyCode(this)">Copy</button>
+<pre><code>function hasCycle(head) {
+  let slow = head, fast = head;
+  while (fast && fast.next) {
+    slow = slow.next;
+    fast = fast.next.next;
+    if (slow === fast) return true; // they met - cycle exists
+  }
+  return false; // fast reached the end - no cycle
+}</code></pre></div>
+<div class="callout example">
+  <div class="ctitle">📝 Analogy: Two Runners on a Circular Track</div>
+  Agar ek runner doosre se tez daudta hai ek circular track par, wo eventually use "lap" kar lega — matlab mil jayenge. Agar track circular nahi hai (straight line), tez runner bas finish line (null) tak pahunch jayega bina mile.
+</div>
+<p>Time: O(n), Space: O(1) — bahut better than using a HashSet to track visited nodes (which would be O(n) space).</p>
+
+<h3>Key Problem 3: Find the Middle of a Linked List</h3>
+<p><b>Idea:</b> Same slow/fast pointer trick! Jab fast pointer end tak pahunchta hai, slow exactly beech mein hota hai (kyunki wo aadhi speed se chal raha tha).</p>
+<div class="codewrap"><button class="copybtn" onclick="copyCode(this)">Copy</button>
+<pre><code>function findMiddle(head) {
+  let slow = head, fast = head;
+  while (fast && fast.next) {
+    slow = slow.next;
+    fast = fast.next.next;
+  }
+  return slow; // middle node
+}</code></pre></div>
+<p>Brute force would be: count total length first (one pass), then walk to length/2 (second pass) — O(n) but two passes. Slow/fast pointer does it in a <b>single pass</b>.</p>
+
+<h3>Key Problem 4: Merge Two Sorted Linked Lists</h3>
+<div class="codewrap"><button class="copybtn" onclick="copyCode(this)">Copy</button>
+<pre><code>function mergeTwoLists(l1, l2) {
+  const dummy = new Node(0); // dummy node simplifies edge cases
+  let tail = dummy;
+  while (l1 && l2) {
+    if (l1.value <= l2.value) { tail.next = l1; l1 = l1.next; }
+    else { tail.next = l2; l2 = l2.next; }
+    tail = tail.next;
+  }
+  tail.next = l1 || l2; // attach whichever list has leftovers
+  return dummy.next;
+}</code></pre></div>
+<div class="callout tip">
+  <div class="ctitle">🎯 Dummy Node Trick</div>
+  Linked list problems mein ek "dummy" (placeholder) node banake shuru karna bahut common trick hai — isse edge cases (jaise "head khud change ho raha hai") handle karna aasan ho jata hai, bina special-case code likhe.
+</div>
+
+<h3>Complexity Summary</h3>
+<table>
+  <tr><th>Operation</th><th>Time</th><th>Space</th></tr>
+  <tr><td>Access by index</td><td>O(n)</td><td>—</td></tr>
+  <tr><td>Insert/Delete at head</td><td>O(1)</td><td>O(1)</td></tr>
+  <tr><td>Insert/Delete at tail (no tail pointer)</td><td>O(n)</td><td>O(1)</td></tr>
+  <tr><td>Search</td><td>O(n)</td><td>O(1)</td></tr>
+  <tr><td>Reverse</td><td>O(n)</td><td>O(1)</td></tr>
+</table>
+
+<h3>Array vs Linked List — Quick Comparison</h3>
+<table>
+  <tr><th></th><th>Array</th><th>Linked List</th></tr>
+  <tr><td>Access by index</td><td>O(1)</td><td>O(n)</td></tr>
+  <tr><td>Insert/Delete at start</td><td>O(n)</td><td>O(1)</td></tr>
+  <tr><td>Memory layout</td><td>Contiguous</td><td>Scattered (pointers)</td></tr>
+  <tr><td>Extra memory per element</td><td>None</td><td>Pointer(s) overhead</td></tr>
+</table>
+
+<h3>When Should I Use Linked List?</h3>
+<div class="callout tip">
+  <div class="ctitle">🎯 Checklist</div>
+  <ul>
+    <li>Bahut saari insertions/deletions honi hain, especially beech mein ya start mein</li>
+    <li>Random index access ki zaroorat <b>nahi</b> hai</li>
+    <li>Size dynamically change hoti rahegi bina resize cost ke</li>
+  </ul>
+</div>
+
+<h3>Common Mistakes</h3>
+<div class="callout mistake">
+  <ul>
+    <li>Reverse karte waqt <code>next</code> save karna bhool jaana — isse list "toot" jati hai aur aage ka access kho jata hai.</li>
+    <li>Empty list (<code>head === null</code>) ka edge case handle na karna.</li>
+    <li>Slow/fast pointer mein <code>fast.next</code> null check bhool jaana — null.next access karne se crash hoga.</li>
+  </ul>
+</div>
+
+<h3>Interview Tips</h3>
+<div class="callout tip">
+  Linked List problems mein hamesha pehle poochho: "Singly ya doubly? Circular ho sakti hai?" Aur jab bhi "cycle detect karo" ya "middle dhundo" jaisa kuch dikhe, turant Floyd's Slow/Fast pointer technique bolo — ye ek signature pattern hai jo interviewer turant recognize karega.
+</div>
+
+<hr class="div">
+<h2>Interview Questions</h2>
+
+<h3>Easy <span class="badge easy">Easy</span></h3>
+
+<div class="qcard">
+  <div class="qhead"><b>Q1. Reverse a Linked List</b><span class="badge easy">Easy</span></div>
+  <p>Reverse a singly linked list in-place.</p>
+  <p><b>Example:</b> 1→2→3→null → Output: 3→2→1→null</p>
+  <div class="hint"><b>Hint:</b> Use three pointers — prev, curr, next — and flip each node's next pointer as you go.</div>
+</div>
+
+<div class="qcard">
+  <div class="qhead"><b>Q2. Find Middle of Linked List</b><span class="badge easy">Easy</span></div>
+  <p>Return the middle node of a linked list in one pass.</p>
+  <p><b>Example:</b> 1→2→3→4→5 → Output: 3</p>
+  <div class="hint"><b>Hint:</b> Slow and fast pointers — slow moves 1 step, fast moves 2 steps.</div>
+</div>
+
+<div class="qcard">
+  <div class="qhead"><b>Q3. Delete a Node (given only that node, not head)</b><span class="badge easy">Easy</span></div>
+  <p>Delete a given node from a singly linked list, where you don't have access to the head.</p>
+  <p><b>Example:</b> list 4→5→1→9, node = 5 → Output: 4→1→9</p>
+  <div class="hint"><b>Hint:</b> Copy the next node's value into the current node, then skip over the next node.</div>
+</div>
+
+<div class="qcard">
+  <div class="qhead"><b>Q4. Convert Array to Linked List</b><span class="badge easy">Easy</span></div>
+  <p>Build a linked list from an array of values.</p>
+  <p><b>Example:</b> [1,2,3] → Output: 1→2→3→null</p>
+  <div class="hint"><b>Hint:</b> Loop through the array appending each value, or build backwards while prepending.</div>
+</div>
+
+<div class="qcard">
+  <div class="qhead"><b>Q5. Palindrome Linked List</b><span class="badge easy">Easy</span></div>
+  <p>Check whether a singly linked list reads the same forward and backward.</p>
+  <p><b>Example:</b> 1→2→2→1 → Output: true</p>
+  <div class="hint"><b>Hint:</b> Find the middle, reverse the second half, then compare both halves node by node.</div>
+</div>
+
+<h3>Medium <span class="badge medium">Medium</span></h3>
+
+<div class="qcard">
+  <div class="qhead"><b>Q6. Detect Cycle in a Linked List</b><span class="badge medium">Medium</span></div>
+  <p>Determine if a linked list has a cycle.</p>
+  <p><b>Example:</b> 3→2→0→-4→(back to 2) → Output: true</p>
+  <div class="hint"><b>Hint:</b> Use fast and slow pointers — Floyd's Cycle Detection.</div>
+</div>
+
+<div class="qcard">
+  <div class="qhead"><b>Q7. Merge Two Sorted Lists</b><span class="badge medium">Medium</span></div>
+  <p>Merge two sorted linked lists into one sorted list.</p>
+  <p><b>Example:</b> 1→2→4 and 1→3→4 → Output: 1→1→2→3→4→4</p>
+  <div class="hint"><b>Hint:</b> Use a dummy node and a tail pointer, always attaching the smaller of the two current nodes.</div>
+</div>
+
+<div class="qcard">
+  <div class="qhead"><b>Q8. Remove Nth Node From End</b><span class="badge medium">Medium</span></div>
+  <p>Remove the n-th node from the end of the list in one pass.</p>
+  <p><b>Example:</b> 1→2→3→4→5, n=2 → Output: 1→2→3→5</p>
+  <div class="hint"><b>Hint:</b> Move a "fast" pointer n steps ahead first, then move both pointers together until fast reaches the end.</div>
+</div>
+
+<div class="qcard">
+  <div class="qhead"><b>Q9. Reorder List</b><span class="badge medium">Medium</span></div>
+  <p>Reorder list L0→L1→…→Ln-1→Ln into L0→Ln→L1→Ln-1→…</p>
+  <p><b>Example:</b> 1→2→3→4 → Output: 1→4→2→3</p>
+  <div class="hint"><b>Hint:</b> Find the middle, reverse the second half, then merge the two halves alternately.</div>
+</div>
+
+<h3>Hard <span class="badge hard">Hard</span></h3>
+
+<div class="qcard">
+  <div class="qhead"><b>Q10. Merge K Sorted Lists</b><span class="badge hard">Hard</span></div>
+  <p>Merge k sorted linked lists into one sorted list.</p>
+  <p><b>Example:</b> [[1,4,5],[1,3,4],[2,6]] → Output: 1→1→2→3→4→4→5→6</p>
+  <div class="hint"><b>Hint:</b> Merge lists pairwise divide-and-conquer style, or use a min-heap holding the current head of each list.</div>
+</div>
+
+<div class="qcard">
+  <div class="qhead"><b>Q11. Copy List with Random Pointer</b><span class="badge hard">Hard</span></div>
+  <p>Deep-copy a linked list where each node also has a random pointer to any node (or null).</p>
+  <p><b>Example:</b> list with random pointers → Output: fully independent deep copy</p>
+  <div class="hint"><b>Hint:</b> Use a hashmap from original node to cloned node, or interleave cloned nodes into the original list to avoid extra space.</div>
+</div>
+
+<div class="qcard">
+  <div class="qhead"><b>Q12. LRU Cache</b><span class="badge hard">Hard</span></div>
+  <p>Design a Least Recently Used cache with O(1) get and put operations.</p>
+  <p><b>Example:</b> capacity=2; put(1,1); put(2,2); get(1)→1; put(3,3) evicts key 2</p>
+  <div class="hint"><b>Hint:</b> Combine a doubly linked list (for O(1) reordering/eviction) with a hashmap (for O(1) key lookup).</div>
+</div>
+
+<hr class="div">
+<div class="navlinks">
+  <a href="../Phase-07-Recursion-Backtracking/01-recursion-backtracking.html">&larr; Prev: Recursion &amp; Backtracking</a>
+  <a href="../Phase-09-Stack-Queue/01-stack.html">Next: Stack &rarr;</a>
+</div>
+
+</div>
+<script>
+function copyCode(btn){
+  const code = btn.parentElement.querySelector('code');
+  if(code){ navigator.clipboard.writeText(code.innerText); btn.textContent='Copied!'; setTimeout(()=>btn.textContent='Copy',1200); }
+}
+</script>
+</body>
+</html>

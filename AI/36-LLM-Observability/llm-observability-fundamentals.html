@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LLM Observability Fundamentals</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <input class="searchbox" placeholder="Search topics..." />
+    <a href="../index.html">← Home</a>
+    <h3>36-LLM-Observability</h3>
+    <a href="llm-observability-fundamentals.html">LLM Observability Fundamentals</a>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumbs"><a href="../index.html">Home</a> / 36-LLM-Observability</div>
+      <button class="theme-toggle" onclick="toggleTheme()">🌓 Theme</button>
+    </div>
+    <h1>LLM Observability: Tracing, Spans, Cost, Agent Trajectories</h1>
+    <span class="tag good">Stable</span><span class="tag">Last verified: 2026-10-06</span>
+
+    <div class="toc">
+      <b>On this page</b>
+      <a href="#what">1. What is this?</a>
+      <a href="#whyexist">2. Why does it exist?</a>
+      <a href="#whyimportant">3. Why is it important?</a>
+      <a href="#whereused">4. Where is it used?</a>
+      <a href="#prereq">5. Prerequisites</a>
+      <a href="#core">6. Core concepts</a>
+      <a href="#terms">7. Terminology</a>
+      <a href="#arch">8. Architecture</a>
+      <a href="#internal">9. How it works internally</a>
+      <a href="#steps">10. Step-by-step: instrumenting an LLM app</a>
+      <a href="#simple">11. Simple example</a>
+      <a href="#real">12. Real-world example</a>
+      <a href="#code">13. Code example</a>
+      <a href="#advanced">14. Advanced example (agent trajectory tracing)</a>
+      <a href="#mistakes">15. Common mistakes</a>
+      <a href="#best">16. Best practices</a>
+      <a href="#production">17. Production considerations</a>
+      <a href="#security">18. Security considerations</a>
+      <a href="#performance">19. Performance considerations</a>
+      <a href="#cost">20. Cost considerations</a>
+      <a href="#debug">21. Debugging/troubleshooting</a>
+      <a href="#related">22. Related concepts</a>
+      <a href="#comparison">23. LangSmith vs Langfuse</a>
+      <a href="#exercise">24. Mini practical exercise</a>
+      <a href="#project">25. Practical project</a>
+      <a href="#projectarch">26. Project architecture</a>
+      <a href="#interview-b">27. Interview Questions — Beginner</a>
+      <a href="#interview-i">28. Interview Questions — Intermediate</a>
+      <a href="#interview-a">29. Interview Questions — Advanced</a>
+      <a href="#interview-s">30. Interview Questions — Senior/Architect</a>
+      <a href="#interview-sc">31. Scenario-Based Questions</a>
+      <a href="#revision">32. Quick revision notes</a>
+      <a href="#cheat">33. Cheat sheet</a>
+      <a href="#further">34. Further topics to learn</a>
+    </div>
+
+    <h2 id="what">1. What is this?</h2>
+    <p>LLM observability is tracing and monitoring every step of an LLM application's execution — prompts, model calls, retrieval, tool calls, token usage, latency, cost, and errors — using tools like LangSmith, Langfuse, Arize Phoenix, or OpenTelemetry-based tracing.</p>
+
+    <h2 id="whyexist">2. Why does it exist?</h2>
+    <p>LLM applications are inherently harder to debug than deterministic code — the same input can produce different outputs, and failures can originate from the prompt, retrieval, a tool call, or the model itself. Observability exists to make this otherwise-opaque execution path inspectable.</p>
+
+    <h2 id="whyimportant">3. Why is it important?</h2>
+    <p>Without observability, debugging a production LLM issue means guessing — with it, you can see exactly what prompt was sent, what was retrieved, what the model returned, and where things went wrong, turning debugging from guesswork into inspection.</p>
+
+    <h2 id="whereused">4. Where is it used?</h2>
+    <p>Every production LLM application, especially RAG pipelines and agents with multiple steps where failures can originate anywhere in the chain.</p>
+
+    <h2 id="prereq">5. Prerequisites</h2>
+    <p><a href="../07-LLM-APIs-and-SDKs/llm-apis-and-sdks.html">LLM APIs and SDKs</a>, <a href="../35-AI-Evaluation/ai-evaluation-fundamentals.html">AI Evaluation</a>.</p>
+
+    <h2 id="core">6. Core concepts</h2>
+    <ul>
+      <li><b>Trace:</b> the full record of one end-to-end request's execution path.</li>
+      <li><b>Span:</b> a single step within a trace (one LLM call, one retrieval, one tool call).</li>
+      <li><b>Token/cost tracking:</b> recording input/output tokens and computed cost per span and aggregated per trace.</li>
+      <li><b>Latency tracking:</b> per-span and end-to-end timing.</li>
+      <li><b>Agent trajectory:</b> the full sequence of reasoning/tool-call steps an agent took, visualized as a structured trace.</li>
+      <li><b>Error tracking:</b> capturing and surfacing failures at any step for debugging.</li>
+    </ul>
+
+    <h2 id="terms">7. Terminology</h2>
+    <table>
+      <tr><th>Term</th><th>Meaning</th></tr>
+      <tr><td>Trace</td><td>The complete record of one request's full execution.</td></tr>
+      <tr><td>Span</td><td>One step/operation within a trace.</td></tr>
+      <tr><td>OpenTelemetry</td><td>A vendor-neutral standard for instrumentation/tracing, increasingly used for LLM observability too.</td></tr>
+      <tr><td>LangSmith / Langfuse</td><td>Popular platforms specifically for LLM application tracing, evaluation, and dataset management.</td></tr>
+      <tr><td>Arize Phoenix</td><td>An open-source LLM observability platform with strong tracing and evaluation features.</td></tr>
+    </table>
+
+    <h2 id="arch">8. Architecture</h2>
+    <pre><code>Request
+ → Trace started
+    → Span: retrieval (query, results, latency)
+    → Span: prompt construction
+    → Span: LLM call (prompt, response, tokens, cost, latency)
+    → Span: tool call(s) (if any)
+    → Trace ended (full request logged)
+ → Dashboard: aggregate latency, cost, error rate, quality scores over time</code></pre>
+
+    <h2 id="internal">9. How it works internally</h2>
+    <p>Observability platforms instrument your code (via SDK decorators/wrappers around LLM calls, retrievers, and tools) to automatically capture inputs, outputs, timing, and metadata for each span, nesting them into a trace tree reflecting the actual call structure — this is conceptually identical to distributed tracing in traditional microservices observability (e.g., Jaeger/Zipkin), just applied to the LLM-specific operations (prompts, completions, retrievals) instead of generic service calls.</p>
+
+    <h2 id="steps">10. Step-by-step: instrumenting an LLM app</h2>
+    <ol>
+      <li>Choose an observability platform (LangSmith, Langfuse, Phoenix) or OpenTelemetry-based custom setup.</li>
+      <li>Wrap/decorate LLM calls, retrieval calls, and tool calls to automatically capture spans.</li>
+      <li>Tag traces with useful metadata (user ID, feature name, environment) for later filtering/analysis.</li>
+      <li>Build dashboards for latency, cost, error rate, and (if integrated) quality scores.</li>
+      <li>Set up alerting on anomalies (latency spikes, error rate increases, cost spikes).</li>
+    </ol>
+
+    <h2 id="simple">11. Simple example</h2>
+    <p>Wrapping a RAG pipeline's retrieval and generation calls with LangSmith tracing decorators, then inspecting a specific failed request's trace in the LangSmith UI to see exactly what was retrieved and what prompt was actually sent.</p>
+
+    <h2 id="real">12. Real-world example</h2>
+    <p>A production support bot's observability dashboard flags an unusual cost spike; engineers trace it back to a specific trace pattern where conversation history wasn't being properly truncated for a subset of long-running sessions, identified within minutes thanks to full trace visibility rather than hours of blind debugging.</p>
+
+    <h2 id="code">13. Code example</h2>
+    <pre><code class="language-python">from langsmith import traceable
+
+@traceable(name="retrieve")
+def retrieve(query):
+    return vector_db.search(embed(query), top_k=5)
+
+@traceable(name="generate")
+def generate(query, context):
+    return client.messages.create(
+        model="claude-sonnet-5", max_tokens=400,
+        messages=[{"role": "user", "content": f"Context: {context}\nQuestion: {query}"}],
+    ).content[0].text
+
+@traceable(name="rag_pipeline")
+def rag_answer(query):
+    context = retrieve(query)
+    return generate(query, context)
+# Every call automatically traced with inputs, outputs, latency, tokens
+</code></pre>
+
+    <h2 id="advanced">14. Advanced example (agent trajectory tracing)</h2>
+    <pre><code class="language-python">@traceable(name="agent_step")
+def agent_step(messages, tools):
+    response = client.messages.create(model="claude-sonnet-5", max_tokens=1000, tools=tools, messages=messages)
+    return response
+
+@traceable(name="agent_run")
+def run_agent(task, tools, max_iterations=10):
+    messages = [{"role": "user", "content": task}]
+    for i in range(max_iterations):
+        response = agent_step(messages, tools)  # each step becomes a nested span
+        if response.stop_reason != "tool_use":
+            return response.content[0].text
+        # ... execute tools, append results ...
+    return "max iterations reached"
+# Full trajectory (every step, every tool call) visible as a nested trace tree
+</code></pre>
+
+    <h2 id="mistakes">15. Common mistakes</h2>
+    <ul>
+      <li>No observability instrumentation at all, relying on basic application logs that don't capture prompt/retrieval/model details.</li>
+      <li>Logging full request/response content without considering PII/sensitive data exposure in trace storage.</li>
+      <li>Not tagging traces with useful metadata, making filtering/analysis difficult at scale.</li>
+      <li>Treating observability as a "nice to have" added after launch instead of from day one.</li>
+    </ul>
+
+    <h2 id="best">16. Best practices</h2>
+    <ul>
+      <li>Instrument from day one, not as an afterthought post-incident.</li>
+      <li>Tag traces with metadata (user/session ID, feature, environment) for effective filtering.</li>
+      <li>Track token usage and cost per trace, not just latency and errors.</li>
+      <li>Apply data redaction/masking for sensitive content before it's stored in traces.</li>
+    </ul>
+
+    <h2 id="production">17. Production considerations</h2>
+    <p>Set up alerting on latency, error rate, and cost anomalies; make tracing a standard part of the development workflow (engineers should habitually check traces when debugging, not just logs).</p>
+
+    <h2 id="security">18. Security considerations</h2>
+    <p>Traces often contain full prompts/responses, which may include sensitive user data — apply redaction for PII/secrets before storage, and enforce the same access controls on trace data as on the underlying sensitive data itself.</p>
+
+    <h2 id="performance">19. Performance considerations</h2>
+    <p>Tracing instrumentation adds minor overhead per call — generally negligible compared to LLM call latency itself, but batch/async trace submission (most SDKs do this by default) avoids blocking the actual request path.</p>
+
+    <h2 id="cost">20. Cost considerations</h2>
+    <p>Most observability platforms have their own pricing (often based on trace volume) — factor this into overall platform cost, and consider sampling (not tracing 100% of traffic) at very high volume if cost becomes a concern.</p>
+
+    <h2 id="debug">21. Debugging/troubleshooting</h2>
+    <ul>
+      <li><b>Trace is missing expected spans:</b> verify the relevant function calls are actually wrapped/decorated for tracing.</li>
+      <li><b>Can't correlate a user complaint to a specific trace:</b> ensure traces are tagged with user/session IDs enabling lookup from a complaint to the specific request.</li>
+      <li><b>High-cardinality metadata overwhelming the dashboard:</b> review tagging strategy — too many unique tag values can make aggregation less useful.</li>
+    </ul>
+
+    <h2 id="related">22. Related concepts</h2>
+    <p><a href="../35-AI-Evaluation/ai-evaluation-fundamentals.html">AI Evaluation</a> · <a href="../40-Cost-Optimization/">Cost Optimization</a> · <a href="../17-AI-Agents/ai-agents-fundamentals.html">AI Agents</a></p>
+
+    <h2 id="comparison">23. LangSmith vs Langfuse</h2>
+    <table>
+      <tr><th>Tool</th><th>Notes</th></tr>
+      <tr><td>LangSmith</td><td>Built by the LangChain team, tight integration with LangChain/LangGraph</td></tr>
+      <tr><td>Langfuse</td><td>Open-source, framework-agnostic, strong self-hosting option</td></tr>
+      <tr><td>Arize Phoenix</td><td>Open-source, strong evaluation integration alongside tracing</td></tr>
+      <tr><td>OpenTelemetry (custom)</td><td>Vendor-neutral, more setup effort, maximum flexibility/portability</td></tr>
+    </table>
+
+    <h2 id="exercise">24. Mini practical exercise</h2>
+    <p>Add LangSmith (or Langfuse) tracing decorators to a simple RAG pipeline and inspect the resulting trace in the platform's UI, identifying each span's latency and token usage.</p>
+
+    <h2 id="project">25. Practical project</h2>
+    <p><b>Instrumented Multi-Agent Dashboard:</b> add full tracing to the multi-agent support system from 21-Multi-Agent-Systems, building a dashboard showing per-agent latency, cost, and error rate.</p>
+
+    <h2 id="projectarch">26. Project architecture</h2>
+    <pre><code>multi_agent_system (supervisor + specialists)
+ → @traceable decorators on every agent node
+ → traces tagged with {ticket_category, agent_name}
+ → LangSmith/Langfuse dashboard: per-agent latency, cost, error rate
+ → alert if any agent's error rate exceeds threshold</code></pre>
+
+    <h2 id="interview-b">27. Interview Questions — Beginner</h2>
+    <div class="qa"><b>Q1.</b> What is a trace in LLM observability?<br><b>A.</b> The complete record of one end-to-end request's execution path.</div>
+    <div class="qa"><b>Q2.</b> What is a span?<br><b>A.</b> A single step/operation within a trace, like one LLM call or one retrieval.</div>
+    <div class="qa"><b>Q3.</b> Why is LLM observability harder than traditional software observability?<br><b>A.</b> LLM outputs are non-deterministic and failures can originate from the prompt, retrieval, tools, or the model itself, making root-cause analysis more complex than deterministic code.</div>
+    <div class="qa"><b>Q4.</b> Name two popular LLM observability platforms.<br><b>A.</b> LangSmith and Langfuse (or Arize Phoenix).</div>
+    <div class="qa"><b>Q5.</b> What should you tag traces with for effective analysis?<br><b>A.</b> Useful metadata like user/session ID, feature name, and environment.</div>
+    <div class="qa"><b>Q6.</b> Why track token usage per trace?<br><b>A.</b> For cost monitoring and catching regressions like unbounded context growth.</div>
+    <div class="qa"><b>Q7.</b> What is an agent trajectory?<br><b>A.</b> The full sequence of reasoning/tool-call steps an agent took, visualized as a structured trace.</div>
+    <div class="qa"><b>Q8.</b> Should you log full prompt/response content without any consideration?<br><b>A.</b> No — apply redaction for PII/sensitive data before storing traces.</div>
+    <div class="qa"><b>Q9.</b> What is OpenTelemetry?<br><b>A.</b> A vendor-neutral standard for instrumentation/tracing, increasingly used for LLM observability as well.</div>
+    <div class="qa"><b>Q10.</b> Why instrument observability from day one rather than after launch?<br><b>A.</b> Debugging production issues without historical trace data is much harder; early instrumentation builds the debugging foundation before problems arise.</div>
+
+    <h2 id="interview-i">28. Interview Questions — Intermediate</h2>
+    <div class="qa"><b>Q1.</b> How does LLM observability's span/trace model relate to traditional distributed tracing (e.g., Jaeger/Zipkin)?<br><b>A.</b> It's conceptually identical — a trace represents one request's full path, composed of nested spans for each operation — just applied to LLM-specific operations (prompts, completions, retrievals, tool calls) instead of generic microservice calls.</div>
+    <div class="qa"><b>Q2.</b> Why might tracing an agent's full trajectory be more valuable than just logging its final answer?<br><b>A.</b> Agent failures often stem from a specific intermediate step (wrong tool choice, misinterpreted observation) rather than the final synthesis — full trajectory visibility lets you pinpoint exactly where reasoning went wrong, which the final answer alone can't reveal.</div>
+    <div class="qa"><b>Q3.</b> What's a practical reason to tag traces with user/session ID even in a privacy-conscious application?<br><b>A.</b> It enables correlating a specific user's reported issue to the exact trace of their request for debugging, which is valuable enough to justify careful, access-controlled storage (with redaction of actual sensitive content) rather than omitting identification entirely.</div>
+    <div class="qa"><b>Q4.</b> How would you use trace data to identify the root cause of a sudden cost spike in a RAG application?<br><b>A.</b> Query traces for unusually high token counts, filter by time range matching the spike, and inspect the specific spans (likely retrieval returning more/larger chunks than normal, or conversation history growing unbounded) responsible for the elevated token usage.</div>
+    <div class="qa"><b>Q5.</b> Why might sampling (not tracing 100% of requests) be a reasonable trade-off at very high production volume?<br><b>A.</b> Full tracing at massive scale can incur significant observability platform cost and storage; a representative sample (e.g., 10% of traffic, or 100% of errors) can still provide sufficient visibility for debugging and monitoring trends while controlling cost.</div>
+
+    <h2 id="interview-a">29. Interview Questions — Advanced</h2>
+    <div class="qa"><b>Q1.</b> How would you design a tracing strategy that balances full visibility for debugging against the cost/storage of high-volume production tracing?<br><b>A.</b> Trace 100% of error/failure cases (where full visibility matters most) and a representative sample of successful requests for trend monitoring, with the ability to dynamically increase sampling rate temporarily during an active incident investigation — balancing baseline cost against the need for complete visibility when it actually matters.</div>
+    <div class="qa"><b>Q2.</b> What's a subtle risk of trace data becoming a secondary, uncontrolled copy of sensitive production data?<br><b>A.</b> If traces capture full prompts/responses including sensitive user data without the same redaction/access-control/retention policies as the primary data store, the observability platform becomes an under-governed data leak risk — compliance and security requirements (data residency, retention limits, access logging) must extend to trace storage, not just the primary application database.</div>
+
+    <h2 id="interview-s">30. Interview Questions — Senior/Architect</h2>
+    <div class="qa"><b>Q1.</b> Design an observability strategy for a large-scale multi-agent platform serving many internal teams, balancing cost, debuggability, and governance.<br><b>A.</b> Standardize tracing instrumentation as a shared library all teams use (consistent span naming, metadata tagging conventions), implement tiered sampling (100% for errors, sampled for success cases, temporary full-trace mode during incidents), enforce PII redaction centrally before trace storage, apply role-based access control on trace data matching the sensitivity of underlying systems, and provide cross-team dashboards for cost/latency/error-rate so platform-wide issues (e.g., a shared dependency degrading) are visible beyond just individual team's traces.</div>
+
+    <h2 id="interview-sc">31. Scenario-Based Questions</h2>
+    <div class="qa"><b>Scenario 1.</b> A user reports a specific bad answer, but you have no way to find the corresponding request in your logs. What's missing and how do you fix it?<br><b>A.</b> Missing trace tagging with user/session identifiers; add this tagging going forward, and build a support workflow where user-reported issues can be correlated to specific traces via timestamp + user ID for investigation.</div>
+    <div class="qa"><b>Scenario 2.</b> Your observability platform bill grew 10x after launch without a corresponding traffic increase. What do you investigate?<br><b>A.</b> Check whether tracing is capturing excessive data per span (e.g., full large documents in retrieval spans) or whether sampling isn't configured and you're tracing more volume than intended — adjust trace content/sampling to match your actual visibility needs versus cost tolerance.</div>
+
+    <h2 id="revision">32. Quick revision notes</h2>
+    <ul>
+      <li>Trace = full request path; Span = one step within it.</li>
+      <li>LangSmith/Langfuse/Phoenix/OpenTelemetry for instrumentation.</li>
+      <li>Tag traces with metadata; redact sensitive content; track tokens/cost per trace.</li>
+      <li>Instrument from day one; sample at very high volume to manage cost.</li>
+    </ul>
+
+    <h2 id="cheat">33. Cheat sheet</h2>
+    <div class="callout">Trace = full request; Span = one step. Instrument every LLM call, retrieval, and tool call. Tag with metadata; redact sensitive content; track tokens/cost/latency per span. Instrument from day one, not after an incident.</div>
+
+    <h2 id="further">34. Further topics to learn</h2>
+    <p><a href="../37-AI-Guardrails/">AI Guardrails</a> → <a href="../40-Cost-Optimization/">Cost Optimization</a></p>
+
+    <div class="prevnext">
+      <a href="../35-AI-Evaluation/ai-evaluation-fundamentals.html">← AI Evaluation</a>
+      <a href="../37-AI-Guardrails/ai-guardrails-fundamentals.html">Next: AI Guardrails →</a>
+    </div>
+  </main>
+</div>
+<script src="../assets/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Kubernetes Core — Cloud, AWS, Docker &amp; K8s — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">Cloud, AWS, Docker &amp; K8s</a><span class="sep">›</span>Kubernetes Core</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>Kubernetes Core</h1>
+      <p class="meta-line"><span>⏱ 4 hrs</span><span>📍 Chapter 3 of 7</span></p>
+      <p><strong>One-line summary:</strong> Kubernetes is a declarative, eventually-consistent control system —
+      every object is a desired-state record that independent controllers continuously reconcile toward,
+      and almost every "weird" K8s behavior is explained by that reconciliation loop.</p>
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>You've deployed to Kubernetes clusters managed by someone else, written YAML manifests, and debugged a
+      <code>CrashLoopBackOff</code> or two. The Staff/Lead bar is explaining <em>why</em> the system behaves the
+      way it does: why a rolling update can briefly 5xx, why a pod gets evicted under node pressure before it
+      gets OOM-killed, why the scheduler placed a pod where it did, and why "it's running" (liveness) is a
+      completely different question from "it's ready to serve traffic" (readiness). Interviews at this level
+      probe the control loop, not kubectl syntax.</p>
+      <div class="box why"><h4>Why</h4><p>Nearly every production K8s incident — a bad rollout, a cascading
+      eviction, a Service routing to dead pods — traces back to a misunderstanding of reconciliation, probes,
+      or scheduling, not to a YAML typo.</p></div>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>Comfortable with Docker images and containers. Related: <a href="01-docker-deep-dive.html">Docker Deep
+      Dive</a>, <a href="06-infrastructure-as-code.html">Infrastructure as Code</a>.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="basics">Pods, Deployments, Services, Ingress</h3>
+      <p>A <strong>Pod</strong> is the smallest deployable unit — one or more containers sharing a network
+      namespace (same IP, localhost between containers) and optionally storage. Pods are meant to be
+      disposable and are never created directly in production; a <strong>Deployment</strong> manages a
+      <strong>ReplicaSet</strong>, which ensures N identical pod replicas exist, and the Deployment itself
+      manages rolling updates between ReplicaSet versions. A <strong>Service</strong> is a stable virtual IP
+      and DNS name in front of a dynamic set of pod IPs, selected by label, so clients never talk to a pod IP
+      directly. <strong>Ingress</strong> is an L7 HTTP(S) router sitting in front of Services, handling
+      host/path-based routing and TLS termination — it requires an Ingress controller (nginx-ingress, ALB
+      controller, etc.) to actually do anything; the Ingress object alone is just a routing spec.</p>
+
+      <h3 id="controller-pattern">The controller / reconciliation pattern</h3>
+      <p>Every K8s controller runs the same loop forever: watch the API server for objects it cares about, compare
+      <strong>desired state</strong> (the object's spec) against <strong>observed state</strong> (status, and
+      what actually exists in the cluster), and issue the minimum actions needed to close the gap. The
+      Deployment controller doesn't "do a rolling update" as a single operation — it adjusts ReplicaSet replica
+      counts step by step, and the <em>result</em> of those adjustments, observed over time, looks like a
+      rolling update. This matters because it means K8s is self-healing by construction: if a node dies and
+      takes 3 pods with it, no special "node died" handler runs — the ReplicaSet controller simply notices
+      observed replicas (2) no longer matches desired (5) and creates 3 more, exactly the same code path as a
+      manual scale-up.</p>
+
+      <h3 id="scheduler">The scheduler: filtering and scoring</h3>
+      <p>The scheduler assigns unscheduled pods to nodes in two phases. <strong>Filtering</strong> eliminates
+      nodes that can't satisfy hard constraints: insufficient CPU/memory requests, taints the pod doesn't
+      tolerate, node selectors/affinity rules not matched, port conflicts. <strong>Scoring</strong> ranks the
+      remaining feasible nodes by plugins — spreading pods across nodes/zones for availability
+      (<code>PodTopologySpread</code>), preferring nodes with more free resources or least resource
+  fragmentation, honoring soft (preferred) affinity/anti-affinity. The highest-scoring node wins. Crucially,
+      the scheduler only <em>decides</em> placement by writing <code>pod.spec.nodeName</code> — the kubelet on
+      that node is what actually pulls the image and starts the container. A pod stuck in <code>Pending</code>
+      with no node assigned means scheduling failed (check resource requests vs cluster capacity, taints,
+      affinity rules); a pod assigned a node but not starting is a kubelet/runtime problem instead.</p>
+
+      <h3 id="probes">Liveness, readiness, and startup probes</h3>
+      <p>These answer three different questions and mixing them up causes real incidents. <strong>Liveness</strong>:
+      "is this process stuck/deadlocked and should be killed and restarted?" A failing liveness probe causes a
+      container restart. <strong>Readiness</strong>: "should this pod currently receive traffic from a
+      Service?" A failing readiness probe removes the pod's IP from the Service's endpoint list — no restart,
+      just temporarily out of rotation. <strong>Startup</strong>: a grace period probe for slow-starting apps,
+      during which liveness/readiness checks are suppressed so a legitimately slow boot isn't mistaken for a
+      deadlock.</p>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Using the same endpoint/logic for liveness and readiness is a
+      classic mistake. If a pod's dependency (e.g. its DB connection pool) degrades and a single shared probe
+      fails, a readiness-style problem (temporarily stop routing traffic) turns into a liveness-style action
+      (kill and restart the container) — which doesn't fix a downstream DB outage and can cause a restart storm
+      across every replica simultaneously, taking the whole service down instead of gracefully degrading it.</p></div>
+
+      <h3 id="config-secrets">ConfigMaps and Secrets</h3>
+      <p>Both inject configuration into pods (as env vars or mounted files) decoupled from the image, so the
+      same image runs across environments. A Secret is <em>not encrypted at rest by default</em> in base
+      etcd — it's base64-encoded (trivially reversible, not security), and only genuinely protected if the
+      cluster has etcd encryption-at-rest enabled and RBAC properly restricts who can <code>get</code> Secret
+      objects. Mounted-as-file ConfigMaps/Secrets auto-update on the filesystem when the object changes (via
+      kubelet sync, with a short propagation delay), but env-var-injected values do <strong>not</strong>
+      update without a pod restart — env vars are only read once at container start.</p>
+
+      <h3 id="autoscaling">HPA and resource requests/limits</h3>
+      <p>The Horizontal Pod Autoscaler watches a metric (CPU/memory by default via metrics-server, or custom
+      metrics) against a target utilization and adjusts the Deployment's replica count. It only works correctly
+      if <strong>requests</strong> are set accurately — HPA's CPU utilization percentage is computed against
+      the pod's CPU <em>request</em>, not an absolute value, so an under-set request makes the HPA wildly
+      over-sensitive, and an over-set request makes it nearly inert. <strong>Limits</strong> are a hard ceiling:
+      exceeding a memory limit gets the container OOM-killed by the kernel cgroup controller; exceeding a CPU
+      limit just throttles the process (no kill), which can silently cause latency spikes that look like
+      application bugs.</p>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>End to end for a Deployment rollout: you <code>kubectl apply</code> an updated manifest; the API server
+      persists the new desired state to etcd (the cluster's strongly-consistent key-value store, the only
+      source of truth); the Deployment controller notices the pod template changed, creates a new ReplicaSet at
+      0 replicas, and begins shifting replica counts between old and new ReplicaSets according to
+      <code>maxSurge</code>/<code>maxUnavailable</code>; for each new pod the ReplicaSet controller creates a
+      Pod object; the scheduler watches for pods with no assigned node, filters and scores nodes, and writes
+      the chosen node name; the kubelet on that node watches for pods assigned to it, pulls the image, creates
+      the container via the container runtime (containerd, via the CRI), and starts probing it per the
+      readiness/liveness config; once readiness passes, the endpoint controller adds the pod's IP to the
+      Service's Endpoints/EndpointSlice object; kube-proxy (or a CNI's eBPF equivalent) updates iptables/IPVS
+      rules on every node so traffic to the Service VIP now load-balances to the new pod too. Every one of
+      these is an independent watch-reconcile loop — there's no single "deploy" transaction; the end state
+      emerges from many controllers converging.</p>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+graph TD
+  U[kubectl apply] --> API[API Server]
+  API --> ETCD[(etcd)]
+  API -->|watch| DC[Deployment Controller]
+  DC -->|create/scale| RS[ReplicaSet Controller]
+  RS -->|create| POD[Pod object - unscheduled]
+  API -->|watch Pending pods| SCHED[Scheduler]
+  SCHED -->|filter+score, set nodeName| POD
+  API -->|watch assigned pods| KLET[kubelet on node]
+  KLET -->|pull image, start, probe| CTR[Container running]
+  CTR -->|readiness OK| EP[Endpoints/EndpointSlice]
+  EP --> KP[kube-proxy - iptables/IPVS]
+  KP --> SVC[Service VIP routes to pod]
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-yaml">apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  labels: { app: api }
+spec:
+  replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxSurge: 1, maxUnavailable: 0 }   # never drop below desired capacity
+  selector:
+    matchLabels: { app: api }
+  template:
+    metadata:
+      labels: { app: api }
+    spec:
+      containers:
+        - name: api
+          image: myrepo/api:1.4.2@sha256:abcd1234...   # pinned by digest, never :latest
+          ports: [{ containerPort: 3000 }]
+          envFrom:
+            - configMapRef: { name: api-config }
+            - secretRef: { name: api-secrets }
+          resources:
+            requests: { cpu: "250m", memory: "256Mi" }  # HPA % is computed against this
+            limits:   { cpu: "500m", memory: "512Mi" }  # mem limit breach -> OOMKill
+          readinessProbe:
+            httpGet: { path: /health/ready, port: 3000 }
+            initialDelaySeconds: 2
+            periodSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet: { path: /health/live, port: 3000 }
+            periodSeconds: 10
+            failureThreshold: 3
+          startupProbe:
+            httpGet: { path: /health/live, port: 3000 }
+            failureThreshold: 30   # allow up to 30 * periodSeconds to boot
+            periodSeconds: 2
+---
+apiVersion: v1
+kind: Service
+metadata: { name: api }
+spec:
+  selector: { app: api }
+  ports: [{ port: 80, targetPort: 3000 }]
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: api-ingress
+  annotations: { nginx.ingress.kubernetes.io/ssl-redirect: "true" }
+spec:
+  rules:
+    - host: api.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend: { service: { name: api, port: { number: 80 } } }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata: { name: api-config }
+data:
+  LOG_LEVEL: "info"
+---
+apiVersion: v1
+kind: Secret
+metadata: { name: api-secrets }
+type: Opaque
+stringData:
+  DATABASE_URL: "postgres://app:changeme@rds-host:5432/app"
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata: { name: api-hpa }
+spec:
+  scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: api }
+  minReplicas: 3
+  maxReplicas: 20
+  metrics:
+    - type: Resource
+      resource: { name: cpu, target: { type: Utilization, averageUtilization: 65 } }
+</code></pre>
+      <pre><code class="language-bash"># Why is this pod Pending? Check scheduler events first.
+kubectl describe pod api-7d9f8c-x2z1q | grep -A5 Events
+
+# Watch the Deployment rollout step by step (surge/unavailable in action)
+kubectl rollout status deployment/api
+
+# Instant rollback to the previous ReplicaSet revision
+kubectl rollout undo deployment/api
+
+# Which node did the scheduler pick, and why (resource fit)?
+kubectl describe node <node> | grep -A10 "Allocated resources"
+</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4><p>A rolling update of a payment API caused a brief spike in 502s
+      on every deploy. Root cause: the Deployment had no readiness probe at all, so the moment a new pod's
+      container process started, Kubernetes considered it "ready" and the endpoint controller added it to the
+      Service immediately — but the app took ~4 seconds to finish warming an in-memory cache before it could
+      actually serve requests correctly. Adding a readiness probe hitting a <code>/health/ready</code> endpoint
+      that only returned 200 after cache warmup fixed it completely: new pods stayed out of the Service's
+      endpoint list until genuinely ready, and <code>maxUnavailable: 0</code> combined with <code>maxSurge: 1</code>
+      guaranteed capacity never dropped below desired replica count during the rollout.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Setting no resource <code>requests</code> at all. Pods with no
+      requests are scheduled onto nodes with zero capacity accounting, meaning the scheduler can massively
+      overcommit a node, and under memory pressure the kubelet's eviction logic treats unset-request pods as
+      "Best Effort" QoS — first in line to be evicted, even before pods that are using less memory but have a
+      correctly set request (which get "Burstable" or "Guaranteed" QoS and are evicted later).</p></div>
+      <ul>
+        <li>Always set both requests and limits; let CPU limits be generous (throttling degrades gracefully)
+        but set memory limits carefully (breach = hard kill, no degradation).</li>
+        <li>Never use the same endpoint for liveness and readiness probes.</li>
+        <li>Use <code>maxUnavailable: 0</code> for user-facing services so a rollout never reduces serving
+        capacity, accepting the tradeoff of briefly running above desired replica count (surge).</li>
+        <li>Prefer <code>PodDisruptionBudget</code> for anything that must maintain a minimum replica count
+        during voluntary disruptions (node drains, cluster upgrades) — without one, a cluster upgrade can
+        evict every replica of a service simultaneously.</li>
+        <li>Use <code>PodTopologySpread</code> or anti-affinity so replicas of a service land on different
+        nodes/zones — otherwise a single node failure can take out most of your capacity at once.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>Deployment</td><td>Stateless services, web APIs</td>
+        <td>Stateful workloads needing stable identity/storage per replica</td><td>StatefulSet</td></tr>
+        <tr><td>Ingress + one controller</td><td>HTTP(S) routing, path/host-based rules, TLS termination</td>
+        <td>Non-HTTP protocols, or need for advanced traffic splitting (canary) at L7 beyond basic annotations</td>
+        <td>Service mesh (Istio/Linkerd) or Gateway API</td></tr>
+        <tr><td>HPA on CPU/memory</td><td>Workload scales predictably with CPU/memory usage</td>
+        <td>Scaling driven by queue depth, request latency, or custom business metrics</td>
+        <td>HPA with custom metrics (KEDA, Prometheus adapter)</td></tr>
+        <tr><td>ConfigMap/Secret env injection</td><td>Simple, small config values</td>
+        <td>Need live config updates without a pod restart</td><td>Mounted volume + app hot-reload watch</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic"><h4>Basic</h4>
+        <details class="qa"><summary>What is a Pod and why is it the smallest unit, not a container?</summary><div class="answer"><p>A Pod is one or more containers sharing a network namespace (same IP, can talk via localhost) and optionally storage — it's the atomic scheduling unit because tightly coupled containers (e.g. app + sidecar) need to be co-located and co-scheduled.</p></div><div class="followup">Follow-up: give an example of when you'd put two containers in one Pod.</div></details>
+        <details class="qa"><summary>What's the relationship between a Deployment, a ReplicaSet, and Pods?</summary><div class="answer"><p>A Deployment manages ReplicaSets and handles rolling updates between versions of them; a ReplicaSet ensures a target number of identical Pod replicas exist at any time.</p></div><div class="followup">Follow-up: why would you almost never create a Pod directly in production?</div></details>
+        <details class="qa"><summary>What does a Service do that a Pod IP alone can't?</summary><div class="answer"><p>Provides a stable virtual IP/DNS name in front of a changing set of Pod IPs (pods get recreated with new IPs constantly), selected dynamically by label, so clients never need to track individual pod addresses.</p></div><div class="followup">Follow-up: how does a Service actually route traffic at the network level?</div></details>
+        <details class="qa"><summary>What's the difference between a readiness probe and a liveness probe?</summary><div class="answer"><p>Readiness controls whether a pod currently receives traffic from a Service (failure = removed from endpoints, no restart); liveness controls whether the container should be killed and restarted (failure = restart).</p></div><div class="followup">Follow-up: what's a startup probe for?</div></details>
+        <details class="qa"><summary>What's the difference between a ConfigMap and a Secret?</summary><div class="answer"><p>Functionally similar (both inject config into pods), but Secrets are intended for sensitive data and are base64-encoded, not encrypted, by default — real protection requires cluster-level etcd encryption at rest plus RBAC restrictions.</p></div><div class="followup">Follow-up: is base64 encoding a security measure?</div></details>
+        <details class="qa"><summary>What does kubectl rollout undo do?</summary><div class="answer"><p>Rolls a Deployment back to its previous ReplicaSet revision by scaling the old ReplicaSet back up and the current one down, using the same rolling update mechanism as a forward deploy.</p></div><div class="followup">Follow-up: how many previous revisions does Kubernetes keep by default?</div></details>
+        <details class="qa"><summary>What's the difference between a resource request and a limit?</summary><div class="answer"><p>A request is what the scheduler reserves capacity for when placing the pod on a node; a limit is a hard ceiling enforced at runtime — exceeding a memory limit triggers an OOM kill, exceeding a CPU limit causes throttling.</p></div><div class="followup">Follow-up: what happens if requests and limits are set to the same value?</div></details>
+        <details class="qa"><summary>What does an Ingress object actually need to work?</summary><div class="answer"><p>An Ingress controller (e.g. nginx-ingress, AWS ALB controller) running in the cluster that watches Ingress objects and actually configures the routing — the Ingress object alone is just a spec with no effect without a controller implementing it.</p></div><div class="followup">Follow-up: name two different Ingress controller implementations.</div></details>
+      </div>
+      <div class="qa-level medium"><h4>Medium</h4>
+        <details class="qa"><summary>Explain the controller reconciliation loop and why it makes Kubernetes self-healing without special-case failure handling.</summary><div class="answer"><p>Every controller watches desired state (spec) vs observed state (status/actual cluster state) and continuously issues the minimum diff-closing actions. A node dying isn't handled by a special "node down" code path — the ReplicaSet controller just notices actual replica count (observed) no longer matches desired and creates new pods, the exact same logic path as a manual scale operation. Self-healing emerges from the loop running continuously, not from explicit failure handlers.</p></div><div class="followup">Follow-up: what's the practical implication for how long self-healing takes?</div></details>
+        <details class="qa"><summary>Walk through scheduler filtering and scoring for a pod with pod anti-affinity and a CPU request.</summary><div class="answer"><p>Filtering first eliminates nodes that fail hard constraints: insufficient allocatable CPU for the request, taints not tolerated, hard anti-affinity rules that would co-locate it with a disallowed pod. Scoring then ranks remaining feasible nodes using plugins like resource balance and topology spread, favoring nodes that keep resource usage balanced across the cluster and spread replicas across failure domains; the highest-scored node is chosen and written to pod.spec.nodeName.</p></div><div class="followup">Follow-up: what happens if zero nodes pass the filtering stage?</div></details>
+        <details class="qa"><summary>Why does HPA misbehave if CPU requests aren't set accurately?</summary><div class="answer"><p>HPA's target utilization percentage for CPU is computed relative to the pod's CPU request, not an absolute number. An under-set request makes a small absolute CPU increase look like a huge percentage spike, causing over-aggressive scaling; an over-set request makes real load changes look like a tiny percentage change, making the HPA sluggish or inert.</p></div><div class="followup">Follow-up: how would you choose a correct CPU request value in practice?</div></details>
+        <details class="qa"><summary>Why can using the same probe for liveness and readiness cause a cascading outage?</summary><div class="answer"><p>If a shared downstream dependency (e.g. the database) degrades, a readiness-appropriate response (stop routing traffic, keep the process alive) instead triggers liveness failures across every replica simultaneously, restarting all of them at once — removing all capacity exactly when the system needed to gracefully degrade instead, and potentially restart-looping against a DB that still isn't back.</p></div><div class="followup">Follow-up: how should the readiness and liveness endpoints differ in what they check?</div></details>
+        <details class="qa"><summary>Explain QoS classes (Guaranteed/Burstable/BestEffort) and why they matter under node memory pressure.</summary><div class="answer"><p>Guaranteed: requests == limits for all resources. Burstable: requests set, limits differ or unset. BestEffort: neither set. Under node memory pressure, the kubelet evicts BestEffort pods first, then Burstable (ordered further by how far usage exceeds requests), and Guaranteed pods last — so a pod with no requests set isn't just poorly scheduled, it's first in line for eviction during pressure.</p></div><div class="followup">Follow-up: why would a team deliberately choose Burstable over Guaranteed for most workloads?</div></details>
+        <details class="qa"><summary>Why does mounting a ConfigMap as a volume support live updates but injecting it as env vars doesn't?</summary><div class="answer"><p>Mounted ConfigMap/Secret files are kept in sync by the kubelet's periodic sync loop, which updates the file content in place when the underlying object changes (with a short propagation delay). Env vars are resolved once at container start time by the container runtime and have no mechanism to be refreshed without recreating the container.</p></div><div class="followup">Follow-up: how would an app pick up a mounted ConfigMap change without restarting?</div></details>
+        <details class="qa"><summary>What's the purpose of a PodDisruptionBudget and what problem does it prevent?</summary><div class="answer"><p>A PDB caps how many replicas of a service can be voluntarily disrupted at once (node drains, cluster upgrades). Without one, a cluster autoscaler or upgrade operation can evict all replicas of a service in quick succession since it has no signal about the minimum required availability, causing an availability outage during what should be a routine maintenance operation.</p></div><div class="followup">Follow-up: does a PDB protect against involuntary disruptions like a node crashing?</div></details>
+      </div>
+      <div class="qa-level advanced"><h4>Advanced</h4>
+        <details class="qa"><summary>A Deployment rollout with maxSurge:1, maxUnavailable:0 still causes a brief error spike on every deploy even though replica count never drops. Diagnose.</summary><div class="answer"><p>Capacity (replica count) staying constant doesn't mean traffic correctness is constant. Likely causes: no readiness probe (or one that passes before the app is actually ready), so new pods receive traffic before they can serve it correctly; or a missing preStop hook / lack of graceful shutdown handling, so old pods are sent SIGTERM and immediately removed from Service endpoints is correct, but in-flight requests to a pod mid-shutdown get dropped if the app doesn't drain connections during the terminationGracePeriodSeconds window. Fix: proper readiness gating plus a preStop hook that sleeps briefly / stops accepting new connections while finishing in-flight ones.</p></div><div class="followup">Follow-up: what's the role of terminationGracePeriodSeconds here specifically?</div></details>
+        <details class="qa"><summary>Explain exactly how traffic reaches a pod from a Service VIP at the kernel/network level, and how this differs between iptables mode and IPVS mode kube-proxy.</summary><div class="answer"><p>In iptables mode, kube-proxy programs DNAT rules via iptables chains that probabilistically pick a backend pod IP per connection — rule evaluation is roughly O(n) in the number of Service endpoints, since iptables is a linear chain. In IPVS mode, kube-proxy uses the kernel's IPVS virtual server feature with a real hash table lookup, giving O(1) backend selection and better performance/scalability for Services with many endpoints — this is why large clusters with high-churn, high-endpoint-count Services generally run IPVS mode (or an eBPF-based CNI dataplane like Cilium, which bypasses both and programs eBPF maps directly).</p></div><div class="followup">Follow-up: why does eBPF dataplane mode avoid the iptables/IPVS tradeoff entirely?</div></details>
+        <details class="qa"><summary>Design a rollout + autoscaling strategy for a service where traffic is extremely spiky (10x in under 60 seconds) and cold-start time is ~15 seconds.</summary><div class="answer"><p>Default HPA reacting only to current CPU will always lag a 60-second spike since it scales after load has already risen and new pods take 15s to become ready. Mitigations: set minReplicas high enough to absorb typical spike headroom without scaling, use a custom/predictive metric (e.g. request-queue-depth or a leading indicator) rather than CPU alone, reduce effective cold-start with a startup probe tuned tightly and image pre-pulling (or keep a warm pool via an over-provisioned low-priority placeholder Deployment that gets preempted when real pods need the capacity), and consider KEDA for faster-reacting event-driven scaling if the trigger is queue-based rather than CPU-based.</p></div><div class="followup">Follow-up: what's the "overprovisioning placeholder pod" trick and why does it help with scheduler latency specifically, not just scaling latency?</div></details>
+        <details class="qa"><summary>Why might two pods with identical resource requests/limits experience very different CPU throttling behavior under the same load?</summary><div class="answer"><p>CPU limits are enforced via CFS (Completely Fair Scheduler) quota/period in the cgroup — a limit is implemented as a quota of CPU-time per fixed period (e.g. 100ms). A process with bursty, multi-threaded CPU usage can exhaust its quota early in the period and get throttled for the remainder even though its average usage is well under the limit, while a steadier single-threaded process with the same average usage never hits the per-period ceiling. This is a known CFS quota granularity issue, not a Kubernetes bug — it's why some teams run with generous or no CPU limits and rely on requests + node-level isolation instead.</p></div><div class="followup">Follow-up: how would you detect this throttling is happening in production metrics?</div></details>
+        <details class="qa"><summary>How does etcd's consistency model affect what guarantees the API server can actually give you during a network partition inside the control plane?</summary><div class="answer"><p>etcd uses Raft consensus — a write (e.g. kubectl apply) must be committed to a quorum of etcd members before the API server acknowledges it, so during a partition where the leader loses quorum, writes block/fail rather than risk inconsistency (CP, not AP, under partition). Reads can be served from a potentially stale follower depending on consistency settings, but the default API server read path goes through the leader for linearizable reads. Practically: a control-plane network partition degrades cluster mutability before it degrades running workloads — existing pods keep running fine since kubelets cache their last-known pod specs and don't require constant API server contact to keep containers alive.</p></div><div class="followup">Follow-up: what does this mean for how long a cluster can tolerate a control-plane outage without workload impact?</div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment"><span class="level-tag">Beginner (30-60 min)</span><h4>Deploy and probe-harden a simple API</h4>
+      <p>Deploy a small HTTP API to a local cluster (kind/minikube) with a Deployment, Service, and distinct readiness/liveness probes.</p>
+      <ul><li>Deployment with 2 replicas</li><li>ClusterIP Service</li><li>Separate /health/ready and /health/live endpoints</li></ul>
+      <p><strong>Acceptance criteria:</strong> Killing the app's DB connection (simulate) fails readiness without triggering a restart; killing the process itself triggers a liveness restart.</p>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>Build two separate handler routes in your app that check different things; readiness checks the DB ping, liveness just checks the process loop is alive.</p></div></details>
+      <p><strong>Bonus:</strong> Add a startup probe and verify it suppresses liveness checks during a simulated slow boot.</p>
+      </div>
+      <div class="assignment"><span class="level-tag">Intermediate (2-4 hrs)</span><h4>Zero-downtime rolling update with graceful shutdown</h4>
+      <p>Configure a Deployment so a rolling update produces zero failed requests under continuous load (use a simple load-testing loop while deploying).</p>
+      <ul><li>maxUnavailable: 0, maxSurge: 1</li><li>Correct readiness gating</li><li>preStop hook + graceful shutdown handling in the app for in-flight requests</li></ul>
+      <p><strong>Acceptance criteria:</strong> Run a continuous curl loop during a rollout; zero non-2xx responses across the whole rollout.</p>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>preStop hook should sleep for slightly longer than your app's connection-drain time; terminationGracePeriodSeconds must be long enough to cover it.</p></div></details>
+      <p><strong>Bonus:</strong> Repeat the test with maxUnavailable:0 removed and document the difference.</p>
+      </div>
+      <div class="assignment"><span class="level-tag">Advanced (1-2 days)</span><h4>Reproduce and fix an HPA mis-scaling scenario</h4>
+      <p>Deploy a CPU-bound workload with deliberately wrong (too low) resource requests, trigger load, and observe the HPA over-scale. Then fix the requests and compare scaling behavior under identical load.</p>
+      <ul><li>Load-generation script producing a controlled, repeatable CPU pattern</li><li>HPA on CPU utilization</li><li>Before/after comparison of replica count over time, graphed</li></ul>
+      <p><strong>Acceptance criteria:</strong> left as an exercise — think through how you'd determine the "correct" CPU request value from real usage data, not a guess.</p>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>kubectl top pods over a representative time window under real (not synthetic) load is a reasonable starting point for request sizing.</p></div></details>
+      </div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet"><ul>
+        <li>Every controller runs watch → compare desired vs observed → act-to-close-gap, forever. That's self-healing.</li>
+        <li>Scheduler: filter (hard constraints) then score (soft preferences); only sets nodeName, doesn't start anything.</li>
+        <li>Liveness = restart if stuck. Readiness = remove from Service if not ready. Never share one probe for both.</li>
+        <li>Requests = scheduling + QoS class; Limits = hard runtime ceiling (mem breach kills, CPU breach throttles).</li>
+        <li>Secrets are base64, not encrypted, by default — real protection needs etcd encryption-at-rest + RBAC.</li>
+        <li>Mounted ConfigMap/Secret files auto-update; env-var-injected values need a pod restart.</li>
+        <li>HPA CPU % is relative to the request value — bad requests = bad autoscaling.</li>
+        <li>Use PodDisruptionBudgets and topology spread so maintenance/node loss doesn't take out all replicas at once.</li>
+        <li>maxUnavailable:0 + maxSurge:1 keeps capacity constant during rollout — but still needs readiness + graceful shutdown to be truly zero-downtime.</li>
+      </ul></div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://kubernetes.io/docs/concepts/architecture/controller/">Kubernetes controller concept docs</a></li>
+        <li><a href="https://kubernetes.io/docs/concepts/scheduling-eviction/kube-scheduler/">kube-scheduler docs</a></li>
+        <li><a href="https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/">Probes documentation</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="02-docker-compose.html"><span class="dir">← Previous</span>Docker Compose</a>
+        <a class="next" href="04-aws-core.html"><span class="dir">Next →</span>AWS Core (IAM/VPC/EC2/S3/RDS)</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · Cloud, AWS, Docker &amp; K8s</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-yaml.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-hcl.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-docker.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "06-cloud-aws-docker-k8s", chapterKey: "03-kubernetes-core" });</script>
+</body>
+</html>

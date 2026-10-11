@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Evals, Advanced Topics & Multimodal — Machine Learning & AI — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">Machine Learning & AI</a><span class="sep">›</span>Evals, Advanced Topics & Multimodal</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>Evals, Advanced Topics & Multimodal</h1>
+      <p class="meta-line"><span>⏱ ~3.5 hrs</span><span>📍 Chapter 14 of 14</span></p>
+      <p><strong>One-line summary:</strong> You cannot responsibly ship any of the systems from the previous
+      thirteen chapters without a real eval suite to tell you whether a change helped or hurt — this closing
+      chapter covers how to build that suite, surveys the frontier techniques (MoE, long context, test-time
+      compute/reasoning) reshaping what "the model" even means, and extends everything to models that see and
+      hear, not just read.</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>This is the last chapter of the last topic in this entire site, and it's deliberately a survey — the
+      point isn't to go deep on any one of these subjects (you've already gone deep on the foundations across
+      chapters 1-13), it's to connect them and show you the shape of what's next. In a senior interview, "how
+      would you know if this change actually helped" is the single most commonly skipped question by candidates
+      who can talk fluently about architecture but have never built a rigorous eval harness — and it's exactly
+      the question that separates "can build a demo" from "can be trusted to ship and iterate on a production AI
+      system." The advanced-topics survey (MoE, long context, reasoning models, multimodal) exists so you can
+      speak intelligently about where the field is heading in 2025-26 interviews without having to have
+      personally implemented a mixture-of-experts layer from scratch.</p>
+      <div class="box why"><h4>Why</h4><p>Every technique in chapters 1-13 — attention, RAG, agents, fine-tuning —
+      is a lever you can pull. Without an eval suite, you're pulling levers blind: you genuinely cannot tell
+      whether a prompt change, a new chunking strategy, or a fine-tuning run made things better, worse, or just
+      different, and "it feels better in the few examples I tried" is not a substitute for measurement at the
+      scale your system actually operates at.</p></div>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>This chapter assumes you've completed the rest of this topic — it directly reuses ideas from <a
+      href="09-vector-databases-and-rag.html">RAG</a> (retrieval vs. generation eval decomposition), <a
+      href="08-llm-observability-tracing.html">LLM Observability & Tracing</a> (the infrastructure evals run on
+      top of), <a href="11-ai-agents-from-first-principles.html">AI Agents</a> and <a
+      href="13-finetuning-and-rl.html">Fine-tuning & RL</a> (what you're evaluating before/after a change), and
+      <a href="06-attention-and-transformers.html">Attention & Transformers</a> (for the architecture-level
+      advanced topics).</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="eval-basics">Building an eval suite: golden datasets and the eval pyramid</h3>
+      <p>A <strong>golden dataset</strong> is a curated, versioned set of (input, expected output or rubric)
+      pairs representing the real distribution of what your system needs to handle — including edge cases and
+      known-hard examples, not just easy average-case ones. It is the single most important artifact in an eval
+      suite: without it, "did this change help" has no stable yardstick to measure against, and every discussion
+      about quality degenerates into anecdote-trading. Golden datasets should be: versioned (so you know exactly
+      what a historical score was measured against), representative (sampled from real usage, not hand-invented
+      examples that don't reflect actual query patterns), and continuously grown (every production incident or
+      user complaint is a candidate new golden example, specifically so the exact failure that happened once
+      gets caught automatically if it ever regresses).</p>
+      <p>Evals typically layer like a pyramid, cheapest/fastest at the bottom, run most often:</p>
+      <ul>
+        <li><strong>Deterministic/rule-based checks</strong> — exact match, schema validation, regex checks,
+        code-execution-based checks (does generated code actually run and pass tests). Cheap, fast, zero
+        ambiguity, but only applicable where "correct" has a crisp, checkable definition.</li>
+        <li><strong>LLM-as-judge</strong> — a separate (often more capable, or at minimum independently-prompted)
+        model scores outputs against a rubric or reference answer. Covers the much larger space of free-form,
+        open-ended outputs where exact match is meaningless, at the cost of being itself an imperfect, sometimes
+        biased measurement instrument (see pitfalls below).</li>
+        <li><strong>Human eval</strong> — the most expensive and slowest, but the ground truth for subjective or
+        high-stakes judgments; used sparingly, often to validate that LLM-as-judge scores actually correlate with
+        real human judgment on a sample, and reserved for changes significant enough to warrant it.</li>
+      </ul>
+
+      <h3 id="llm-as-judge">LLM-as-judge methodology and its pitfalls</h3>
+      <p>The standard pattern: give a judge model the input, the output being scored, and either a reference
+      answer or a scoring rubric, and ask for a structured score (not free-text prose) plus a brief justification
+      — structuring the output as JSON or a fixed scale makes scores aggregable across a whole eval run. Known,
+      well-documented pitfalls:</p>
+      <ul>
+        <li><strong>Position/order bias</strong> — when comparing two outputs side by side, judge models show a
+        measurable bias toward whichever is presented first (or second, depending on the model) — mitigated by
+        running the comparison both ways and checking for consistency, or averaging.</li>
+        <li><strong>Verbosity bias</strong> — judges tend to rate longer, more elaborate-sounding answers higher
+        independent of actual correctness or helpfulness, which rewards models that learned to pad rather than
+        models that learned to be right.</li>
+        <li><strong>Self-preference bias</strong> — a model used to judge outputs (including its own family's
+        outputs) can rate outputs from the same model family more favorably than outputs from a different model,
+        confounding any cross-model comparison that uses that judge.</li>
+        <li><strong>Judge-reference leakage/circularity</strong> — if the judge model and the model being
+        evaluated were trained on overlapping data or share blind spots, the judge may systematically miss the
+        exact errors both models are prone to.</li>
+      </ul>
+      <p>None of these make LLM-as-judge useless — they make it a measurement instrument requiring calibration,
+      same as any other: periodically validate judge scores against a human-labeled sample, use structured
+      rubrics rather than vague "rate 1-10" prompts, and never treat a single judge score as ground truth without
+      having checked it correlates with what you actually care about.</p>
+
+      <h3 id="regression-testing">Human eval and regression testing for prompts/models</h3>
+      <p>Treat prompts and model versions exactly like code: changes should run against the golden dataset and
+      produce a score report compared against a stored baseline before being shipped, the same discipline as a
+      CI test suite (directly extending the RAG eval harness pattern from <a
+      href="09-vector-databases-and-rag.html">chapter 9</a> to the whole system, not just retrieval). This catches
+      two distinct regression types teams routinely miss: a <strong>prompt regression</strong> (a seemingly
+      unrelated prompt tweak degrades a capability the golden dataset covers, caught immediately by a score drop)
+      and a <strong>model regression</strong> (swapping to a newer model version, or a cheaper one to save cost,
+      silently degrades quality on specific example types your golden dataset — if representative — will surface
+      even when aggregate benchmarks look fine). Human eval is reserved for calibrating the automated pipeline
+      (sampling N automated-scored examples for human re-scoring periodically) and for high-stakes launches where
+      the cost of a human review pass is justified by the cost of being wrong.</p>
+
+      <h3 id="moe">Mixture-of-Experts (MoE): the basics</h3>
+      <p>A standard ("dense") transformer feed-forward layer runs every token through the same single feed-forward
+      network. An MoE layer instead has multiple parallel feed-forward networks ("experts"), and a small
+      learned <strong>router/gating network</strong> decides, per token, which small subset of experts (commonly
+      1-2 out of dozens) to route that token through — the other experts are simply skipped for that token. This
+      means the model can have a very large total parameter count (spread across many experts) while the actual
+      compute per token (and per forward pass) only touches a small fraction of those parameters — more total
+      "knowledge capacity" without a proportional increase in per-token compute cost. The tradeoff: MoE models
+      need more total memory to hold all the experts even though only a few are active per token, and training
+      them well requires solving load-balancing (ensuring the router doesn't collapse into always picking the
+      same few experts, wasting the rest of the model's capacity).</p>
+
+      <h3 id="long-context">Long-context techniques</h3>
+      <p>Naive self-attention cost scales quadratically with sequence length, which is why extending context
+      windows from thousands to hundreds of thousands (or millions) of tokens required real architectural and
+      systems work, not just "turn up a config number": <strong>sparse/local attention patterns</strong>
+      (restricting full attention to nearby tokens plus select long-range connections rather than all-pairs),
+      <strong>efficient attention implementations</strong> (like FlashAttention, which restructures the
+      computation to avoid materializing the full attention matrix in memory, dramatically cutting memory
+      bandwidth cost without changing the math's result), and <strong>positional encoding schemes</strong> designed
+      to generalize to sequence lengths beyond what was seen in training (RoPE scaling and its variants). Even
+      with these, the lost-in-the-middle effect from <a href="06-attention-and-transformers.html">chapter 6</a>
+      means a longer context window doesn't automatically mean uniformly reliable use of everything in it — "can
+      fit 1M tokens" and "reliably uses information from anywhere in those 1M tokens" are different claims, and
+      production systems should verify the second, not just assume it from the first.</p>
+
+      <h3 id="reasoning-models">Reasoning / test-time-compute models</h3>
+      <p>Rather than generating an answer in one forward pass per output token, "reasoning" models are trained
+      (via RL on correctness, often on tasks like math and code where correctness is automatically checkable) to
+      generate an extended internal chain of reasoning tokens before producing a final answer — spending more
+      compute at <em>inference time</em> on harder problems, instead of only ever spending the same fixed
+      per-token compute regardless of problem difficulty. This is the "test-time compute" idea: performance on
+      hard reasoning tasks improves measurably as you allow the model to spend more tokens/compute reasoning
+      before answering, somewhat analogous to a human spending more time thinking about a hard problem versus a
+      trivial one. It's a genuinely different scaling axis from "bigger model" or "more pretraining data" — you
+      can get better results on reasoning-heavy tasks from the same base model by letting it think longer, up to
+      a point of diminishing (and eventually negative, if it starts looping or overthinking) returns.</p>
+
+      <h3 id="multimodal">Multimodal models: vision-language and audio</h3>
+      <p><strong>Vision-language models (VLMs)</strong> connect an image to an LLM conceptually in three stages:
+      (1) an <strong>image encoder</strong> (typically a vision transformer) converts an image into a sequence of
+      patch embeddings, the visual analog of token embeddings; (2) a <strong>projection/adapter layer</strong>
+      maps those visual embeddings into the same embedding space the LLM's text tokens live in, so the LLM's
+      existing attention mechanism can attend over image-patch embeddings exactly as it attends over text-token
+      embeddings — the LLM itself doesn't need architectural changes, it just receives a longer input sequence
+      that happens to include image-patch embeddings interleaved with text-token embeddings; (3) the combined
+      sequence (image-patch embeddings + text tokens) runs through the same transformer decoder as any other
+      input, generating a text response conditioned on both. Training typically proceeds in stages: pretrain or
+      reuse a strong image encoder, train the projection layer (often with the LLM and image encoder frozen) to
+      align the two embedding spaces, then optionally fine-tune the whole stack jointly.</p>
+      <p><strong>Audio/voice models</strong> follow a conceptually similar pattern for speech: an audio encoder
+      converts raw audio (or a spectrogram) into a sequence of embeddings analogous to patch/token embeddings,
+      which either feed into an LLM-style sequence model for understanding (speech-to-text, voice assistants) or
+      a decoder generates audio-domain tokens back out for synthesis (text-to-speech). The 2025-26 frontier trend
+      is toward <strong>native multimodal</strong> models trained jointly across text, image, and audio from the
+      start rather than bolting a modality-specific encoder onto a text-only LLM after the fact — closing the gap
+      between "a language model that can also see/hear" and "a model that reasons natively across modalities."</p>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>A production eval pipeline, tying the chapter together, in order:</p>
+      <ol>
+        <li><strong>Golden dataset maintenance</strong>: versioned, growing set of (input, expected output or
+        rubric) examples, sourced from real usage patterns and every significant production incident.</li>
+        <li><strong>Deterministic checks first</strong>: run cheap rule-based/schema checks on every candidate
+        output — fail fast on structurally broken outputs before spending judge-model budget on them.</li>
+        <li><strong>LLM-as-judge scoring</strong>: for outputs that pass deterministic checks, score against a
+        structured rubric, running comparisons in both orders to check for position bias, and logging raw
+        justifications (not just scores) for later human audit.</li>
+        <li><strong>Baseline comparison</strong>: diff the new run's aggregate scores against the last-shipped
+        baseline, per category (not just one overall number) so a regression in one capability isn't masked by
+        improvement in another.</li>
+        <li><strong>Human spot-check calibration</strong>: periodically sample N examples for human re-scoring to
+        confirm the automated pipeline's scores still correlate with actual human judgment, re-calibrating the
+        judge prompt/rubric if drift is detected.</li>
+        <li><strong>Ship/hold decision</strong>: a change ships only if it doesn't regress any tracked category
+        below an agreed threshold — exactly the same discipline as a CI gate on code, applied to prompts, RAG
+        pipelines, fine-tuned checkpoints, and model version swaps alike.</li>
+      </ol>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+flowchart TB
+  GD[Golden dataset: versioned, representative, growing] --> DET[Deterministic checks: schema/exact-match/code-exec]
+  DET -->|pass| JUDGE[LLM-as-judge: structured rubric score]
+  DET -->|fail| FAIL[Fail fast, no judge budget spent]
+  JUDGE --> AGG[Aggregate scores per category]
+  AGG --> BASE[Compare against stored baseline]
+  BASE -->|regression| BLOCK[Block ship, investigate layer]
+  BASE -->|no regression| SHIP[Ship]
+  JUDGE -.periodic sample.-> HUMAN[Human eval: calibrate judge]
+  HUMAN -.recalibrate.-> JUDGE
+      </div>
+      <div class="mermaid">
+flowchart LR
+  IMG[Image] --> ENC[Image encoder: vision transformer -> patch embeddings]
+  ENC --> PROJ[Projection layer: align to LLM embedding space]
+  TXT[Text tokens] --> EMB[Text embeddings]
+  PROJ --> SEQ[Combined sequence: image-patch + text embeddings]
+  EMB --> SEQ
+  SEQ --> LLM[Same transformer decoder, unchanged architecture]
+  LLM --> OUT[Generated text response]
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-python"># Structured LLM-as-judge scoring, with order-bias mitigation and strict JSON output.
+import json
+
+JUDGE_PROMPT = """You are scoring an AI assistant's response against a reference answer.
+Score strictly on a 1-5 scale for CORRECTNESS and a 1-5 scale for FAITHFULNESS to the
+provided context. Respond with ONLY valid JSON: {{"correctness": <int>, "faithfulness": <int>, "justification": "<short reason>"}}
+
+Question: {question}
+Context: {context}
+Reference answer: {reference}
+Candidate answer: {candidate}"""
+
+def judge_score(llm_client, question, context, reference, candidate):
+    prompt = JUDGE_PROMPT.format(
+        question=question, context=context, reference=reference, candidate=candidate
+    )
+    raw = llm_client.complete(prompt, temperature=0)  # temperature 0: reduce judge variance
+    return json.loads(raw)
+
+def run_eval_suite(llm_client, golden_examples, candidate_outputs, baseline_scores=None):
+    """Run deterministic checks first, then judge scoring, then compare to baseline
+    per category so one improving category can't silently mask another regressing."""
+    results = {"schema_fail": [], "scored": []}
+    for ex, candidate in zip(golden_examples, candidate_outputs):
+        if ex.get("expects_schema") and not validate_schema(candidate, ex["expects_schema"]):
+            results["schema_fail"].append(ex["id"])
+            continue  # fail fast -- don't spend judge budget on structurally broken output
+        score = judge_score(llm_client, ex["question"], ex["context"], ex["reference"], candidate)
+        results["scored"].append({"id": ex["id"], "category": ex["category"], **score})
+
+    by_category = {}
+    for r in results["scored"]:
+        by_category.setdefault(r["category"], []).append(r["correctness"])
+    category_avgs = {c: sum(v) / len(v) for c, v in by_category.items()}
+
+    if baseline_scores:
+        regressions = {c: (category_avgs[c], baseline_scores.get(c))
+                       for c in category_avgs if category_avgs[c] < baseline_scores.get(c, 0) - 0.3}
+        if regressions:
+            print(f"REGRESSION DETECTED in categories: {regressions}")
+    return category_avgs, results["schema_fail"]
+
+def validate_schema(output, schema) -> bool:
+    try:
+        parsed = json.loads(output)
+        return all(k in parsed for k in schema)
+    except (json.JSONDecodeError, TypeError):
+        return False
+
+
+# BAD: a single free-text "rate this response 1-10" judge prompt with no structure,
+# no reference answer, and no position-bias check when comparing two candidates --
+# unaggregable, unreproducible, and silently biased toward whichever is shown first.
+def bad_judge(llm_client, candidate_a, candidate_b):
+    return llm_client.complete(f"Which is better, A or B?\nA: {candidate_a}\nB: {candidate_b}")
+</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4><p>A team ships a cost-saving change: swap their production RAG
+      system's generation model from a large model to a cheaper, faster one, after confirming aggregate
+      benchmark scores look "basically the same." Two weeks post-launch, a specific customer segment (technical
+      users asking multi-step configuration questions) complains the assistant has gotten noticeably worse.
+      Because the team maintains a golden dataset with per-category breakdowns (not just one aggregate score),
+      a retroactive eval run reveals the cheaper model regressed specifically on the "multi-step instruction
+      synthesis" category by a wide margin, while simple single-fact lookups — the majority of the aggregate
+      benchmark's examples — were unaffected, which is exactly why the aggregate number looked fine. They roll
+      back generation for that specific query category (routing multi-step questions to the larger model, simple
+      lookups to the cheaper one) and add that category's examples permanently to the golden dataset so any
+      future model swap is checked against it automatically before shipping.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Reporting one aggregate eval score and treating it as sufficient.
+      Aggregate scores average away exactly the kind of category-specific regression that matters most in
+      practice — always break scores down by category/capability, and track each category's trend over time, not
+      just a single blended number.</p></div>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Never validating that your LLM-as-judge scores actually correlate
+      with human judgment. A judge with an undetected bias (verbosity, position, self-preference) can drive a
+      team to optimize for exactly the wrong thing for months before anyone notices, because the automated scores
+      keep going up even as real quality doesn't. Schedule periodic human-vs-judge correlation checks as a
+      standing practice, not a one-time validation.</p></div>
+      <ul>
+        <li>Grow your golden dataset from real production incidents, not just hand-invented examples — the gap
+        between "what the team imagines users ask" and "what users actually ask" is usually large.</li>
+        <li>Run deterministic checks before LLM-as-judge scoring wherever possible — it's free signal and avoids
+        wasting judge-model budget on outputs that are already structurally broken.</li>
+        <li>"Long context window" and "reliably uses everything in that window" are different claims — test the
+        second explicitly (e.g. needle-in-a-haystack style evals) rather than assuming it from the advertised
+        context length.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>Deterministic eval checks</td><td>Output has a crisp, checkable definition of correct (schema, exact match, code execution)</td><td>Free-form, open-ended, subjective outputs</td><td>LLM-as-judge</td></tr>
+        <tr><td>LLM-as-judge</td><td>Free-form outputs needing scale, reference-answer comparison available</td><td>High-stakes decisions needing ground-truth certainty</td><td>Human eval, at least for calibration</td></tr>
+        <tr><td>Dense transformer</td><td>Simpler training/serving, smaller total model</td><td>Need very large knowledge capacity at bounded per-token compute</td><td>Mixture-of-Experts</td></tr>
+        <tr><td>Fixed-compute generation</td><td>Simple/fast tasks, latency-critical</td><td>Hard reasoning/math/code tasks worth extra inference compute</td><td>Reasoning / test-time-compute models</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+
+      <div class="qa-level basic">
+        <h4>Basic</h4>
+        <details class="qa"><summary>What is a golden dataset and why does it need to be versioned?</summary><div class="answer"><p>A curated, representative set of (input, expected output or rubric) pairs used as the stable yardstick for evaluating changes. It needs to be versioned so historical scores are always comparable against the exact dataset they were measured on, and so the dataset's own evolution (e.g. adding a new hard example from an incident) is tracked rather than silently changing what "the score" means.</p></div><div class="followup">Follow-up: where should new golden examples come from, ideally?</div></details>
+        <details class="qa"><summary>What's the difference between deterministic eval checks and LLM-as-judge?</summary><div class="answer"><p>Deterministic checks (exact match, schema validation, code execution) apply where correctness has a crisp, checkable definition, and are cheap and unambiguous. LLM-as-judge uses a model to score free-form, open-ended outputs against a rubric or reference, covering cases deterministic checks can't, at the cost of being itself an imperfect measurement instrument.</p></div><div class="followup">Follow-up: in what order should these two typically run in a pipeline, and why?</div></details>
+        <details class="qa"><summary>Name two documented biases that affect LLM-as-judge scoring.</summary><div class="answer"><p>Position/order bias (favoring whichever output is shown first or second in a comparison) and verbosity bias (rating longer answers higher independent of actual quality). Self-preference bias (favoring outputs from the judge's own model family) is a third.</p></div><div class="followup">Follow-up: how would you mitigate position bias specifically?</div></details>
+        <details class="qa"><summary>What is Mixture-of-Experts, at a basic level?</summary><div class="answer"><p>Instead of every token passing through one shared feed-forward network, an MoE layer has multiple expert feed-forward networks and a router that selects a small subset of experts per token, allowing a large total parameter count while keeping per-token compute bounded to only the selected experts.</p></div><div class="followup">Follow-up: what's the tradeoff MoE introduces in exchange for this compute efficiency?</div></details>
+        <details class="qa"><summary>What is test-time compute / a "reasoning model," conceptually?</summary><div class="answer"><p>A model trained to generate an extended chain of internal reasoning tokens before producing a final answer, spending more inference-time compute on harder problems rather than a fixed amount regardless of difficulty — performance on hard reasoning tasks improves as more reasoning compute is allowed.</p></div><div class="followup">Follow-up: is this a replacement for scaling model size/pretraining data, or a different axis entirely?</div></details>
+        <details class="qa"><summary>At a conceptual level, how does a vision-language model let a text-only-architecture LLM "see" an image?</summary><div class="answer"><p>An image encoder converts the image into patch embeddings, a projection layer maps those into the same embedding space as the LLM's text-token embeddings, and the combined sequence (image-patch embeddings + text tokens) is fed through the same transformer decoder — the LLM's attention mechanism doesn't need architectural changes, it just receives a longer input sequence.</p></div><div class="followup">Follow-up: what part of the pipeline is typically trained while the image encoder and LLM stay frozen?</div></details>
+        <details class="qa"><summary>Why is "the chatbot seems better in the examples I tried" not an adequate eval?</summary><div class="answer"><p>It's an unmeasured, unreproducible impression based on a small, likely non-representative sample, with no stable comparison point — it can't tell you whether a change actually helped across the real distribution of inputs, nor catch regressions in categories you didn't happen to try.</p></div><div class="followup">Follow-up: what's the minimum structure needed to turn this into a real eval?</div></details>
+      </div>
+
+      <div class="qa-level medium">
+        <h4>Medium</h4>
+        <details class="qa"><summary>Why should eval scores be broken down by category rather than reported as one aggregate number?</summary><div class="answer"><p>An aggregate score averages across all categories, so an improvement in one (often the majority, easier category) can mask a serious regression in another (often a smaller, harder category) — exactly the scenario in this chapter's production example, where simple lookups stayed fine while multi-step instruction synthesis silently regressed. Per-category breakdowns let you detect and attribute regressions precisely instead of discovering them only after user complaints.</p></div><div class="followup">Follow-up: how would you decide what categories to split your golden dataset into in the first place?</div></details>
+        <details class="qa"><summary>Why is a strict JSON/structured output format important for an LLM-as-judge prompt, beyond just convenience?</summary><div class="answer"><p>Structured output makes scores programmatically aggregable across a whole eval run (you can compute averages, track trends, diff against a baseline) rather than requiring manual reading of free-text judgments for every example. It also forces the judge to commit to a specific score rather than hedging in prose, and makes the judge's reasoning (a justification field) auditable alongside the score for later human calibration checks.</p></div><div class="followup">Follow-up: what would you do if you noticed the judge's JSON output was occasionally malformed?</div></details>
+        <details class="qa"><summary>Explain why "the context window is now 1M tokens" doesn't automatically mean "the model reliably uses information from anywhere in those 1M tokens."</summary><div class="answer"><p>A larger context window is an architectural/systems capability (the model can technically accept that many tokens as input), but the lost-in-the-middle effect means attention doesn't necessarily weight all positions in a long context equally reliably — information buried deep in the middle of a very long context can be attended to less reliably than information near the start or end, regardless of the window's advertised maximum size. These are separate claims requiring separate verification — typically via needle-in-a-haystack style evals that explicitly test recall at varying positions and context lengths.</p></div><div class="followup">Follow-up: how would you design a needle-in-a-haystack eval for your own RAG or agent system specifically?</div></details>
+        <details class="qa"><summary>What's the core compute/memory tradeoff MoE introduces compared to a dense model of equivalent per-token compute cost?</summary><div class="answer"><p>MoE achieves a much larger total parameter count (more "knowledge capacity" spread across many experts) at roughly the same per-token compute cost as a smaller dense model, since only a small subset of experts activates per token. The tradeoff is memory: all experts must be held in memory (often across multiple devices) even though only a few are active for any given token, so total memory footprint is much larger than a dense model with equivalent per-token compute — MoE trades memory capacity for compute efficiency, not for free capacity gains.</p></div><div class="followup">Follow-up: what training-time problem does load balancing between experts solve, and why does an imbalanced router waste model capacity?</div></details>
+        <details class="qa"><summary>How would you validate that your LLM-as-judge is actually measuring what you care about, rather than trusting it blindly?</summary><div class="answer"><p>Periodically sample a subset of judge-scored examples and have humans independently score the same examples on the same rubric, then measure correlation between human and judge scores. If correlation is weak or systematically skewed (e.g. judge consistently over-scores verbose answers that humans rate lower), recalibrate the judge prompt/rubric — tightening the rubric, providing better reference answers, or switching judge models — and re-validate. This should be a standing, recurring practice, not a one-time setup check, since model updates or distribution shifts in what's being evaluated can silently degrade judge-human correlation over time.</p></div><div class="followup">Follow-up: what sample size and cadence would you consider reasonable for this calibration check in a real production system?</div></details>
+      </div>
+
+      <div class="qa-level advanced">
+        <h4>Advanced</h4>
+        <details class="qa"><summary>Design a complete eval + regression-testing pipeline for a production system that combines RAG, an agent with tool use, and a fine-tuned generation model — specifying what gets evaluated at each layer and how a regression gets attributed to the right one.</summary><div class="answer"><p>Decompose evaluation per layer, each with its own golden dataset and metrics: retrieval (precision@k, recall@k, MRR against labeled relevant-chunk sets, independent of generation), tool-use/agent behavior (did the agent call the correct tools in a reasonable sequence, did it terminate appropriately — checkable via trace-based deterministic assertions, reusing the observability infrastructure from chapter 8), and generation/fine-tuned-model quality (LLM-as-judge correctness/faithfulness against reference answers, run separately on outputs from the fine-tuned model vs. a baseline). Run all three layers' evals on every change — a prompt tweak, a new chunking strategy, a new LoRA checkpoint, a model version swap — and diff each layer's category-broken-down scores against stored baselines independently, so a regression is attributable to "retrieval got worse" vs. "the agent stopped calling the right tool" vs. "the fine-tuned model's output quality dropped" rather than one opaque end-to-end score that can't localize the cause.</p></div><div class="followup">Follow-up: how would you handle the case where a regression only appears in the combination of layers (each individually passes its own eval) but not in any single layer's isolated test?</div></details>
+        <details class="qa"><summary>A team observes that their reasoning model's accuracy on a hard benchmark keeps improving as they allow more test-time reasoning tokens, but their production latency/cost budget caps how many reasoning tokens they can afford per request. How would you approach this tradeoff systematically rather than picking an arbitrary cap?</summary><div class="answer"><p>Treat allowed reasoning-token budget as a hyperparameter to sweep against your golden dataset exactly like any other config: measure accuracy (broken down per difficulty category, since harder examples benefit more from extra reasoning than easy ones) at several token-budget levels, and plot the accuracy-vs-cost/latency curve to find the point of diminishing returns rather than guessing. Consider adaptive budgets — route easy queries (detected via a cheap classifier or the model's own early confidence signal) through a low reasoning-token cap, and route hard queries through a higher cap — rather than applying one fixed budget uniformly, since the chapter's core point about test-time compute is precisely that difficulty-dependent compute allocation is where the real gains are, not a flat increase applied everywhere.</p></div><div class="followup">Follow-up: how would you build a reliable "is this query hard" classifier without it becoming another unvalidated judge-bias-prone component?</div></details>
+        <details class="qa"><summary>How would you build an eval specifically for a vision-language model's grounding — i.e. verifying it's actually attending to and reasoning from the image content, not just producing plausible-sounding text that ignores the image?</summary><div class="answer"><p>Construct adversarial/counterfactual image-question pairs where the correct answer depends entirely on the specific image content and would be wrong (or unanswerable) for a plausible-sounding but image-ignorant guess — e.g. ask about a specific count, color, or spatial relationship that varies across near-identical image variants, and verify the model's answer actually tracks the variation rather than giving the same "generic plausible" answer regardless of which image variant it's shown. This is the vision-language analog of a faithfulness check in RAG (chapter 9): you're testing whether the output is actually grounded in the provided input, not just generically plausible text the model could have produced blind. Score systematically across a labeled set of such pairs (expected answer changes predictably with the image) rather than spot-checking a few examples.</p></div><div class="followup">Follow-up: how is this failure mode (plausible-sounding but input-ignorant output) structurally similar to a problem you've already seen in RAG, and does the same root cause apply?</div></details>
+        <details class="qa"><summary>Your team ships MoE-based generation for cost reasons but notices inconsistent quality across requests that seem similar on the surface. How would you investigate whether the MoE routing itself is a contributing factor?</summary><div class="answer"><p>Investigate whether the router is sending superficially-similar inputs to different experts inconsistently, producing variance in output quality that a dense model wouldn't exhibit for the same inputs — this would show up as higher output variance on repeated/near-duplicate queries compared to a dense-model baseline on the same golden dataset. If confirmed, check training-time load-balancing health (was the router trained with adequate load-balancing regularization, or did a small number of experts dominate routing, leaving others under-trained and lower-quality when they do get selected) — poorly load-balanced experts are a plausible root cause for inconsistent quality specifically because under-trained experts produce worse outputs only for the subset of inputs unlucky enough to route to them.</p></div><div class="followup">Follow-up: what would an eval specifically designed to detect "unhealthy expert routing" from the outside (without access to training internals) look like?</div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment">
+        <span class="level-tag">Beginner (30-60 min)</span>
+        <h4>Build a 15-example golden dataset with category labels</h4>
+        <p>For any AI system you've built in earlier chapters (or a hypothetical one), write a 15-example golden
+        dataset with at least 3 categories (e.g. simple lookup, multi-step reasoning, edge case), each example
+        having an input and either an exact expected output or a short scoring rubric.</p>
+        <ul>
+          <li>Run a deterministic check (schema or exact match) on at least the examples where that's applicable.</li>
+        </ul>
+        <p><strong>Acceptance criteria:</strong> a versioned dataset file (e.g. JSON) with category labels, plus
+        a short note on where each example's "expected" value came from (hand-written vs. derived from a real
+        past query).</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>Deliberately include at least one deliberately hard/edge-case example per category — a golden dataset that's all easy examples won't catch the regressions that matter.</p></div></details>
+        <p><strong>Bonus:</strong> add a 4th category specifically modeled on a real mistake/incident (hypothetical is fine) you'd want permanently guarded against.</p>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Intermediate (2-4 hrs)</span>
+        <h4>LLM-as-judge pipeline with bias checks</h4>
+        <p>Build an LLM-as-judge scoring pipeline (structured JSON output, rubric-based) over your golden dataset
+        from the beginner assignment, and specifically test for position bias by scoring the same pair of
+        candidate outputs in both presentation orders.</p>
+        <ul>
+          <li>Run at least 10 comparison pairs in both orders and report how often the judge's preference flips
+          depending on order.</li>
+          <li>Compute per-category average scores and present them in a table (not one aggregate number).</li>
+        </ul>
+        <p><strong>Acceptance criteria:</strong> a working judge pipeline, a measured position-bias flip rate,
+        and a per-category score table.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>Set judge temperature to 0 to reduce noise unrelated to actual bias before you try to measure the bias itself — otherwise sampling variance and genuine bias are hard to tell apart.</p></div></details>
+        <p><strong>Bonus:</strong> have 3-5 of the same examples human-scored and compute a rough correlation between human and judge scores.</p>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Advanced (1-2 days)</span>
+        <h4>Full regression-testing harness across a prompt and model-version change</h4>
+        <p>Build a regression-testing harness that runs your golden dataset (grown to 30+ examples across 4+
+        categories) through deterministic checks + LLM-as-judge, stores a baseline score report, then
+        deliberately introduces two separate changes (a prompt tweak, and a model-version swap to a cheaper
+        model) and shows the harness correctly detecting and localizing any regression to the right category.</p>
+        <ul>
+          <li>Baseline report, then two separate "after change" reports, each diffed against baseline per category.</li>
+          <li>At least one of your two changes should cause a real, detectable regression in at least one category.</li>
+        </ul>
+        <p><strong>Acceptance criteria:</strong> three score reports (baseline + two changes), a clear diff
+        showing which category regressed for which change, and the harness runnable as a single script.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>If you can't easily access two real model versions, simulate a "model regression" by deliberately degrading a prompt for one specific category only (e.g. removing a key instruction) — the harness should still correctly localize the hit to that category.</p></div></details>
+        <p><strong>Bonus:</strong> add a needle-in-a-haystack style long-context eval category and show how it behaves differently from your other categories as you vary context length.</p>
+      </div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet">
+        <ul>
+          <li>Golden dataset = versioned, representative, continuously-grown (input, expected/rubric) pairs — the one thing every eval strategy needs.</li>
+          <li>Eval pyramid: deterministic checks (cheap, crisp) → LLM-as-judge (scalable, imperfect) → human eval (expensive, ground truth, used for calibration).</li>
+          <li>LLM-as-judge pitfalls: position bias, verbosity bias, self-preference bias — calibrate against human scores periodically.</li>
+          <li>Always break eval scores down by category — an aggregate score hides exactly the regressions that matter most.</li>
+          <li>Treat prompts and model versions like code: run golden-dataset regression checks before every ship.</li>
+          <li>MoE: large total capacity, bounded per-token compute via routing to a small expert subset — trades memory for compute efficiency.</li>
+          <li>Long context needs real systems work (FlashAttention, sparse attention, positional scaling) — a big window ≠ uniformly reliable recall everywhere in it.</li>
+          <li>Reasoning/test-time-compute models trade inference-time compute for accuracy on hard problems — a different scaling axis from model size.</li>
+          <li>VLMs: image encoder → projection into the LLM's embedding space → same unmodified transformer decoder processes the combined sequence.</li>
+          <li>Native multimodal (jointly trained across text/image/audio) is the 2025-26 frontier direction over bolted-on modality encoders.</li>
+        </ul>
+      </div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://docs.ragas.io/">Ragas: open-source LLM/RAG evaluation framework</a></li>
+        <li><a href="https://arxiv.org/abs/2306.05685">Judging LLM-as-a-Judge with MT-Bench and Chatbot Arena</a></li>
+        <li><a href="https://arxiv.org/abs/2401.04088">Mixtral of Experts (MoE architecture paper)</a></li>
+        <li><a href="https://docs.anthropic.com/en/docs/build-with-claude/vision">Anthropic: vision/multimodal model guidance</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="13-finetuning-and-rl.html"><span class="dir">← Previous</span>Fine-tuning & RL</a>
+        <a class="next" href="../index.html"><span class="dir">Next →</span>Back to Home</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · Machine Learning & AI</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "15-machine-learning-ai", chapterKey: "14-evals-advanced-topics-multimodal" });</script>
+</body>
+</html>

@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>React Testing Library — Testing — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">Testing</a><span class="sep">›</span>React Testing Library</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>React Testing Library</h1>
+      <p class="meta-line"><span>⏱ 2.5 hrs</span><span>📍 Chapter 3 of 6</span></p>
+      <p><strong>One-line summary:</strong> RTL's entire design forces you to query the DOM the way a user or
+      assistive technology would, and to wait for async UI changes using real event-loop-aware utilities instead
+      of fake timers or manual re-renders — understanding both of those mechanics is what separates confident RTL
+      usage from fighting <code>act()</code> warnings forever.</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>RTL is deliberately opinionated in a way that trips up engineers coming from Enzyme or shallow-rendering
+      backgrounds: it has no API for reaching into component internals, state, or props. That's not a missing
+      feature — it's the point. A senior engineer should be able to explain <em>why</em> that constraint exists
+      (tests that couple to implementation details break on every refactor, even when user-facing behavior is
+      unchanged) and should be fluent in the query priority system and the `act()`/async-utility model, because
+      debugging a flaky or warning-spewing RTL test is one of the most common real-world friction points on React
+      teams — and being the person who can fix it quickly is a visible senior-level skill.</p>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>Assumes comfort with React and hooks. Related: <a href="02-unit-testing.html">Unit Testing</a>,
+      <a href="../03-react-nextjs-advanced/02-hooks-deep-dive.html">Hooks Deep Dive</a>.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="guiding-principle">The guiding principle: test like a user, not like an implementation</h3>
+      <p>RTL's tagline, "the more your tests resemble the way your software is used, the more confidence they can
+      give you," is the entire API design in one sentence. There's no `wrapper.setState()`, no `.instance()`, no
+      way to assert on a prop value directly — you query the rendered DOM by text, role, or label, interact with it
+      via `fireEvent`/`userEvent`, and assert on what's visible. This forces tests to survive internal refactors
+      (switching from `useState` to a reducer, renaming a prop, restructuring child components) as long as the
+      user-facing behavior doesn't change — which is exactly the property you want from a test suite that should
+      support refactoring, not punish it.</p>
+
+      <h3 id="query-priority">Query priority — and why it's not arbitrary</h3>
+      <p>RTL's own docs define a strict priority order for queries, directly mapping to how real users (including
+      users of assistive technology) perceive the page:</p>
+      <ol>
+        <li><strong><code>getByRole</code></strong> — the top choice almost always. Matches the accessibility tree
+        (the same thing a screen reader exposes), e.g. <code>getByRole('button', { name: /submit/i })</code>. Using
+        it as a default forces you to notice when an element lacks a proper role/label — an accessibility bug your
+        test suite catches for free.</li>
+        <li><strong><code>getByLabelText</code></strong> — for form fields, mirrors how a sighted user associates a
+        label with an input, and how a screen reader announces it.</li>
+        <li><strong><code>getByPlaceholderText</code>, <code>getByText</code></strong> — reasonable fallbacks for
+        non-form content.</li>
+        <li><strong><code>getByDisplayValue</code></strong>, <strong><code>getByAltText</code></strong>,
+        <strong><code>getByTitle</code></strong> — narrower, specific use cases.</li>
+        <li><strong><code>getByTestId</code></strong> — explicitly the last resort. A <code>data-testid</code>
+        attribute is invisible to real users and assistive tech, so relying on it means your test could pass while
+        the actual accessible experience is broken.</li>
+      </ol>
+
+      <h3 id="query-variants">get / query / find — three families, one real distinction</h3>
+      <ul>
+        <li><strong><code>getBy*</code></strong> — throws immediately if zero or more than one match is found.
+        Use when the element should already be present synchronously.</li>
+        <li><strong><code>queryBy*</code></strong> — returns <code>null</code> instead of throwing when not found
+        (still throws on multiple matches). The only query family you should use to assert
+        <em>absence</em> — <code>expect(queryByText('Error')).not.toBeInTheDocument()</code>. Using
+        <code>getBy*</code> for an absence check would throw before your assertion even runs.</li>
+        <li><strong><code>findBy*</code></strong> — returns a Promise, retries the query internally on an interval
+        until it resolves or times out (default 1000ms via <code>waitFor</code> under the hood). Use whenever the
+        element appears asynchronously — after a fetch resolves, after a state update triggered by an effect.</li>
+      </ul>
+
+      <h3 id="act-and-async">`act()`, async utilities, and why `act warning` happens</h3>
+      <p>React batches and flushes state updates inside an <code>act()</code> boundary so that, by the time
+      assertions run, the DOM reflects every pending update — without it, you could assert on a DOM snapshot
+      mid-update. RTL's <code>render()</code> and <code>fireEvent</code>/<code>userEvent</code> calls already wrap
+      themselves in <code>act()</code> automatically in the testing environment, which is why most RTL tests never
+      call <code>act()</code> explicitly. The warning <strong>"An update to Component inside a test was not
+      wrapped in act(...)"</strong> happens specifically when a state update occurs <em>outside</em> any `act()`
+      boundary that the test is aware of — classically, a <code>fetch().then(setState)</code> or a timer callback
+      that resolves after the synchronous test body has already finished and moved on, with no
+      <code>await</code>/<code>findBy</code> giving React's test environment a chance to flush it inside a tracked
+      boundary. The fix is almost always to <code>await</code> something that internally polls until the update
+      has happened — <code>findBy*</code> or <code>waitFor</code> — not to silence the warning.</p>
+
+      <h3 id="userEvent-vs-fireEvent">userEvent vs fireEvent</h3>
+      <p><code>fireEvent.click(button)</code> dispatches a single, raw DOM event. <code>userEvent.click(button)</code>
+      (from <code>@testing-library/user-event</code>) simulates the <em>full sequence</em> of events a real browser
+      would fire for that interaction — pointerdown, mousedown, focus, pointerup, mouseup, click — and, since v14,
+      is async by default, requiring <code>await userEvent.click(...)</code>. This matters concretely:
+      <code>fireEvent.change</code> on an input sets the value and fires one change event, but a real user typing
+      triggers keydown/keypress/input events per character, which matters if your component has
+      <code>onKeyDown</code> logic or debounced input handling — <code>userEvent.type()</code> replicates that
+      correctly, <code>fireEvent.change</code> does not. Modern guidance is to default to <code>userEvent</code>
+      for anything resembling real user interaction, and reserve <code>fireEvent</code> for low-level or synthetic
+      scenarios <code>userEvent</code> doesn't model.</p>
+
+      <h3 id="async-ui-states">Testing async UI states correctly</h3>
+      <p>A component with loading/error/success states needs tests for each transition, not just the final state.
+      The correct pattern is: render, assert the loading state is visible immediately (synchronous
+      <code>getBy*</code>), then <code>await findBy*</code> for the post-fetch state, then assert the loading state
+      is gone (<code>queryBy*</code>, not <code>getBy*</code>, since it should now be absent). Skipping the
+      loading-state assertion is a common gap — it means a regression that makes loading states flash forever (a
+      missing "else" branch) goes completely uncaught.</p>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>RTL is a thin wrapper around <code>@testing-library/dom</code> plus a renderer adapter
+      (<code>react-dom/test-utils</code>'s <code>act</code>, under the hood using <code>ReactDOM.render</code>/
+      <code>createRoot</code> depending on version) and, in modern setups, runs inside <strong>jsdom</strong> — a
+      pure-JS DOM implementation, not a real browser. This has real consequences: jsdom does not implement layout
+      (no real box model), so anything depending on actual computed geometry (<code>getBoundingClientRect</code>,
+      real CSS cascade effects like <code>display: none</code> via a stylesheet rather than inline style) won't
+      behave like a real browser — this is exactly the boundary where RTL/jsdom tests stop being trustworthy and
+      you need Playwright/E2E instead. The <code>findBy*</code> queries and <code>waitFor</code> are built on top
+      of a polling mechanism tied to the DOM's `MutationObserver` plus a timeout, re-running the query callback
+      whenever the DOM mutates, which is why they resolve "as soon as possible" rather than waiting the full
+      timeout in the common case.</p>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+graph TD
+  A[Query priority] --> B["getByRole — matches accessibility tree"]
+  A --> C["getByLabelText — form fields"]
+  A --> D["getByText / getByPlaceholderText"]
+  A --> E["getByTestId — last resort only"]
+  style B fill:#16a34a,color:#fff
+  style C fill:#16a34a,color:#fff
+  style D fill:#d97706,color:#fff
+  style E fill:#dc2626,color:#fff
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-jsx">// UserProfile.tsx — component under test
+function UserProfile({ userId }: { userId: string }) {
+  const [state, setState] = useState<'loading' | 'error' | 'loaded'>('loading');
+  const [user, setUser] = useState<{ name: string } | null>(null);
+
+  useEffect(() => {
+    setState('loading');
+    fetchUser(userId)
+      .then(u => { setUser(u); setState('loaded'); })
+      .catch(() => setState('error'));
+  }, [userId]);
+
+  if (state === 'loading') return <p role="status">Loading…</p>;
+  if (state === 'error') return <p role="alert">Could not load profile</p>;
+  return (
+    <div>
+      <h2>{user!.name}</h2>
+      <button onClick={() => setState('loading')}>Refresh</button>
+    </div>
+  );
+}
+
+// UserProfile.test.tsx
+import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { vi, describe, it, expect } from 'vitest';
+import { UserProfile } from './UserProfile';
+import * as api from './api';
+
+vi.mock('./api');
+
+describe('UserProfile', () => {
+  it('shows a loading state immediately, then the user name once loaded', async () => {
+    vi.mocked(api.fetchUser).mockResolvedValue({ name: 'Ada Lovelace' });
+    render(<UserProfile userId="1" />);
+
+    // synchronous: loading state must be visible right away — no await here
+    expect(screen.getByRole('status')).toHaveTextContent(/loading/i);
+
+    // async: wait for the real post-fetch state — findBy polls until it appears
+    expect(await screen.findByRole('heading', { name: 'Ada Lovelace' })).toBeInTheDocument();
+
+    // and the loading indicator must now be GONE — queryBy, not getBy, for absence
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  });
+
+  it('shows an error alert when the fetch fails', async () => {
+    vi.mocked(api.fetchUser).mockRejectedValue(new Error('network down'));
+    render(<UserProfile userId="1" />);
+    expect(await screen.findByRole('alert')).toHaveTextContent(/could not load/i);
+  });
+
+  it('re-fetches when Refresh is clicked, using userEvent for a realistic click', async () => {
+    vi.mocked(api.fetchUser).mockResolvedValue({ name: 'Ada Lovelace' });
+    render(<UserProfile userId="1" />);
+    await screen.findByRole('heading', { name: 'Ada Lovelace' });
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: /refresh/i }));
+
+    expect(screen.getByRole('status')).toBeInTheDocument(); // loading again
+    expect(api.fetchUser).toHaveBeenCalledTimes(2);
+  });
+});
+
+// ANTI-PATTERN: reaching for data-testid and getBy for an async element (causes act warnings)
+// test('BAD', () => {
+//   render(<UserProfile userId="1" />);
+//   const heading = screen.getByTestId('user-name'); // throws: not rendered yet, fetch hasn't resolved
+//   expect(heading).toHaveTextContent('Ada Lovelace');
+// });</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4><p>A SaaS dashboard team had hundreds of component tests riddled with
+      <code>data-testid</code> queries added years earlier under Enzyme-style habits. A design system migration
+      swapped a custom <code>&lt;Button&gt;</code> implementation, and in the process a developer accidentally
+      dropped the implicit <code>role="button"</code> behavior on a styled <code>&lt;div&gt;</code>-based variant —
+      a real accessibility regression, screen readers could no longer identify it as a button. Every
+      <code>getByTestId('submit-btn')</code> test kept passing because the test id was still present on the
+      element; none of them would have caught the regression even in principle, since <code>data-testid</code> is
+      invisible to the accessibility tree the bug broke. The team spent a sprint migrating the highest-traffic
+      flows to <code>getByRole</code> queries specifically, which immediately surfaced four more pre-existing
+      accessibility gaps across the app that nobody had noticed, simply because switching the query type made the
+      tests start failing on real issues they'd been blind to the whole time.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Calling <code>fireEvent.change</code> to simulate typing into a
+      controlled input skips the per-keystroke events a real browser fires, which silently breaks tests for any
+      component relying on <code>onKeyDown</code>, IME composition events, or input masking. The fix is
+      <code>userEvent.type()</code>, which fires the full realistic key sequence — but remember it's async
+      (<code>await user.type(...)</code>) since v14, and forgetting the await causes assertions to run before
+      typing finishes, producing a flaky partial-input failure.</p></div>
+      <ul>
+        <li><strong>Mistake:</strong> using <code>getBy*</code> to assert an element is absent — it throws on "not
+        found" before your <code>.not.toBeInTheDocument()</code> assertion ever runs, so the test fails with a
+        confusing error message rather than a clean assertion failure. Always use <code>queryBy*</code> for
+        absence checks.</li>
+        <li><strong>Mistake:</strong> snapshotting the entire rendered output (<code>expect(container).toMatchSnapshot()</code>)
+        as the primary assertion strategy. It passes on any change, meaningful or not, and reviewers rubber-stamp
+        snapshot diffs without reading them — this is functionally equivalent to not testing behavior at all.</li>
+        <li><strong>Mistake:</strong> not cleaning up between tests — modern RTL auto-cleans via
+        <code>afterEach(cleanup)</code> when using the testing framework's global setup, but custom setups that skip
+        this see DOM nodes leak across tests within a file, causing duplicate-element query failures.</li>
+        <li><strong>Best practice:</strong> assert on the loading AND error AND success states of any async
+        component, not just the success path — each is a distinct branch that can regress independently.</li>
+        <li><strong>Best practice:</strong> treat a forced reach for <code>getByTestId</code> as a signal to check
+        whether the markup is missing a semantic role/label, not just a convenient escape hatch.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>getByRole</td><td>Almost always — interactive elements, headings, alerts, status regions</td><td>Element genuinely has no meaningful accessible role (rare)</td><td>getByLabelText for form fields specifically</td></tr>
+        <tr><td>getByTestId</td><td>True last resort — dynamic lists needing a stable per-item hook with no good text/role</td><td>Any case where a role/label/text query would work</td><td>Add a proper aria-label instead of a testid</td></tr>
+        <tr><td>userEvent</td><td>Simulating real user interaction (typing, clicking, tabbing)</td><td>You need to dispatch a very specific low-level synthetic event userEvent doesn't model</td><td>fireEvent</td></tr>
+        <tr><td>Full snapshot testing</td><td>Verifying large, rarely-changing static output (e.g., generated config) where manual assertions are impractical</td><td>Interactive component behavior — doesn't verify meaningful behavior and invites blind approval</td><td>Targeted getBy/expect assertions</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic">
+        <h4>Basic</h4>
+        <details class="qa"><summary>What is RTL's core philosophy, in one sentence?</summary><div class="answer"><p>Test components the way a user interacts with them — query by visible text/role/label and interact via events — rather than reaching into component internals (state, props, instance methods).</p></div><div class="followup">Follow-up: why does this make tests more resilient to refactors?</div></details>
+        <details class="qa"><summary>What's the difference between `getByText`, `queryByText`, and `findByText`?</summary><div class="answer"><p>`getBy*` throws if not found (or if multiple match) — use for elements expected synchronously. `queryBy*` returns null instead of throwing — the correct choice for asserting absence. `findBy*` returns a Promise that polls until the element appears or times out — for elements that appear asynchronously.</p></div><div class="followup">Follow-up: what happens if you use `getBy*` to check something is NOT present?</div></details>
+        <details class="qa"><summary>Why is `getByTestId` considered a last resort?</summary><div class="answer"><p>A `data-testid` attribute is invisible to real users and assistive technology, so a test relying on it can pass while the actual accessible experience (what a screen reader announces, what role an element exposes) is broken. Role/label/text queries double as an implicit accessibility check.</p></div><div class="followup">Follow-up: what would you do instead if an element genuinely has no good text or role to query by?</div></details>
+        <details class="qa"><summary>What's the difference between `userEvent.click` and `fireEvent.click`?</summary><div class="answer"><p>`fireEvent.click` dispatches a single raw click DOM event. `userEvent.click` simulates the full sequence of events a real browser fires (pointerdown, mousedown, focus, pointerup, mouseup, click), more closely matching real user interaction, and is asynchronous since v14.</p></div><div class="followup">Follow-up: when would fireEvent still be the right choice?</div></details>
+        <details class="qa"><summary>What does the "not wrapped in act(...)" warning mean?</summary><div class="answer"><p>A state update happened outside any act() boundary the test tracked — typically an async callback (fetch, timer) resolving after the synchronous test body finished, with nothing awaited to let React flush it. The fix is to await the right async utility (`findBy*`/`waitFor`), not to suppress the warning.</p></div><div class="followup">Follow-up: why do render() and userEvent calls not usually need an explicit act() wrapper?</div></details>
+        <details class="qa"><summary>How do you test that an element is no longer present after some interaction?</summary><div class="answer"><p>`expect(screen.queryByRole(...)).not.toBeInTheDocument()` — using `queryBy*` because it returns null on no match instead of throwing, which `getBy*` would do before the assertion runs.</p></div><div class="followup">Follow-up: what if the element disappears asynchronously rather than immediately?</div></details>
+      </div>
+      <div class="qa-level medium">
+        <h4>Medium</h4>
+        <details class="qa"><summary>Walk through testing a component with loading, error, and success states for a single async fetch. What's the minimum set of assertions needed for real confidence?</summary><div class="answer"><p>At least three tests: (1) loading state renders synchronously right after render(), before the fetch resolves; (2) success case — await findBy for the loaded content, then assert the loading indicator is gone via queryBy; (3) failure case — mock a rejection and await findBy for the error UI. Skipping the loading-state assertion specifically misses regressions where a missing branch leaves the UI stuck loading forever.</p></div><div class="followup">Follow-up: how would you additionally test a retry/refetch interaction on the error state?</div></details>
+        <details class="qa"><summary>Why does RTL run on jsdom instead of a real browser, and what classes of bugs can that miss?</summary><div class="answer"><p>jsdom is a pure-JS DOM implementation with no real rendering engine — it has no actual layout engine, so it can't compute real geometry (getBoundingClientRect returns zeros by default), doesn't apply real CSS cascade/visual effects, and doesn't do real browser-specific quirks. Bugs depending on actual visual layout, real CSS-driven visibility, or genuine cross-browser behavior won't be caught by RTL and need E2E/visual regression testing instead.</p></div><div class="followup">Follow-up: give a concrete example of a bug jsdom would never catch.</div></details>
+        <details class="qa"><summary>A test fails intermittently with a "not wrapped in act()" warning only in CI, never locally. How would you investigate?</summary><div class="answer"><p>Suspect a timing-dependent async update that resolves inconsistently relative to the test's own awaits — e.g., a `setTimeout`-based retry or a debounce whose delay is close to a race with the test's `findBy` timeout under CI's slower/more contended CPU. Check for any component code path that updates state outside of an awaited chain the test knows about, and add fake timers or extend the relevant wait rather than treating it as a test flake to retry away.</p></div><div class="followup">Follow-up: how would fake timers interact with userEvent's own internal timing, and what gotcha does that raise?</div></details>
+        <details class="qa"><summary>What's wrong with a test suite that's mostly full-component snapshot tests, and how would you migrate away from it?</summary><div class="answer"><p>Snapshots assert on the entire rendered markup, so they fail (and get blindly "update-snapshot"-approved) on any change, meaningful or cosmetic, teaching reviewers to stop reading diffs — functionally this is close to not testing behavior at all. Migrate incrementally: for each component, identify the actual user-facing behaviors that matter (specific text, specific interactive states) and replace the snapshot with targeted `getBy`/`expect` assertions for those; keep snapshots only for things that are genuinely "any change here is worth a human look," like generated static config.</p></div><div class="followup">Follow-up: are there any component categories where full snapshotting is still the right call?</div></details>
+        <details class="qa"><summary>How would you test a component that uses a portal (e.g., a modal rendered via `createPortal` to `document.body`)?</summary><div class="answer"><p>RTL's `screen` queries search the entire document by default, not just the render container, so portal content is found the same way as any other content — no special API needed. The thing to watch for is cleanup: if the portal target isn't torn down correctly between tests, duplicate portal content from a previous test can cause `getBy*` to throw on multiple matches; ensure RTL's automatic `cleanup()` is actually running (verify your test setup imports it, especially in custom non-Jest setups).</p></div><div class="followup">Follow-up: how would you specifically scope a query to only the modal's content if the page has similar text elsewhere?</div></details>
+        <details class="qa"><summary>How do you unit-test a custom hook in isolation without a full component?</summary><div class="answer"><p>Use `renderHook` from `@testing-library/react`, which mounts the hook inside a minimal internal test component and exposes `result.current` for assertions, plus a `rerender`/`act`-aware API for triggering updates. Wrap any state-updating call from the hook (e.g., calling a returned setter) in `act()` if it's not already inside one of RTL's own wrapped utilities.</p></div><div class="followup">Follow-up: how would you test a hook that depends on a context provider?</div></details>
+      </div>
+      <div class="qa-level advanced">
+        <h4>Advanced</h4>
+        <details class="qa"><summary>Your team wants "visual regression" confidence (catching unintended layout/style breaks) but RTL/jsdom structurally can't provide it. How would you architect a solution?</summary><div class="answer"><p>RTL/jsdom should stay responsible for behavior correctness; visual regression needs a separate layer entirely — a tool like Playwright's screenshot comparison, Chromatic, or Percy that renders components in a real browser and diffs pixel output against an approved baseline. Architect it as its own CI job (separate from the fast unit/component suite) gated on actual visual diffs requiring human approval, typically scoped to a component-library "storybook" of isolated states rather than full pages, to keep the baseline set manageable and reviewable.</p></div><div class="followup">Follow-up: how would you handle font-rendering or anti-aliasing differences between CI runners causing false-positive visual diffs?</div></details>
+        <details class="qa"><summary>How would you test a component that uses `IntersectionObserver` or `ResizeObserver`, which jsdom doesn't implement?</summary><div class="answer"><p>jsdom has no real implementation of these browser APIs, so you need to mock the global constructor in your test setup (a hand-written fake that lets the test manually trigger callback invocations, simulating "element became visible" or "element resized"), rather than mocking `IntersectionObserver` away entirely — the fake needs to be realistic enough to trigger the component's actual callback logic under test. This is a case where you genuinely cannot use RTL/jsdom to verify the real browser-level trigger condition — that part needs an E2E test in a real browser if it's critical enough to warrant one.</p></div><div class="followup">Follow-up: how would you structure the fake so multiple tests can control exactly when the callback fires?</div></details>
+        <details class="qa"><summary>Design a strategy for a large component library's test suite to catch accessibility regressions automatically, beyond just defaulting to getByRole queries.</summary><div class="answer"><p>Layer it: (1) getByRole-first querying as the baseline habit, which implicitly fails if a role disappears; (2) an automated axe-core integration (jest-axe / vitest-axe) run against each component's rendered output in key states, asserting zero violations as part of the normal test run, catching issues role-querying alone wouldn't (color contrast, missing alt text, invalid ARIA attribute combinations); (3) a periodic, separate real-browser accessibility audit (e.g., via Playwright + axe) for interactive, stateful flows that static per-component checks can't fully capture (focus order across a multi-step flow, live region announcements).</p></div><div class="followup">Follow-up: how would you prevent axe-core false positives from blocking unrelated PRs?</div></details>
+        <details class="qa"><summary>A component test suite has hundreds of tests using `userEvent` that recently got noticeably slower after a library upgrade. How would you investigate whether this is a real regression versus expected behavior?</summary><div class="answer"><p>Check the userEvent changelog around the version jump — v14's switch to fully async, more realistic event sequencing (including internally using real `setTimeout`-based delays for things like key press timing by default) is a known, deliberate tradeoff of realism for speed, and is often configurable (e.g., disabling pointer/keyboard delay options) for test suites that don't need that fidelity. Benchmark a representative sample of tests on old vs new versions in isolation to separate "userEvent got slower by design" from "something else regressed" (e.g., an unrelated act()-wrapped re-render storm in the component itself that only userEvent's realistic event sequence now triggers).</p></div><div class="followup">Follow-up: what's the tradeoff of disabling userEvent's realistic delay to regain speed?</div></details>
+        <details class="qa"><summary>How would you decide, for a given component, whether to write a component test (RTL) or push its logic down to a pure-function unit test instead?</summary><div class="answer"><p>If the logic in question can be extracted as a pure function (a pricing calculation, a form-validation rule, a date formatter) independent of rendering, extract it and unit-test it directly — it's faster, more precise, and doesn't need DOM querying at all. Reserve the RTL component test for what can only be verified by rendering: that the extracted logic is wired correctly into the UI (the right text appears, the right element is disabled), that user interactions trigger the right state transitions, and that composition between child components behaves correctly. A component test re-verifying every branch of already-unit-tested business logic through the DOM is redundant, slower, and duplicates coverage instead of adding confidence.</p></div><div class="followup">Follow-up: how do you avoid winding up with neither a direct unit test nor adequate component coverage during this extraction?</div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment">
+        <span class="level-tag">Beginner (30-60 min)</span>
+        <h4>Test a controlled form input</h4>
+        <p>Build a simple <code>&lt;SearchBox&gt;</code> component: a labeled text input and a "Search" button that
+        calls an <code>onSearch(query)</code> prop when clicked.</p>
+        <ul>
+          <li>Use `getByLabelText` to find the input (give it a proper `&lt;label&gt;`).</li>
+          <li>Use `userEvent.type()` to type a query, `userEvent.click()` to submit.</li>
+          <li>Assert `onSearch` was called with the typed value.</li>
+        </ul>
+        <p><strong>Acceptance criteria:</strong> no `data-testid` used anywhere; test fails correctly if the label
+        association is removed from the markup.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>Remember userEvent methods are async — await every call.</p></div></details>
+        <p><strong>Bonus:</strong> add Enter-key submission and test it fires the same callback.</p>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Intermediate (2-4 hrs)</span>
+        <h4>Full async state-machine component test</h4>
+        <p>Build a component that fetches and displays a paginated list (loading / error / loaded / empty states,
+        plus a "Next page" button that triggers a new fetch).</p>
+        <ul>
+          <li>Mock the fetch function at the module boundary.</li>
+          <li>Write tests for all four states, plus the pagination interaction, plus a "fetch fails on page 2 after succeeding on page 1" case.</li>
+          <li>Use the correct query family (`getBy`/`queryBy`/`findBy`) deliberately in each assertion and be ready to justify each choice.</li>
+        </ul>
+        <p><strong>Acceptance criteria:</strong> zero `act()` warnings in test output; all five scenarios pass
+        reliably across 20 repeated runs.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>The empty state ("no results") is easy to forget — it's a distinct branch from both loading and error.</p></div></details>
+        <p><strong>Bonus:</strong> add `jest-axe`/`vitest-axe` and assert zero accessibility violations in each state.</p>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Advanced (1-2 days)</span>
+        <h4>Migrate a testid-heavy legacy test suite to role-based queries</h4>
+        <p>Take (or write) a small component suite that uses `getByTestId` pervasively. Migrate every query to the
+        highest-priority RTL query that correctly applies, without changing component behavior.</p>
+        <ul>
+          <li>For each migration, note whether it required a markup/accessibility fix (missing label, missing role) to make the better query possible.</li>
+          <li>Run an automated accessibility check (axe) before and after, and record the violation count delta.</li>
+        </ul>
+        <p><strong>Acceptance criteria:</strong> no `data-testid` remains except for cases you can justify in
+        writing as having no viable alternative; accessibility violation count did not increase and ideally decreased.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>Expect to find real accessibility gaps mid-migration — that's the point of this exercise, not a sign you're doing it wrong.</p></div></details>
+        <p><strong>Bonus:</strong> write the PR description you'd use to get a skeptical reviewer to approve this as a worthwhile, non-trivial refactor.</p>
+      </div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet"><ul>
+        <li>Query priority: getByRole > getByLabelText > getByText/Placeholder > getByDisplayValue/AltText/Title > getByTestId (last resort).</li>
+        <li>getBy = throws if missing (sync elements). queryBy = null if missing (use for absence). findBy = async, polls until found.</li>
+        <li>userEvent simulates real browser event sequences and is async (`await user.click(...)`); fireEvent dispatches one raw event.</li>
+        <li>"not wrapped in act()" = a state update happened outside a tracked act() boundary — fix by awaiting findBy/waitFor, not suppressing.</li>
+        <li>Test loading, error, AND success states for async components — each is an independently-regressable branch.</li>
+        <li>RTL runs on jsdom: no real layout engine, no real CSS cascade — visual/layout bugs need E2E or visual regression tools instead.</li>
+        <li>Full-page snapshot testing invites blind approval — prefer targeted getBy/expect assertions on meaningful behavior.</li>
+        <li>renderHook() tests custom hooks in isolation without a full component.</li>
+        <li>A forced reach for getByTestId is a signal to check for a missing accessible role/label, not just an escape hatch.</li>
+        <li>Pair with axe-core (jest-axe/vitest-axe) for automated accessibility checks beyond query-priority habits alone.</li>
+      </ul></div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://testing-library.com/docs/queries/about/#priority">Testing Library — Query Priority</a></li>
+        <li><a href="https://testing-library.com/docs/user-event/intro">Testing Library — user-event</a></li>
+        <li><a href="https://kentcdodds.com/blog/common-mistakes-with-react-testing-library">Kent C. Dodds — Common Mistakes with RTL</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="02-unit-testing.html"><span class="dir">← Previous</span>Unit Testing (Jest/Vitest)</a>
+        <a class="next" href="04-api-integration-testing.html"><span class="dir">Next →</span>API & Integration Testing</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · Testing</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-typescript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-jsx.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "05-testing", chapterKey: "03-react-testing-library" });</script>
+</body>
+</html>

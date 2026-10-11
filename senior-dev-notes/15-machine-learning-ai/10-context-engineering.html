@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Context Engineering — Machine Learning & AI — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">Machine Learning & AI</a><span class="sep">›</span>Context Engineering</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>Context Engineering: Designing What the Model Sees</h1>
+      <p class="meta-line"><span>⏱ ~3 hrs</span><span>📍 Chapter 10 of 14</span></p>
+      <p><strong>One-line summary:</strong> context engineering is the discipline of deciding, deliberately and
+      under a hard token budget, exactly what goes into an LLM's context window at every turn — it has emerged
+      as a distinct skill from prompt engineering because a perfectly worded prompt still fails if it's fed the
+      wrong, stale, or bloated context.</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>Prompt engineering asks "how do I phrase the instruction." Context engineering asks a prior, more
+      consequential question: "what information should even be in the window when the instruction runs, and in
+      what form." As LLM systems grow multi-turn, multi-tool, and multi-document, the context window stops being
+      a scratchpad you fill once and becomes a scarce, continuously-contended resource — every tool result,
+      every piece of chat history, every retrieved document is competing for a fixed token budget, and bad
+      context management degrades answer quality in ways that look like "the model got dumber" but are actually
+      "we handed it a worse context than last turn." Senior engineers building agentic or long-running LLM
+      systems are expected to reason about this explicitly: what gets summarized, what gets dropped, what gets
+      kept verbatim, and why — this is now interview-relevant precisely because it separates people who've only
+      called an LLM API from people who've operated a long-running agentic system in production.</p>
+      <div class="box why"><h4>Why</h4><p>A transformer's attention mechanism (see
+      <a href="06-attention-and-transformers.html">Attention & Transformers</a>) doesn't treat all context
+      equally well regardless of position or volume — longer context increases compute cost roughly
+      quadratically in naive attention, degrades the model's ability to locate specific facts
+      ("lost-in-the-middle"), and dilutes the proportion of context that's actually relevant to the current
+      instruction. Context engineering exists because "just put everything in the window" is not a strategy —
+      it's the default that fails as soon as the task runs longer than a single exchange.</p></div>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>Builds on <a href="06-attention-and-transformers.html">Attention & Transformers</a> (why context
+      position and volume matter mechanically) and <a href="09-vector-databases-and-rag.html">Vector Databases
+      & RAG</a> (retrieval as one specific context-selection technique). Pairs with the applied side in
+      <a href="../09-ai-integration/04-rag.html">AI Integration: RAG</a> and
+      <a href="../09-ai-integration/05-ai-agents.html">AI Integration: AI Agents</a>, both of which make
+      context-window decisions in production without naming the discipline explicitly. Next:
+      <a href="11-ai-agents-from-first-principles.html">AI Agents from First Principles</a>.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="context-vs-prompt-engineering">Why context engineering is a distinct skill from prompt engineering</h3>
+      <p>Prompt engineering optimizes a largely static artifact — the instruction text, few-shot examples,
+      output format — for a single call. Context engineering optimizes a <em>dynamic, per-turn, budget-constrained</em>
+      pipeline: deciding what subset of available information (conversation history, tool outputs, retrieved
+      documents, system state) gets included this turn, in what form (verbatim, summarized, compressed), and in
+      what order. The two compound — a great prompt fed bad context still fails, and good context fed a sloppy
+      prompt underperforms — but they're solved with entirely different techniques. Prompt engineering is mostly
+      a writing/iteration problem. Context engineering is mostly a systems/data-pipeline problem: what to fetch,
+      what to drop, what to cache, what to compress, and how to measure whether you got it right. This shift
+      matters practically because as agents run longer (multi-tool, multi-turn, hours-long sessions), the
+      context-selection problem grows continuously, while the prompt itself often stays nearly fixed.</p>
+
+      <h3 id="summarization-strategies">Summarization strategies: map-reduce, refine, iterative</h3>
+      <p>When content exceeds what fits (or should sensibly be put) in context verbatim, it must be summarized.
+      Three structurally different strategies:</p>
+      <ul>
+        <li><strong>Map-reduce</strong> — split the source into independent chunks, summarize each chunk in
+        parallel ("map"), then summarize the set of chunk-summaries into one final summary ("reduce"). Fast
+        (fully parallelizable) and scales to arbitrarily long sources, but each chunk is summarized in isolation
+        with no visibility into the rest of the document, so cross-chunk connections (a fact in chunk 1 that
+        only matters in light of chunk 9) can be lost in the map step before the reduce step ever sees them.</li>
+        <li><strong>Refine</strong> — process chunks sequentially, carrying forward a running summary that gets
+        updated ("refined") with each new chunk's content, one LLM call per chunk. This preserves cross-chunk
+        continuity far better than map-reduce (each step sees the accumulated summary, not an isolated chunk)
+        but is inherently sequential (no parallelism) and has a subtle failure mode: early chunks can get
+        progressively diluted or dropped as the running summary is repeatedly compressed and re-compressed,
+        since nothing forces later refinements to preserve early details that no longer seem salient in the
+        moment.</li>
+        <li><strong>Iterative/hierarchical summarization</strong> — a middle path: summarize chunks in small
+        groups, then summarize the group-summaries in groups, repeating until one summary remains — a tree
+        rather than a flat map-reduce or a single sequential chain. This better preserves local coherence within
+        each level than pure map-reduce (nearby chunks are grouped and considered together before reduction) while
+        remaining more parallelizable than refine. The right choice depends on whether cross-document connections
+        matter: map-reduce for independent, loosely related documents; refine or hierarchical for a single
+        narrative or tightly connected source where losing continuity is costly.</li>
+      </ul>
+
+      <h3 id="context-budget-management">Context window budget management across a session</h3>
+      <p>In a real multi-turn, multi-tool agentic session, the context window is a shared, shrinking resource
+      across: the system prompt/instructions (fixed cost, paid every turn), conversation history (grows every
+      turn unless managed), tool definitions (fixed cost per available tool, paid every turn regardless of
+      whether that tool is used), tool call results (can be large — a full file read, a large API response), and
+      the current task's working context (retrieved documents, relevant state). A disciplined budget treats each
+      of these as a line item with an explicit allocation, not a free-for-all that grows until it hits the
+      model's hard limit. Practical techniques: <strong>sliding window</strong> (keep only the last N turns
+      verbatim, summarize everything older); <strong>importance-weighted retention</strong> (keep turns flagged
+      as decision-relevant — e.g. a user correction, a stated constraint — even if old, while aggressively
+      dropping routine back-and-forth); <strong>tool-result truncation</strong> (a tool returning 50KB of JSON
+      gets summarized or filtered to the fields actually relevant to the current step before being inserted,
+      rather than inserted raw); and <strong>explicit token accounting</strong> (track exact or estimated token
+      counts per component in real time, so budget decisions are made from numbers, not vibes). The core design
+      question for any long-running agent is: at turn 50, what fraction of the context window is still
+      genuinely useful signal versus accumulated cruft from turns 1-20 that nobody will reference again?</p>
+
+      <h3 id="compression-techniques">Compressing long conversation history</h3>
+      <p>Beyond simple summarization, several specific compression techniques recur in production agent/chat
+      systems:</p>
+      <ul>
+        <li><strong>Rolling summary + recent-turns window</strong> — maintain one continuously-updated summary of
+        everything older than the last N turns, which stay verbatim. This is the most common pattern: cheap,
+        preserves recency (where most relevant detail lives) in full fidelity, and bounds total context growth.</li>
+        <li><strong>Structured state extraction</strong> — instead of summarizing conversation as prose, extract
+        and maintain a structured state object (e.g. "current task: X, constraints: [...], decisions made:
+        [...], open questions: [...]") updated incrementally each turn. This is denser than prose summary and
+        easier for the model to act on reliably, at the cost of needing an explicit schema and an extraction
+        step that itself can drop information if the schema is incomplete.</li>
+        <li><strong>Reference-don't-repeat</strong> — once a large artifact (a document, a tool result, a file)
+        has been seen once, store it externally (a cache, a scratch file, a vector store) and reference it by ID
+        rather than re-inserting its full content every subsequent turn; the model requests the full content
+        again only if it actually needs to re-examine it. This is the single highest-leverage technique for
+        multi-tool agent sessions, since tool results are often the largest and most redundantly-repeated
+        context consumer.</li>
+        <li><strong>Selective forgetting</strong> — deliberately drop content that's provably no longer relevant
+        (a resolved sub-task's intermediate scratch work, a tool call whose result was already extracted into
+        structured state) rather than carrying it forward indefinitely "just in case." This requires the system
+        to track what's resolved vs. still open, which is itself a piece of explicit state, not an incidental
+        side effect of just not mentioning it again.</li>
+      </ul>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>A context-engineered turn in a long-running agent session, in order:</p>
+      <ol>
+        <li>Fixed costs are computed first: system prompt tokens + tool definition tokens for every tool
+        currently available (this is often underestimated — a system with 30 registered tools can spend
+        thousands of tokens on tool schemas alone, before a single turn of actual content).</li>
+        <li>The remaining budget is allocated across: rolling summary of older history, verbatim recent turns,
+        any newly retrieved documents (if this turn involves RAG), and space reserved for the model's own
+        response and any tool calls it will make.</li>
+        <li>If the allocation doesn't fit, a compression pass runs: older verbatim turns get folded into the
+        rolling summary (refine-style), oversized tool results from recent turns get re-summarized or truncated
+        to their relevant fields, and low-priority context (resolved sub-tasks, superseded draft content) is
+        dropped per the selective-forgetting policy.</li>
+        <li>The assembled context is sent to the model. The model's response and any tool calls it issues are
+        appended to the live conversation state (not yet summarized — that happens on a future turn once this
+        content ages out of the "recent" window).</li>
+        <li>Token accounting updates for the next turn, and the cycle repeats — critically, this budget
+        management runs <em>every turn</em>, not as a one-time setup step, because the pressure compounds as the
+        session continues.</li>
+      </ol>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+flowchart TD
+  H[Full conversation history] --> SPLIT{Age of turn}
+  SPLIT -->|Recent N turns| VERB[Kept verbatim]
+  SPLIT -->|Older turns| SUM[Rolling summary, refine-style update]
+  TR[New tool result] --> TRUNC{Size check}
+  TRUNC -->|Large| EXTRACT[Extract relevant fields / summarize / store by reference]
+  TRUNC -->|Small| INC[Include as-is]
+  VERB --> BUDGET[Context budget assembly]
+  SUM --> BUDGET
+  EXTRACT --> BUDGET
+  INC --> BUDGET
+  SYS[System prompt + tool schemas] --> BUDGET
+  BUDGET --> CTX[Final context sent to model]
+      </div>
+      <div class="mermaid">
+flowchart LR
+  D1[Doc chunk 1] --> M1[Map: summarize]
+  D2[Doc chunk 2] --> M2[Map: summarize]
+  D3[Doc chunk 3] --> M3[Map: summarize]
+  M1 --> R[Reduce: summarize the summaries]
+  M2 --> R
+  M3 --> R
+  R --> FINAL1[Map-reduce final summary]
+  D1b[Chunk 1] --> REF1[Refine step 1]
+  REF1 --> REF2[Refine step 2, + chunk 2]
+  D2b[Chunk 2] -.-> REF2
+  REF2 --> REF3[Refine step 3, + chunk 3]
+  D3b[Chunk 3] -.-> REF3
+  REF3 --> FINAL2[Refine final summary]
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-python">from dataclasses import dataclass, field
+
+# --- A minimal context budget manager: fixed costs first, then allocate the rest ---
+@dataclass
+class ContextBudget:
+    max_tokens: int
+    system_prompt_tokens: int
+    tool_schema_tokens: int
+    reserved_for_response: int = 1500
+
+    def available_for_history(self) -> int:
+        used = self.system_prompt_tokens + self.tool_schema_tokens + self.reserved_for_response
+        return max(0, self.max_tokens - used)
+
+
+def estimate_tokens(text: str) -> int:
+    # Rough heuristic (~4 chars/token for English); real systems use the model's tokenizer.
+    return max(1, len(text) // 4)
+
+
+@dataclass
+class Turn:
+    role: str
+    content: str
+    tokens: int = field(init=False)
+
+    def __post_init__(self):
+        self.tokens = estimate_tokens(self.content)
+
+
+def assemble_context(turns: list[Turn], rolling_summary: str, budget_tokens: int) -> tuple[str, list[Turn]]:
+    """Keep the most recent turns verbatim until the budget is exhausted; fold the rest
+    into the rolling summary's responsibility (summarization happens elsewhere -- this
+    function only decides the cut point)."""
+    summary_tokens = estimate_tokens(rolling_summary)
+    remaining = budget_tokens - summary_tokens
+    kept: list[Turn] = []
+    for turn in reversed(turns):  # walk from most recent backwards
+        if turn.tokens > remaining:
+            break
+        kept.insert(0, turn)
+        remaining -= turn.tokens
+    dropped = turns[: len(turns) - len(kept)]
+    return rolling_summary, dropped  # caller folds `dropped` into the summary on next pass
+
+
+# BAD: naive context assembly that just concatenates everything and hopes it fits,
+# throwing away the oldest content with no summarization when the model's hard limit
+# is hit -- silently losing information rather than deliberately compressing it.
+def bad_naive_context(turns: list[Turn], max_tokens: int) -> list[Turn]:
+    total = 0
+    kept = []
+    for turn in turns:  # oldest first, no prioritization, no summarization fallback
+        total += turn.tokens
+        if total > max_tokens:
+            return kept  # just stops -- recent, likely-more-relevant turns get cut off!
+        kept.append(turn)
+    return kept
+
+
+# --- Reference-don't-repeat: large tool results stored once, referenced by ID ---
+class ToolResultStore:
+    def __init__(self):
+        self._store: dict[str, str] = {}
+        self._next_id = 0
+
+    def save(self, result: str) -> str:
+        ref_id = f"ref-{self._next_id}"
+        self._next_id += 1
+        self._store[ref_id] = result
+        return ref_id
+
+    def fetch(self, ref_id: str) -> str:
+        return self._store[ref_id]
+
+    def summarize_for_context(self, ref_id: str, max_chars: int = 300) -> str:
+        full = self._store[ref_id]
+        if len(full) <= max_chars:
+            return full
+        return f"[{ref_id}] {full[:max_chars]}... (truncated, {len(full)} chars total, fetch by ref_id for full content)"
+</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4><p>An internal coding agent that reads files, runs tests, and
+      iterates works well for short tasks but degrades badly on long-running refactors spanning 40+ tool calls:
+      by call 30, responses get slower, more expensive, and noticeably less focused — the agent starts
+      re-reading files it already read, forgetting constraints the user stated at turn 3, and occasionally
+      contradicting a decision it made at turn 15. The root cause, found by inspecting the actual context sent
+      per call: every full file read and every test-run's full stdout had been kept verbatim in history,
+      so by call 30 roughly 70% of the context window was stale tool output nobody needed again, crowding out
+      the system prompt's instructions and the user's actual recent requests in relative attention weight. The
+      fix: a reference-don't-repeat store for file contents and tool outputs (fetch by ID instead of re-reading
+      full content into history every time), a structured state object tracking "constraints stated so far" and
+      "decisions made so far" updated every turn instead of relying on the model to recall them from buried
+      history, and a rolling summary replacing verbatim turns older than the last 8. Average call latency and
+      cost both dropped roughly 40%, and — measured via a held-out set of long refactor tasks — the rate of the
+      agent contradicting an earlier stated constraint dropped close to zero, because the constraint now lived
+      in explicit structured state instead of relying on it surviving un-summarized in raw history.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Treating "the context window got bigger" (as model providers
+      ship 200K, 1M+ token windows) as a reason to stop doing context engineering. A bigger window raises the
+      ceiling but doesn't fix attention dilution, lost-in-the-middle, or cost — stuffing a 1M-token window full
+      of mostly-irrelevant history is slower, more expensive, and often <em>worse</em> for answer quality than a
+      well-curated 30K-token context, because the model still has to find the signal in all that noise. Context
+      engineering is about relevance density, not just fitting under a limit.</p></div>
+      <ul>
+        <li>Forgetting that tool schemas have a real, recurring token cost paid every single turn regardless of
+        use — registering 40 rarely-used tools "just in case" quietly taxes every call in the session.</li>
+        <li>Summarizing conversation history with a generic "summarize this" prompt that has no awareness of
+        what's actually decision-relevant (stated constraints, user corrections) versus routine chatter — this
+        reliably loses exactly the details that matter most later.</li>
+        <li>Re-inserting full tool results into context on every subsequent turn instead of storing once and
+        referencing by ID — the single most common cause of runaway context bloat in agentic systems.</li>
+        <li>No token accounting at all — discovering the budget problem only when a call fails with a hard
+        context-length error, rather than managing the budget proactively turn by turn.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>Map-reduce summarization</td><td>Independent/loosely related documents, need parallelism</td><td>Tightly connected narrative where cross-chunk links matter</td><td>Refine or hierarchical summarization</td></tr>
+        <tr><td>Refine summarization</td><td>Single coherent narrative, continuity matters most</td><td>Very long sources (sequential, slow) or highly parallel workloads</td><td>Hierarchical/iterative summarization</td></tr>
+        <tr><td>Verbatim full history</td><td>Short sessions, few turns, low tool-result volume</td><td>Long-running multi-tool agent sessions</td><td>Rolling summary + recent-turns window</td></tr>
+        <tr><td>Reference-don't-repeat for tool results</td><td>Any agent making repeated/large tool calls</td><td>Trivial, tiny tool outputs where overhead isn't worth it</td><td>Inline truncation per result</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+
+      <div class="qa-level basic">
+        <h4>Basic</h4>
+        <details class="qa"><summary>What is context engineering, and how does it differ from prompt engineering?</summary><div class="answer"><p>Context engineering is deciding what information goes into an LLM's context window each turn — what to include, summarize, compress, or drop under a token budget. Prompt engineering optimizes the instruction text itself for a single call. They compound (a great prompt with bad context still fails) but are solved with different techniques: context engineering is a systems/data-pipeline problem, prompt engineering is mostly a writing/iteration problem.</p></div><div class="followup">Follow-up: why has context engineering become more important as agentic systems have grown longer-running?</div></details>
+        <details class="qa"><summary>Name the three main summarization strategies covered and the one-sentence difference between them.</summary><div class="answer"><p>Map-reduce: summarize chunks independently in parallel, then summarize the summaries. Refine: process chunks sequentially, updating one running summary with each new chunk. Hierarchical/iterative: group and summarize in a tree, a middle path between the two.</p></div><div class="followup">Follow-up: which one is most prone to progressively diluting early details, and why?</div></details>
+        <details class="qa"><summary>Why do tool definitions/schemas count as a "fixed cost" against the context budget?</summary><div class="answer"><p>Every tool registered as available to the model has its schema included in context on every single call, regardless of whether that tool is actually used that turn — so a system with many registered tools pays that token cost repeatedly, reducing the budget available for everything else.</p></div><div class="followup">Follow-up: how would you decide which tools to keep registered versus dynamically load only when relevant?</div></details>
+        <details class="qa"><summary>What is "reference-don't-repeat" and what problem does it solve?</summary><div class="answer"><p>Instead of re-inserting a large artifact's (document, tool result, file) full content into context every subsequent turn, it's stored once externally and referenced by an ID; the model fetches the full content again only if actually needed. It solves runaway context bloat from redundantly repeating large content across many turns.</p></div><div class="followup">Follow-up: what's the risk if the model needs content it previously saw but no longer has access to the reference?</div></details>
+        <details class="qa"><summary>Why doesn't a larger context window (e.g. 1M tokens) eliminate the need for context engineering?</summary><div class="answer"><p>A bigger window raises the ceiling but doesn't fix attention dilution (more irrelevant content still competes for the model's attention), lost-in-the-middle effects, or the cost/latency of processing more tokens — a well-curated smaller context is often both cheaper and higher quality than a sprawling, mostly-irrelevant large one.</p></div><div class="followup">Follow-up: what's the actual compute cost relationship between context length and processing time in naive attention?</div></details>
+        <details class="qa"><summary>What is a "rolling summary + recent-turns window," and why is it such a common pattern?</summary><div class="answer"><p>It keeps the most recent N turns verbatim (full fidelity where detail matters most) and maintains one continuously-updated summary of everything older. It's common because it's cheap to implement, bounds total context growth, and preserves recency in full detail while still retaining older context in compressed form rather than discarding it entirely.</p></div><div class="followup">Follow-up: what's a risk if N is set too small for a particular task?</div></details>
+      </div>
+
+      <div class="qa-level medium">
+        <h4>Medium</h4>
+        <details class="qa"><summary>Explain the specific failure mode refine-style summarization is prone to that map-reduce isn't, and vice versa.</summary><div class="answer"><p>Refine risks progressive dilution: each sequential update re-compresses the running summary, and nothing forces later refinements to preserve early details that no longer seem salient in the moment, so early content can quietly erode across many refine steps. Map-reduce risks losing cross-chunk connections: each chunk is summarized in isolation with no visibility into other chunks, so a fact in one chunk that's only meaningful combined with a fact in a distant chunk can be lost before the reduce step ever has a chance to connect them.</p></div><div class="followup">Follow-up: how would hierarchical/iterative summarization partially mitigate both failure modes?</div></details>
+        <details class="qa"><summary>Design a token budget allocation policy for a multi-tool agent session and justify the allocation.</summary><div class="answer"><p>Compute fixed costs first (system prompt + tool schemas for all registered tools), reserve a fixed slice for the model's own response/tool calls, then allocate the remainder across: a rolling summary of older history (small, dense), verbatim recent turns (larger, since recency correlates with relevance), and any task-specific retrieved context (RAG documents, current file content) sized to the task at hand. The policy should re-evaluate every turn, not just once at session start, since the relative pressure on each category shifts as the session progresses (e.g. tool results accumulate faster than conversational turns in a tool-heavy agent).</p></div><div class="followup">Follow-up: how would this allocation change for a coding agent (large file-content tool results) versus a customer-support chat agent (mostly conversational turns)?</div></details>
+        <details class="qa"><summary>Why is "structured state extraction" often preferred over prose summarization for tracking an agent's decisions and constraints across a long session?</summary><div class="answer"><p>Structured state (an explicit schema of constraints, decisions, open questions) is denser and more reliably actionable than prose summary, since the model doesn't have to re-parse free text to extract what matters — it can be directly referenced. It also makes it possible to update individual fields incrementally rather than re-summarizing an entire blob each turn, which both reduces summarization cost and avoids the progressive-dilution risk of repeatedly re-compressing prose.</p></div><div class="followup">Follow-up: what's the failure mode if the extraction schema is incomplete and a decision-relevant detail doesn't fit any defined field?</div></details>
+        <details class="qa"><summary>A team notices their agent's answer quality degrades specifically after large tool-result-heavy turns, even though total token count stays well under the model's limit. Explain the likely cause.</summary><div class="answer"><p>Being under the hard token limit doesn't mean context is well-used — a large, mostly-irrelevant tool result (e.g. a full file dump or verbose API response) dilutes the proportion of context that's actually relevant to the current instruction, and can push genuinely important content (the user's actual request, key constraints) further from the position the model attends to most reliably, triggering lost-in-the-middle effects even without hitting any limit. The fix is extracting/summarizing tool results to their relevant fields before insertion, not just confirming total tokens fit.</p></div><div class="followup">Follow-up: how would you measure "relevance density" of a context window quantitatively rather than just inspecting it manually?</div></details>
+        <details class="qa"><summary>How would you decide, for a specific agent, what counts as "safe to selectively forget" versus what must be retained indefinitely?</summary><div class="answer"><p>Classify context by whether it's resolved (a completed sub-task whose outcome has already been extracted into structured state, or a tool result whose relevant fields were already captured) versus still-open (an active constraint, an unresolved question, a decision that later steps still depend on). Resolved content whose relevant conclusions are already captured elsewhere can be safely dropped from raw history; still-open content cannot be forgotten without risking the agent re-asking resolved questions or violating a constraint it no longer "remembers." This requires the system to explicitly track resolution status as part of its state, not infer it implicitly from recency.</p></div><div class="followup">Follow-up: what's the risk of getting this classification wrong in the "too aggressive" direction?</div></details>
+      </div>
+
+      <div class="qa-level advanced">
+        <h4>Advanced</h4>
+        <details class="qa"><summary>Design a context engineering architecture for an agent running an 8-hour autonomous task (e.g. a large codebase migration) that must remain coherent and low-cost throughout.</summary><div class="answer"><p>Layer multiple mechanisms: (1) structured state extraction for the task's plan/progress/decisions, updated incrementally every step rather than relying on buried history; (2) reference-don't-repeat storage for every file read/tool result, with content fetched fresh only when a step actually needs to re-examine it; (3) a rolling summary for conversational/reasoning history older than the last several steps, using refine-style updates anchored to the structured state so dilution of task-critical facts is caught against that state rather than drifting silently; (4) periodic checkpointing of the full state to persistent storage so the session can resume after an interruption without replaying the entire history; (5) explicit token accounting with alerts/automatic compression triggers before hitting hard limits, rather than reactive handling of context-length errors. Critically, treat the structured state as the source of truth for "what has been decided" and treat conversational history as disposable/compressible, since the structured state is what both the model and a human auditor would actually need to understand progress at any point.</p></div><div class="followup">Follow-up: how would you validate that the structured state hasn't silently drifted from what actually happened, over an 8-hour run?</div></details>
+        <details class="qa"><summary>Explain the relationship between context engineering and the "credit-assignment problem" in multi-step agent tasks (see the agents-from-first-principles chapter) — how does poor context management make credit assignment harder?</summary><div class="answer"><p>Credit assignment requires being able to trace a bad outcome back to the specific step/decision that caused it. If context management has summarized, truncated, or dropped the specific intermediate reasoning and tool results from earlier steps, that trace becomes impossible to reconstruct after the fact — you're left with only the compressed residue, not the actual decision trail. This creates a tension: aggressive compression (needed to stay within budget) actively destroys the observability needed to debug the agent's own failures, so production systems often need a separate, less-compressed audit log/trace (see LLM Observability & Tracing) distinct from the compressed context actually fed back into the model on subsequent turns.</p></div><div class="followup">Follow-up: why can't the audit log and the live context simply be the same artifact?</div></details>
+        <details class="qa"><summary>How would you quantitatively measure whether a context compression strategy is actually preserving the information that matters, rather than just reducing token count?</summary><div class="answer"><p>Define a set of "must-survive" facts for representative sessions (specific constraints, decisions, or details a correct continuation would need) and run an automated check after each compression pass: can those facts still be recovered from the compressed context (via direct presence, or via an LLM-as-judge check asking "does this summary preserve fact X")? Track this recovery rate as a regression-detectable metric across changes to the summarization/compression pipeline, the same way a RAG system tracks recall@k — token-count reduction alone tells you nothing about information loss, and without this check compression quality regressions are invisible until a user-facing failure surfaces them.</p></div><div class="followup">Follow-up: how would you choose which facts belong in the "must-survive" set without hand-curating it for every possible session?</div></details>
+        <details class="qa"><summary>A multi-agent system has several sub-agents each with their own context window collaborating on one task. How does context engineering change when context must be shared/handed off between agents rather than managed within a single session?</summary><div class="answer"><p>Hand-off context needs to be more structured and self-contained than within-session context, since a receiving sub-agent has no access to the sending agent's full history/reasoning — it only gets whatever is explicitly passed. This pushes toward structured state extraction as the primary hand-off mechanism (a defined schema of "task, constraints, progress so far, specific sub-task for you") rather than passing raw conversation history, and requires the sending agent to proactively summarize for an audience that doesn't share its context, which is a different skill than summarizing for your own future turns. It also surfaces a new failure mode: a sub-agent silently losing fidelity because the hand-off schema didn't capture something the sending agent considered too obvious to state explicitly.</p></div><div class="followup">Follow-up: how would you test whether a hand-off schema is actually complete enough for the receiving agent to succeed, before relying on it in production?</div></details>
+        <details class="qa"><summary>Discuss the tension between caching (e.g. prompt caching for cost/latency) and aggressive context compression — how do they pull in opposite directions, and how would you reconcile them?</summary><div class="answer"><p>Prompt caching rewards keeping a stable, unchanged prefix of context across calls (so the cached portion is reused rather than reprocessed), which favors leaving early context untouched. Aggressive compression rewards continuously rewriting/shrinking older context to save tokens, which invalidates the cache prefix on every compression pass, forcing expensive full reprocessing. Reconciling the two means structuring context so the frequently-reused, rarely-changing parts (system prompt, tool schemas, stable task description) sit in a cacheable prefix that's left untouched, while only the genuinely dynamic suffix (recent turns, current step's working data) is subject to per-turn compression — deliberately separating "what's cheap to keep stable" from "what actually needs active budget management" rather than compressing the entire context uniformly.</p></div><div class="followup">Follow-up: how would you measure whether a given compression policy is net-negative on cost once cache invalidation is accounted for?</div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment">
+        <span class="level-tag">Beginner (30-60 min)</span>
+        <h4>Map-reduce vs. refine summarization comparison</h4>
+        <p>Take a long document (3,000+ words, split into 5-6 natural sections) and summarize it two ways using
+        an LLM API of your choice: map-reduce (summarize each section independently, then summarize the
+        summaries) and refine (process sections sequentially, updating one running summary).</p>
+        <ul>
+          <li>Pick a document with at least one fact stated early that's only meaningful combined with a fact
+          stated much later.</li>
+          <li>Check whether each strategy's final summary preserves that cross-section connection.</li>
+        </ul>
+        <p><strong>Acceptance criteria:</strong> both final summaries produced, plus a written comparison
+        specifically addressing whether the cross-section fact survived in each.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>A biography or technical history document with an early "setup" fact and a later "payoff" fact that depends on it works well for this test.</p></div></details>
+        <p><strong>Bonus:</strong> add a hierarchical/iterative version and compare all three.</p>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Intermediate (2-4 hrs)</span>
+        <h4>Token budget manager for a simulated multi-turn session</h4>
+        <p>Extend the <code>ContextBudget</code>/<code>assemble_context</code> code from this chapter into a
+        working budget manager for a simulated 30-turn conversation (you can script synthetic turns of varying
+        length, including a few deliberately oversized "tool result" turns).</p>
+        <ul>
+          <li>Implement the rolling summary: when turns age out of the verbatim window, fold them into a running
+          summary via an actual LLM call (refine-style).</li>
+          <li>Track and print total tokens used per turn and confirm the budget is never exceeded.</li>
+          <li>Include at least one oversized tool-result turn and show it being truncated/summarized rather than
+          blowing the budget.</li>
+        </ul>
+        <p><strong>Acceptance criteria:</strong> a running script that processes all 30 turns without ever
+        exceeding the configured budget, with a log showing what got summarized/truncated and when.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>Use the real tokenizer for your chosen model (e.g. tiktoken for OpenAI models) rather than the char/4 heuristic once you're validating actual budget compliance.</p></div></details>
+        <p><strong>Bonus:</strong> add a "must-survive facts" check (per the advanced interview question) that verifies a specific fact from turn 2 is still recoverable from the rolling summary at turn 30.</p>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Advanced (1-2 days)</span>
+        <h4>Reference-don't-repeat agent with structured state tracking</h4>
+        <p>Build a small tool-using agent (can use a simple framework or raw API calls) that performs a
+        multi-step task involving several tool calls returning sizable results (e.g. reading multiple files, or
+        calling a few different APIs), and implement a context architecture using reference-don't-repeat storage
+        plus structured state extraction instead of naive full-history concatenation.</p>
+        <ul>
+          <li>Tool results are stored once with an ID and referenced, not re-inserted into history on every
+          subsequent turn.</li>
+          <li>A structured state object (constraints, decisions, progress) is updated incrementally and used to
+          inform the agent's next action instead of relying on raw history recall.</li>
+          <li>Run the same multi-step task with (a) your context-engineered version and (b) a naive
+          full-history-concatenation baseline, and compare total tokens consumed and whether the agent
+          correctly recalls an early-stated constraint by the final step.</li>
+        </ul>
+        <p><strong>Acceptance criteria:</strong> both versions run to completion on the same task, with a
+        reported comparison of total tokens used and constraint-recall correctness, demonstrating the
+        context-engineered version wins on at least one dimension.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>Pick a task where an early constraint (e.g. "never modify files in the /legacy directory") is easy to check for violation at the end — this makes the comparison's pass/fail criterion unambiguous.</p></div></details>
+        <p><strong>Bonus:</strong> add a deliberate interruption/resume (kill and restart the agent process mid-task) and show the structured state checkpoint allowing it to resume correctly without replaying full history.</p>
+      </div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet">
+        <ul>
+          <li>Context engineering = deciding what goes into the window each turn under a budget; prompt engineering = optimizing the instruction text. Different disciplines, both needed.</li>
+          <li>Map-reduce: parallel, independent chunks, risks losing cross-chunk connections.</li>
+          <li>Refine: sequential, preserves continuity, risks progressive dilution of early details.</li>
+          <li>Hierarchical/iterative summarization: middle path, groups then reduces in a tree.</li>
+          <li>Tool schemas are a fixed recurring cost every turn — don't register tools "just in case."</li>
+          <li>Reference-don't-repeat: store large tool results/documents once, reference by ID, fetch on demand.</li>
+          <li>Structured state extraction beats prose summarization for tracking decisions/constraints reliably.</li>
+          <li>A bigger context window doesn't eliminate the need for this — relevance density matters more than fitting under a limit.</li>
+          <li>Separate the compressed live context from a less-compressed audit trail — compression that helps the model can destroy debuggability.</li>
+          <li>Measure compression quality with "must-survive facts" recovery checks, not just token-count reduction.</li>
+        </ul>
+      </div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://arxiv.org/abs/2307.03172">Lost in the Middle: How Language Models Use Long Contexts (Liu et al., 2023)</a></li>
+        <li><a href="https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents">Anthropic: Effective context engineering for AI agents</a></li>
+        <li><a href="https://python.langchain.com/docs/tutorials/summarization/">LangChain: summarization strategies (map-reduce, refine)</a></li>
+        <li><a href="https://docs.anthropic.com/en/docs/build-with-claude/prompt-caching">Anthropic: prompt caching documentation</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="09-vector-databases-and-rag.html"><span class="dir">← Previous</span>Vector Databases & RAG</a>
+        <a class="next" href="11-ai-agents-from-first-principles.html"><span class="dir">Next →</span>AI Agents from First Principles</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · Machine Learning & AI</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-typescript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "15-machine-learning-ai", chapterKey: "10-context-engineering" });</script>
+</body>
+</html>

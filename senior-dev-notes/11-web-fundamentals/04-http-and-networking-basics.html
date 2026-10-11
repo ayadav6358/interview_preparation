@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HTTP & Networking Basics — Web Fundamentals — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">Web Fundamentals</a><span class="sep">›</span>HTTP & Networking Basics</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>HTTP &amp; Networking Basics: Requests, Status Codes, Headers, Cookies, CORS</h1>
+      <p class="meta-line"><span>⏱ 2 hrs</span><span>📍 Chapter 4 of 6</span></p>
+      <p><strong>One-line summary:</strong> Every API call you've ever made is an HTTP request/response pair governed by precise rules around status codes, headers, cookies, and the same-origin policy — CORS in particular is one of the most-misunderstood "basic" topics and a reliable interview filter.</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>You've debugged a thousand failed `fetch()` calls. The senior-level bar isn't "I can call an API" — it's "I can read a raw response and immediately know whether this is a CORS problem, a cookie `SameSite` problem, a caching problem, or an actual server bug, from the headers alone." CORS especially is asked constantly because it's genuinely confusing (it's enforced by the browser, not the server, and the error message is deliberately vague for security reasons) and because getting it wrong in production causes real, embarrassing outages. This chapter is foundational to <a href="../03-react-nextjs-advanced/index.html">React/Next.js Advanced</a> (data fetching, SSR cookies) and <a href="../04-nodejs-advanced/index.html">Node.js Advanced</a> (building the server side of these same requests).</p>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>Builds on <a href="02-javascript-fundamentals.html">Chapter 2 (Promises/async-await for fetch)</a> and <a href="03-dom-and-browser.html">Chapter 3 (browser environment)</a>. Directly assumed by <a href="../03-react-nextjs-advanced/index.html">React/Next.js Advanced</a> and <a href="../04-nodejs-advanced/index.html">Node.js Advanced</a> for building/consuming APIs.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="request-response">Request/response anatomy</h3>
+      <p>An HTTP request has: a method (verb), a path, headers, and optionally a body. A response has: a status code, headers, and optionally a body. HTTP is <strong>stateless</strong> by design — the server retains no memory of previous requests from the same client unless state is explicitly carried (cookies, tokens, session IDs) in each request. Methods carry precise semantics senior devs are expected to know exactly: <strong>GET</strong> (safe — no side effects — and idempotent), <strong>POST</strong> (neither safe nor idempotent — calling it twice may create two resources), <strong>PUT</strong> (idempotent — replaces the whole resource; calling it N times has the same effect as once), <strong>PATCH</strong> (partial update, not guaranteed idempotent depending on the patch semantics), <strong>DELETE</strong> (idempotent — deleting an already-deleted resource is still "deleted"). "Idempotent" means repeating the same request produces the same server state, not that the response is identical.</p>
+
+      <h3 id="status-codes">Status codes: the precise groupings</h3>
+      <p>1xx informational (rare in app code, e.g. `101 Switching Protocols` for WebSocket upgrade). 2xx success: `200 OK`, `201 Created` (should include a `Location` header pointing to the new resource), `204 No Content` (success, deliberately empty body — common for DELETE). 3xx redirection: `301` permanent (clients/caches should remember and reuse the new URL), `302`/`307` temporary (302 historically allowed method-changing redirects, 307 strictly preserves the original method — a subtle but real distinction that breaks POST redirects differently across the two). 4xx client error: `400` bad request (malformed), `401` unauthenticated (you are not who you say you are, or haven't said), `403` unauthorized/forbidden (you are known but not allowed), `404` not found, `409` conflict (e.g., version mismatch, duplicate unique key), `422` unprocessable entity (semantically invalid, e.g. failed validation despite well-formed JSON), `429` too many requests (rate limited, should include `Retry-After`). 5xx server error: `500` generic, `502` bad gateway (upstream server gave an invalid response), `503` service unavailable (temporarily down/overloaded, should include `Retry-After`), `504` gateway timeout. The 401 vs 403 distinction is one of the most commonly botched in real APIs and a frequent interview question.</p>
+
+      <h3 id="headers-cookies">Headers and cookies, precisely</h3>
+      <p>Key request headers: `Authorization` (bearer tokens/basic auth), `Content-Type` (what the body actually is), `Accept` (what the client wants back), `If-None-Match`/`If-Modified-Since` (conditional requests for caching, paired with response `ETag`/`Last-Modified`). Key response headers: `Set-Cookie`, `Cache-Control` (`no-store` never cache, `no-cache` cache but revalidate every time, `max-age=N` cache for N seconds, `private` vs `public` for shared caches/CDNs), `Content-Encoding` (gzip/br compression).</p>
+      <p>Cookie attributes senior devs must know exactly: <strong>`HttpOnly`</strong> (inaccessible to JS via `document.cookie` — the primary XSS mitigation for session cookies), <strong>`Secure`</strong> (only sent over HTTPS), <strong>`SameSite`</strong> — `Strict` (never sent cross-site, even on top-level navigation from another site), `Lax` (sent on top-level navigation like clicking a link, but not on cross-site subresource requests or most fetches — the modern browser default), `None` (sent on all cross-site requests, but requires `Secure`). `SameSite=Lax` as the default is precisely what killed most classic CSRF attacks without requiring any app-level CSRF token for simple cases — a senior-relevant detail many miss.</p>
+
+      <h3 id="cors">CORS: enforced by the browser, not the server</h3>
+      <p>The Same-Origin Policy blocks a page from script-reading responses from a different origin (scheme+host+port) unless the server opts in via CORS headers. Critically: <strong>the request still reaches the server and the server still processes it</strong> — CORS only blocks the <em>browser</em> from letting your JS read the response. This is why "it works in Postman but not the browser" is the single most common CORS confusion: Postman isn't a browser and doesn't enforce same-origin policy at all.</p>
+      <p>A <strong>simple request</strong> (GET/HEAD/POST with only a small whitelist of headers and content-types like `text/plain`/`form-urlencoded`/`multipart`) goes straight through, and the browser just checks the `Access-Control-Allow-Origin` response header before exposing the response to JS. Anything else (custom headers like a bearer `Authorization`, `Content-Type: application/json`, methods like `PUT`/`DELETE`/`PATCH`) triggers a <strong>preflight</strong>: the browser automatically sends an `OPTIONS` request first, asking "would you allow this actual request?" via `Access-Control-Request-Method`/`-Headers`; the server must respond with matching `Access-Control-Allow-Method`/`-Headers`/`-Origin` for the real request to even be attempted. `Access-Control-Allow-Credentials: true` (server) + `credentials: 'include'` (client fetch) are both required together to send cookies cross-origin — and critically, `Access-Control-Allow-Origin` cannot be the wildcard `*` when credentials are involved; it must echo back the specific requesting origin.</p>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>A browser-initiated cross-origin request that needs a preflight flows as: (1) browser sees the JS wants to make a "non-simple" cross-origin request, (2) browser automatically fires an `OPTIONS` request with no body, carrying `Access-Control-Request-Method` and `-Headers`, (3) server inspects these and responds with its allowed origins/methods/headers as response headers (no actual business logic runs for this request), (4) browser checks the response against what the real request needs — if everything matches, (5) the browser fires the actual request and, on response, checks `Access-Control-Allow-Origin` again before handing the response body to your JS code; if it doesn't match, the browser throws a CORS error in the console and your `.catch()`/promise rejection fires, even though the server may have returned `200 OK` — the data was received over the wire but withheld from your JS.</p>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+sequenceDiagram
+    participant Browser
+    participant Server
+    Note over Browser,Server: Non-simple cross-origin request (e.g. PUT with JSON body)
+    Browser->>Server: OPTIONS /resource (preflight)<br/>Access-Control-Request-Method: PUT<br/>Access-Control-Request-Headers: content-type
+    Server-->>Browser: 204 No Content<br/>Access-Control-Allow-Origin: https://app.example.com<br/>Access-Control-Allow-Methods: PUT<br/>Access-Control-Allow-Headers: content-type
+    Browser->>Browser: Check preflight response matches intended request
+    Browser->>Server: PUT /resource (the real request, with body)
+    Server-->>Browser: 200 OK + data
+    Browser->>Browser: Check Access-Control-Allow-Origin again<br/>before exposing response to JS
+      </div>
+      <div class="mermaid">
+flowchart TD
+    A["Request status code"] --> B{"1xx / 2xx / 3xx / 4xx / 5xx?"}
+    B -->|2xx| C["Success — 200 OK, 201 Created, 204 No Content"]
+    B -->|3xx| D["Redirect — 301 permanent, 302/307 temporary"]
+    B -->|4xx| E["Client error — fix the request"]
+    E --> F["401 = who are you? (unauthenticated)"]
+    E --> G["403 = I know you, you can't (unauthorized)"]
+    E --> H["429 = slow down (rate limited)"]
+    B -->|5xx| I["Server error — 500 generic, 502/503/504 upstream/overload/timeout"]
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-javascript">// fetch with explicit error handling — fetch() does NOT reject on 4xx/5xx!
+async function getUser(id) {
+  const response = await fetch(`/api/users/${id}`);
+  if (!response.ok) { // response.ok is false for status >= 400
+    // fetch only rejects on network failure (DNS, offline, CORS block) — not HTTP error codes
+    throw new Error(`Request failed: ${response.status} ${response.statusText}`);
+  }
+  return response.json();
+}
+
+// Sending cookies cross-origin requires BOTH sides to opt in
+fetch('https://api.example.com/profile', {
+  credentials: 'include', // client: actually send cookies cross-origin
+});
+// Server MUST respond with:
+//   Access-Control-Allow-Credentials: true
+//   Access-Control-Allow-Origin: https://app.example.com   (NOT '*' — wildcard is rejected with credentials)
+</code></pre>
+      <pre><code class="language-bash"># Reading CORS/cache behavior directly from raw headers with curl -i
+curl -i -X OPTIONS https://api.example.com/resource \
+  -H "Origin: https://app.example.com" \
+  -H "Access-Control-Request-Method: PUT" \
+  -H "Access-Control-Request-Headers: content-type"
+
+# Expected preflight response headers (what to look for):
+#   HTTP/1.1 204 No Content
+#   Access-Control-Allow-Origin: https://app.example.com
+#   Access-Control-Allow-Methods: GET, POST, PUT, DELETE
+#   Access-Control-Allow-Headers: content-type
+#   Access-Control-Max-Age: 86400   (cache the preflight result for a day)
+</code></pre>
+      <pre><code class="language-javascript">// Conditional caching: ETag round-trip
+// 1st request
+// Response: 200 OK, ETag: "abc123"
+// 2nd request (browser automatically adds this if cached)
+// Request:  If-None-Match: "abc123"
+// Response: 304 Not Modified, empty body — browser reuses its cached copy
+</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4><p>A team splits their frontend (`app.example.com`) and API (`api.example.com`) onto different subdomains for independent deployment. After launch, login works in every manual test via Postman/curl but silently fails in the real browser app — specifically, the session cookie never gets attached to subsequent requests, so every "authenticated" call 401s right after a successful login. The root cause is a stacked CORS + cookie misconfiguration: the API set `Access-Control-Allow-Origin: *` (convenient during early development) while the client used `credentials: 'include'` — browsers reject this combination outright since a wildcard origin cannot be paired with credentials, for the obvious security reason that `*` would let literally any site read a user's authenticated response. The fix requires three coordinated changes: the API must echo back the specific requesting origin instead of `*`, set `Access-Control-Allow-Credentials: true`, and the cookie itself must be set with `SameSite=None; Secure` since it's now genuinely cross-site between subdomains — missing any one of these three leaves the exact same symptom.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Assuming `fetch()` throws/rejects on a 404 or 500. It does not — `fetch()` only rejects on true network failures (DNS failure, offline, CORS block). A `404` or `500` is a "successful" fetch from the Promise's perspective; you must check `response.ok` or `response.status` yourself and throw explicitly if you want error-path handling.</p></div>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Treating a CORS error as a server-side problem to "fix on the backend only," without realizing the request already succeeded server-side — the data was computed and sent, the browser just withheld it from JS. This matters for anything with side effects: a blocked POST may have still created the resource server-side even though the client sees only a CORS error and assumes it failed, leading to duplicate-submission bugs on retry.</p></div>
+      <ul>
+        <li>Always check `response.ok`/`response.status` explicitly after `fetch()` — never assume a resolved promise means success.</li>
+        <li>Know the 401 vs 403 distinction cold: 401 = "I don't know who you are," 403 = "I know who you are and the answer is no."</li>
+        <li>For cross-site cookies, all three must align: `SameSite=None; Secure` on the cookie, a specific echoed origin (never `*`) plus `Access-Control-Allow-Credentials: true` on the server, and `credentials: 'include'` on the client.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs: When to Use vs When NOT To</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>PUT</td><td>Replacing a whole resource idempotently</td><td>Partial updates, or creation where the server assigns the ID</td><td>PATCH, POST</td></tr>
+        <tr><td>Cookie-based auth</td><td>Same-site or well-configured cross-site apps needing HttpOnly protection from XSS</td><td>Pure API-to-API/service calls, mobile-native clients</td><td>Bearer tokens (Authorization header)</td></tr>
+        <tr><td>`Access-Control-Allow-Origin: *`</td><td>Fully public, non-credentialed API (e.g., open data)</td><td>Any endpoint using cookies/credentials</td><td>Echo specific allowed origin(s)</td></tr>
+        <tr><td>302 redirect</td><td>Legacy compatibility, allowing method change on redirect</td><td>Need guaranteed method/body preservation</td><td>307 (temporary, strict) / 308 (permanent, strict)</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic"><h4>Basic</h4>
+        <details class="qa"><summary>What does "idempotent" mean for an HTTP method, and which common methods are idempotent?</summary><div class="answer"><p>Repeating the same request produces the same end server state as doing it once. GET, PUT, and DELETE are idempotent; POST is not (calling it twice can create two resources); PATCH's idempotency depends on the specific patch semantics.</p></div></details>
+        <details class="qa"><summary>What's the difference between 401 and 403?</summary><div class="answer"><p>401 Unauthorized actually means "unauthenticated" — the server doesn't know who you are (missing/invalid credentials). 403 Forbidden means the server knows who you are but you don't have permission for this action/resource.</p></div></details>
+        <details class="qa"><summary>Does `fetch()` reject its promise on a 404 response?</summary><div class="answer"><p>No. `fetch()` only rejects on network-level failures. A 404 resolves successfully with `response.ok === false` — you must check status explicitly.</p></div></details>
+        <details class="qa"><summary>What does the `HttpOnly` cookie attribute do?</summary><div class="answer"><p>Prevents the cookie from being accessed via `document.cookie` in JavaScript, which mitigates session-cookie theft via XSS.</p></div></details>
+        <details class="qa"><summary>What is a CORS preflight request?</summary><div class="answer"><p>An automatic `OPTIONS` request the browser sends before a "non-simple" cross-origin request, asking the server whether the actual request (method/headers) will be allowed, before sending it.</p></div></details>
+        <details class="qa"><summary>Is CORS enforced by the client or the server?</summary><div class="answer"><p>Enforced by the browser (the client). The server opts in via response headers, but the actual blocking of the JS from reading the response happens in the browser — the request itself still reaches the server and is processed.</p></div></details>
+      </div>
+      <div class="qa-level medium"><h4>Medium</h4>
+        <details class="qa"><summary>A request works fine in Postman/curl but fails with a CORS error only in the browser. Explain exactly why, and what that tells you about where the request actually got processed.</summary><div class="answer"><p>CORS is a browser-enforced policy, not a server/network restriction — tools like curl/Postman don't implement the same-origin policy at all. The request reached the server and was processed normally; the browser simply withheld the response from the page's JS because the response didn't carry the required `Access-Control-Allow-Origin` header matching the page's origin.</p></div></details>
+        <details class="qa"><summary>What three things must align correctly to send cookies on a cross-origin fetch request?</summary><div class="answer"><p>The cookie itself must be set with `SameSite=None; Secure`; the server response must include a specific echoed `Access-Control-Allow-Origin` (not a wildcard) plus `Access-Control-Allow-Credentials: true`; and the client's fetch call must include `credentials: 'include'`. Missing any one silently breaks cookie delivery.</p></div></details>
+        <details class="qa"><summary>Why can't `Access-Control-Allow-Origin: *` be combined with credentialed requests?</summary><div class="answer"><p>If a wildcard origin were allowed alongside credentials, any arbitrary website could make a credentialed request (with the user's cookies) to the API and read the authenticated response — defeating the entire purpose of same-origin protection. The spec explicitly forbids this combination; browsers reject it even if a server mistakenly sends both.</p></div></details>
+        <details class="qa"><summary>What's the practical difference between `Cache-Control: no-cache` and `no-store`?</summary><div class="answer"><p>`no-cache` allows the response to be cached but requires revalidation (e.g., via ETag/If-None-Match) with the server before reuse. `no-store` forbids caching entirely — the response must be refetched fully every time, never stored anywhere.</p></div></details>
+        <details class="qa"><summary>Why does `SameSite=Lax` as a default break fewer things than `Strict`, while still stopping most CSRF attacks?</summary><div class="answer"><p>`Lax` still sends the cookie on top-level navigations (clicking a link to your site from elsewhere), preserving normal "click a link and you're still logged in" UX, while blocking it on cross-site subresource requests and most programmatic cross-site POSTs — which is exactly the vector classic CSRF attacks rely on. `Strict` would also block the cookie on simple top-level navigation, breaking legitimate flows like following an email link while logged in.</p></div></details>
+      </div>
+      <div class="qa-level advanced"><h4>Advanced</h4>
+        <details class="qa"><summary>Design the CORS and cookie configuration for a company splitting a monolith into `app.company.com` (frontend) and `api.company.com` (backend), while keeping session-based auth and protecting against CSRF.</summary><div class="answer"><p>Cookie: `Set-Cookie: session=...; HttpOnly; Secure; SameSite=None` (required since it's now cross-subdomain, hence cross-site per browser rules) — but `SameSite=None` alone reopens CSRF risk that `Lax` used to mitigate for free, so add an explicit CSRF token (double-submit cookie or synchronizer token) validated server-side on state-changing requests. Server CORS: echo `Access-Control-Allow-Origin: https://app.company.com` exactly (never `*`), `Access-Control-Allow-Credentials: true`, and explicitly list allowed methods/headers for preflight. Client: `credentials: 'include'` on every request needing the session.</p></div></details>
+        <details class="qa"><summary>Why does a blocked CORS POST request still potentially create a resource server-side, and what design pattern protects against the resulting duplicate-submission risk?</summary><div class="answer"><p>CORS blocking happens entirely client-side after the response returns — the server received, processed, and responded to the request before the browser decided to withhold the response from JS. If the client then retries blindly (assuming failure), it may create duplicate resources. The protection is a client-supplied idempotency key sent as a header/field, which the server uses to detect and safely no-op a retried request for an operation it already completed, regardless of whether the client "saw" the original success.</p></div></details>
+        <details class="qa"><summary>Explain `Access-Control-Max-Age` and its security/performance tradeoff.</summary><div class="answer"><p>It tells the browser how long (in seconds) it may cache a preflight response and skip re-sending `OPTIONS` for matching subsequent requests — improving performance by avoiding a round trip per request. The tradeoff is that if the server's CORS policy changes (e.g., revoking an origin) before this cache expires, browsers that already cached the old preflight approval will continue allowing the now-revoked origin until the cache naturally expires, so overly long values create a window where a CORS policy change isn't actually enforced immediately for returning clients.</p></div></details>
+        <details class="qa"><summary>A 307 redirect is used instead of 302 for a POST-heavy API gateway migration. Why would the team have made that specific choice?</summary><div class="answer"><p>307 strictly guarantees the redirected request preserves the original method and body — critical for a POST that carries a payload, since some clients historically "helpfully" converted a redirected POST into a GET on a 302 (dropping the body), causing silent data loss. 307 removes that ambiguity entirely at the protocol level, which matters specifically because the migration involves re-pointing POST endpoints to a new host.</p></div></details>
+        <details class="qa"><summary>How would you debug a production incident where users intermittently get logged out, and the suspected cause is cookie/CORS misconfiguration rather than an actual session expiry bug?</summary><div class="answer"><p>Inspect the raw `Set-Cookie` response header for the exact `SameSite`/`Secure`/`Domain`/`Path` attributes actually sent (not just what the code intends to send — a misconfigured reverse proxy or CDN can strip/rewrite headers); check whether the affected users share a pattern (specific browser enforcing stricter third-party cookie policies, a specific subdomain, or an iframe/embedded context where third-party cookie blocking applies); and verify the preflight response's `Access-Control-Allow-Origin` exactly matches the request `Origin` byte-for-byte (including scheme and port) for every affected origin, since even a trailing slash or `www.` mismatch silently breaks the whole flow.</p></div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment"><span class="level-tag">Beginner (30-60 min)</span><h4>Status code and header scavenger hunt</h4><p>Using your browser's Network tab, visit 5 different real websites and record: at least one 2xx, 3xx, 4xx response in the wild, the exact `Cache-Control` header on a static asset, and the `SameSite` attribute on at least 2 different cookies set by those sites.</p><ul><li>Explain in one sentence why each status code you found makes sense for that request.</li><li>Note any cookie using `SameSite=None` and hypothesize why (likely a cross-site embedded widget/ad/analytics).</li></ul><p><strong>Acceptance criteria:</strong> A table of findings with status code, header value, and a correct one-line explanation for each.</p><details class="qa"><summary>Hints</summary><div class="answer"><p>Open DevTools → Network tab → reload the page → click individual requests → check the Headers panel for both request and response headers.</p></div></details><p><strong>Bonus:</strong> Find a 304 Not Modified response and identify the `ETag`/`If-None-Match` pair that produced it.</p></div>
+      <div class="assignment"><span class="level-tag">Intermediate (2-4 hrs)</span><h4>Build and break a CORS setup</h4><p>Stand up two tiny local servers on different ports (simulating different origins) — one serving a static HTML page with a `fetch()` call, one serving a JSON API. Deliberately misconfigure CORS first (missing header, wildcard + credentials), observe the exact browser console error, then fix it correctly including a credentialed cookie-based request.</p><ul><li>Reproduce and screenshot/record at least 2 distinct CORS failure modes and their exact console error text.</li><li>Get a fully working credentialed cross-origin GET and POST, including correct preflight handling for the POST.</li></ul><p><strong>Acceptance criteria:</strong> Working cross-origin fetch with cookies, plus a written explanation of each failure mode you deliberately caused and fixed.</p><details class="qa"><summary>Hints</summary><div class="answer"><p>Use any minimal HTTP server (even Node's built-in `http` module) on two different ports — different ports alone are a different origin, you don't need different hostnames.</p></div></details><p><strong>Bonus:</strong> Add a custom header to the request (e.g., `X-Request-Id`) and observe the preflight's `Access-Control-Request-Headers` picking it up automatically.</p></div>
+      <div class="assignment"><span class="level-tag">Advanced (1-2 days)</span><h4>Design and document a full auth + CORS architecture for a split frontend/API</h4><p>Write a design document (no need to fully implement, but a working proof-of-concept is encouraged) for a system with `app.example.com` and `api.example.com`, covering: cookie attributes, CORS headers on every endpoint type (public vs authenticated), CSRF protection strategy, and how a mobile app (no cookies/CORS at all) would authenticate against the same API.</p><ul><li>Explicitly justify SameSite choice and the accompanying CSRF mitigation.</li><li>Explain how the mobile client's auth strategy differs from the web client's and why CORS is irrelevant there.</li></ul><p><strong>Acceptance criteria:</strong> A design doc that correctly distinguishes browser-enforced concerns (CORS, SameSite) from concerns that apply regardless of client (token validation, rate limiting), and a proof-of-concept demonstrating the web flow working end-to-end.</p><details class="qa"><summary>Hints</summary><div class="answer"><p>Mobile apps aren't browsers — there's no same-origin policy or CORS enforcement at all for a native HTTP client, so mobile auth is typically a bearer token in an `Authorization` header with no cookie/CORS concerns whatsoever.</p></div></details><p><strong>Bonus:</strong> Add rate limiting (429 + `Retry-After`) and show a client correctly backing off based on that header rather than retrying blindly.</p></div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet"><ul>
+        <li>Idempotent methods: GET, PUT, DELETE. Not idempotent: POST. PATCH depends on semantics.</li>
+        <li>401 = unauthenticated ("who are you?"). 403 = unauthorized ("I know you, no.").</li>
+        <li>`fetch()` only rejects on network failure — always check `response.ok`/`status` yourself for HTTP errors.</li>
+        <li>CORS is browser-enforced; the request still reaches and is processed by the server regardless of whether the browser lets JS read the response.</li>
+        <li>Non-simple cross-origin requests trigger an automatic `OPTIONS` preflight checked against `Access-Control-Allow-*` response headers.</li>
+        <li>Credentialed cross-origin requires all three: `SameSite=None; Secure` cookie, server echoing a specific origin + `Allow-Credentials: true` (never `*` with credentials), and client `credentials: 'include'`.</li>
+        <li>`HttpOnly` blocks JS access to a cookie (XSS mitigation); `Secure` requires HTTPS; `SameSite=Lax` is the modern default CSRF mitigation.</li>
+        <li>`Cache-Control: no-store` never caches; `no-cache` caches but revalidates every time via ETag/Last-Modified.</li>
+        <li>307/308 redirects strictly preserve method+body; 302 historically allowed a method change on redirect.</li>
+      </ul></div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/CORS">MDN — Cross-Origin Resource Sharing (CORS)</a></li>
+        <li><a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Status">MDN — HTTP response status codes</a></li>
+        <li><a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Set-Cookie#samesitesamesite-value">MDN — Set-Cookie and SameSite</a></li>
+        <li><a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/Caching">MDN — HTTP caching</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="03-dom-and-browser.html"><span class="dir">← Previous</span>The DOM & Browser Environment</a>
+        <a class="next" href="05-git-and-version-control.html"><span class="dir">Next →</span>Git & Version Control</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · Web Fundamentals</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-javascript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "11-web-fundamentals", chapterKey: "04-http-and-networking-basics" });</script>
+</body>
+</html>

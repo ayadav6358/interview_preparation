@@ -1,0 +1,656 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MCP Course Notes</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#f7f8fb; --panel:#ffffff; --text:#1d2433; --muted:#5b6478; --line:#e3e7ef;
+  --accent:#c2560c; --accent-soft:#fdf0e6; --code-bg:#0f172a; --code-text:#e2e8f0;
+  --tip:#0f9d6b; --tip-soft:#e6f7f0; --warn:#b91c1c; --warn-soft:#fdecec;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0d1117; --panel:#151b24; --text:#e6e9ef; --muted:#9aa4b6; --line:#263040;
+    --accent:#fb923c; --accent-soft:#2a1a10; --code-bg:#0a0e14; --code-text:#d8dee9;
+    --tip:#34d399; --tip-soft:#10261e; --warn:#f87171; --warn-soft:#2a1414;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0d1117; --panel:#151b24; --text:#e6e9ef; --muted:#9aa4b6; --line:#263040;
+  --accent:#fb923c; --accent-soft:#2a1a10; --code-bg:#0a0e14; --code-text:#d8dee9;
+  --tip:#34d399; --tip-soft:#10261e; --warn:#f87171; --warn-soft:#2a1414;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,system-ui,sans-serif;line-height:1.65;font-size:16px}
+.layout{display:grid;grid-template-columns:280px 1fr;min-height:100vh}
+nav{position:sticky;top:0;height:100vh;overflow-y:auto;background:var(--panel);border-right:1px solid var(--line);padding:20px 14px}
+nav h1{font-size:17px;margin:0 0 4px}
+nav .sub{font-size:12px;color:var(--muted);margin-bottom:14px}
+nav input{width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--text);font:inherit;font-size:14px;margin-bottom:10px}
+nav ol{list-style:none;padding:0;margin:0}
+nav li a{display:flex;gap:8px;padding:6px 8px;border-radius:6px;color:var(--text);text-decoration:none;font-size:14px}
+nav li a:hover{background:var(--accent-soft)}
+nav li a span.n{color:var(--accent);font-weight:600;min-width:22px}
+.phase{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:14px 8px 4px}
+main{padding:32px 40px;max-width:1000px}
+header.hero{margin-bottom:28px}
+header.hero h2{font-size:30px;margin:0 0 8px;line-height:1.25}
+header.hero p{color:var(--muted);margin:0 0 6px}
+section.video{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:28px;margin-bottom:28px;scroll-margin-top:16px}
+.tag{display:inline-block;background:var(--accent-soft);color:var(--accent);font-weight:600;font-size:12px;padding:3px 10px;border-radius:999px;margin-bottom:8px}
+section.video h2{margin:0 0 10px;font-size:24px;line-height:1.3}
+section.video h3{margin:24px 0 8px;font-size:18px}
+section.video h4{margin:16px 0 4px;font-size:15.5px}
+.lead{color:var(--muted);font-size:16.5px}
+ul,ol.inner{padding-left:22px}
+li{margin:4px 0}
+pre{background:var(--code-bg);color:var(--code-text);padding:14px 16px;border-radius:10px;overflow-x:auto;font-family:"JetBrains Mono",monospace;font-size:13.5px;line-height:1.55}
+code{font-family:"JetBrains Mono",monospace;font-size:.9em;background:var(--accent-soft);padding:1px 5px;border-radius:4px}
+pre code{background:none;padding:0;font-size:inherit}
+.diagram{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:14px;margin:12px 0;overflow-x:auto;text-align:center}
+.box{border-radius:10px;padding:12px 16px;margin:14px 0}
+.tip{background:var(--tip-soft);border-left:4px solid var(--tip)}
+.warn{background:var(--warn-soft);border-left:4px solid var(--warn)}
+table{border-collapse:collapse;width:100%;margin:10px 0;font-size:14.5px}
+th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+th{background:var(--accent-soft)}
+.tablewrap{overflow-x:auto}
+.toggle{position:fixed;top:14px;right:14px;z-index:5;border:1px solid var(--line);background:var(--panel);color:var(--text);border-radius:8px;padding:6px 10px;cursor:pointer;font:inherit;font-size:13px}
+.menu-btn{display:none}
+@media (max-width:860px){
+  .layout{grid-template-columns:1fr}
+  nav{position:fixed;inset:0 25% 0 0;transform:translateX(-100%);transition:transform .2s;z-index:10;height:100%}
+  nav.open{transform:none;box-shadow:0 0 40px rgba(0,0,0,.4)}
+  .menu-btn{display:block;position:fixed;top:14px;left:16px;z-index:11;border:1px solid var(--line);background:var(--panel);color:var(--text);border-radius:8px;padding:6px 10px;font:inherit;font-size:13px}
+  main{padding:64px 16px 24px}
+  section.video{padding:18px}
+  header.hero h2{font-size:24px}
+}
+</style>
+</head>
+<body>
+<button class="menu-btn" id="menuBtn">☰ Topics</button>
+<button class="toggle" id="themeBtn">◐ Theme</button>
+<div class="layout">
+<nav id="nav">
+  <h1>MCP — 8 Videos</h1>
+  <div class="sub">Model Context Protocol notes with diagrams</div>
+  <input id="search" placeholder="Search topics…">
+  <ol id="toc">
+    <div class="phase">Concepts</div>
+    <li><a href="#v1"><span class="n">1</span>What is MCP &amp; Why</a></li>
+    <li><a href="#v2"><span class="n">2</span>MCP Architecture</a></li>
+    <li><a href="#v3"><span class="n">3</span>Server Primitives</a></li>
+    <li><a href="#v4"><span class="n">4</span>Protocol, Lifecycle &amp; Transports</a></li>
+    <div class="phase">Building</div>
+    <li><a href="#v5"><span class="n">5</span>Build a Local MCP Server</a></li>
+    <li><a href="#v6"><span class="n">6</span>Remote MCP Server &amp; Deploy</a></li>
+    <li><a href="#v7"><span class="n">7</span>Build an MCP Client</a></li>
+    <div class="phase">Advanced</div>
+    <li><a href="#v8"><span class="n">8</span>Advanced Features &amp; Security</a></li>
+  </ol>
+</nav>
+
+<main>
+<header class="hero">
+  <span class="tag">Course map</span>
+  <h2>MCP: Complete Topic &amp; Subtopic Notes</h2>
+  <p>8 sections covering the Model Context Protocol: why it exists → architecture → primitives → protocol internals → building servers (local and remote) → building clients → advanced features and security.</p>
+  <p>Code uses Python: <code>fastmcp</code> for servers, the official <code>mcp</code> SDK and <code>langchain-mcp-adapters</code> for clients.</p>
+  <div class="diagram"><pre class="mermaid">
+flowchart LR
+  A["1 Why MCP"] --> B["2 Architecture&lt;br/&gt;host, client, server"]
+  B --> C["3 Primitives&lt;br/&gt;tools, resources, prompts"]
+  C --> D["4 Protocol&lt;br/&gt;JSON-RPC, lifecycle, transports"]
+  D --> E["5-6 Build servers&lt;br/&gt;local and remote"]
+  E --> F["7 Build clients"]
+  F --> G["8 Advanced + security"]
+  </pre></div>
+</header>
+
+<!-- ================= 1 ================= -->
+<section class="video" id="v1">
+  <span class="tag">Video 1</span>
+  <h2>What is MCP &amp; Why Do We Need It?</h2>
+  <p class="lead">MCP (Model Context Protocol) is an open standard, introduced by Anthropic in November 2024, that defines <b>one common way for AI applications to connect to external tools and data</b>. Often described as "USB-C for AI apps".</p>
+
+  <h3>1. The evolution of AI apps</h3>
+  <div class="diagram"><pre class="mermaid">
+flowchart LR
+  A["Chatbot&lt;br/&gt;only training knowledge"] --> B["Copy-paste context&lt;br/&gt;user pastes docs into chat"]
+  B --> C["Function calling / plugins&lt;br/&gt;each app writes custom integrations"]
+  C --> D["MCP&lt;br/&gt;standard plug for any tool"]
+  </pre></div>
+  <ul>
+    <li><b>Context is everything</b> — an LLM is only as useful as the information and actions it can reach (your files, GitHub, Slack, DB, calendar).</li>
+    <li>Early on, users manually copy-pasted context into the chat — slow and tiring ("context fragmentation").</li>
+    <li>Then came <b>function calling / tool calling</b>: developers wrote integrations so the LLM could call APIs.</li>
+  </ul>
+
+  <h3>2. The problem: M × N integrations</h3>
+  <p>Every AI app (ChatGPT, Claude, Cursor, your own chatbot) had to build its own connector for every service (GitHub, Drive, Slack, Jira…).</p>
+  <div class="diagram"><pre class="mermaid">
+flowchart LR
+  subgraph Before["Without MCP: M x N"]
+    A1["App 1"] --> S1["GitHub"]
+    A1 --> S2["Slack"]
+    A1 --> S3["Drive"]
+    A2["App 2"] --> S1
+    A2 --> S2
+    A2 --> S3
+  end
+  subgraph After["With MCP: M + N"]
+    B1["App 1"] --> P(("MCP"))
+    B2["App 2"] --> P
+    P --> T1["GitHub server"]
+    P --> T2["Slack server"]
+    P --> T3["Drive server"]
+  end
+  </pre></div>
+  <ul>
+    <li>Huge duplicated effort; each integration has different auth, formats and error handling.</li>
+    <li>Maintenance pain when an API changes.</li>
+    <li>Security inconsistencies across custom code.</li>
+  </ul>
+
+  <h3>3. What MCP changes</h3>
+  <ul>
+    <li><b>Service providers</b> write one MCP server; it works with every MCP-compatible app.</li>
+    <li><b>App developers</b> implement the MCP client once; they get access to the whole ecosystem.</li>
+    <li><b>Users</b> plug in new capabilities without waiting for the app vendor.</li>
+  </ul>
+
+  <h3>4. Why it spread fast</h3>
+  <p>Open spec, SDKs in many languages, and adoption by major AI apps and IDEs (Claude, ChatGPT, Cursor, VS Code, and others), plus thousands of community servers.</p>
+  <div class="box tip"><b>Key takeaway:</b> MCP doesn't add new AI intelligence — it standardizes <b>how</b> AI apps get context and take actions, turning M×N custom integrations into M+N.</div>
+</section>
+
+<!-- ================= 2 ================= -->
+<section class="video" id="v2">
+  <span class="tag">Video 2</span>
+  <h2>MCP Architecture — Host, Client, Server</h2>
+  <p class="lead">MCP follows a client-server architecture with three roles.</p>
+  <div class="diagram"><pre class="mermaid">
+flowchart LR
+  subgraph HOST["MCP Host (e.g. Claude Desktop, IDE, your chatbot)"]
+    LLM["LLM"]
+    C1["MCP Client 1"]
+    C2["MCP Client 2"]
+    C3["MCP Client 3"]
+  end
+  C1 &lt;-->|stdio| S1["Local server&lt;br/&gt;File system"]
+  C2 &lt;-->|stdio| S2["Local server&lt;br/&gt;SQLite"]
+  C3 &lt;-->|Streamable HTTP| S3["Remote server&lt;br/&gt;GitHub"]
+  S1 --> D1[("Local files")]
+  S2 --> D2[("Database")]
+  S3 --> D3["GitHub API"]
+  </pre></div>
+
+  <h3>1. Host</h3>
+  <p>The AI application the user interacts with — Claude Desktop, Cursor, VS Code, or your own LangGraph chatbot. It contains the LLM, manages the UI, permissions and user consent, and creates the clients.</p>
+  <h3>2. Client</h3>
+  <p>A component inside the host that maintains a <b>1:1 connection with one server</b>. It handles the protocol: discovering capabilities, sending requests, receiving responses. A host with 3 servers has 3 clients.</p>
+  <h3>3. Server</h3>
+  <p>A program that exposes capabilities (tools, resources, prompts) for one service — e.g. a GitHub server, a Postgres server, an expense-tracker server. It wraps the real API/DB.</p>
+  <h3>4. Local vs Remote servers</h3>
+  <div class="tablewrap"><table>
+    <tr><th></th><th>Local server</th><th>Remote server</th></tr>
+    <tr><td>Runs where</td><td>On the user's machine (as a subprocess of the host)</td><td>On the internet / cloud</td></tr>
+    <tr><td>Transport</td><td>stdio</td><td>Streamable HTTP</td></tr>
+    <tr><td>Good for</td><td>Files, local DB, private tools</td><td>SaaS services, shared team tools</td></tr>
+    <tr><td>Auth</td><td>Usually not needed</td><td>OAuth / API keys</td></tr>
+  </table></div>
+
+  <h3>5. Example flow</h3>
+  <div class="diagram"><pre class="mermaid">
+sequenceDiagram
+  participant U as User
+  participant H as Host + LLM
+  participant C as MCP Client
+  participant S as GitHub MCP Server
+  U->>H: Summarize my open PRs
+  H->>C: LLM chooses tool list_pull_requests
+  C->>S: tools/call list_pull_requests
+  S->>S: call GitHub API
+  S-->>C: result (PR list)
+  C-->>H: tool result
+  H-->>U: Summary of PRs
+  </pre></div>
+  <div class="box tip"><b>Key takeaway:</b> Host = the app, Client = the connector (one per server), Server = the capability provider.</div>
+</section>
+
+<!-- ================= 3 ================= -->
+<section class="video" id="v3">
+  <span class="tag">Video 3</span>
+  <h2>Server Primitives — Tools, Resources, Prompts</h2>
+  <p class="lead">An MCP server can expose three kinds of things. They differ by <b>who controls</b> when they are used.</p>
+  <div class="diagram"><pre class="mermaid">
+flowchart TB
+  S["MCP Server"] --> T["Tools&lt;br/&gt;actions / functions&lt;br/&gt;model-controlled"]
+  S --> R["Resources&lt;br/&gt;read-only data&lt;br/&gt;application-controlled"]
+  S --> P["Prompts&lt;br/&gt;reusable templates&lt;br/&gt;user-controlled"]
+  </pre></div>
+
+  <h3>1. Tools (model-controlled)</h3>
+  <p>Functions the LLM can decide to call — they can <b>do</b> things and have side effects: create a GitHub issue, query a DB, send a message, add an expense.</p>
+  <ul>
+    <li>Each tool has a <b>name</b>, <b>description</b> and <b>JSON Schema</b> for inputs.</li>
+    <li>Methods: <code>tools/list</code> (discover), <code>tools/call</code> (execute).</li>
+    <li>Optional annotations like read-only / destructive help hosts ask for confirmation.</li>
+  </ul>
+  <h3>2. Resources (application-controlled)</h3>
+  <p>Data the server makes available for context, identified by a <b>URI</b>: file contents, DB schema, log files, API docs.</p>
+  <ul>
+    <li>Like GET endpoints — read-only, no side effects.</li>
+    <li>Static (<code>file:///project/README.md</code>) or templated (<code>expense://categories/{year}</code>).</li>
+    <li>Methods: <code>resources/list</code>, <code>resources/read</code>; clients can subscribe to updates.</li>
+    <li>The <b>host app</b> decides which resources to attach (often user picks them).</li>
+  </ul>
+  <h3>3. Prompts (user-controlled)</h3>
+  <p>Pre-written prompt templates the server offers, which the user explicitly chooses — often shown as slash commands (<code>/summarize-pr</code>, <code>/code-review</code>). They can take arguments and embed resources.</p>
+  <ul>
+    <li>Methods: <code>prompts/list</code>, <code>prompts/get</code>.</li>
+  </ul>
+
+  <h3>4. Comparison</h3>
+  <div class="tablewrap"><table>
+    <tr><th></th><th>Tools</th><th>Resources</th><th>Prompts</th></tr>
+    <tr><td>Controlled by</td><td>Model (LLM decides)</td><td>Application</td><td>User</td></tr>
+    <tr><td>Purpose</td><td>Take actions / compute</td><td>Provide context data</td><td>Reusable workflows</td></tr>
+    <tr><td>Side effects</td><td>Possible</td><td>No</td><td>No</td></tr>
+    <tr><td>Example</td><td><code>add_expense(amount, category)</code></td><td><code>expense://categories</code></td><td>"Monthly spending summary"</td></tr>
+  </table></div>
+  <div class="box tip"><b>Key takeaway:</b> Tools = verbs (do), Resources = nouns (read), Prompts = templates (ask). In practice most servers start with tools.</div>
+</section>
+
+<!-- ================= 4 ================= -->
+<section class="video" id="v4">
+  <span class="tag">Video 4</span>
+  <h2>Protocol Internals — JSON-RPC, Lifecycle &amp; Transports</h2>
+  <p class="lead">MCP has two layers: the <b>data layer</b> (what messages mean) and the <b>transport layer</b> (how bytes travel).</p>
+
+  <h3>1. Data layer: JSON-RPC 2.0</h3>
+  <p>All MCP messages are JSON-RPC 2.0 — a simple, language-independent format. Three message types:</p>
+  <ul>
+    <li><b>Request</b> — has <code>id</code>, <code>method</code>, <code>params</code>; expects a response.</li>
+    <li><b>Response</b> — same <code>id</code>, with <code>result</code> or <code>error</code>.</li>
+    <li><b>Notification</b> — no <code>id</code>, no response expected (e.g. "tool list changed").</li>
+  </ul>
+<pre><code>// request
+{"jsonrpc": "2.0", "id": 7, "method": "tools/call",
+ "params": {"name": "add_expense", "arguments": {"amount": 250, "category": "food"}}}
+
+// response
+{"jsonrpc": "2.0", "id": 7,
+ "result": {"content": [{"type": "text", "text": "Expense added with id 12"}], "isError": false}}</code></pre>
+
+  <h3>2. Connection lifecycle</h3>
+  <div class="diagram"><pre class="mermaid">
+sequenceDiagram
+  participant C as Client
+  participant S as Server
+  Note over C,S: 1. Initialization
+  C->>S: initialize (protocolVersion, capabilities, clientInfo)
+  S-->>C: result (protocolVersion, capabilities, serverInfo)
+  C->>S: notifications/initialized
+  Note over C,S: 2. Operation
+  C->>S: tools/list
+  S-->>C: list of tools with schemas
+  C->>S: tools/call
+  S-->>C: result
+  S--)C: notifications/tools/list_changed
+  Note over C,S: 3. Shutdown
+  C->>S: close connection / end process
+  </pre></div>
+  <ul>
+    <li><b>Initialization</b> — version negotiation + <b>capability negotiation</b> (server says "I support tools and resources"; client says "I support sampling, roots, elicitation").</li>
+    <li><b>Operation</b> — discovery (<code>*/list</code>) and usage (<code>tools/call</code>, <code>resources/read</code>, <code>prompts/get</code>), plus notifications.</li>
+    <li><b>Shutdown</b> — transport closes (stdio: close input and end process; HTTP: close connections).</li>
+  </ul>
+  <p>Also supported: <b>ping</b> (health check), <b>progress notifications</b> for long tasks, <b>cancellation</b>, and <b>logging</b>.</p>
+
+  <h3>3. Transport layer</h3>
+  <div class="tablewrap"><table>
+    <tr><th></th><th>stdio</th><th>Streamable HTTP</th></tr>
+    <tr><td>How</td><td>Host launches the server as a subprocess; messages over stdin / stdout</td><td>Server runs as a web service; client sends HTTP POST, server can stream responses (SSE)</td></tr>
+    <tr><td>Use</td><td>Local servers</td><td>Remote servers, many clients</td></tr>
+    <tr><td>Network</td><td>None — very fast, simple</td><td>Needs auth, HTTPS</td></tr>
+  </table></div>
+  <div class="box warn">The older <b>HTTP + SSE</b> transport (two endpoints) is deprecated in favour of <b>Streamable HTTP</b> (single endpoint, optional streaming, session ids).</div>
+  <div class="box tip"><b>Key takeaway:</b> Same JSON-RPC messages, two ways to carry them: stdio for local, Streamable HTTP for remote. Initialization negotiates what each side can do.</div>
+</section>
+
+<!-- ================= 5 ================= -->
+<section class="video" id="v5">
+  <span class="tag">Video 5</span>
+  <h2>Build a Local MCP Server (FastMCP)</h2>
+  <p class="lead">Project: an <b>Expense Tracker</b> MCP server backed by SQLite, then connect it to Claude Desktop so you can say "I spent ₹450 on groceries today".</p>
+  <div class="diagram"><pre class="mermaid">
+flowchart LR
+  U["User in Claude Desktop"] --> H["Host + LLM"]
+  H &lt;-->|stdio| S["expense-tracker server&lt;br/&gt;FastMCP, main.py"]
+  S --> DB[("expenses.db&lt;br/&gt;SQLite")]
+  S --> R["resource: expense://categories"]
+  </pre></div>
+
+  <h3>1. Setup</h3>
+<pre><code># using uv (fast Python package manager)
+uv init expense-tracker-mcp
+cd expense-tracker-mcp
+uv add fastmcp</code></pre>
+
+  <h3>2. Server code</h3>
+<pre><code>from fastmcp import FastMCP
+import sqlite3, os
+
+DB_PATH = os.path.join(os.path.dirname(__file__), "expenses.db")
+mcp = FastMCP("ExpenseTracker")
+
+def init_db():
+    with sqlite3.connect(DB_PATH) as c:
+        c.execute("""CREATE TABLE IF NOT EXISTS expenses(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            date TEXT NOT NULL, amount REAL NOT NULL,
+            category TEXT NOT NULL, subcategory TEXT DEFAULT '', note TEXT DEFAULT '')""")
+init_db()
+
+@mcp.tool()
+def add_expense(date: str, amount: float, category: str, subcategory: str = "", note: str = "") -> dict:
+    """Add a new expense entry. date format: YYYY-MM-DD."""
+    with sqlite3.connect(DB_PATH) as c:
+        cur = c.execute("INSERT INTO expenses(date, amount, category, subcategory, note) VALUES (?,?,?,?,?)",
+                        (date, amount, category, subcategory, note))
+        return {"status": "ok", "id": cur.lastrowid}
+
+@mcp.tool()
+def list_expenses(start_date: str, end_date: str) -> list[dict]:
+    """List expenses between two dates (inclusive)."""
+    with sqlite3.connect(DB_PATH) as c:
+        cur = c.execute("SELECT id, date, amount, category, subcategory, note FROM expenses "
+                        "WHERE date BETWEEN ? AND ? ORDER BY date", (start_date, end_date))
+        cols = [d[0] for d in cur.description]
+        return [dict(zip(cols, r)) for r in cur.fetchall()]
+
+@mcp.tool()
+def summarize(start_date: str, end_date: str, category: str | None = None) -> list[dict]:
+    """Total spend by category between two dates."""
+    q = "SELECT category, SUM(amount) AS total FROM expenses WHERE date BETWEEN ? AND ?"
+    params = [start_date, end_date]
+    if category:
+        q += " AND category = ?"; params.append(category)
+    q += " GROUP BY category ORDER BY total DESC"
+    with sqlite3.connect(DB_PATH) as c:
+        return [{"category": r[0], "total": r[1]} for r in c.execute(q, params)]
+
+@mcp.resource("expense://categories", mime_type="application/json")
+def categories() -> str:
+    """List of allowed categories and subcategories."""
+    return open(os.path.join(os.path.dirname(__file__), "categories.json")).read()
+
+if __name__ == "__main__":
+    mcp.run()          # default transport = stdio</code></pre>
+  <p>FastMCP reads the <b>type hints</b> to build the JSON Schema and the <b>docstring</b> as the tool description — write both carefully, the LLM only sees these.</p>
+
+  <h3>3. Test with MCP Inspector</h3>
+<pre><code>uv run fastmcp dev main.py      # opens the Inspector in the browser
+# or: npx @modelcontextprotocol/inspector uv run main.py</code></pre>
+  <p>The Inspector lets you connect, list tools/resources, call them with test inputs and see raw JSON-RPC messages.</p>
+
+  <h3>4. Connect to Claude Desktop</h3>
+<pre><code>uv run fastmcp install claude-desktop main.py</code></pre>
+  <p>Or edit <code>claude_desktop_config.json</code> manually:</p>
+<pre><code>{
+  "mcpServers": {
+    "expense-tracker": {
+      "command": "uv",
+      "args": ["run", "--with", "fastmcp", "fastmcp", "run", "/full/path/to/main.py"]
+    }
+  }
+}</code></pre>
+  <p>Restart Claude Desktop; the tools appear in the tools menu. Try: "Add ₹450 for groceries today" → "How much did I spend on food this month?"</p>
+  <div class="box warn"><b>Common errors:</b> wrong absolute path, <code>uv</code> not on PATH (use full path to uv), relative DB path (use <code>__file__</code>), printing to stdout in a stdio server (it corrupts the protocol — log to stderr).</div>
+  <div class="box tip"><b>Key takeaway:</b> <code>@mcp.tool()</code> + type hints + docstring = a working tool. Inspector to test, config file to plug into a host.</div>
+</section>
+
+<!-- ================= 6 ================= -->
+<section class="video" id="v6">
+  <span class="tag">Video 6</span>
+  <h2>Remote MCP Server &amp; Deployment</h2>
+  <p class="lead">A local server only works on your machine. A remote server runs on the internet so many users and apps can connect — over <b>Streamable HTTP</b>.</p>
+  <div class="diagram"><pre class="mermaid">
+flowchart LR
+  U1["Claude (custom connector)"] -->|HTTPS| GW["Remote MCP server&lt;br/&gt;https://my-expense.example.com/mcp"]
+  U2["Your LangGraph app"] -->|HTTPS| GW
+  U3["Cursor / VS Code"] -->|HTTPS| GW
+  GW --> AUTH["Auth&lt;br/&gt;OAuth 2.1 / API key"]
+  GW --> DB[("Cloud DB&lt;br/&gt;Postgres")]
+  </pre></div>
+
+  <h3>1. Switch transport</h3>
+<pre><code>if __name__ == "__main__":
+    mcp.run(transport="http", host="0.0.0.0", port=8000)   # endpoint: /mcp</code></pre>
+
+  <h3>2. Async tools</h3>
+  <p>A remote server handles many requests at once, so use <code>async def</code> tools and async DB drivers (<code>aiosqlite</code>, <code>asyncpg</code>) to avoid blocking.</p>
+<pre><code>import aiosqlite
+@mcp.tool()
+async def add_expense(date: str, amount: float, category: str) -> dict:
+    """Add a new expense entry."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute("INSERT INTO expenses(date, amount, category) VALUES (?,?,?)",
+                               (date, amount, category))
+        await db.commit()
+        return {"status": "ok", "id": cur.lastrowid}</code></pre>
+
+  <h3>3. Deployment options</h3>
+  <ul>
+    <li><b>FastMCP Cloud</b> — connect the GitHub repo, pick the entry file, get a public URL.</li>
+    <li><b>Any cloud</b> — Docker container on Render, Railway, Fly.io, Cloud Run, EC2.</li>
+    <li>Use a real database (Postgres) — container file systems are often temporary.</li>
+  </ul>
+
+  <h3>4. Connecting clients</h3>
+  <ul>
+    <li><b>Claude</b> — add the URL as a custom connector in settings.</li>
+    <li><b>Claude Desktop (if a client only supports stdio)</b> — use a proxy like <code>mcp-remote</code>: <code>"command": "npx", "args": ["mcp-remote", "https://…/mcp"]</code>.</li>
+    <li><b>Your code</b> — see video 7.</li>
+  </ul>
+
+  <h3>5. Authentication &amp; multi-user</h3>
+  <ul>
+    <li>MCP's auth spec is based on <b>OAuth 2.1</b>: the client gets a token from an authorization server and sends it as a Bearer token.</li>
+    <li>Simpler setups use an API key header.</li>
+    <li>For multi-user apps, store a <code>user_id</code> with every row and read it from the authenticated token — never trust a user id passed as a tool argument.</li>
+  </ul>
+  <div class="box tip"><b>Key takeaway:</b> Remote = <code>transport="http"</code> + async tools + persistent DB + auth + deploy. The tool code barely changes.</div>
+</section>
+
+<!-- ================= 7 ================= -->
+<section class="video" id="v7">
+  <span class="tag">Video 7</span>
+  <h2>Build an MCP Client</h2>
+  <p class="lead">Instead of Claude Desktop, build your <b>own host</b>: a chatbot that connects to any MCP servers and lets an LLM use their tools.</p>
+  <div class="diagram"><pre class="mermaid">
+flowchart TB
+  UI["Streamlit chat UI"] --> AG["LangGraph agent&lt;br/&gt;chat_node + ToolNode"]
+  AG --> MC["MultiServerMCPClient"]
+  MC -->|stdio| L1["math server (local)"]
+  MC -->|Streamable HTTP| R1["expense server (remote)"]
+  MC -->|Streamable HTTP| R2["any public MCP server"]
+  AG --> LLM["Chat model with tools bound"]
+  </pre></div>
+
+  <h3>1. Low-level: official Python SDK</h3>
+<pre><code>import asyncio
+from mcp import ClientSession, StdioServerParameters
+from mcp.client.stdio import stdio_client
+
+params = StdioServerParameters(command="python", args=["math_server.py"])
+
+async def main():
+    async with stdio_client(params) as (read, write):
+        async with ClientSession(read, write) as session:
+            await session.initialize()                        # handshake
+            tools = await session.list_tools()
+            print([t.name for t in tools.tools])
+            result = await session.call_tool("add", {"a": 5, "b": 7})
+            print(result.content[0].text)
+asyncio.run(main())</code></pre>
+  <p>This shows the protocol steps directly: connect → initialize → list → call. You'd still need to pass the tool schemas to the LLM and run the tool-calling loop yourself.</p>
+
+  <h3>2. High-level: LangChain MCP adapters + LangGraph</h3>
+<pre><code>from langchain_mcp_adapters.client import MultiServerMCPClient
+from langgraph.graph import StateGraph, START, MessagesState
+from langgraph.prebuilt import ToolNode, tools_condition
+from langchain_openai import ChatOpenAI
+
+SERVERS = {
+    "math":    {"transport": "stdio", "command": "python", "args": ["math_server.py"]},
+    "expense": {"transport": "streamable_http", "url": "https://my-expense.example.com/mcp"},
+}
+
+async def build_agent():
+    client = MultiServerMCPClient(SERVERS)
+    tools = await client.get_tools()            # MCP tools -> LangChain tools
+    llm = ChatOpenAI(model="gpt-4o-mini").bind_tools(tools)
+
+    async def chat_node(state: MessagesState):
+        return {"messages": [await llm.ainvoke(state["messages"])]}
+
+    g = StateGraph(MessagesState)
+    g.add_node("chat_node", chat_node)
+    g.add_node("tools", ToolNode(tools))
+    g.add_edge(START, "chat_node")
+    g.add_conditional_edges("chat_node", tools_condition)
+    g.add_edge("tools", "chat_node")
+    return g.compile()
+
+# usage
+agent = await build_agent()
+out = await agent.ainvoke({"messages": [("user", "Add ₹300 for food today, then show this month's total")]})</code></pre>
+
+  <h3>3. The tool-calling loop</h3>
+  <div class="diagram"><pre class="mermaid">
+sequenceDiagram
+  participant U as User
+  participant A as Agent (LLM)
+  participant M as MCP Client
+  participant S as MCP Server
+  U->>A: Add 300 for food
+  A-->>M: tool_call add_expense(...)
+  M->>S: tools/call
+  S-->>M: result
+  M-->>A: ToolMessage
+  A-->>U: Done, expense added
+  </pre></div>
+
+  <h3>4. Practical notes</h3>
+  <ul>
+    <li>MCP tools are <b>async</b> → use <code>ainvoke</code>/<code>astream</code>; in Streamlit run a background event loop.</li>
+    <li>Show tool activity in the UI ("Using add_expense…") for transparency.</li>
+    <li>Ask for user confirmation before destructive tools.</li>
+    <li>Too many tools confuse the model — connect only the servers you need.</li>
+  </ul>
+  <div class="box tip"><b>Key takeaway:</b> Your app becomes an MCP host: the client discovers tools from servers, the LLM decides, the client executes.</div>
+</section>
+
+<!-- ================= 8 ================= -->
+<section class="video" id="v8">
+  <span class="tag">Video 8</span>
+  <h2>Advanced Features &amp; Security</h2>
+  <p class="lead">Beyond tools/resources/prompts, MCP lets servers ask things <b>from the client</b>. And because MCP gives an LLM real power, security needs careful thought.</p>
+
+  <h3>1. Client primitives (server → client requests)</h3>
+  <div class="diagram"><pre class="mermaid">
+flowchart LR
+  S["MCP Server"] -->|sampling/createMessage| C1["Sampling&lt;br/&gt;ask host's LLM to generate text"]
+  S -->|elicitation/create| C2["Elicitation&lt;br/&gt;ask the user for input"]
+  S -->|roots/list| C3["Roots&lt;br/&gt;which folders / URIs it may access"]
+  </pre></div>
+  <ul>
+    <li><b>Sampling</b> — the server asks the host's LLM for a completion (e.g. summarize data) without needing its own API key. The user/host can review and approve.</li>
+    <li><b>Elicitation</b> — the server asks the user for missing information mid-task with a simple schema ("Which account: personal or business?").</li>
+    <li><b>Roots</b> — the client tells the server which directories/URIs it is allowed to work in.</li>
+  </ul>
+  <p>Other useful features: <b>notifications</b> (list changed, resource updated), <b>progress</b> updates, <b>logging</b>, <b>cancellation</b>, structured tool output.</p>
+
+  <h3>2. Security risks</h3>
+  <div class="tablewrap"><table>
+    <tr><th>Risk</th><th>What happens</th></tr>
+    <tr><td>Prompt injection</td><td>Malicious text in a document, email or web page (read via a tool) instructs the LLM to do something harmful.</td></tr>
+    <tr><td>Tool poisoning</td><td>A malicious server hides instructions in tool descriptions that the LLM obeys.</td></tr>
+    <tr><td>Rug pull</td><td>A server you trusted changes its tools later to behave maliciously.</td></tr>
+    <tr><td>Tool shadowing</td><td>One server's tool description manipulates how another server's tools are used.</td></tr>
+    <tr><td>Data exfiltration</td><td>Combining a private-data tool with an internet tool leaks data.</td></tr>
+    <tr><td>Over-broad permissions / token passthrough</td><td>Server has more access than needed, or forwards user tokens unsafely.</td></tr>
+    <tr><td>Command injection</td><td>Server builds shell/SQL commands from unsanitized input.</td></tr>
+  </table></div>
+
+  <h3>3. Best practices</h3>
+  <ul>
+    <li>Install servers only from <b>trusted sources</b>; review code; pin versions.</li>
+    <li><b>Least privilege</b> — scope tokens and file access (roots) tightly.</li>
+    <li><b>Human approval</b> for destructive or sensitive tools.</li>
+    <li>Validate inputs; use parameterized SQL; never <code>eval</code> or run raw shell from arguments.</li>
+    <li>Use OAuth properly for remote servers; HTTPS only; validate the token audience.</li>
+    <li>Log and monitor tool calls; rate-limit.</li>
+    <li>Treat everything a tool returns as <b>untrusted data</b>, not instructions.</li>
+  </ul>
+
+  <h3>4. Ecosystem &amp; where to go next</h3>
+  <ul>
+    <li>Official and community servers: file system, GitHub, Postgres, Slack, Google Drive, browser automation, and many more.</li>
+    <li>SDKs: Python, TypeScript, Java, C#, Go, and others.</li>
+    <li>Project ideas: a personal finance server (this course), a company-docs RAG server, a server wrapping your own web app's API (good fit for a React/Node developer).</li>
+  </ul>
+  <div class="box tip"><b>Key takeaway:</b> MCP = standard plug + powerful capabilities. Use client primitives for richer interactions, and design every server with least privilege and human approval in mind.</div>
+</section>
+
+<footer style="color:var(--muted);font-size:13px;padding:10px 0 40px">
+  Study notes on the Model Context Protocol, organised in 8 sections. The MCP spec and SDKs evolve quickly — check modelcontextprotocol.io and the FastMCP docs for the latest details.
+</footer>
+</main>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script>
+(function(){
+  var root=document.documentElement;
+  function isDark(){
+    var t=root.getAttribute("data-theme");
+    if(t) return t==="dark";
+    return window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+  }
+  var blocks=[].slice.call(document.querySelectorAll("pre.mermaid"));
+  blocks.forEach(function(b){ b.dataset.src=b.textContent; });
+  function render(){
+    if(!window.mermaid) return;
+    blocks.forEach(function(b){ b.removeAttribute("data-processed"); b.textContent=b.dataset.src; });
+    mermaid.initialize({startOnLoad:false, theme:isDark()?"dark":"default", securityLevel:"loose", flowchart:{useMaxWidth:true}});
+    mermaid.run({nodes:blocks}).catch(function(e){console.error(e);});
+  }
+  window.addEventListener("load", render);
+  document.getElementById("themeBtn").addEventListener("click",function(){
+    root.setAttribute("data-theme", isDark()?"light":"dark"); render();
+  });
+  var nav=document.getElementById("nav");
+  document.getElementById("menuBtn").addEventListener("click",function(){ nav.classList.toggle("open"); });
+  nav.addEventListener("click",function(e){ if(e.target.closest("a")) nav.classList.remove("open"); });
+  document.getElementById("search").addEventListener("input",function(e){
+    var q=e.target.value.toLowerCase();
+    document.querySelectorAll("#toc li").forEach(function(li){
+      var id=li.querySelector("a").getAttribute("href").slice(1);
+      var sec=document.getElementById(id);
+      var hit=!q || li.textContent.toLowerCase().indexOf(q)>-1 || sec.textContent.toLowerCase().indexOf(q)>-1;
+      li.style.display=hit?"":"none";
+    });
+  });
+})();
+</script>
+</body>
+</html>

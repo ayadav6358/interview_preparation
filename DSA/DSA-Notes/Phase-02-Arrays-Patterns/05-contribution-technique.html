@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Contribution Technique — DSA Trail</title>
+<style>
+  :root{
+    --ink:#12181B; --ink2:#1A2226; --ink3:#232C31;
+    --amber:#E8A33D; --amber-soft:#3A2E19;
+    --teal:#4FB3A9; --teal-soft:#12312D;
+    --rust:#D9695F; --rust-soft:#3A1F1C;
+    --slate:#8B9199;
+    --text:#E8E6E1; --text-dim:#A9AFAE;
+    --border: rgba(255,255,255,0.08);
+    --radius: 10px;
+    --mono: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{background:var(--ink); color:var(--text); font-family:var(--sans); line-height:1.65; font-size:16px;}
+  a{color:var(--amber); text-decoration:none;}
+  a:hover{text-decoration:underline;}
+  code, pre{font-family:var(--mono);}
+  #main{max-width:900px; margin:0 auto; padding:30px 24px 100px;}
+  h1{font-size:2rem; letter-spacing:-.01em; margin:14px 0 6px;}
+  h2{font-size:1.5rem; margin-top:52px; padding-top:14px; border-top:1px solid var(--border); letter-spacing:-.01em;}
+  h2:first-of-type{border-top:none; margin-top:20px;}
+  h3{font-size:1.15rem; margin-top:30px; color:var(--amber);}
+  .eyebrow{font-size:11px; text-transform:uppercase; letter-spacing:.12em; color:var(--teal); font-weight:700; margin-bottom:4px;}
+  .subtitle{color:var(--text-dim); font-size:15px; margin-bottom:28px;}
+  .callout{border-radius:var(--radius); padding:14px 16px; margin:18px 0; border:1px solid var(--border); font-size:14.5px;}
+  .callout .ctitle{font-weight:700; margin-bottom:4px; display:flex; gap:8px; align-items:center;}
+  .callout.concept{background:var(--teal-soft); border-color:var(--teal);}
+  .callout.concept .ctitle{color:var(--teal);}
+  .callout.example{background:var(--ink3);}
+  .callout.mistake{background:var(--rust-soft); border-color:var(--rust);}
+  .callout.mistake .ctitle{color:var(--rust);}
+  .callout.tip{background:var(--amber-soft); border-color:var(--amber);}
+  .callout.tip .ctitle{color:var(--amber);}
+  .codewrap{position:relative; margin:14px 0;}
+  pre{background:var(--ink3); border:1px solid var(--border); border-radius:var(--radius); padding:16px 18px; overflow-x:auto; font-size:13.5px; line-height:1.6;}
+  .lang-tag{font-size:10px; text-transform:uppercase; letter-spacing:.08em; color:var(--slate); margin-bottom:-4px; display:block;}
+  :not(pre) > code{background:var(--ink3); padding:2px 6px; border-radius:4px; font-size:.88em;}
+  table{width:100%; border-collapse:collapse; margin:16px 0; font-size:14px;}
+  th,td{border:1px solid var(--border); padding:9px 12px; text-align:left;}
+  th{background:var(--ink3); font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:var(--slate);}
+  .badge{display:inline-block; font-size:11px; font-weight:700; padding:3px 9px; border-radius:20px; text-transform:uppercase; letter-spacing:.03em;}
+  .badge.easy{background:var(--teal-soft); color:var(--teal);}
+  .badge.medium{background:var(--amber-soft); color:var(--amber);}
+  .badge.hard{background:var(--rust-soft); color:var(--rust);}
+  .qcard{border:1px solid var(--border); border-radius:var(--radius); padding:16px 18px; margin:14px 0; background:var(--ink2);}
+  .qcard .qhead{display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; gap:10px;}
+  .qcard .qhead b{font-size:14.5px;}
+  .qcard .ex{background:var(--ink3); border-radius:8px; padding:8px 12px; margin:8px 0; font-size:13.5px;}
+  .qcard .hint{color:var(--amber); font-size:13.5px; margin-top:8px;}
+  hr.div{border:none; border-top:1px solid var(--border); margin:40px 0;}
+  .navlinks{display:flex; justify-content:space-between; gap:12px; font-size:14px; margin:18px 0; flex-wrap:wrap;}
+  .navlinks a{background:var(--ink2); border:1px solid var(--border); padding:8px 14px; border-radius:8px;}
+  .navlinks a:hover{border-color:var(--amber);}
+  .index-link{font-size:13px; color:var(--text-dim);}
+</style>
+</head>
+<body>
+<div id="main">
+
+  <p class="index-link"><a href="../index.html">&larr; Back to Index</a></p>
+  <div class="eyebrow">Phase 2 · Arrays & Patterns</div>
+  <h1>Contribution Technique</h1>
+  <p class="subtitle">Har element ka total answer mein "contribution" nikaal kar O(n²)/O(n³) se O(n) tak optimize karna.</p>
+
+  <div class="navlinks">
+    <a href="04-two-pointers.html">&larr; Prev: Two Pointers</a>
+    <a href="../Phase-03-Strings/01-strings.html">Next: Strings &rarr;</a>
+  </div>
+
+  <hr class="div">
+  <h2>1. What is it?</h2>
+  <p>Contribution Technique ek problem-solving mindset hai jisme, instead of directly calculating the final answer, hum sochte hain: <b>"har individual element total answer mein kitna 'contribute' kar raha hai?"</b> Phir sabke contributions add kar dete hain.</p>
+
+  <h2>2. Why is it useful?</h2>
+  <p>Kai problems mein "sum over all subarrays" ya "sum over all pairs" jaisa kuch poocha jata hai. Har subarray/pair ko individually generate karke sum karna O(n²) ya O(n³) lagta hai. Contribution Technique se hum seedha calculate karte hain ki <b>har element kitne subarrays/pairs mein appear hota hai</b>, aur uska total contribution ek formula se nikal lete hain — often O(n).</p>
+
+  <h2>3. Real-Life Analogy</h2>
+  <div class="callout example">
+    <div class="ctitle">📝 Class Photo Analogy</div>
+    Socho tumhe count karna hai "total kitni baar har student kisi group photo mein appear hua" agar sabhi possible group combinations li jaye. Har group ko individually list karne ke bajaye (bahut saare groups!), tum directly calculate kar sakte ho: "ek particular student kitne groups mein hoga" — usko formula se seedha nikal lo.
+  </div>
+
+  <h2>4. How to Calculate Contribution — The Core Idea</h2>
+  <p>Classic example: <b>Sum of all subarray sums.</b> Ek element <code>arr[i]</code> kitne subarrays mein appear hota hai?</p>
+  <pre><code>arr[i] index se subarray start ho sakta hai (i+1) tareeko se: [0..i], [1..i], ..., [i..i]
+arr[i] index par subarray end ho sakta hai (n-i) tareeko se: [i..i], [i..i+1], ..., [i..n-1]
+
+Total subarrays jisme arr[i] shaamil hai = (i + 1) * (n - i)
+
+Contribution of arr[i] to the final answer = arr[i] * (i + 1) * (n - i)</code></pre>
+
+  <h2>5. Visual Diagram</h2>
+  <pre><code>arr = [1, 2, 3],  n = 3
+
+For arr[0]=1: appears in (0+1)*(3-0) = 1*3 = 3 subarrays
+  → [1], [1,2], [1,2,3]   (yes, 3 subarrays contain index 0)
+
+For arr[1]=2: appears in (1+1)*(3-1) = 2*2 = 4 subarrays
+  → [2], [1,2], [2,3], [1,2,3]
+
+For arr[2]=3: appears in (2+1)*(3-2) = 3*1 = 3 subarrays
+  → [3], [2,3], [1,2,3]
+
+Total sum of all subarray sums = 1*3 + 2*4 + 3*3 = 3 + 8 + 9 = 20</code></pre>
+
+  <h2>6. Code + Explanation</h2>
+  <div class="lang-tag">JavaScript — Brute Force</div>
+  <div class="codewrap"><pre><code>function sumOfSubarraySumsBrute(arr) {
+  let total = 0;
+  for (let i = 0; i < arr.length; i++) {
+    let sum = 0;
+    for (let j = i; j < arr.length; j++) {
+      sum += arr[j];
+      total += sum; // add this subarray's sum
+    }
+  }
+  return total;
+}</code></pre></div>
+  <p>Ye har subarray generate karke uska sum add kar raha hai — O(n²) time.</p>
+
+  <div class="lang-tag">JavaScript — Optimal (Contribution Technique)</div>
+  <div class="codewrap"><pre><code>function sumOfSubarraySumsOptimal(arr) {
+  const n = arr.length;
+  let total = 0;
+  for (let i = 0; i < n; i++) {
+    const timesAppears = (i + 1) * (n - i);
+    total += arr[i] * timesAppears;
+  }
+  return total;
+}</code></pre></div>
+  <p><b>Why faster:</b> Hum direct formula se calculate kar rahe hain ki har element kitni baar count hoga, bina actually har subarray generate kiye. Single loop → O(n).</p>
+
+  <h2>7. Dry Run</h2>
+  <div class="callout example">
+    <div class="ctitle">📝 arr = [1, 2, 3]</div>
+    i=0: (0+1)*(3-0)=3, contribution = 1*3 = 3, total=3<br>
+    i=1: (1+1)*(3-1)=4, contribution = 2*4 = 8, total=11<br>
+    i=2: (2+1)*(3-2)=3, contribution = 3*3 = 9, total=20 ✅
+  </div>
+
+  <h2>8. Complexity</h2>
+  <p>Brute Force: Time O(n²), Space O(1). Optimal (Contribution): Time O(n), Space O(1) — huge improvement.</p>
+
+  <h3>When Should I Use It? — Checklist</h3>
+  <div class="callout tip">
+    <div class="ctitle">🎯 Use Contribution Technique when:</div>
+    <ul>
+      <li>Question asks for a sum/count <b>over all subarrays/subsequences/pairs</b></li>
+      <li>Aap directly answer nahi nikal sakte, but har element ka "role" (kitni baar count hoga) predictable hai</li>
+      <li>Common in: "sum of minimums of all subarrays", "sum of all subarray sums", "count of pairs with some property"</li>
+    </ul>
+  </div>
+
+  <h3>Common Mistakes</h3>
+  <div class="callout mistake">
+    <ul>
+      <li>Formula galat lagana — hamesha chhoti example (jaise n=3) par haath se verify karo pehle.</li>
+      <li>Overcounting ya undercounting — boundary cases (pehla/aakhri element) carefully check karo.</li>
+      <li>Duplicate values wale array mein monotonic stack ka strict vs non-strict comparison sahi na rakhna (double counting ho sakta hai).</li>
+    </ul>
+  </div>
+
+  <h3>Interview Tips</h3>
+  <div class="callout tip">
+    Ye ek advanced/clever pattern hai — jab tum ise use karo, interviewer ko explain zaroor karo "main directly answer nahi nikaal raha, balki har element ka contribution calculate kar raha hoon total answer mein" — ye samajhna interviewer ko impress karta hai kyunki ye ek non-obvious insight hai.
+  </div>
+
+  <hr class="div">
+  <h2>Interview Questions</h2>
+
+  <h3><span class="badge easy">Easy</span> Section</h3>
+
+  <div class="qcard">
+    <div class="qhead"><b>Q1. Sum of All Subarray Sums</b><span class="badge easy">Easy</span></div>
+    <p>Compute the sum of sums of all contiguous subarrays.</p>
+    <div class="ex"><b>Input:</b> [1,2,3] &rarr; <b>Output:</b> 20</div>
+    <div class="hint">Hint: For each i, contribution = arr[i] * (i+1) * (n-i). Sum all contributions.</div>
+  </div>
+
+  <div class="qcard">
+    <div class="qhead"><b>Q2. Count Subarrays Containing a Specific Index</b><span class="badge easy">Easy</span></div>
+    <p>Given index i and array length n, count how many subarrays include index i.</p>
+    <div class="ex"><b>Input:</b> n=5, i=2 &rarr; <b>Output:</b> 9</div>
+    <div class="hint">Hint: Number of (start, end) combinations that include index i is (i+1)*(n-i) — a direct formula, no enumeration needed.</div>
+  </div>
+
+  <div class="qcard">
+    <div class="qhead"><b>Q3. Count Pairs with Given Difference</b><span class="badge easy">Easy</span></div>
+    <p>Count pairs (i, j) where arr[i] - arr[j] equals a given difference k.</p>
+    <div class="ex"><b>Input:</b> [1,5,3,4,2], k=3 &rarr; <b>Output:</b> 2</div>
+    <div class="hint">Hint: Use a frequency hashmap; for each element, check how many previous elements satisfy the difference condition — each match contributes 1 to the answer.</div>
+  </div>
+
+  <div class="qcard">
+    <div class="qhead"><b>Q4. Total Appearances Across All Subsets of Size 2</b><span class="badge easy">Easy</span></div>
+    <p>Given n elements, how many pairs (2-element subsets) include a specific element?</p>
+    <div class="ex"><b>Input:</b> n=5 &rarr; <b>Output:</b> 4 (pairs with any one fixed element)</div>
+    <div class="hint">Hint: Each element pairs with every other element exactly once — that's (n-1) pairs per element.</div>
+  </div>
+
+  <div class="qcard">
+    <div class="qhead"><b>Q5. Sum of Left-Right Boundary Contributions</b><span class="badge easy">Easy</span></div>
+    <p>Given a fixed position, count how many valid (start,end) ranges in an array include it.</p>
+    <div class="ex"><b>Input:</b> n=6, position=3 &rarr; <b>Output:</b> 4*3 = 12</div>
+    <div class="hint">Hint: Think in terms of "how many valid ranges include this position" — same left-count × right-count multiplication idea.</div>
+  </div>
+
+  <h3><span class="badge medium">Medium</span> Section</h3>
+
+  <div class="qcard">
+    <div class="qhead"><b>Q6. Sum of Subarray Minimums</b><span class="badge medium">Medium</span></div>
+    <p>Find the sum of the minimum of every contiguous subarray.</p>
+    <div class="ex"><b>Input:</b> [3,1,2,4] &rarr; <b>Output:</b> 17</div>
+    <div class="hint">Hint: For each element, find how far left/right it remains the minimum using a monotonic stack, then contribution = arr[i] * leftCount * rightCount.</div>
+  </div>
+
+  <div class="qcard">
+    <div class="qhead"><b>Q7. Sum of Subarray Ranges (max - min)</b><span class="badge medium">Medium</span></div>
+    <p>Find the sum of (max - min) over all contiguous subarrays.</p>
+    <div class="ex"><b>Input:</b> [1,2,3] &rarr; <b>Output:</b> 4</div>
+    <div class="hint">Hint: Compute "sum of subarray maximums" and "sum of subarray minimums" separately using contribution + monotonic stack, then subtract.</div>
+  </div>
+
+  <div class="qcard">
+    <div class="qhead"><b>Q8. Count Subarrays With Product Less Than K</b><span class="badge medium">Medium</span></div>
+    <p>Count contiguous subarrays whose product is strictly less than k.</p>
+    <div class="ex"><b>Input:</b> [10,5,2,6], k=100 &rarr; <b>Output:</b> 8</div>
+    <div class="hint">Hint: Use a sliding window; whenever the window is valid, add (right - left + 1) to the count — this counts all subarrays ending at 'right' that are valid.</div>
+  </div>
+
+  <div class="qcard">
+    <div class="qhead"><b>Q9. Count of Range Sum</b><span class="badge medium">Medium</span></div>
+    <p>Count the number of subarrays whose sum lies within [lower, upper].</p>
+    <div class="ex"><b>Input:</b> [-2,5,-1], lower=-2, upper=2 &rarr; <b>Output:</b> 3</div>
+    <div class="hint">Hint: Use prefix sums plus a counting structure (like a modified merge sort or BIT) to count how many earlier prefix sums fall within the needed range for each position.</div>
+  </div>
+
+  <div class="qcard">
+    <div class="qhead"><b>Q10. Number of Subsequences That Satisfy a Sum Condition</b><span class="badge medium">Medium</span></div>
+    <p>Count subsequences where min+max &le; target.</p>
+    <div class="ex"><b>Input:</b> [3,5,6,7], target=9 &rarr; <b>Output:</b> 4</div>
+    <div class="hint">Hint: Sort the array, use two pointers; for a fixed left (min), all elements up to the matching right can freely be included or not — contributes 2^(count) subsequences.</div>
+  </div>
+
+  <h3><span class="badge hard">Hard</span> Section</h3>
+
+  <div class="qcard">
+    <div class="qhead"><b>Q11. Sum of Widths of Subsequences</b><span class="badge hard">Hard</span></div>
+    <p>Sum of (max - min) over all non-empty subsequences of an array.</p>
+    <div class="ex"><b>Input:</b> [2,1,3] &rarr; <b>Output:</b> 6</div>
+    <div class="hint">Hint: Sort the array. For each element as the max of a subsequence, count 2^(elements smaller than it) as multiplier; similarly for min — sum contributions using this combinatorial formula.</div>
+  </div>
+
+  <div class="qcard">
+    <div class="qhead"><b>Q12. Total Strength of Wizards</b><span class="badge hard">Hard</span></div>
+    <p>For every subarray, strength = min(subarray) * sum(subarray). Find total strength over all subarrays, modulo 1e9+7.</p>
+    <div class="ex"><b>Input:</b> [1,3,1,2] &rarr; <b>Output:</b> 44</div>
+    <div class="hint">Hint: Combine a monotonic stack (to find each element's range as minimum) with prefix-sum-of-prefix-sums to compute each minimum's weighted contribution efficiently.</div>
+  </div>
+
+  <div class="qcard">
+    <div class="qhead"><b>Q13. Sum of Subsequence Widths with Weighted Positions</b><span class="badge hard">Hard</span></div>
+    <p>Given weights per index, compute sum of (max-min) * (position-based weight) over all subsequences.</p>
+    <div class="ex"><b>Input:</b> values=[1,3,5], weights=[2,1,3] &rarr; <b>Output:</b> problem-specific combinatorial sum</div>
+    <div class="hint">Hint: Extend the sorted + power-of-2 contribution idea, but now also fold in the weight of the subsequence's contributing positions using prefix sums of weights.</div>
+  </div>
+
+  <hr class="div">
+  <div class="navlinks">
+    <a href="04-two-pointers.html">&larr; Prev: Two Pointers</a>
+    <a href="../Phase-03-Strings/01-strings.html">Next: Strings &rarr;</a>
+  </div>
+  <p class="index-link"><a href="../index.html">&larr; Back to Index</a></p>
+
+</div>
+</body>
+</html>

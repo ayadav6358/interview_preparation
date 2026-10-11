@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bash & Terminal Basics — Web Fundamentals — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">Web Fundamentals</a><span class="sep">›</span>Bash & Terminal Basics</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>Bash &amp; Terminal Basics: Navigation, Piping, Redirection, Environment Variables, Scripting</h1>
+      <p class="meta-line"><span>⏱ 2 hrs</span><span>📍 Chapter 6 of 6</span></p>
+      <p><strong>One-line summary:</strong> The shell is a precise, composable programming environment built on pipes, exit codes, and text streams — knowing it cold means you debug a broken deploy or CI pipeline in two commands instead of googling the error message.</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>You SSH into servers, debug CI pipelines, and write one-off scripts constantly, and you've built muscle memory for the commands you use daily. The senior-level gap is usually around the parts used less often but that matter disproportionately when they come up: exact quoting rules, exit codes and `&amp;&amp;`/`||` chaining, what a pipe actually does under the hood (concurrent processes, not "run A then feed its output to B"), and why a script that works interactively fails in CI (non-interactive shells, different `PATH`, different working directory assumptions). Being fluent here is also what makes <a href="../04-nodejs-advanced/index.html">Node.js tooling</a>, Docker, and CI/CD configuration (covered elsewhere on this site) legible instead of cargo-culted.</p>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>No hard prerequisite within this topic, though it pairs naturally with <a href="05-git-and-version-control.html">Chapter 5 (Git)</a> since Git is used from the shell daily. This is the final chapter of <a href="index.html">Web Fundamentals</a>; from here the site continues into <a href="../12-react-fundamentals/01-react-basics-jsx-components.html">React Fundamentals</a>.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="navigation">Navigation and the filesystem model</h3>
+      <p>Every process has a <strong>current working directory</strong>; `cd` changes it for the current shell only (not for a subprocess you spawn, since each process gets its own copy of this state at fork time). `.` is the current directory, `..` is the parent, `~` expands to `$HOME`, `-` after `cd` returns to the previous directory. Absolute paths start with `/`; relative paths are resolved against the current working directory — a huge source of CI bugs is a script assuming a working directory that differs between local runs and the CI runner's checkout location.</p>
+
+      <h3 id="piping-redirection">Piping and redirection — what's actually happening</h3>
+      <p>A pipe (`|`) connects one process's `stdout` directly to another process's `stdin` via a kernel-managed buffer — critically, both processes run <strong>concurrently</strong>, not sequentially; the second process can start consuming output before the first has finished producing it (this is why `tail -f log | grep ERROR` works as a live stream, not a batch operation). Redirection (`&gt;`, `&gt;&gt;`, `&lt;`, `2&gt;`, `&amp;&gt;`) operates on file descriptors: `1` is stdout, `2` is stderr, `0` is stdin. `command &gt; file` truncates and writes stdout only (stderr still goes to the terminal); `command 2&gt;&amp;1` redirects stderr to wherever stdout is currently going (order matters: `&gt; file 2&gt;&amp;1` sends both to the file, but `2&gt;&amp;1 &gt; file` does not, because `2&gt;&amp;1` is evaluated first against the terminal, before stdout is redirected to the file).</p>
+
+      <h3 id="exit-codes-chaining">Exit codes and command chaining</h3>
+      <p>Every command returns an exit code: `0` means success, any nonzero means failure (the specific nonzero value is command-defined, e.g. `1` generic error, `127` command not found, `130` killed by Ctrl+C/SIGINT). `$?` holds the most recent command's exit code. `&amp;&amp;` runs the next command only if the previous succeeded (exit 0); `||` runs the next command only if the previous failed; `;` runs the next command unconditionally regardless of the previous result. This is the actual mechanism behind `set -e` in scripts (abort immediately on any nonzero exit) and why `cmd1 &amp;&amp; cmd2 &amp;&amp; cmd3` is a common "only proceed if every step succeeds" CI idiom.</p>
+
+      <h3 id="env-vars">Environment variables and scope</h3>
+      <p>A variable set with `VAR=value` (no `export`) is a shell variable visible only to the current shell, not to any subprocess it spawns. `export VAR=value` promotes it to an <strong>environment variable</strong>, which is copied into the environment of every child process the shell spawns from that point on — but critically, a child can never modify its parent's environment back (environment inheritance is one-directional, copy-on-fork). This is precisely why `cd /some/path` inside a script run via `./script.sh` doesn't change your interactive shell's directory — the script runs in a child process/subshell with its own copy of the working directory state that's discarded when it exits; `source ./script.sh` (or `. ./script.sh`) instead runs the script's commands directly in your current shell, which is why `source` can change your actual shell's state while executing a script normally cannot.</p>
+
+      <h3 id="scripting">Basic scripting idioms</h3>
+      <p>A script begins with a shebang (`#!/usr/bin/env bash`) telling the OS which interpreter to use when executed directly. `set -euo pipefail` is the standard "fail fast" header for production scripts: `-e` exits immediately on any command's nonzero exit (with some well-known exceptions, e.g. inside `if` conditions), `-u` treats referencing an unset variable as an error instead of silently substituting empty string, `-o pipefail` makes a pipeline's exit code reflect the <em>last command that actually failed</em> rather than always just the final command's exit code (without it, `false | true` reports success, masking the real failure). Quoting matters precisely: `"$var"` preserves whitespace/prevents word-splitting and glob expansion of the variable's value; unquoted `$var` is split on whitespace and glob-expanded, which is the source of countless "works with simple filenames, breaks with a space in the path" bugs.</p>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>When the shell runs `cmd1 | cmd2`, it forks two child processes, wires `cmd1`'s stdout file descriptor directly to `cmd2`'s stdin file descriptor via a pipe (a kernel ring buffer), and starts both roughly simultaneously — the OS scheduler interleaves them, with `cmd2` blocking on reads whenever the buffer is empty and `cmd1` blocking on writes whenever the buffer is full (backpressure), which is exactly why a pipe between a fast producer and a slow consumer doesn't buffer unboundedly in memory. Variable expansion, globbing, and word-splitting all happen in a specific order <em>before</em> the command actually runs — the shell first expands `$VAR`, then performs word-splitting on unquoted results, then glob-expands any remaining `*`/`?` patterns — which is precisely why quoting order/placement changes behavior and why `rm $file` with an unquoted variable containing a space silently tries to delete two separate paths instead of one.</p>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+flowchart LR
+    A["cmd1 (process)"] -->|"stdout → pipe buffer"| B["kernel pipe buffer<br/>(fixed size, backpressure)"]
+    B -->|"stdin ← pipe buffer"| C["cmd2 (process)"]
+    A -. "runs concurrently with" .-> C
+    C --> D["cmd2's stdout → terminal<br/>(or further piped)"]
+      </div>
+      <div class="mermaid">
+flowchart TD
+    A["Shell parses command line"] --> B["Variable expansion: $VAR → its value"]
+    B --> C["Word splitting on unquoted expansions<br/>(splits on IFS, default: space/tab/newline)"]
+    C --> D["Glob expansion: * ? [...] → matching filenames"]
+    D --> E["Command executes with final argument list"]
+    E --> F{"Quoted with double quotes?"}
+    F -->|Yes| G["Word-splitting and glob expansion skipped<br/>for that expansion"]
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-bash"># Exit codes and chaining
+grep "ERROR" app.log && echo "found errors" || echo "no errors found"
+echo $?   # exit code of the most recently run command
+
+# BAD: pipeline failure is masked — reports success because `true` is the LAST command
+false | true; echo $?     # => 0 (misleading!)
+
+# GOOD: pipefail makes the pipeline's exit code reflect the real failure
+set -o pipefail
+false | true; echo $?     # => 1 (the actual failure from `false` is now visible)
+</code></pre>
+      <pre><code class="language-bash"># Redirection order matters
+command > file 2>&1    # both stdout AND stderr go to `file` (stderr redirected to wherever stdout NOW points)
+command 2>&1 > file     # stderr goes to the terminal, ONLY stdout goes to `file`
+                        # (2>&1 duplicates stderr to wherever stdout points AT THAT MOMENT — the terminal — BEFORE stdout is redirected)
+
+# Quoting: the classic space-in-filename bug
+file="my report.txt"
+rm $file      # BAD: expands to `rm my report.txt` — tries to delete TWO files, "my" and "report.txt"
+rm "$file"    # GOOD: expands to `rm "my report.txt"` — one correctly-quoted argument
+</code></pre>
+      <pre><code class="language-bash">#!/usr/bin/env bash
+set -euo pipefail   # fail fast: -e exit on error, -u error on unset var, -o pipefail catch pipe failures
+
+# export makes a variable visible to child processes; plain assignment does not
+DB_HOST="localhost"       # shell-local only — a spawned subprocess won't see this
+export API_KEY="secret"   # child processes (e.g., `node server.js` run from here) WILL see this
+
+deploy() {
+  echo "Deploying with API_KEY=${API_KEY}..."
+  ./run-migrations.sh && ./start-server.sh
+}
+
+deploy
+</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4><p>A CI pipeline step runs `npm run build | tee build.log` to both display and save build output, followed by a deploy step gated on the previous step's success. For weeks, broken builds (npm exiting nonzero) still trigger deploys of stale/broken artifacts, because the pipeline checks the exit code of the overall line, which without `pipefail` reflects only `tee`'s exit code (`tee` almost always succeeds at writing a file, regardless of whether `npm run build` failed upstream in the same pipeline) — a direct real-world instance of the "masked pipeline failure" mechanism. The fix is a one-line `set -o pipefail` added to the CI script's shebang block, after which the pipeline correctly reports failure the moment `npm run build` fails, and the deploy step's `&amp;&amp;`-gated dependency correctly refuses to run. The postmortem's lasting takeaway, now in the team's CI style guide: every CI script must start with `set -euo pipefail`, no exceptions, because the cost of silently deploying a broken build vastly outweighs the rare cases where strict-fail behavior is inconvenient.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Leaving variable expansions unquoted (`rm $file`, `cp $src $dest`) — any value containing a space, glob character, or being empty/unset can cause word-splitting or glob-expansion into multiple unintended arguments, or (worse) deleting/copying the wrong thing entirely. Default to quoting every variable expansion (`"$file"`) unless you specifically need word-splitting/globbing.</p></div>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Assuming a pipeline's exit code reflects the whole pipeline's success. By default it only reflects the last command — `set -o pipefail` is required to catch failures anywhere earlier in the chain, and it's missing from a huge fraction of real CI scripts until someone gets bitten by exactly this.</p></div>
+      <ul>
+        <li>Start every non-trivial script with `#!/usr/bin/env bash` and `set -euo pipefail`.</li>
+        <li>Quote every variable expansion by default; only leave something unquoted when you deliberately want word-splitting/globbing.</li>
+        <li>Remember `export` is required for a child process to see a variable — plain assignment is shell-local only, and `cd`/variable changes inside a script run normally (not sourced) never affect your interactive shell.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs: When to Use vs When NOT To</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>`&amp;&amp;` chaining</td><td>Each step must succeed before the next runs (build→test→deploy)</td><td>You want all steps to attempt regardless of earlier failure</td><td>`;` (unconditional), explicit `if` blocks for nuanced control</td></tr>
+        <tr><td>Running a script normally (`./script.sh`)</td><td>The script's own side effects (files, output) are all you need</td><td>You need the script to change your current shell's environment/directory</td><td>`source ./script.sh`</td></tr>
+        <tr><td>Unquoted variable expansion</td><td>Deliberately want word-splitting/glob behavior (rare, intentional)</td><td>Default case — almost always</td><td>Quoted `"$var"`</td></tr>
+        <tr><td>Bash scripting</td><td>Simple glue logic, file/process orchestration, CI steps</td><td>Complex logic with real data structures, error handling, testing needs</td><td>A real scripting language (Python, Node.js)</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic"><h4>Basic</h4>
+        <details class="qa"><summary>What does `&amp;&amp;` do differently from `;` between two commands?</summary><div class="answer"><p>`&amp;&amp;` only runs the second command if the first succeeded (exit code 0). `;` runs the second command unconditionally, regardless of the first's result.</p></div></details>
+        <details class="qa"><summary>What file descriptor numbers correspond to stdin, stdout, and stderr?</summary><div class="answer"><p>0 = stdin, 1 = stdout, 2 = stderr.</p></div></details>
+        <details class="qa"><summary>What's the difference between `export VAR=value` and `VAR=value`?</summary><div class="answer"><p>Plain assignment is a shell-local variable only; `export` additionally makes it part of the environment that gets copied into any child processes the shell spawns afterward.</p></div></details>
+        <details class="qa"><summary>What does `$?` hold?</summary><div class="answer"><p>The exit code of the most recently executed command.</p></div></details>
+        <details class="qa"><summary>Why should you generally quote variable expansions, e.g. `"$file"` instead of `$file`?</summary><div class="answer"><p>Unquoted expansions undergo word-splitting (on whitespace) and glob expansion, which can turn one intended argument into multiple, incorrect arguments — especially dangerous with filenames containing spaces.</p></div></details>
+        <details class="qa"><summary>What does `cd -` do?</summary><div class="answer"><p>Changes back to the previous working directory (the one you were in before the last `cd`).</p></div></details>
+      </div>
+      <div class="qa-level medium"><h4>Medium</h4>
+        <details class="qa"><summary>Why doesn't `cd /some/path` inside a script change your interactive shell's working directory when you run the script normally?</summary><div class="answer"><p>Running `./script.sh` executes it in a separate child process with its own copy of shell state (including working directory), inherited at fork time from the parent but never propagated back. Only `source ./script.sh` (or `. ./script.sh`) runs the script's commands directly within your current shell process, allowing changes like `cd` to persist.</p></div></details>
+        <details class="qa"><summary>Explain why `false | true` reports exit code 0 by default, and how `set -o pipefail` changes that.</summary><div class="answer"><p>A pipeline's default exit code is simply the last command's exit code — `true` always succeeds, so the pipeline reports success even though `false` (earlier in the pipe) failed. `pipefail` changes the pipeline's reported exit code to be the rightmost nonzero exit code among all commands in the pipe, or zero only if all of them succeeded.</p></div></details>
+        <details class="qa"><summary>What's the practical difference between `command > file 2>&1` and `command 2>&1 > file`?</summary><div class="answer"><p>Redirections are applied left to right. In the first, stdout is redirected to `file`, then `2>&1` duplicates stderr to wherever stdout currently points — which is now `file` — so both streams end up in the file. In the second, `2>&1` duplicates stderr to wherever stdout currently points — still the terminal at that point — and only afterward is stdout redirected to `file`, leaving stderr still going to the terminal.</p></div></details>
+        <details class="qa"><summary>Why is a pipe not simply "run command A fully, then feed its complete output to command B"?</summary><div class="answer"><p>Both processes in a pipe run concurrently, connected via a kernel buffer; the second process can begin consuming data as soon as any is available, and the first process blocks (backpressure) if it produces faster than the buffer can be drained. This is why something like `tail -f file | grep pattern` can stream matches live rather than waiting for `tail -f` (which never terminates) to "finish."</p></div></details>
+        <details class="qa"><summary>What does `set -u` protect against, and give an example of a bug it would catch.</summary><div class="answer"><p>It makes referencing an unset variable an immediate error instead of silently substituting an empty string. Example: a typo like `$DEPLOY_ENVIRONEMNT` (misspelled) would silently expand to empty string without `-u`, potentially causing a command like `rm -rf /app/$DEPLOY_ENVIRONEMNT/cache` to become `rm -rf /app//cache` — with `-u`, the script errors out immediately instead of executing a dangerously different command.</p></div></details>
+      </div>
+      <div class="qa-level advanced"><h4>Advanced</h4>
+        <details class="qa"><summary>Walk through, at the OS level, what happens when you run `cmd1 | cmd2 | cmd3` — process creation order, file descriptor wiring, and how the shell waits for completion.</summary><div class="answer"><p>The shell parses the pipeline and creates pipe pairs (two file descriptors each: a read end and a write end) between each adjacent pair of commands, then forks a child process for each command, duping the appropriate pipe ends onto each child's stdin/stdout before exec'ing the actual program, and closing unused pipe ends in each child to avoid descriptor leaks and ensure EOF propagates correctly when a producer finishes. All three processes are started roughly together and run concurrently; the shell then waits on all of them, and the overall pipeline's reported exit status (absent `pipefail`) is the last command's exit status, since that's the one the shell is most directly "waiting on" as the pipeline's nominal result.</p></div></details>
+        <details class="qa"><summary>Design a production deploy script's error-handling strategy: what should trigger immediate abort vs. what should be allowed to fail with manual follow-up?</summary><div class="answer"><p>Use `set -euo pipefail` as the baseline so any unexpected failure aborts immediately rather than continuing into an inconsistent state. For steps that are expected to sometimes fail non-fatally (e.g., a best-effort cache warm), explicitly wrap them with `|| true` or an explicit `if ! command; then log_warning; fi` so a deliberate, documented exception exists rather than relying on globally disabling `-e`, which would silently hide genuinely unexpected failures everywhere else in the script.</p></div></details>
+        <details class="qa"><summary>A script behaves correctly when run interactively but fails mysteriously in CI. What categories of differences between interactive and non-interactive/CI shells would you investigate first?</summary><div class="answer"><p>PATH differences (CI runners often have a minimal PATH that doesn't include tools available in an interactive login shell's profile); working directory assumptions (CI checkouts may place the repo at a different path, or the step may run from a different directory than expected); environment variables that are normally set by an interactive shell's rc files (`.bashrc`/`.profile`) but never sourced in a non-interactive/non-login CI shell; and TTY-dependent behavior (some commands behave differently or prompt for input when there's no attached terminal, which can hang a CI job indefinitely instead of erroring immediately).</p></div></details>
+        <details class="qa"><summary>Explain the exact order of shell expansions (brace, tilde, parameter/variable, command substitution, arithmetic, word-splitting, pathname/glob) and why getting this order wrong leads to subtly incorrect scripts.</summary><div class="answer"><p>Bash performs expansions in a fixed order: brace expansion, tilde expansion, parameter/variable and command substitution and arithmetic expansion (these three left-to-right together), then word-splitting on the results of the previous step, then pathname (glob) expansion, and finally quote removal. Because word-splitting happens AFTER variable expansion but BEFORE globbing, a variable holding `*.txt` won't glob-expand from the variable's assignment — it only glob-expands if the `*` literally appears unquoted in the command line itself at the point globbing occurs, which is a frequent source of "why didn't my wildcard work when it's inside a variable" confusion.</p></div></details>
+        <details class="qa"><summary>How would you make a Bash script safely idempotent for use in automated retries (e.g., a CI job that might be re-run after a transient failure)?</summary><div class="answer"><p>Design every side-effecting step to check current state before acting rather than assuming a clean slate: use `mkdir -p` instead of `mkdir`, check for existing resources before creating them (or use upsert-style operations), make file writes atomic (write to a temp file then `mv` into place, since `mv` within the same filesystem is atomic) so a half-written file from an interrupted run is never mistaken for a complete one, and ensure any external API calls the script makes are themselves idempotent (e.g., via a client-supplied idempotency key) since the script itself re-running can't guarantee it wasn't partially successful on a prior attempt.</p></div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment"><span class="level-tag">Beginner (30-60 min)</span><h4>Pipe and redirect scavenger hunt</h4><p>Using only shell built-ins and common utilities (`grep`, `wc`, `sort`, `uniq`, `head`), write 5 one-line pipelines against a real log file or `ls -la` output answering questions like "how many unique IP addresses appear" or "what are the 5 largest files in this directory."</p><ul><li>At least one pipeline must redirect stderr separately from stdout into two different files.</li><li>At least one must demonstrate `set -o pipefail` catching a failure that would otherwise be masked.</li></ul><p><strong>Acceptance criteria:</strong> All 5 pipelines produce correct answers, with the pipefail demonstration showing a before/after exit code difference.</p><details class="qa"><summary>Hints</summary><div class="answer"><p>`sort | uniq -c | sort -rn` is a classic "count and rank unique lines" idiom worth memorizing.</p></div></details><p><strong>Bonus:</strong> Chain a 6th pipeline that only proceeds to a second command if the first pipeline's grep found at least one match (using exit codes, not output content).</p></div>
+      <div class="assignment"><span class="level-tag">Intermediate (2-4 hrs)</span><h4>Write a defensive deploy-simulation script</h4><p>Write a Bash script simulating a 4-step deploy (build, test, migrate, start) using functions, with `set -euo pipefail`, proper quoting throughout, and explicit handling for one step that's allowed to fail non-fatally (e.g., a cache warm-up).</p><ul><li>Deliberately inject a failure into each of the 4 steps (one at a time, across 4 runs) and verify the script aborts at exactly the right point for 3 of them, and continues past the 4th (the non-fatal one) with a logged warning.</li><li>Use an exported environment variable to pass a value into a step that runs as a separate subprocess, and demonstrate it would NOT be visible if the variable weren't exported.</li></ul><p><strong>Acceptance criteria:</strong> All 4 failure-injection scenarios behave exactly as designed, with clear log output distinguishing fatal aborts from the one tolerated failure.</p><details class="qa"><summary>Hints</summary><div class="answer"><p>Use `some_command || { echo "non-fatal failure, continuing"; }` for the one step allowed to fail, leaving `set -e`'s default fatal behavior intact for every other step.</p></div></details><p><strong>Bonus:</strong> Add a cleanup step using `trap ... EXIT` that always runs, even when the script aborts early due to `set -e`.</p></div>
+      <div class="assignment"><span class="level-tag">Advanced (1-2 days)</span><h4>Build a small CI-style pipeline runner from scratch in Bash</h4><p>Write a script that reads a simple list of shell commands from a config file (one per line, or a tiny custom format) and runs them in sequence, logging each command's output to its own timestamped log file, aborting the whole run on the first failure (with pipefail-aware failure detection for any piped commands), and printing a final pass/fail summary table.</p><ul><li>Must correctly detect failure inside a piped command within a step, not just a step's final command.</li><li>Must produce a clear, readable summary distinguishing which steps ran, which passed, which failed, and which were skipped due to an earlier abort.</li></ul><p><strong>Acceptance criteria:</strong> Running against a config with a deliberately failing piped command correctly aborts remaining steps and reports them as skipped, not silently omitted.</p><details class="qa"><summary>Hints</summary><div class="answer"><p>Run each step as `bash -c "set -o pipefail; $step_command"` inside the runner so pipefail semantics apply per-step even though the runner script itself is doing the orchestration.</p></div></details><p><strong>Bonus:</strong> Add parallel execution for steps explicitly marked independent, using background jobs (`&amp;`) and `wait`, while keeping sequential steps correctly ordered.</p></div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet"><ul>
+        <li>fd 0 = stdin, 1 = stdout, 2 = stderr. `2>&1` duplicates stderr to wherever stdout points AT THAT MOMENT — order of redirections matters.</li>
+        <li>A pipe runs both processes concurrently via a kernel buffer with backpressure, not sequentially.</li>
+        <li>`&amp;&amp;` = run next only on success; `||` = run next only on failure; `;` = run next unconditionally.</li>
+        <li>Plain `VAR=value` is shell-local; `export VAR=value` is inherited by child processes (one-directional, copy-on-fork).</li>
+        <li>Running `./script.sh` can't change your interactive shell's state (new process); `source ./script.sh` can.</li>
+        <li>Default pipeline exit code = last command's only; `set -o pipefail` makes it reflect any earlier failure too.</li>
+        <li>Always quote variable expansions (`"$var"`) to avoid word-splitting and glob-expansion surprises.</li>
+        <li>`set -euo pipefail` is the standard fail-fast header for production scripts.</li>
+        <li>Shell expansion order: brace → tilde → parameter/command/arithmetic → word-splitting → glob — this is why globs inside variables don't expand the way literal globs do.</li>
+      </ul></div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://www.gnu.org/software/bash/manual/bash.html">GNU Bash Reference Manual</a></li>
+        <li><a href="https://mywiki.wooledge.org/BashPitfalls">Greg's Wiki — Bash Pitfalls</a></li>
+        <li><a href="https://www.gnu.org/software/bash/manual/bash.html#Pipelines">GNU Bash Manual — Pipelines</a></li>
+        <li><a href="https://explainshell.com/">explainshell.com — breaks down any shell command's syntax</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="05-git-and-version-control.html"><span class="dir">← Previous</span>Git & Version Control</a>
+        <a class="next" href="../12-react-fundamentals/01-react-basics-jsx-components.html"><span class="dir">Next →</span>React Fundamentals</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · Web Fundamentals</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "11-web-fundamentals", chapterKey: "06-bash-and-terminal-basics" });</script>
+</body>
+</html>

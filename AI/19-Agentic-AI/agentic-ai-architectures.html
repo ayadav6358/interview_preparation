@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agentic AI Architectures</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <input class="searchbox" placeholder="Search topics..." />
+    <a href="../index.html">← Home</a>
+    <h3>19-Agentic-AI</h3>
+    <a href="agentic-ai-architectures.html">Agentic AI Architectures</a>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumbs"><a href="../index.html">Home</a> / 19-Agentic-AI</div>
+      <button class="theme-toggle" onclick="toggleTheme()">🌓 Theme</button>
+    </div>
+    <h1>Agentic AI Architectures (Planner, Executor, Supervisor, Critic)</h1>
+    <span class="tag good">Stable</span><span class="tag">Last verified: 2026-10-06</span>
+
+    <div class="toc">
+      <b>On this page</b>
+      <a href="#what">1. What is this?</a>
+      <a href="#whyexist">2. Why does it exist?</a>
+      <a href="#whyimportant">3. Why is it important?</a>
+      <a href="#whereused">4. Where is it used?</a>
+      <a href="#prereq">5. Prerequisites</a>
+      <a href="#core">6. Core architectures</a>
+      <a href="#terms">7. Terminology</a>
+      <a href="#arch">8. Architecture</a>
+      <a href="#internal">9. How it works internally</a>
+      <a href="#steps">10. Step-by-step: choosing an architecture</a>
+      <a href="#simple">11. Simple example</a>
+      <a href="#real">12. Real-world example</a>
+      <a href="#code">13. Code example</a>
+      <a href="#advanced">14. Advanced example (critic loop)</a>
+      <a href="#mistakes">15. Common mistakes</a>
+      <a href="#best">16. Best practices</a>
+      <a href="#production">17. Production considerations</a>
+      <a href="#security">18. Security considerations</a>
+      <a href="#performance">19. Performance considerations</a>
+      <a href="#cost">20. Cost considerations</a>
+      <a href="#debug">21. Debugging/troubleshooting</a>
+      <a href="#related">22. Related concepts</a>
+      <a href="#comparison">23. When NOT to use agents</a>
+      <a href="#exercise">24. Mini practical exercise</a>
+      <a href="#project">25. Practical project</a>
+      <a href="#projectarch">26. Project architecture</a>
+      <a href="#interview-b">27. Interview Questions — Beginner</a>
+      <a href="#interview-i">28. Interview Questions — Intermediate</a>
+      <a href="#interview-a">29. Interview Questions — Advanced</a>
+      <a href="#interview-s">30. Interview Questions — Senior/Architect</a>
+      <a href="#interview-sc">31. Scenario-Based Questions</a>
+      <a href="#revision">32. Quick revision notes</a>
+      <a href="#cheat">33. Cheat sheet</a>
+      <a href="#further">34. Further topics to learn</a>
+    </div>
+
+    <h2 id="what">1. What is this?</h2>
+    <p>Agentic AI architectures are recurring organizational patterns for structuring agent systems: Planner/Executor (separate planning from execution), Supervisor (a coordinator delegating to specialists), Router (directs requests to the right handler), Reflection/Critic (a separate pass evaluates and improves output), and combinations thereof for parallel/sequential multi-agent systems.</p>
+
+    <h2 id="whyexist">2. Why does it exist?</h2>
+    <p>A single LLM trying to plan, execute, and self-evaluate all in one undifferentiated loop often performs worse than when those responsibilities are separated into specialized roles/passes — these architectures exist because decomposing agent responsibilities, much like decomposing prompts, improves reliability.</p>
+
+    <h2 id="whyimportant">3. Why is it important?</h2>
+    <p>These are the standard vocabulary and design patterns senior AI engineers use to describe and justify agent system designs — fluency here is directly tested in system-design interviews for agentic AI roles.</p>
+
+    <h2 id="whereused">4. Where is it used?</h2>
+    <p>Complex research agents, multi-agent customer support platforms, coding agents, any system where a single undifferentiated agent loop underperforms a decomposed architecture.</p>
+
+    <h2 id="prereq">5. Prerequisites</h2>
+    <p><a href="../17-AI-Agents/ai-agents-fundamentals.html">AI Agents</a>, <a href="../18-LangGraph/langgraph-fundamentals.html">LangGraph</a>.</p>
+
+    <h2 id="core">6. Core architectures</h2>
+    <table>
+      <tr><th>Pattern</th><th>Description</th></tr>
+      <tr><td>Planner/Executor</td><td>A planner decomposes the goal into steps; an executor carries out each step, possibly re-planning if execution reveals new information.</td></tr>
+      <tr><td>Supervisor</td><td>A coordinating agent routes sub-tasks to specialist agents and integrates their results.</td></tr>
+      <tr><td>Router</td><td>Classifies an incoming request and directs it to the appropriate handler/agent, without necessarily coordinating multi-step execution.</td></tr>
+      <tr><td>Reflection/Critic</td><td>A separate pass (or agent) evaluates the primary agent's output and provides feedback for revision.</td></tr>
+      <tr><td>Reviewer</td><td>Similar to critic, often framed as a final quality gate before output is finalized/delivered.</td></tr>
+      <tr><td>Parallel agents</td><td>Multiple agents work on independent sub-tasks simultaneously, results aggregated afterward.</td></tr>
+      <tr><td>Sequential agents</td><td>Agents run one after another, each building on the previous one's output.</td></tr>
+    </table>
+
+    <h2 id="terms">7. Terminology</h2>
+    <table>
+      <tr><th>Term</th><th>Meaning</th></tr>
+      <tr><td>Planner</td><td>Component/agent responsible for decomposing a goal into an ordered set of steps.</td></tr>
+      <tr><td>Executor</td><td>Component/agent responsible for carrying out individual steps.</td></tr>
+      <tr><td>Supervisor</td><td>A coordinating agent delegating to and integrating results from specialist agents.</td></tr>
+      <tr><td>Critic</td><td>A component evaluating output quality and providing corrective feedback.</td></tr>
+      <tr><td>Autonomous workflow</td><td>A multi-step process requiring minimal human intervention end to end.</td></tr>
+    </table>
+
+    <h2 id="arch">8. Architecture</h2>
+    <pre><code>Planner/Executor:
+ Goal → Planner (produces step list) → Executor (runs step 1..N, possibly re-planning)
+
+Supervisor:
+ Task → Supervisor → routes to [Specialist A | Specialist B | Specialist C] → Supervisor integrates → Answer
+
+Reflection/Critic:
+ Draft → Critic (evaluates) → feedback → Reviser (produces improved draft) → (loop or finalize)</code></pre>
+
+    <h2 id="internal">9. How it works internally</h2>
+    <p>Each specialized role is typically just a differently-prompted (and sometimes differently-sized/model) LLM call, operating on a narrower, more clearly-defined sub-task than an undifferentiated "do everything" agent — the architectural benefit comes from task decomposition (same principle as in prompt engineering) applied at the agent-role level, often implemented as distinct nodes in a LangGraph-style state graph.</p>
+
+    <h2 id="steps">10. Step-by-step: choosing an architecture</h2>
+    <ol>
+      <li>If the task needs distinct, clearly-defined expertise areas → Supervisor + specialists.</li>
+      <li>If the task needs upfront decomposition before execution → Planner/Executor.</li>
+      <li>If output quality benefits from self-critique → add a Reflection/Critic pass.</li>
+      <li>If sub-tasks are independent and can run concurrently → Parallel agents.</li>
+      <li>If sub-tasks must build on each other in order → Sequential agents.</li>
+      <li>If none of the above adds measurable value over a single agent/workflow → don't use agents at all (see "When NOT to use agents").</li>
+    </ol>
+
+    <h2 id="simple">11. Simple example</h2>
+    <p>A trip-planning agent: a Planner decomposes "plan a 3-day Tokyo trip" into steps (find flights, find hotels, suggest itinerary); an Executor carries out each step via tools; a final Critic checks the overall plan for consistency (e.g., no overlapping bookings) before presenting it.</p>
+
+    <h2 id="real">12. Real-world example</h2>
+    <p>A multi-agent customer-support platform uses a Supervisor to classify incoming tickets and route to specialist agents (billing, technical, account-security), each with tools and prompts scoped to their domain — far more reliable and maintainable than one agent trying to handle every ticket type with one giant prompt.</p>
+
+    <h2 id="code">13. Code example</h2>
+    <pre><code class="language-python">from langgraph.graph import StateGraph, START, END
+
+def supervisor(state):
+    category = classify(state["ticket"])
+    return {"route": category}
+
+def billing_agent(state):
+    return {"response": handle_billing(state["ticket"])}
+
+def technical_agent(state):
+    return {"response": handle_technical(state["ticket"])}
+
+graph = StateGraph(SupportState)
+graph.add_node("supervisor", supervisor)
+graph.add_node("billing", billing_agent)
+graph.add_node("technical", technical_agent)
+graph.add_edge(START, "supervisor")
+graph.add_conditional_edges("supervisor", lambda s: s["route"], {
+    "billing": "billing", "technical": "technical",
+})
+graph.add_edge("billing", END)
+graph.add_edge("technical", END)
+app = graph.compile()
+</code></pre>
+
+    <h2 id="advanced">14. Advanced example (critic loop)</h2>
+    <pre><code class="language-python">def draft(state):
+    return {"draft": generate_draft(state["task"])}
+
+def critique(state):
+    feedback = evaluate(state["draft"], state["task"])
+    return {"feedback": feedback, "approved": "no issues" in feedback.lower()}
+
+def revise(state):
+    return {"draft": revise_draft(state["draft"], state["feedback"])}
+
+graph.add_node("draft", draft)
+graph.add_node("critique", critique)
+graph.add_node("revise", revise)
+graph.add_edge("draft", "critique")
+graph.add_conditional_edges("critique", lambda s: END if s["approved"] else "revise", {END: END, "revise": "revise"})
+graph.add_edge("revise", "critique")  # loop back for re-evaluation
+</code></pre>
+
+    <h2 id="mistakes">15. Common mistakes</h2>
+    <ul>
+      <li>Adding a Supervisor/Planner/Critic architecture when a single well-prompted agent already performs adequately.</li>
+      <li>Creating specialist agents with overlapping, ambiguous responsibilities, confusing the Supervisor's routing.</li>
+      <li>Infinite critique loops without a maximum revision count.</li>
+      <li>Not giving the Planner enough information to produce a realistic, executable plan.</li>
+    </ul>
+
+    <h2 id="best">16. Best practices</h2>
+    <ul>
+      <li>Only decompose into specialized roles when evaluation shows it measurably improves outcomes over a simpler architecture.</li>
+      <li>Keep specialist agent responsibilities clearly non-overlapping.</li>
+      <li>Bound reflection/critique loops with a maximum revision count.</li>
+      <li>Let the Planner re-plan when execution reveals the original plan was flawed, rather than rigidly executing a stale plan.</li>
+    </ul>
+
+    <h2 id="production">17. Production considerations</h2>
+    <p>Each additional role/pass adds latency and cost — measure the marginal quality improvement of each architectural layer against its marginal cost, same discipline as Advanced RAG technique selection.</p>
+
+    <h2 id="security">18. Security considerations</h2>
+    <p>A Supervisor routing to specialist agents with different tool permissions must enforce that routing decision cannot be manipulated by injected content to grant a lower-privilege specialist higher-privilege tool access.</p>
+
+    <h2 id="performance">19. Performance considerations</h2>
+    <p>Parallel agent patterns can significantly reduce wall-clock latency for independent sub-tasks compared to sequential execution — use parallelism wherever sub-tasks don't have dependencies.</p>
+
+    <h2 id="cost">20. Cost considerations</h2>
+    <p>Reflection/critic loops and multi-agent supervisor patterns multiply LLM calls per task — quantify this multiplier and validate it's justified by measured quality improvement, not assumed.</p>
+
+    <h2 id="debug">21. Debugging/troubleshooting</h2>
+    <ul>
+      <li><b>Supervisor routes to the wrong specialist:</b> review classification logic/prompt for ambiguity between specialist domains.</li>
+      <li><b>Critic loop never converges:</b> check if the critic's feedback is actionable/specific enough for the reviser to actually address, and add a max-iteration cap.</li>
+      <li><b>Planner produces unrealistic plans:</b> ensure the planner has access to the same tool/capability information the executor will actually have.</li>
+    </ul>
+
+    <h2 id="related">22. Related concepts</h2>
+    <p><a href="../18-LangGraph/langgraph-fundamentals.html">LangGraph</a> · <a href="../21-Multi-Agent-Systems/">Multi-Agent Systems</a> · <a href="../47-AI-Design-Patterns/">AI Design Patterns</a></p>
+
+    <h2 id="comparison">23. When NOT to use agents</h2>
+    <ul>
+      <li>The task has a fixed, predictable sequence of steps regardless of intermediate results (use a workflow).</li>
+      <li>Latency/cost budgets can't tolerate multi-step LLM round trips.</li>
+      <li>The task requires strict determinism/reproducibility (agents introduce variability).</li>
+      <li>A simpler single-prompt or single-agent solution already meets quality requirements — added architecture must be justified by measured gains, not assumed sophistication.</li>
+    </ul>
+
+    <h2 id="exercise">24. Mini practical exercise</h2>
+    <p>Take a single-agent implementation of a task and compare it against a Planner/Executor split on the same task, measuring success rate and cost difference.</p>
+
+    <h2 id="project">25. Practical project</h2>
+    <p><b>Supervisor + 3 Specialists Support System:</b> build a LangGraph system with a supervisor classifying tickets into billing/technical/account categories, routing to specialist nodes, each with its own tools and prompt.</p>
+
+    <h2 id="projectarch">26. Project architecture</h2>
+    <pre><code>ticket → supervisor (classify) → conditional edge
+ → billing_agent | technical_agent | account_agent
+ → each produces response → END
+eval: measure routing accuracy against labeled test tickets</code></pre>
+
+    <h2 id="interview-b">27. Interview Questions — Beginner</h2>
+    <div class="qa"><b>Q1.</b> What is the Planner/Executor pattern?<br><b>A.</b> A planner decomposes a goal into steps; an executor carries out each step, separating planning responsibility from execution.</div>
+    <div class="qa"><b>Q2.</b> What does a Supervisor agent do?<br><b>A.</b> Coordinates by routing sub-tasks to specialist agents and integrating their results.</div>
+    <div class="qa"><b>Q3.</b> What is a Critic/Reviewer in agentic AI?<br><b>A.</b> A component that evaluates an agent's output and provides corrective feedback for revision.</div>
+    <div class="qa"><b>Q4.</b> What's the difference between parallel and sequential agents?<br><b>A.</b> Parallel agents work on independent sub-tasks simultaneously; sequential agents run one after another, each building on the previous output.</div>
+    <div class="qa"><b>Q5.</b> Why would you decompose a single agent into a Supervisor + specialists?<br><b>A.</b> To give each specialist a narrower, clearer responsibility and tool scope, often improving reliability over one agent trying to handle everything.</div>
+    <div class="qa"><b>Q6.</b> Should you always add a Critic pass to improve output quality?<br><b>A.</b> No — it adds cost/latency; only add it when evaluation shows a measurable quality improvement justifying that cost.</div>
+    <div class="qa"><b>Q7.</b> What is a Router pattern?<br><b>A.</b> Classifying an incoming request and directing it to the appropriate handler/agent.</div>
+    <div class="qa"><b>Q8.</b> Name one scenario where you should NOT use an agent.<br><b>A.</b> When the task has a fixed, predictable sequence of steps regardless of intermediate results — use a workflow instead.</div>
+    <div class="qa"><b>Q9.</b> Why does a Planner sometimes need to re-plan mid-execution?<br><b>A.</b> Because execution can reveal new information showing the original plan is flawed or infeasible, requiring adaptation.</div>
+    <div class="qa"><b>Q10.</b> What's a risk of an unbounded critique/revision loop?<br><b>A.</b> It could run indefinitely without converging, incurring unbounded cost — needs a maximum iteration cap.</div>
+
+    <h2 id="interview-i">28. Interview Questions — Intermediate</h2>
+    <div class="qa"><b>Q1.</b> Why might decomposing an agent into specialized roles improve reliability even though each role is still "just an LLM call"?<br><b>A.</b> Narrower, more clearly-scoped responsibilities reduce the chance of the model conflating or dropping instructions the way a single do-everything prompt might, similar to how task decomposition improves prompt reliability generally — specialization reduces cognitive/instructional load per call.</div>
+    <div class="qa"><b>Q2.</b> How would you prevent a Supervisor's misrouting from causing a specialist agent to handle a request outside its competence?<br><b>A.</b> Add a confidence threshold to the routing decision — if classification confidence is low, route to a fallback/general handler or request clarification rather than forcing a potentially wrong specialist assignment; also evaluate routing accuracy against a labeled test set to catch systematic misclassification patterns.</div>
+    <div class="qa"><b>Q3.</b> What's the trade-off between Parallel and Sequential agent execution for a multi-part research task?<br><b>A.</b> Parallel execution reduces wall-clock latency for genuinely independent sub-tasks but can't handle dependencies between sub-tasks; Sequential execution naturally handles dependencies (each step building on prior results) but takes longer overall — choose based on whether sub-tasks are actually independent.</div>
+    <div class="qa"><b>Q4.</b> Why is a Critic agent's feedback quality itself a potential failure point in the Reflection pattern?<br><b>A.</b> If the critic's feedback is vague, unhelpful, or itself wrong (the critic can hallucinate issues or miss real ones), the reviser can't effectively improve the draft — the critic needs its own evaluation/calibration, not blind trust that "having a critic" automatically improves quality.</div>
+    <div class="qa"><b>Q5.</b> How would you measure whether a multi-agent Supervisor architecture is actually outperforming a single well-prompted agent for your task?<br><b>A.</b> Run both architectures against the same evaluation set, comparing success rate, cost, and latency — if the single-agent baseline matches multi-agent quality at lower cost, the added architectural complexity isn't earning its keep.</div>
+
+    <h2 id="interview-a">29. Interview Questions — Advanced</h2>
+    <div class="qa"><b>Q1.</b> How would you design a Planner/Executor system that gracefully handles the Executor discovering the Planner's assumptions were wrong partway through?<br><b>A.</b> Have the Executor report structured failure/discrepancy information back to the Planner (not just raw errors), trigger a re-planning step that incorporates this new information to produce a revised plan, and maintain state tracking which steps already completed successfully so re-planning doesn't redundantly redo completed work.</div>
+    <div class="qa"><b>Q2.</b> What's a subtle risk of a Critic agent being the same underlying model/prompt family as the agent producing the draft it's critiquing?<br><b>A.</b> The critic may share the same blind spots/biases as the generator (correlated errors), reducing its ability to catch certain classes of mistakes — using a different model, a differently-prompted critic focusing on specific failure modes, or incorporating external verification (rule-based checks, retrieval-grounded fact-checking) can provide more independent, effective critique.</div>
+
+    <h2 id="interview-s">30. Interview Questions — Senior/Architect</h2>
+    <div class="qa"><b>Q1.</b> Design a multi-agent research platform combining Planner/Executor, Supervisor, and Critic patterns, justifying each architectural choice.<br><b>A.</b> Planner decomposes the research goal into sub-questions; a Supervisor routes each sub-question to specialist research agents (web search, data analysis, document retrieval) running in parallel where independent; each specialist's output passes through a Critic checking source quality and factual consistency before being accepted; the Planner re-plans if critic feedback reveals a sub-question needs a different approach; final synthesis combines all accepted specialist outputs — each layer justified by addressing a specific failure mode (decomposition for complexity, specialization for domain accuracy, critique for quality assurance) rather than added for its own sake.</div>
+
+    <h2 id="interview-sc">31. Scenario-Based Questions</h2>
+    <div class="qa"><b>Scenario 1.</b> Your team built a 5-agent Supervisor architecture for a task that a single well-prompted agent handles just as well in evaluation. What do you recommend?<br><b>A.</b> Recommend simplifying to the single-agent approach — the added architectural complexity isn't earning its cost/latency overhead if evaluation shows no quality benefit; reserve the multi-agent architecture for tasks where it's measurably justified.</div>
+    <div class="qa"><b>Scenario 2.</b> A Critic/Reviser loop in production occasionally runs 20+ revision cycles before giving up. How do you fix it?<br><b>A.</b> Add a hard maximum revision count with a defined fallback (return best-effort draft or escalate to human) when hit, and investigate whether the critic's feedback is specific/actionable enough for the reviser to actually converge, rather than vague recurring criticism.</div>
+    <div class="qa"><b>Scenario 3.</b> A Supervisor occasionally routes sensitive account-security tickets to the general-purpose billing specialist, which lacks proper security protocols. How do you fix this architecturally?<br><b>A.</b> Treat this as a security-relevant misrouting risk, not just a quality issue — add stricter, higher-confidence-threshold routing rules for security-sensitive categories, default to a secure fallback (human review) rather than any general specialist when classification confidence is uncertain for sensitive categories, and audit-log all security-category routing decisions.</div>
+
+    <h2 id="revision">32. Quick revision notes</h2>
+    <ul>
+      <li>Planner/Executor, Supervisor, Router, Reflection/Critic — standard agentic architecture patterns.</li>
+      <li>Each pattern exists to decompose responsibility, improving reliability over one undifferentiated agent.</li>
+      <li>Only adopt added architecture when evaluation shows measurable benefit over simpler alternatives.</li>
+      <li>Know when NOT to use agents at all.</li>
+    </ul>
+
+    <h2 id="cheat">33. Cheat sheet</h2>
+    <div class="callout">Planner/Executor = decompose then execute. Supervisor = route to specialists + integrate. Critic/Reflection = evaluate + revise. Parallel = independent sub-tasks concurrently. Sequential = dependent sub-tasks in order. Only add complexity that's measurably justified.</div>
+
+    <h2 id="further">34. Further topics to learn</h2>
+    <p><a href="../21-Multi-Agent-Systems/">Multi-Agent Systems</a> → <a href="../20-Agent-Memory/">Agent Memory</a> → <a href="../47-AI-Design-Patterns/">AI Design Patterns</a></p>
+
+    <div class="prevnext">
+      <a href="../18-LangGraph/langgraph-fundamentals.html">← LangGraph</a>
+      <a href="../20-Agent-Memory/agent-memory-fundamentals.html">Next: Agent Memory →</a>
+    </div>
+  </main>
+</div>
+<script src="../assets/app.js"></script>
+</body>
+</html>

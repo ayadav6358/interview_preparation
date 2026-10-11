@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TypeScript Advanced — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span>TypeScript Advanced</div>
+      <div class="topbar-actions"><button id="theme-toggle" class="icon-btn">🌙</button></div>
+    </div>
+    <div class="content">
+      <h1>TypeScript Advanced</h1>
+      <p class="meta-line"><span>📚 6 chapters</span><span>⏱ ~15–17 hrs total</span></p>
+      <p>TypeScript questions in senior/staff interviews rarely stop at "what's the difference between <code>interface</code>
+      and <code>type</code>". You'll be asked to reason about how inference actually resolves, why a conditional type
+      didn't distribute the way you expected, how to design a generic API that infers correctly at every call site, and
+      how to keep a large monorepo's type-checking fast and sound. This topic goes under the hood of the compiler's type
+      system and builds the pattern library you need to design type-safe libraries, not just consume them.</p>
+
+      <h2 id="outcomes">Learning Outcomes</h2>
+      <ul>
+        <li>Explain how TypeScript's structural type system, control-flow narrowing, and inference algorithm actually work — not just "it just knows".</li>
+        <li>Design generic functions and types whose inference "falls out" naturally at call sites, without annotation gymnastics.</li>
+        <li>Read, build, and debug mapped, conditional, and template literal types, including distributive conditional types and recursive type-level computation.</li>
+        <li>Apply branded/nominal types, discriminated unions, and type-safe builder/factory patterns in real React and Node codebases.</li>
+        <li>Configure <code>tsconfig.json</code> strict mode flags with intent, author clean <code>.d.ts</code> output, and keep a multi-package monorepo's type-checking fast and correct with project references.</li>
+        <li>Defend design tradeoffs (type complexity vs readability, compile-time guarantees vs runtime cost) under interviewer pushback.</li>
+      </ul>
+
+      <h2 id="chapters">Chapters</h2>
+      <table>
+        <tr><th>#</th><th>Chapter</th><th>Time</th></tr>
+        <tr><td>01</td><td><a href="01-type-system.html">Type System Deep Dive: inference, narrowing, unions, intersections</a></td><td>2.5 hrs</td></tr>
+        <tr><td>02</td><td><a href="02-generics.html">Generics In Depth: constraints, variance, inference sites</a></td><td>2.5 hrs</td></tr>
+        <tr><td>03</td><td><a href="03-utility-types.html">Utility Types: built-ins and building your own</a></td><td>2.5 hrs</td></tr>
+        <tr><td>04</td><td><a href="04-conditional-mapped-template.html">Conditional, Mapped &amp; Template Literal Types</a></td><td>3 hrs</td></tr>
+        <tr><td>05</td><td><a href="05-type-safe-patterns.html">Type-Safe Patterns for React &amp; Node APIs</a></td><td>2.5 hrs</td></tr>
+        <tr><td>06</td><td><a href="06-tsconfig-monorepo.html">tsconfig, Strict Mode, Declaration Files, Monorepos</a></td><td>2 hrs</td></tr>
+      </table>
+
+      <div class="capstone">
+        <h3>🏆 Capstone Project: Build a Fully Type-Safe REST Client + Validation Layer</h3>
+        <p><strong>Problem statement:</strong> Build a TypeScript library that lets a consumer define a small REST API's
+        shape once (routes, params, request bodies, response bodies) and get a fully type-safe client where every call
+        site's argument types and return type are <em>inferred</em> from that one definition — no manual generic
+        annotations at call sites, no <code>any</code>, no response shape drift between client and server.</p>
+        <p><strong>Required features:</strong></p>
+        <ul>
+          <li>A route definition map (e.g. <code>{ "GET /users/:id": { params: {...}, response: User } }</code>) typed with template literal types to extract path params automatically from the route string.</li>
+          <li>Generic <code>request()</code>/<code>client.get()</code>/<code>client.post()</code> functions whose parameter and return types are <em>inferred</em> from the route key passed in — using conditional and mapped types, not overload spam.</li>
+          <li>A runtime validation layer (hand-rolled or a thin wrapper) whose validator type and inferred static type are provably the same type (no "trust me" <code>as</code> casts) — i.e. <code>Infer&lt;typeof UserSchema&gt;</code> style.</li>
+          <li>Branded types for IDs (<code>UserId</code>, <code>OrderId</code>) so swapping them at a call site is a compile error, with zero runtime cost.</li>
+          <li>A mini type-level test suite using conditional types (an <code>Expect&lt;Equal&lt;A, B&gt;&gt;</code> pattern) that fails the build if an inferred type regresses — no test runner needed, just <code>tsc --noEmit</code>.</li>
+          <li>At least one deliberately tricky case handled correctly: optional vs required params inferred from the route string, and a distributive conditional type used to map a union of route keys to a union of response types.</li>
+        </ul>
+        <p><strong>Tech stack suggestion:</strong> Plain TypeScript 5.x, no framework required for the client; optionally wire it to a small Express/Fastify mock server for an end-to-end demo. Vitest or <code>tsc --noEmit</code> for the type-level tests.</p>
+        <p><strong>Milestones:</strong></p>
+        <ol>
+          <li>Design the route definition shape and write the template literal type that extracts <code>:id</code>-style params into a typed object.</li>
+          <li>Build the generic <code>request()</code> core and prove inference works end-to-end for one GET and one POST route.</li>
+          <li>Add the runtime validator + <code>Infer&lt;T&gt;</code> type-level extraction so static and runtime types can never drift silently.</li>
+          <li>Add branded ID types and thread them through the route map.</li>
+          <li>Write the type-level test suite (<code>Equal</code>/<code>Expect</code> utilities) covering at least 8 inference scenarios, including one that currently fails until you fix the type.</li>
+          <li>Write a short README explaining the 3 hardest type-level tricks you used and why each exists.</li>
+        </ol>
+        <p><strong>Evaluation checklist:</strong></p>
+        <ul>
+          <li>☐ No <code>any</code> or unchecked <code>as</code> casts anywhere in the public API surface.</li>
+          <li>☐ Changing a route's response shape in the definition map produces a compile error everywhere it's consumed incorrectly.</li>
+          <li>☐ Can explain, from memory, why the conditional type you used for param extraction distributes the way it does.</li>
+          <li>☐ Branded types prevent passing a <code>UserId</code> where an <code>OrderId</code> is expected, with a one-line proof.</li>
+          <li>☐ Can defend at least one place you chose <em>not</em> to push the type system further, and why (readability/compile-time cost).</li>
+        </ul>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · TypeScript Advanced</footer>
+  </main>
+</div>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "02-typescript-advanced" });</script>
+</body>
+</html>

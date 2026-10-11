@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Features in React/Node: End-to-End — AI Integration — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">AI Integration</a><span class="sep">›</span>AI Features in React/Node</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>AI Features in React/Node: End-to-End Architecture</h1>
+      <p class="meta-line"><span>⏱ ~3 hrs</span><span>📍 Chapter 7 of 7</span></p>
+      <p><strong>One-line summary:</strong> Everything from the previous six chapters has to land somewhere real
+      — a Node backend streaming tokens over SSE or WebSocket to a React frontend that renders them
+      incrementally, handles abort/cancel cleanly, and feels responsive even though the model is still thinking
+      — and nearly all of the genuinely tricky bugs in that pipeline are about state management and cleanup,
+      not about the AI itself.</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>This is the chapter where everything becomes concrete, and it's also where senior React/Node experience
+      actually pays off directly — the hard parts of a streaming AI chat feature are the same hard parts as any
+      other long-lived, cancellable, stateful connection (think long-polling, live updates, file uploads with
+      progress), just dressed up in AI terminology. An interviewer asking you to design this end to end is really
+      testing whether you can reason about backpressure, cancellation, race conditions between a stream and a
+      user action, and graceful degradation — skills you already have from other systems, applied to a new
+      transport pattern. Candidates who've only called an LLM API from a script and never wired it into a real
+      UI consistently stumble here, which makes it one of the highest-signal parts of an AI-integration interview.</p>
+      <div class="box why"><h4>Why</h4><p>An LLM response can take anywhere from under a second to tens of
+      seconds depending on length and model; a UI that waits silently for the full response feels broken at any
+      length past a couple of seconds, and a UI that can't be cancelled mid-generation wastes money on tokens
+      the user no longer wants and leaves them stuck watching a pointless spinner. Streaming plus cancellation
+      isn't a nice-to-have polish layer — it's the baseline UX contract for any production chat-style AI feature.</p></div>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>Requires <a href="05-ai-agents.html">AI Agents & Workflows</a> and
+      <a href="06-ai-in-production.html">AI in Production</a>. Assumes working React (hooks, effects) and Node
+      (HTTP servers, async/await) knowledge.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="transport-basics">Choosing a transport: SSE vs. WebSocket</h3>
+      <p><strong>Server-Sent Events (SSE)</strong> is the right default for the common case of "server streams
+      tokens to the client, client doesn't need to send anything mid-stream": it's plain HTTP (works through
+      standard proxies/load balancers without special configuration), the browser's native <code>EventSource</code>
+      (or a manual <code>fetch</code> with a readable-stream reader, which gives more control over headers/auth
+      and is what most production chat UIs actually use instead of <code>EventSource</code>) handles reconnection
+      semantics, and it's unidirectional in exactly the direction this use case needs. <strong>WebSocket</strong>
+      is justified when you need true bidirectional communication mid-stream — e.g. a voice-agent interface
+      where the client is also streaming audio up while the server streams a response down, or a collaborative
+      multi-user session where other clients' events need to interleave with the AI stream. For a standard chat
+      UI, reaching for WebSocket by default is usually unjustified complexity: you gain a persistent bidirectional
+      channel you don't need and lose the simplicity of plain HTTP semantics (caching, proxying, standard
+      load-balancer behavior) that SSE still gets to use.</p>
+
+      <h3 id="backend-streaming">Node backend: proxying a provider stream to the client</h3>
+      <p>The backend's job is almost never "call the LLM directly from the browser" (that would expose API keys
+      client-side and skip all the guardrail/auth/rate-limiting layers from chapter 6) — it's a thin proxy: the
+      Node server calls the LLM provider's streaming API, receives chunks as they arrive, and re-streams them to
+      the browser as SSE events, typically after some light transformation (extracting just the text delta,
+      injecting metadata like a message ID, or running incremental output-guardrail checks on partial content).
+      This proxy layer is also where per-request auth, rate limiting, cost tracking, and abort propagation all
+      live — none of which the client should be trusted to enforce itself.</p>
+
+      <h3 id="frontend-state">React frontend: optimistic UI, streaming state, and abort</h3>
+      <p>A production chat UI manages several pieces of state that are easy to get subtly wrong: (1)
+      <strong>optimistic rendering</strong> — the user's own message appears immediately on send, before any
+      network round-trip completes, because waiting for a server round-trip just to echo the user's own typed
+      text back is a needless latency hit; (2) <strong>incremental assistant-message state</strong> — as SSE
+      chunks arrive, the in-progress assistant message is appended to and re-rendered, typically keyed by a
+      stable message ID so React can reconcile efficiently instead of treating each chunk as a wholly new list
+      item; (3) <strong>abort/cancel</strong> — wiring an <code>AbortController</code> through the fetch call so
+      a user-initiated "stop generating" click actually terminates the underlying HTTP request (and, upstream,
+      the Node server should propagate that cancellation to the LLM provider call too, to actually stop paying
+      for tokens the user no longer wants, not just stop rendering them); (4) <strong>race conditions</strong> —
+      a user sending a second message while the first is still streaming, or navigating away mid-stream, both
+      need explicit handling (ignore/queue the second send, or cleanly abort on unmount) or you get either
+      garbled interleaved output or a classic React "setState after unmount" warning masking an actual leaked
+      connection.</p>
+
+      <h3 id="resilience">Resilience: reconnection, partial failures, and degraded UX</h3>
+      <p>Streams fail mid-flight — a network blip, a provider timeout, a server restart during a deploy. A
+      resilient design: the backend buffers/can replay from a last-received-chunk marker if the provider's API
+      supports resumption (not all do; absent that, the simplest robust fallback is "the client detects the
+      stream closed abnormally and offers a retry," rather than silently showing a truncated, confidently-final-
+      looking response as if it were complete). The frontend should visually distinguish "still generating,"
+      "finished normally," and "stopped/failed partway" states rather than rendering all three identically —
+      a truncated response that looks complete is actively worse than an explicit error, because the user has no
+      signal to distrust it.</p>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>A full request/response cycle for a streaming chat message:</p>
+      <ol>
+        <li>User types a message and hits send; React immediately renders the user's message optimistically and
+        creates a placeholder "in progress" assistant message in local state.</li>
+        <li>Frontend issues a <code>fetch</code> (or <code>EventSource</code>) request to the Node backend,
+        holding onto an <code>AbortController</code> tied to this specific request.</li>
+        <li>Node backend authenticates/rate-limits the request, assembles the cache-friendly prompt (chapter 6),
+        and opens a streaming call to the LLM provider.</li>
+        <li>As the provider streams token chunks back, the Node server forwards each as an SSE event
+        (<code>data: {"delta": "..."}\n\n</code>) to the client, optionally running incremental guardrail checks
+        and injecting a stable message ID on the first chunk.</li>
+        <li>The frontend's stream reader appends each received delta to the in-progress assistant message in
+        state, causing an incremental re-render; this continues until a terminal event (done, error, or
+        provider-side stop reason) arrives.</li>
+        <li>If the user clicks "stop": the frontend calls <code>abort()</code> on the controller, which
+        terminates the fetch; the Node server, detecting the client disconnect (via the request's abort/close
+        event), propagates cancellation upstream to the LLM provider call so token generation (and billing) for
+        that request actually stops rather than completing server-side with no one listening.</li>
+        <li>On normal completion, the message is marked finalized (no longer "in progress") and, async, logged
+        for the eval/monitoring pipeline from chapter 6.</li>
+      </ol>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+sequenceDiagram
+  participant React as React Client
+  participant Node as Node Backend
+  participant LLM as LLM Provider
+  React->>React: optimistic render of user message
+  React->>Node: POST /chat (fetch, AbortController attached)
+  Node->>Node: authenticate, rate-limit, build cached prompt
+  Node->>LLM: streaming completion request
+  loop token chunks
+    LLM-->>Node: chunk
+    Node-->>React: SSE event (delta)
+    React->>React: append delta, re-render in-progress message
+  end
+  alt user clicks Stop
+    React->>Node: abort() terminates fetch
+    Node->>LLM: propagate cancellation
+    Node-->>React: connection closed
+    React->>React: mark message "stopped"
+  else stream completes normally
+    LLM-->>Node: done
+    Node-->>React: SSE done event
+    React->>React: mark message "finalized"
+  end
+      </div>
+      <div class="mermaid">
+flowchart TD
+  SEND[User sends message] --> OPT[Optimistic render: user msg + placeholder assistant msg]
+  OPT --> REQ[fetch with AbortController]
+  REQ --> STREAM{Streaming state}
+  STREAM -->|chunks arriving| APPEND[Append delta to in-progress message]
+  APPEND --> STREAM
+  STREAM -->|done event| FINAL[Mark finalized]
+  STREAM -->|abort clicked| CANCEL[AbortController.abort + propagate server-side]
+  STREAM -->|network error| FAIL[Mark stopped/failed, offer retry]
+  CANCEL --> STOPPED[Mark stopped, no further chunks rendered]
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-typescript">// Node backend: thin SSE proxy over a provider streaming call, with abort propagation.
+import type { Request, Response } from "express";
+
+export async function streamChatHandler(req: Request, res: Response) {
+  const { message, conversationId } = req.body;
+
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.flushHeaders();
+
+  const providerAbort = new AbortController();
+
+  // If the client disconnects (closes tab, clicks Stop → fetch aborted), propagate
+  // cancellation upstream so we actually stop paying for generation we no longer need.
+  req.on("close", () => providerAbort.abort());
+
+  try {
+    const stream = await llmClient.messages.stream(
+      { messages: [{ role: "user", content: message }], model: "claude-opus-4" },
+      { signal: providerAbort.signal }
+    );
+
+    let messageId: string | null = null;
+    for await (const event of stream) {
+      if (event.type === "message_start") {
+        messageId = event.message.id;
+        res.write(`data: ${JSON.stringify({ type: "start", messageId })}\n\n`);
+      } else if (event.type === "content_block_delta") {
+        res.write(`data: ${JSON.stringify({ type: "delta", text: event.delta.text })}\n\n`);
+      }
+    }
+    res.write(`data: ${JSON.stringify({ type: "done" })}\n\n`);
+  } catch (err) {
+    if (providerAbort.signal.aborted) {
+      // Expected: client cancelled. Nothing to report as an error.
+    } else {
+      res.write(`data: ${JSON.stringify({ type: "error", message: "generation_failed" })}\n\n`);
+    }
+  } finally {
+    res.end();
+  }
+}
+
+// BAD: no abort propagation — closing the tab or clicking "stop" only stops the
+// client from reading further chunks; the server keeps calling the LLM and the
+// bill keeps accumulating for a response nobody will ever see.
+async function badStreamHandler(req: Request, res: Response) {
+  const stream = await llmClient.messages.stream({ messages: [{ role: "user", content: req.body.message }] });
+  for await (const event of stream) {
+    res.write(`data: ${JSON.stringify(event)}\n\n`); // fails silently if client is gone, keeps running
+  }
+  res.end();
+}
+</code></pre>
+      <pre><code class="language-typescript">// React: optimistic send, incremental streaming state, and abort/cancel — the three
+// pieces of state that are easy to get subtly wrong in a chat UI.
+import { useState, useRef, useCallback } from "react";
+
+interface ChatMessage { id: string; role: "user" | "assistant"; text: string; status: "pending" | "streaming" | "done" | "stopped" | "error"; }
+
+export function useChatStream() {
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const abortRef = useRef<AbortController | null>(null);
+
+  const sendMessage = useCallback(async (text: string) => {
+    // Guard against a second send while the first is still streaming.
+    if (abortRef.current) return;
+
+    const userMsg: ChatMessage = { id: crypto.randomUUID(), role: "user", text, status: "done" };
+    const assistantId = crypto.randomUUID();
+    const placeholder: ChatMessage = { id: assistantId, role: "assistant", text: "", status: "pending" };
+    // Optimistic render: both messages appear immediately, before any network round-trip.
+    setMessages((prev) => [...prev, userMsg, placeholder]);
+
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    try {
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        body: JSON.stringify({ message: text }),
+        signal: controller.signal,
+      });
+      const reader = res.body!.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const events = buffer.split("\n\n");
+        buffer = events.pop() ?? "";
+
+        for (const raw of events) {
+          const payload = JSON.parse(raw.replace(/^data: /, ""));
+          if (payload.type === "delta") {
+            setMessages((prev) =>
+              prev.map((m) => (m.id === assistantId ? { ...m, text: m.text + payload.text, status: "streaming" } : m))
+            );
+          } else if (payload.type === "done") {
+            setMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, status: "done" } : m)));
+          }
+        }
+      }
+    } catch (err) {
+      if (controller.signal.aborted) {
+        // User clicked Stop — mark as stopped, not as an error.
+        setMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, status: "stopped" } : m)));
+      } else {
+        setMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, status: "error" } : m)));
+      }
+    } finally {
+      abortRef.current = null;
+    }
+  }, []);
+
+  const stopGenerating = useCallback(() => {
+    abortRef.current?.abort(); // triggers the catch block above, and server-side req.on("close")
+  }, []);
+
+  return { messages, sendMessage, stopGenerating, isStreaming: abortRef.current !== null };
+}
+
+// BAD: storing the in-progress assistant text in a plain local variable captured by a
+// closure instead of React state keyed by message ID — this silently breaks if the
+// user sends a second message before the first finishes, since both streams would
+// race to mutate the same variable instead of updating their own distinct message.
+function badStreamingPattern() {
+  let currentText = "";
+  // ...chunks appended to currentText, then setMessages(currentText) — no per-message
+  // identity, so two concurrent streams clobber each other.
+}
+</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4><p>A SaaS product ships an AI chat assistant that streams responses
+      via SSE. Early feedback is good, but cost monitoring (chapter 6) flags something odd: measured completion-
+      token cost is noticeably higher than the number of tokens actually rendered to users would suggest. Root
+      cause: the "stop generating" button only called an internal React state update to stop rendering further
+      chunks — it never actually called <code>AbortController.abort()</code> on the underlying fetch, so the
+      HTTP connection (and the Node server's loop reading provider chunks) kept running to completion every time,
+      regardless of whether anyone clicked stop. Worse, the Node server had no <code>req.on("close")</code>
+      handler, so even a genuine client disconnect (tab closed, navigated away) didn't propagate cancellation to
+      the LLM provider call either — every abandoned or stopped generation silently ran to completion server-side
+      and billed in full. The fix was two-sided: wire the abort button to an actual <code>AbortController</code>
+      that terminates the fetch, and add server-side close-detection that propagates cancellation to the provider
+      call, closing the loop end to end rather than just hiding the problem from the UI.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Implementing "stop generating" as a client-only UI change (just
+      stop rendering new chunks) without actually aborting the underlying request and propagating that
+      cancellation server-side to the LLM provider call. This looks correct in manual testing — the UI visibly
+      stops — but silently keeps paying for and generating tokens nobody will ever see, which only shows up
+      later as an unexplained cost/latency anomaly.</p></div>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Keying streaming message state by array index or by "the most
+      recent message" instead of a stable message ID assigned at send time. This breaks the moment a second
+      message is sent before the first finishes streaming, or when React re-renders/reorders the list for any
+      reason — chunks from one stream can end up appended to the wrong message.</p></div>
+      <ul>
+        <li>Never call the LLM provider directly from the browser — it exposes API keys and skips every
+        guardrail/auth/rate-limit layer from chapter 6; always proxy through your own backend.</li>
+        <li>Visually distinguish "streaming," "done," and "stopped/failed" message states — a truncated response
+        rendered identically to a complete one actively misleads the user.</li>
+        <li>Clean up the <code>AbortController</code> and any open readers on component unmount (React effect
+        cleanup), not just on explicit user cancellation — navigating away mid-stream is cancellation too.</li>
+        <li>Default to SSE over a plain <code>fetch</code> + readable-stream reader for standard chat UIs;
+        reach for WebSocket only when you have a genuine bidirectional-mid-stream requirement.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>SSE (fetch + stream reader)</td><td>Server-to-client streaming, standard chat UI</td><td>Client needs to send data mid-stream (voice, collaboration)</td><td>WebSocket</td></tr>
+        <tr><td>Browser EventSource API</td><td>Simple cases, no custom headers/auth needed</td><td>Need custom auth headers or POST body</td><td>Manual fetch + ReadableStream reader</td></tr>
+        <tr><td>Optimistic UI rendering</td><td>User's own input, high-confidence local actions</td><td>Action might be rejected server-side (auth, validation)</td><td>Pending state with rollback on failure</td></tr>
+        <tr><td>Client-only "stop" (UI-only)</td><td>Never, for production</td><td>Always avoid — doesn't stop cost/generation</td><td>AbortController + server-side cancellation propagation</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+
+      <div class="qa-level basic">
+        <h4>Basic</h4>
+        <details class="qa"><summary>Why is streaming important for a chat-style AI feature's UX, beyond "it looks nicer"?</summary><div class="answer"><p>LLM responses can take many seconds to fully generate; a UI that waits silently for the complete response feels broken past a couple of seconds, while streaming shows progress via time-to-first-token, making the same total generation time feel responsive instead of stalled.</p></div><div class="followup">Follow-up: which latency metric does streaming optimize — time-to-first-token or total generation time?</div></details>
+        <details class="qa"><summary>Why should the browser never call the LLM provider's API directly?</summary><div class="answer"><p>It would expose the API key client-side (visible to anyone inspecting network requests) and bypass every server-side layer — authentication, rate limiting, guardrails, cost tracking — that a real production system needs; the LLM call must be proxied through your own backend.</p></div><div class="followup">Follow-up: what specific guardrail layers from the production chapter would be skipped if the client called the provider directly?</div></details>
+        <details class="qa"><summary>What is optimistic UI rendering in the context of a chat interface?</summary><div class="answer"><p>Rendering the user's own sent message immediately in the UI, before any network round-trip to the server completes, since there's no need to wait for a server echo of text the user just typed themselves — it removes a needless latency hit on the part of the interaction that's already known with certainty.</p></div><div class="followup">Follow-up: what's an action where optimistic rendering would be riskier, and why?</div></details>
+        <details class="qa"><summary>What does an AbortController do, and why does a chat UI need one?</summary><div class="answer"><p>It lets code terminate an in-flight fetch request; a chat UI needs one so a "stop generating" button can actually cancel the underlying HTTP request to the backend, instead of just hiding further output in the UI while the request keeps running.</p></div><div class="followup">Follow-up: does aborting the client-side fetch automatically stop the server from generating more tokens? Why or why not?</div></details>
+        <details class="qa"><summary>Why is keying an in-progress streaming message by a stable message ID important?</summary><div class="answer"><p>Without a stable ID, there's no reliable way to know which message in state a given incoming chunk belongs to, especially if a second message is sent before the first finishes — chunks can get appended to the wrong message, or two concurrent streams can clobber each other's state.</p></div><div class="followup">Follow-up: when would this bug actually manifest in testing — why might it be easy to miss?</div></details>
+        <details class="qa"><summary>When would you choose WebSocket over SSE for an AI feature?</summary><div class="answer"><p>When you need genuine bidirectional communication mid-stream — e.g. a voice agent streaming audio up from the client while the server streams a response down, or a collaborative session where other users' events need to interleave with the AI stream — not for a standard one-directional server-to-client chat UI, where SSE is simpler and sufficient.</p></div><div class="followup">Follow-up: what do you give up by using WebSocket when you didn't actually need bidirectional communication?</div></details>
+      </div>
+
+      <div class="qa-level medium">
+        <h4>Medium</h4>
+        <details class="qa"><summary>Walk through exactly what has to happen, end to end, for clicking "stop generating" to actually stop the LLM provider from generating further tokens.</summary><div class="answer"><p>The client's AbortController must abort the fetch, which closes the HTTP connection to the Node backend. The Node server must detect that closure (e.g. via the request object's close/abort event) and use that to trigger its own AbortSignal passed into the LLM provider's streaming call, which the provider SDK then uses to actually terminate the upstream request. If any link in this chain is missing — the button only updates UI state, or the server doesn't listen for client disconnect, or the provider call isn't wired to a cancellable signal — the provider keeps generating and billing regardless of what the UI shows.</p></div><div class="followup">Follow-up: what would you log or monitor to detect that this chain is broken in production, without manually testing it?</div></details>
+        <details class="qa"><summary>Design the race-condition handling for a user sending a second chat message while the first is still streaming.</summary><div class="answer"><p>Two reasonable designs: (1) disable the send action entirely while a stream is in progress (simplest, matches most production chat UIs), or (2) allow concurrent sends but ensure each stream's chunks are appended only to that stream's own message via its stable ID, with independent AbortControllers per in-flight request so cancelling one doesn't affect the other. Option 1 avoids the complexity entirely at the cost of UX flexibility; option 2 requires careful per-message state isolation, exactly the kind of thing that breaks if streaming state is keyed by "the current message" instead of a stable per-message ID.</p></div><div class="followup">Follow-up: which design would you pick for a typical SaaS chat assistant, and why?</div></details>
+        <details class="qa"><summary>What should happen in the UI when a stream closes abnormally partway through (network blip, server restart) versus when the user explicitly clicks stop?</summary><div class="answer"><p>Both terminate the stream early, but they should render differently and be logged differently: an explicit user-initiated stop should show a clear "stopped by you" state with no implication of failure, while an abnormal closure should show a distinguishable "generation failed/interrupted" state, ideally with a retry option — rendering both as if the response simply finished short is actively misleading, since the user has no signal that the content is incomplete rather than a deliberately short answer.</p></div><div class="followup">Follow-up: how would you distinguish these two cases in your abort/error handling code specifically?</div></details>
+        <details class="qa"><summary>Why is a manual fetch + ReadableStream reader often preferred over the browser's native EventSource API for production chat UIs?</summary><div class="answer"><p>EventSource only supports GET requests and can't set custom headers (needed for most real auth schemes like Bearer tokens), and it has its own automatic-reconnection behavior that can fight with application-level retry/error logic. A manual fetch with a ReadableStream reader gives full control over method, headers, body, and abort behavior, at the cost of having to implement SSE event-chunk parsing yourself instead of getting it for free.</p></div><div class="followup">Follow-up: what do you lose by not using EventSource's built-in reconnection, and how would you replace it?</div></details>
+        <details class="qa"><summary>How would you prevent a memory/connection leak when a user navigates away from a chat page while a response is still streaming?</summary><div class="answer"><p>Use a React effect cleanup function tied to the component's lifecycle (not just the explicit "stop" button handler) that calls abort() on the controller whenever the component unmounts, ensuring the fetch is terminated and the server-side close-detection chain is triggered the same way an explicit stop would. Relying only on the button handler misses this case entirely, since navigating away doesn't trigger a button click.</p></div><div class="followup">Follow-up: why might this leak be hard to notice in development but show up clearly in production traffic?</div></details>
+      </div>
+
+      <div class="qa-level advanced">
+        <h4>Advanced</h4>
+        <details class="qa"><summary>Design a resilient streaming architecture that can resume a partially-delivered response after a transient network drop, without re-generating the entire response from the LLM provider.</summary><div class="answer"><p>This requires the backend to buffer generated chunks (keyed by a request/message ID) as they arrive from the provider, independent of whether the client connection is currently open, so a reconnecting client can request "resume from message ID X, I last received chunk N" and be replayed the buffered chunks it missed before rejoining the live stream. This only works cleanly if the provider's own API either supports true resumption of a specific generation (not universally supported) or if the backend treats itself as the source of truth for a completed generation regardless of client connectivity, decoupling "the provider is still generating" from "the client is currently connected." Absent either, the pragmatic fallback is: detect abnormal closure, don't attempt true resumption, and surface a clear retry affordance instead of silently either losing the content or double-generating it.</p></div><div class="followup">Follow-up: what are the storage/cost implications of buffering every in-flight generation server-side, and how would you bound them?</div></details>
+        <details class="qa"><summary>A production incident: cost monitoring shows completion-token spend far exceeding what rendered-to-user token counts would predict. Walk through your debugging process.</summary><div class="answer"><p>First check whether "stop generating" and client-disconnect events are actually propagating to provider-level cancellation (the most common root cause for exactly this symptom) — instrument and log, per request, whether a client disconnect/abort occurred and whether the corresponding provider call was actually aborted or ran to completion anyway. If that chain is intact, check for duplicate/retry logic sending the same request to the provider multiple times without the client's knowledge (e.g. a frontend retry wrapper race-conditioned with an in-flight request), or a cascading/routing misconfiguration silently also calling a second model tier even when the first succeeded. The key discipline is correlating client-side "stopped early" events against server-side "provider call completed anyway" events at the per-request level — aggregate cost metrics alone won't localize the bug, only per-request tracing will.</p></div><div class="followup">Follow-up: what specific log fields would you want on every request to make this correlation possible without re-instrumenting after the fact?</div></details>
+        <details class="qa"><summary>Design the frontend state machine for a chat message that needs to support: optimistic send, streaming, explicit stop, abnormal failure, and retry — without the UI code becoming an unmanageable pile of boolean flags.</summary><div class="answer"><p>Model message status as an explicit enum/discriminated union (e.g. "pending" | "streaming" | "done" | "stopped" | "error") rather than independent booleans like isLoading/isError/isStopped, since independent booleans can represent impossible combined states (e.g. isLoading=true and isError=true simultaneously) that then need defensive code to handle a state that should never exist. Transitions between states should be the only way status changes (a reducer or explicit transition function), making illegal transitions (e.g. "stopped" directly to "streaming" without going through a new "pending") structurally impossible rather than just convention. Retry should create a conceptually new attempt (new AbortController, same message ID, previous partial text either discarded or kept as context depending on product decision) rather than trying to resume the old stream's state in place.</p></div><div class="followup">Follow-up: would you model this with useReducer, a state machine library (XState), or a simpler pattern, and what would drive that choice at a real company?</div></details>
+        <details class="qa"><summary>How would you add server-side output-guardrail checks (from chapter 6) to a token-by-token streaming response without either defeating the purpose of streaming (buffering the whole response before checking) or letting unsafe content reach the user before it's caught?</summary><div class="answer"><p>Run guardrail checks incrementally against accumulated text at intervals (e.g. every N tokens or every sentence boundary) rather than only at the end, trading off some detection latency for most of streaming's responsiveness benefit — a check firing after each completed sentence catches problems well before the full response would complete, without requiring the full buffer-then-check approach that reintroduces the original latency problem. For structural/format validation that can only be assessed once complete (e.g. "does the final output match this JSON schema"), accept that this specific check necessarily happens post-stream, but keep content-moderation checks running incrementally since those don't need the complete text to evaluate a partial span. If an incremental check fails mid-stream, the stream should be forcibly terminated server-side (not just flagged) and the client shown a safe fallback rather than the partially-delivered unsafe content remaining visible.</p></div><div class="followup">Follow-up: what UX would you show the user when a mid-stream guardrail failure truncates a response they were already reading?</div></details>
+        <details class="qa"><summary>Critique a design where the frontend determines whether to show "Stop" or "Regenerate" purely based on whether any text has been rendered yet (text.length > 0), rather than tracking explicit stream status.</summary><div class="answer"><p>This conflates "has content been rendered" with "is a stream currently active," which diverge in multiple real scenarios: a stream that completed normally still has text.length > 0 but should show "Regenerate," not "Stop" (there's nothing left to stop); a stream that hasn't produced its first token yet (still waiting on time-to-first-token) has text.length === 0 but is actively in-flight and should show "Stop," not nothing. Deriving UI affordances from content length as a proxy for stream status will show the wrong control in exactly the moments that matter most (right after sending, and right after completion) rather than during the comfortable middle of an already-flowing stream where the proxy happens to work. The fix is the same explicit status enum from the state-machine question — never derive control-affecting state from a value that merely correlates with it.</p></div><div class="followup">Follow-up: what's a general principle this illustrates about deriving UI state from data versus tracking it explicitly?</div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment">
+        <span class="level-tag">Beginner (30-60 min)</span>
+        <h4>Minimal SSE streaming chat (no framework polish)</h4>
+        <p>Build a tiny Node/Express endpoint that streams a real or simulated LLM response as SSE, and a plain
+        React component that renders the incrementally-arriving text.</p>
+        <ul>
+          <li>User's message renders optimistically on send, before the request completes.</li>
+          <li>Assistant text appears incrementally as chunks arrive, not all at once at the end.</li>
+        </ul>
+        <p><strong>Acceptance criteria:</strong> visibly incremental rendering (not a single flash at completion),
+        verified by throttling chunk delivery server-side if using a simulated/fast response source.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>If you don't want to call a real LLM API yet, simulate streaming by splitting a canned string into word-sized chunks and writing each with a small artificial delay — the SSE/React mechanics are identical either way.</p></div></details>
+        <p><strong>Bonus:</strong> add a message-status enum (pending/streaming/done) and visually distinguish
+        the states.</p>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Intermediate (2-4 hrs)</span>
+        <h4>Working abort/cancel, end to end, with proof it actually stops generation</h4>
+        <p>Extend the streaming chat from the beginner assignment with a real "Stop" button wired through an
+        AbortController, with server-side cancellation propagation to the upstream LLM call (or simulated
+        upstream call, if not using a real API).</p>
+        <ul>
+          <li>Demonstrate that clicking Stop actually terminates the server-side generation loop — not just the
+          client-side rendering — with a log line proving the upstream call was cancelled, not merely that the
+          client stopped listening.</li>
+          <li>Handle component unmount (navigating away mid-stream) the same way as an explicit Stop click.</li>
+        </ul>
+        <p><strong>Acceptance criteria:</strong> a demonstrated case where Stop is clicked mid-stream and
+        server-side logs confirm the upstream call was aborted, plus a second demonstrated case for unmount-
+        during-stream behaving the same way.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>If simulating the upstream call, make it log a message every second it's "generating" so you can visually confirm those logs stop immediately after abort, rather than continuing to the natural end.</p></div></details>
+        <p><strong>Bonus:</strong> add a cost counter (even simulated, e.g. tokens-per-second x elapsed time) and
+        show it stops accumulating the instant abort fires, not at natural completion.</p>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Advanced (1-2 days)</span>
+        <h4>Production-shaped chat feature: concurrent messages, explicit state machine, guardrails, resilience</h4>
+        <p>Build a more complete chat feature combining concepts from this chapter and chapter 6: explicit
+        per-message status state machine (pending/streaming/done/stopped/error), support for sending a new
+        message while a previous one may or may not still be streaming (your choice of design, justified),
+        incremental output-guardrail checks against accumulated streamed text, and abnormal-disconnect handling
+        with a retry affordance.</p>
+        <ul>
+          <li>Implement and justify your concurrency policy (block second send vs. allow concurrent streams with
+          isolated per-message state).</li>
+          <li>Demonstrate an incremental guardrail check firing mid-stream (e.g. a simple keyword/pattern check)
+          and the stream being forcibly terminated server-side with a clear UI state, not just flagged silently.</li>
+          <li>Simulate an abnormal disconnect (e.g. kill the server mid-response) and show the UI correctly
+          distinguishing this from a normal completion or an explicit stop.</li>
+        </ul>
+        <p><strong>Acceptance criteria:</strong> all three scenarios (concurrency, guardrail trip, abnormal
+        disconnect) demonstrated with visibly distinct, correct UI states for each, plus a short writeup
+        justifying your concurrency design choice.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>Model status with a single enum field per message and a reducer/transition function rather than independent booleans — it will make the concurrency and error-handling logic dramatically easier to reason about and test.</p></div></details>
+        <p><strong>Bonus:</strong> add a retry that creates a new attempt against the same message ID, with a
+        clear UI distinction between "original attempt" and "retried attempt" history.</p>
+      </div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet">
+        <ul>
+          <li>SSE is the right default for server-to-client AI streaming; reach for WebSocket only with a genuine
+          bidirectional-mid-stream need.</li>
+          <li>Never call the LLM provider directly from the browser — always proxy through your own backend for
+          auth, guardrails, rate limiting, and cost tracking.</li>
+          <li>Optimistic rendering: show the user's own message immediately; don't wait on a round-trip to echo
+          text they just typed.</li>
+          <li>Key streaming message state by a stable message ID, never by array index or "the current message."</li>
+          <li>"Stop generating" must propagate all the way to the provider call server-side (AbortController →
+          server close-detection → provider signal) or you keep paying for unseen tokens.</li>
+          <li>Clean up aborts on component unmount, not just on an explicit stop-button click — navigation away
+          mid-stream is cancellation too.</li>
+          <li>Model message status as an explicit enum/state machine, not independent booleans, to avoid
+          impossible combined states.</li>
+          <li>Visually distinguish streaming/done/stopped/error states — a truncated response rendered like a
+          complete one actively misleads the user.</li>
+          <li>Run output guardrails incrementally on streamed text, not only at the end, to catch and terminate
+          unsafe content before the full response reaches the user.</li>
+        </ul>
+      </div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://docs.anthropic.com/en/docs/build-with-claude/streaming">Anthropic: Streaming Messages API documentation</a></li>
+        <li><a href="https://platform.openai.com/docs/api-reference/streaming">OpenAI: Streaming API reference</a></li>
+        <li><a href="https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events/Using_server-sent_events">MDN: Using server-sent events</a></li>
+        <li><a href="https://developer.mozilla.org/en-US/docs/Web/API/AbortController">MDN: AbortController</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="06-ai-in-production.html"><span class="dir">← Previous</span>AI in Production</a>
+        <a class="next" href="../10-soft-skills-leadership/index.html"><span class="dir">Next →</span>Soft Skills & Leadership</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · AI Integration</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-typescript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "09-ai-integration", chapterKey: "07-ai-features-react-node" });</script>
+</body>
+</html>

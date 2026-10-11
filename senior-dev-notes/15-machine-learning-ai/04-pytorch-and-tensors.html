@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PyTorch & Tensors — Machine Learning & AI — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">Machine Learning & AI</a><span class="sep">›</span>PyTorch & Tensors</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>PyTorch & Tensors</h1>
+      <p class="meta-line"><span>⏱ ~3 hrs</span><span>📍 Chapter 4 of 14</span></p>
+      <p><strong>One-line summary:</strong> PyTorch's entire value proposition is that it automates exactly the
+      backward pass you derived by hand in chapter 3, by silently recording every operation into a computation
+      graph as you run the forward pass — once you see that graph explicitly, <code>.backward()</code> stops
+      being magic and <code>loss.backward()</code> reads as "replay the chain rule through everything I just
+      did."</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>PyTorch is the dominant framework for both research and a huge share of production deep learning in
+      2025-26, and senior ML interviews routinely probe whether you understand autograd's mechanics rather than
+      just its API surface — "what does <code>.backward()</code> actually do," "why do I need
+      <code>zero_grad()</code>," "why did my loss become NaN after an in-place operation" are all questions that
+      separate someone who's internalized chapter 3's manual backprop from someone pattern-matching PyTorch
+      tutorials. As a strong general-purpose engineer, you'll also map PyTorch's computation graph directly onto
+      concepts you already know (a DAG, lazy evaluation of gradients, reference-counted memory for the graph) —
+      this chapter leans on exactly that intuition.</p>
+      <div class="box why"><h4>Why</h4><p>Every PyTorch training loop is the same four-line pattern repeated
+      millions of times: forward, compute loss, <code>loss.backward()</code>, <code>optimizer.step()</code>.
+      Understanding that this pattern is a direct automation of chapter 3's hand-derived forward/backward loop
+      — not a different thing — is what lets you debug training failures (vanishing gradients, in-place-op
+      errors, memory leaks from retained graphs) by reasoning about the underlying mechanism instead of
+      guessing from Stack Overflow.</p></div>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>Requires <a href="03-neural-networks-from-scratch.html">Neural Networks from Scratch</a> (chapter 3) —
+      you need to have derived backprop by hand at least once to appreciate what autograd is automating. Builds
+      directly on <a href="01-ml-math-and-foundations.html">ML Math & Foundations</a> (chapter 1) for the
+      tensor/matrix operations. Sets up
+      <a href="05-cnns-rnns-sequence-models.html">CNNs, RNNs & Sequence Models</a> (chapter 5), where these same
+      PyTorch idioms are used to build real architectures.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="tensors">What a tensor is</h3>
+      <p>A <strong>tensor</strong> is PyTorch's n-dimensional array — conceptually identical to a numpy array,
+      but with two crucial additions: it can live on a GPU, and it can track the operations performed on it for
+      automatic differentiation. A scalar is a 0-d tensor, a vector is 1-d, a matrix is 2-d, and a batch of
+      images is typically a 4-d tensor (<code>[batch, channels, height, width]</code>). Every tensor has a
+      <code>.shape</code>, a <code>.dtype</code> (float32 is the default for most training), and a
+      <code>.device</code> (<code>cpu</code> or <code>cuda</code>) — operations between two tensors on
+      different devices raise an error, a common early-career PyTorch mistake.</p>
+
+      <h3 id="autograd">Autograd: how .backward() actually works</h3>
+      <p>Set <code>requires_grad=True</code> on a tensor (or create it as a parameter of an <code>nn.Module</code>,
+      which does this automatically), and PyTorch begins silently building a <strong>computation graph</strong>
+      as you perform operations: every tensor operation (add, matmul, relu, ...) creates a graph node recording
+      what inputs produced it and what operation was used, stored on the output tensor's <code>.grad_fn</code>
+      attribute. This is exactly the "cache every intermediate value" step from chapter 3's manual backprop —
+      PyTorch is doing it for you, automatically, for an arbitrarily complex sequence of operations, not just a
+      fixed 2-layer network.</p>
+      <p>Calling <code>loss.backward()</code> walks this graph <strong>backward</strong> from the loss (a
+      scalar), applying the chain rule at each node exactly as derived in chapter 3, and accumulates the
+      resulting gradient into each leaf tensor's <code>.grad</code> attribute. "Accumulates" is the key word:
+      gradients are <em>added</em> to whatever is already in <code>.grad</code>, not overwritten — which is
+      precisely why every training loop must call <code>optimizer.zero_grad()</code> before each
+      <code>.backward()</code>, or gradients from previous batches silently pile up and corrupt training.</p>
+
+      <h3 id="nn-module">nn.Module and the training loop</h3>
+      <p><code>nn.Module</code> is PyTorch's base class for anything with learnable parameters — a single
+      layer, or an entire network. Subclassing it, you define your layers in <code>__init__</code> (e.g.
+      <code>nn.Linear</code>, which <em>is</em> chapter 3's <code>W @ x + b</code> wrapped with automatic
+      parameter registration and initialization) and the forward computation in <code>forward()</code>; calling
+      the module like a function (<code>model(x)</code>) runs <code>forward()</code> and builds the
+      computation graph as described above. A full training loop is the exact four-step loop from chapter 3's
+      "under the hood" section, now automated: <code>optimizer.zero_grad()</code> → <code>output = model(x)</code>
+      (forward) → <code>loss = loss_fn(output, y)</code> → <code>loss.backward()</code> (autograd walks the
+      graph) → <code>optimizer.step()</code> (applies SGD/Adam's update rule using the now-populated
+      <code>.grad</code> tensors).</p>
+
+      <h3 id="gpu-and-pitfalls">GPU vs CPU tensors, and common pitfalls</h3>
+      <p>Moving a model and its data to GPU (<code>.to("cuda")</code> or <code>.cuda()</code>) offloads the
+      matrix-multiply-heavy forward/backward computation to the GPU's massively parallel cores (chapter 1's
+      "matrix multiply is many dot products at once" point is exactly why this helps). Both the model's
+      parameters <em>and</em> every tensor involved in a given forward pass must be on the same device, or
+      PyTorch raises a device-mismatch error — a very common bug when, say, loading a batch from a CPU-based
+      data pipeline and forgetting to move it to GPU before the forward pass.</p>
+      <p>The single most common class of PyTorch bug is breaking autograd via an <strong>in-place
+      operation</strong> (e.g. <code>x += 1</code> or <code>x[0] = 5</code> on a tensor that's part of the
+      computation graph) — because autograd's backward pass for some operations needs the original
+      (pre-operation) tensor value to compute the correct gradient, and an in-place modification destroys that
+      value before backward can use it, producing either a cryptic runtime error ("a leaf Variable that
+      requires grad is being used in an in-place operation" or "one of the variables needed for gradient
+      computation has been modified by an inplace operation") or, worse, silently wrong gradients if PyTorch
+      doesn't catch the specific case.</p>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>Concretely, for <code>y = relu(W @ x + b)</code> with <code>W, b, x</code> all requiring gradients:</p>
+      <ol>
+        <li>Forward pass executes, and each operation (<code>matmul</code>, <code>add</code>, <code>relu</code>)
+        creates a node in the computation graph, with <code>y.grad_fn</code> pointing to the last op
+        (<code>ReluBackward</code>), which in turn references the <code>AddBackward</code> node that produced
+        its input, which references the <code>MatmulBackward</code> node, forming a DAG back to the leaf
+        tensors <code>W, x, b</code>.</li>
+        <li><code>loss.backward()</code> starts at the loss (implicitly treating it as having gradient 1 with
+        respect to itself) and walks this DAG in reverse topological order, at each node calling that
+        operation's specific backward function (e.g. <code>ReluBackward</code> multiplies the upstream
+        gradient by a 0/1 mask, exactly chapter 3's <code>relu_deriv</code>) and passing the result further
+        back.</li>
+        <li>When the walk reaches a leaf tensor with <code>requires_grad=True</code>, the computed gradient is
+        accumulated into that tensor's <code>.grad</code> attribute.</li>
+        <li>After <code>.backward()</code> completes, the graph is by default freed (to save memory) — calling
+        <code>.backward()</code> a second time on the same graph without
+        <code>retain_graph=True</code> raises an error, since the intermediate values needed were already
+        discarded.</li>
+        <li><code>optimizer.step()</code> then reads each parameter's <code>.grad</code> and applies the
+        optimizer's update rule (SGD, Adam, ...) — this step does <em>not</em> touch the computation graph at
+        all; it's a separate, simple loop over parameters.</li>
+      </ol>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+flowchart LR
+  X[x leaf] --> MM[matmul]
+  W[W leaf, requires_grad] --> MM
+  MM --> ADD[add]
+  B[b leaf, requires_grad] --> ADD
+  ADD --> RELU[relu]
+  RELU --> Y[y]
+  Y --> LOSS[loss scalar]
+      </div>
+      <div class="mermaid">
+sequenceDiagram
+  participant Loop as Training loop
+  participant Model as model(x)
+  participant Graph as Autograd graph
+  participant Opt as optimizer
+  Loop->>Opt: zero_grad()
+  Loop->>Model: forward(x)
+  Model->>Graph: build graph (grad_fn chain)
+  Model-->>Loop: output
+  Loop->>Loop: loss = loss_fn(output, y)
+  Loop->>Graph: loss.backward()
+  Graph-->>Loop: .grad populated on leaves
+  Loop->>Opt: step()
+  Opt-->>Loop: weights updated
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-python">import torch
+import torch.nn as nn
+
+# --- Tensors: shape, dtype, device ---
+x = torch.tensor([[1.0, 2.0], [3.0, 4.0]])
+print(x.shape, x.dtype, x.device)   # torch.Size([2, 2]) torch.float32 cpu
+
+device = "cuda" if torch.cuda.is_available() else "cpu"
+x_gpu = x.to(device)   # mismatched devices between tensors raise a RuntimeError
+
+# --- Autograd: watch the graph build and .backward() walk it ---
+w = torch.tensor([0.5, -0.3], requires_grad=True)
+b = torch.tensor(0.1, requires_grad=True)
+x = torch.tensor([2.0, 1.0])
+
+z = (w * x).sum() + b          # z.grad_fn chains back through mul, sum, add
+y = torch.relu(z)
+loss = (y - 1.0) ** 2           # a tiny "network": relu(w·x+b), MSE loss vs target 1.0
+
+loss.backward()                 # walks the graph backward, chain rule at every node
+print("dw:", w.grad)            # populated — this is exactly chapter 3's dW, computed automatically
+print("db:", b.grad)
+
+# --- nn.Module: a real tiny network, defined declaratively ---
+class TinyNet(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.fc1 = nn.Linear(2, 4)   # is literally W1 @ x + b1, auto-initialized
+        self.fc2 = nn.Linear(4, 2)
+
+    def forward(self, x):
+        h = torch.relu(self.fc1(x))
+        return self.fc2(h)           # raw logits — pair with CrossEntropyLoss, which applies softmax internally
+
+model = TinyNet().to(device)
+optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
+loss_fn = nn.CrossEntropyLoss()
+
+X = torch.tensor([[0., 0.], [0., 1.], [1., 0.], [1., 1.]]).to(device)
+Y = torch.tensor([0, 1, 1, 0]).to(device)   # XOR, class indices (not one-hot — CrossEntropyLoss expects this)
+
+for epoch in range(500):
+    optimizer.zero_grad()           # CRITICAL: without this, gradients accumulate across batches
+    logits = model(X)                # forward pass, builds the graph
+    loss = loss_fn(logits, Y)
+    loss.backward()                  # backward pass, populates .grad on every parameter
+    optimizer.step()                 # applies Adam's update rule using those .grad values
+    if epoch % 100 == 0:
+        print(f"epoch {epoch}  loss {loss.item():.4f}")
+
+# --- BAD: in-place operation breaking autograd ---
+a = torch.tensor([1.0, 2.0], requires_grad=True)
+b = a * 2
+# b += 1   # in-place op on a tensor needed for backward -> RuntimeError on .backward()
+# Fix: use out-of-place ops when the tensor is part of an active computation graph
+c = b + 1   # GOOD: creates a new tensor, doesn't destroy a value autograd needs
+
+# --- GOOD: no_grad() for inference, where you don't want graph-building overhead ---
+with torch.no_grad():
+    preds = model(X)   # no graph built, no .backward() possible or needed, saves memory/compute
+print("inference preds shape:", preds.shape)
+</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4><p>A team's training job runs fine for a few hundred steps, then
+      crashes with "CUDA out of memory," despite the model and batch size being well within the GPU's known
+      capacity based on earlier successful runs. Investigation reveals a validation loop embedded inside the
+      training loop that calls <code>model(val_batch)</code> for logging purposes <em>without</em> wrapping it
+      in <code>torch.no_grad()</code> — every validation forward pass was building and retaining a full
+      computation graph that was never used for a backward pass, silently accumulating unreleased GPU memory
+      across training steps until it exhausted available memory. The fix (wrapping all non-training forward
+      passes in <code>torch.no_grad()</code>, or equivalently using <code>model.eval()</code> plus
+      <code>no_grad()</code> together) is a direct application of understanding what autograd's graph-building
+      actually costs — it's not free bookkeeping, it's real retained memory, and skipping it for passes that
+      don't need gradients is standard, necessary practice at any production training scale.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Forgetting <code>optimizer.zero_grad()</code> before
+      <code>loss.backward()</code> — because PyTorch <em>accumulates</em> gradients into <code>.grad</code>
+      rather than overwriting them, skipping this call causes gradients from every previous batch to silently
+      sum together, producing training that appears to run without errors but converges incorrectly or
+      diverges, with no obvious error message pointing at the cause.</p></div>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Using an in-place operation (<code>+=</code>, indexed
+      assignment, or an in-place method ending in <code>_</code> like <code>relu_()</code>) on a tensor that's
+      part of an active computation graph — this is the single most common "why is my training crashing with a
+      cryptic autograd error" issue for PyTorch beginners, and the fix is almost always to use the out-of-place
+      equivalent operation instead.</p></div>
+      <ul>
+        <li>Always check <code>tensor.device</code> matches across model and data before a forward pass in a
+        new environment — a device mismatch is an immediate, unambiguous error, but it's a very common first
+        bug when moving code from CPU-only development to a GPU training environment.</li>
+        <li>Wrap any forward pass that doesn't need a backward pass afterward (validation, inference, logging)
+        in <code>torch.no_grad()</code> to avoid needlessly building and retaining computation graphs that
+        waste memory and compute.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>CPU tensors</td><td>Small models, debugging, no GPU available</td><td>Any real training workload with meaningful data/model size</td><td>GPU tensors (.to("cuda"))</td></tr>
+        <tr><td>Manual training loop</td><td>Research, custom training logic, learning the mechanics</td><td>Standard training needing production features (checkpointing, logging, distributed)</td><td>A training framework (PyTorch Lightning, HuggingFace Trainer, chapter 7)</td></tr>
+        <tr><td>torch.no_grad()</td><td>Inference, validation, any pass with no backward needed</td><td>Any pass where you do need gradients (training)</td><td>Default (grad-tracking) mode</td></tr>
+        <tr><td>In-place tensor ops</td><td>Tensors outside any active computation graph, memory-critical inference code</td><td>Tensors involved in an active backward pass</td><td>Out-of-place equivalent operations</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+
+      <div class="qa-level basic">
+        <h4>Basic</h4>
+        <details class="qa"><summary>What is a PyTorch tensor, and how does it differ from a numpy array?</summary><div class="answer"><p>A tensor is an n-dimensional array like a numpy array, but it can additionally live on a GPU and can track the operations performed on it to support automatic differentiation (autograd), neither of which numpy arrays support.</p></div><div class="followup">Follow-up: what attribute enables a tensor to track operations for autograd?</div></details>
+        <details class="qa"><summary>What does loss.backward() actually do?</summary><div class="answer"><p>It walks the computation graph built during the forward pass, starting from the loss, backward to every leaf tensor, applying the chain rule at each node to compute the gradient of the loss with respect to every parameter, and accumulates those gradients into each parameter's .grad attribute.</p></div><div class="followup">Follow-up: why does it "accumulate" rather than overwrite .grad, and what does that imply for the training loop?</div></details>
+        <details class="qa"><summary>Why must you call optimizer.zero_grad() before loss.backward() in every training iteration?</summary><div class="answer"><p>Because PyTorch accumulates (adds) new gradients into .grad rather than replacing them, so without zeroing first, gradients from previous batches would pile up on top of the current batch's gradients, corrupting the training signal.</p></div><div class="followup">Follow-up: what would the symptom of forgetting this look like in a loss curve?</div></details>
+        <details class="qa"><summary>What is nn.Linear, in terms of what you learned in the from-scratch neural networks chapter?</summary><div class="answer"><p>It's exactly W @ x + b (a single layer's weighted sum plus bias) wrapped with automatic parameter registration, initialization, and autograd tracking — the same operation implemented by hand in chapter 3, provided as a reusable building block.</p></div><div class="followup">Follow-up: what does calling model.parameters() return, and why does the optimizer need it?</div></details>
+        <details class="qa"><summary>Why does moving a model to GPU speed up training?</summary><div class="answer"><p>The core operations in a forward/backward pass are matrix multiplications, which are many parallel dot products — GPUs have thousands of cores built specifically to execute this kind of parallel arithmetic far faster than a CPU can.</p></div><div class="followup">Follow-up: what error occurs if the model is on GPU but the input data tensor is still on CPU?</div></details>
+        <details class="qa"><summary>What is torch.no_grad() used for, and why does it matter for memory?</summary><div class="answer"><p>It's a context manager that disables computation graph building for the operations inside it, typically used for inference/validation where no backward pass is needed — without it, every forward pass still builds and retains a full graph in memory even if .backward() is never called, wasting memory.</p></div><div class="followup">Follow-up: what's the difference between model.eval() and torch.no_grad(), and why are they often used together?</div></details>
+      </div>
+
+      <div class="qa-level medium">
+        <h4>Medium</h4>
+        <details class="qa"><summary>Explain what grad_fn represents and how it relates to the computation graph.</summary><div class="answer"><p>grad_fn is an attribute on any non-leaf tensor produced by an operation on a tensor requiring gradients; it points to the specific backward function (e.g. ReluBackward, AddBackward) that knows how to compute the local gradient for that operation, and it references the grad_fn of its own inputs, forming a chain (a directed acyclic graph) back to the leaf tensors — this chain is exactly what .backward() traverses.</p></div><div class="followup">Follow-up: why do leaf tensors (like model parameters) not have a grad_fn?</div></details>
+        <details class="qa"><summary>Why does an in-place operation on a tensor involved in the computation graph often cause an autograd error, rather than just silently computing something slightly wrong?</summary><div class="answer"><p>Some backward functions need the original (pre-operation) value of a tensor to correctly compute their local gradient (e.g. ReLU's backward needs to know which entries of the original input were positive). An in-place modification overwrites that value before backward runs, so PyTorch's autograd engine detects (via a version counter it tracks per tensor) that the tensor has been modified since the forward pass and raises an explicit error, rather than silently computing a wrong gradient — this is a deliberate safety check, not an incidental side effect.</p></div><div class="followup">Follow-up: can you think of an in-place operation that would NOT trigger this error, and why?</div></details>
+        <details class="qa"><summary>Why is the graph freed by default after calling .backward(), and what happens if you call .backward() again without retain_graph=True?</summary><div class="answer"><p>Retaining the graph after backward costs memory for no benefit in the typical single-backward-pass-per-forward-pass training loop, so PyTorch frees intermediate values by default to save memory. Calling .backward() again on the same graph without retain_graph=True raises an error, because the intermediate values needed to recompute the backward pass were already discarded.</p></div><div class="followup">Follow-up: name a real scenario where you'd deliberately need retain_graph=True.</div></details>
+        <details class="qa"><summary>What's the practical difference between model.parameters() in a training loop versus manually tracking individual weight tensors as in a from-scratch numpy implementation?</summary><div class="answer"><p>model.parameters() returns an iterator over every registered learnable tensor in the module (and any submodules), letting the optimizer update an arbitrary, dynamically-structured set of weights generically, without the optimizer or training loop needing to know the specific architecture — in the from-scratch version, every weight tensor had to be named and updated individually and explicitly, which doesn't scale past toy examples.</p></div><div class="followup">Follow-up: how does nn.Module know to automatically register a tensor as a parameter versus treating it as a regular attribute?</div></details>
+        <details class="qa"><summary>Why does CrossEntropyLoss in PyTorch expect raw logits (not softmax probabilities) as input?</summary><div class="answer"><p>PyTorch's CrossEntropyLoss internally combines log-softmax and negative log likelihood in a single numerically stable operation, which both avoids a separate, less numerically stable softmax step and directly produces the simplified y_hat - y gradient from chapter 3 during backward — passing already-softmaxed probabilities in would double-apply softmax and produce an incorrect loss and gradient.</p></div><div class="followup">Follow-up: what's the numerical stability benefit of combining log-softmax and NLL into one operation instead of doing them as two separate steps?</div></details>
+      </div>
+
+      <div class="qa-level advanced">
+        <h4>Advanced</h4>
+        <details class="qa"><summary>Explain how PyTorch's autograd engine determines the correct order to traverse the computation graph during .backward(), and why this matters for a graph with multiple paths converging on one tensor.</summary><div class="answer"><p>Autograd performs a reverse topological sort of the DAG rooted at the loss, ensuring that when a node's backward function runs, all of its "downstream" consumers (nodes that depend on it) have already had their gradients computed and passed back to it, so gradients arriving at a node from multiple paths (e.g. a tensor used twice in the forward pass, feeding two different branches that later recombine) are correctly summed before that node's own backward function runs. Without this ordering guarantee, a node could run its backward computation using only a partial (incomplete) upstream gradient, producing an incorrect result for any tensor reused across multiple paths in the forward pass.</p></div><div class="followup">Follow-up: give a concrete architectural example where a tensor is legitimately used along two different paths that later reconverge.</div></details>
+        <details class="qa"><summary>Why does PyTorch build the computation graph dynamically (define-by-run) rather than statically (define-then-run, as early TensorFlow did), and what are the practical tradeoffs?</summary><div class="answer"><p>Dynamic graph construction means the graph is built fresh on every forward pass call, following whatever Python control flow (loops, conditionals) actually executes that time — this makes debugging dramatically easier (you can set breakpoints and inspect intermediate tensors with ordinary Python tooling, since the "graph" is just the normal Python execution) and makes variable-length/data-dependent architectures (like RNNs over variable-length sequences, or conditionally-skipped layers) natural to express. The tradeoff is some performance overhead versus a static graph that can be compiled/optimized once ahead of time and reused unchanged across many forward passes — this is exactly the gap tools like torch.compile aim to close, by tracing the dynamic graph once and generating optimized, static-like execution for repeated use.</p></div><div class="followup">Follow-up: how does torch.compile attempt to get static-graph-like performance while keeping the dynamic authoring experience?</div></details>
+        <details class="qa"><summary>Walk through why a model.eval() call is necessary in addition to torch.no_grad() when running validation, and what would silently go wrong if you only used no_grad().</summary><div class="answer"><p>torch.no_grad() only disables gradient/graph tracking; it has no effect on layers whose forward behavior itself differs between training and evaluation, like dropout (which randomly zeroes activations only during training, to regularize) and batch normalization (which uses batch statistics during training but running/stored statistics during evaluation). Without calling model.eval() to switch these layers' internal mode, a "no_grad-only" validation pass would still apply dropout's random zeroing and batchnorm's training-time batch statistics, producing noisy, non-reproducible, and systematically different validation metrics than what the model will actually do at real inference/serving time.</p></div><div class="followup">Follow-up: why is batchnorm's behavior difference between train and eval mode specifically dependent on batch size during training but not during eval?</div></details>
+        <details class="qa"><summary>Explain memory-wise why gradient accumulation (summing gradients over several small forward/backward passes before one optimizer.step()) is a valid and common technique for simulating a larger batch size than fits in GPU memory.</summary><div class="answer"><p>Since .grad accumulates (sums) rather than overwrites, you can run several forward+backward passes on smaller sub-batches without calling zero_grad() or optimizer.step() between them — each sub-batch's gradient contribution adds into the same .grad tensors, and after N sub-batches you call optimizer.step() once, mathematically approximating (up to a scaling factor on the learning rate/averaging) the gradient you'd have gotten from one large batch forward/backward pass, while only ever holding one sub-batch's activations in memory at a time instead of the full large batch's.</p></div><div class="followup">Follow-up: what scaling adjustment do you need to apply to the loss or learning rate to make gradient accumulation mathematically equivalent to true large-batch training?</div></details>
+        <details class="qa"><summary>Why can repeatedly appending per-step loss values to a Python list for logging purposes (e.g. losses.append(loss)) cause a subtle GPU memory leak, and what's the fix?</summary><div class="answer"><p>loss is a tensor still attached to its full computation graph; appending the tensor itself (rather than its plain scalar value) to a Python list keeps a live reference to that tensor, which in turn keeps the entire computation graph (and all its intermediate activations) alive and un-freed for as long as the list holds the reference — across thousands of training steps, this accumulates retained graphs for every single step and exhausts GPU memory. The fix is to call .item() (for a scalar) or .detach() (for a tensor you still want values from, without graph attachment) before storing it, which extracts the plain value/un-attached tensor without holding a reference into the computation graph.</p></div><div class="followup">Follow-up: why does .item() specifically force a CPU-GPU synchronization, and what performance implication does that have if called too frequently inside a tight training loop?</div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment">
+        <span class="level-tag">Beginner (30-60 min)</span>
+        <h4>Visualize a small computation graph and manually verify .backward()</h4>
+        <p>Build a small chain of operations on scalar tensors with requires_grad=True (e.g. z = (w * x + b) ** 2),
+        call .backward(), and print each leaf tensor's .grad.</p>
+        <ul>
+          <li>Independently compute the same gradients by hand using the chain rule (pen and paper or a comment
+          block), and confirm they match PyTorch's output exactly.</li>
+        </ul>
+        <p><strong>Acceptance criteria:</strong> matching hand-derived and PyTorch-computed gradients for at
+        least 3 different leaf tensors, with the hand derivation shown.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>Start with the simplest possible chain (two operations) before adding more — if your hand-derived and PyTorch gradients don't match on something simple, debug there before attempting anything more complex.</p></div></details>
+        <p><strong>Bonus:</strong> print each intermediate tensor's grad_fn and describe, in your own words, what graph node it represents.</p>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Intermediate (2-4 hrs)</span>
+        <h4>Rebuild chapter 3's XOR network in PyTorch, then intentionally break and fix common bugs</h4>
+        <p>Reimplement the XOR training example from chapter 3 using nn.Module, an optimizer, and a proper
+        training loop, and confirm it reaches the same correct predictions.</p>
+        <ul>
+          <li>Deliberately remove optimizer.zero_grad() and document, with evidence (loss curve or printed
+          gradient magnitudes), what breaks.</li>
+          <li>Deliberately introduce an in-place operation on a tensor inside the active computation graph and
+          capture the exact error PyTorch raises.</li>
+          <li>Fix both bugs and confirm correct training resumes.</li>
+        </ul>
+        <p><strong>Acceptance criteria:</strong> a working correct implementation, plus documented evidence
+        (output/error text) of both intentional bugs and their fixes.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>For the zero_grad bug, compare printed .grad magnitudes at epoch 10 with and without zero_grad — the accumulation effect is often visible numerically well before it visibly wrecks the loss curve.</p></div></details>
+        <p><strong>Bonus:</strong> run the same model on both CPU and GPU (if available) and compare wall-clock training time for a larger synthetic dataset.</p>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Advanced (1-2 days)</span>
+        <h4>Build a minimal autograd engine from scratch, then compare it to PyTorch's</h4>
+        <p>Implement a tiny scalar-valued autograd engine in pure Python (a single Value/Tensor class that
+        tracks its own grad_fn-equivalent and supports .backward() via topological sort) supporting at least
+        add, multiply, and ReLU operations — essentially a minimal version of what PyTorch's autograd does.</p>
+        <ul>
+          <li>Train a tiny 2-layer network using only your own engine (no PyTorch) on a toy dataset.</li>
+          <li>Cross-validate your engine's computed gradients against PyTorch's on at least 10 varied test
+          expressions.</li>
+        </ul>
+        <p><strong>Acceptance criteria:</strong> a working from-scratch autograd engine with a passing
+        cross-validation suite against PyTorch, and a successfully trained toy network using only your engine.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>Andrej Karpathy's "micrograd" is a well-known minimal reference implementation of exactly this idea — build your own first without looking at it, then compare your design choices afterward.</p></div></details>
+        <p><strong>Bonus:</strong> add support for a reused tensor appearing on two different paths that reconverge, and verify your engine correctly sums the gradient contributions from both paths (the multi-path topological-sort case discussed in the advanced interview questions above).</p>
+      </div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet">
+        <ul>
+          <li>A tensor = numpy array + GPU support + autograd tracking.</li>
+          <li>Autograd builds a computation graph during the forward pass; .backward() walks it backward applying the chain rule.</li>
+          <li>Gradients accumulate into .grad — always call optimizer.zero_grad() before each .backward().</li>
+          <li>nn.Linear is literally W @ x + b from chapter 3, with auto-init and parameter registration.</li>
+          <li>Standard loop: zero_grad() → forward → loss → backward() → optimizer.step().</li>
+          <li>In-place ops on graph-attached tensors are the #1 PyTorch autograd bug — use out-of-place equivalents.</li>
+          <li>torch.no_grad() skips graph-building for inference/validation — saves memory and compute.</li>
+          <li>model.eval() changes layer *behavior* (dropout, batchnorm); no_grad() only skips *gradient tracking* — you usually need both for validation.</li>
+          <li>CrossEntropyLoss expects raw logits, not softmax probabilities — it applies log-softmax internally for numerical stability.</li>
+          <li>Device mismatches (CPU tensor + GPU model) raise explicit errors — always confirm model and data share a device.</li>
+        </ul>
+      </div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://pytorch.org/tutorials/beginner/basics/autogradqs_tutorial.html">PyTorch official docs: Automatic Differentiation with torch.autograd</a></li>
+        <li><a href="https://pytorch.org/docs/stable/notes/autograd.html">PyTorch official docs: Autograd mechanics notes</a></li>
+        <li><a href="https://pytorch.org/tutorials/beginner/introyt/trainingyt.html">PyTorch official docs: Training with PyTorch tutorial</a></li>
+        <li><a href="https://github.com/karpathy/micrograd">Andrej Karpathy: micrograd (minimal autograd engine reference)</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="03-neural-networks-from-scratch.html"><span class="dir">← Previous</span>Neural Networks from Scratch</a>
+        <a class="next" href="05-cnns-rnns-sequence-models.html"><span class="dir">Next →</span>CNNs, RNNs & Sequence Models</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · Machine Learning & AI</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "15-machine-learning-ai", chapterKey: "04-pytorch-and-tensors" });</script>
+</body>
+</html>

@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Async Python (asyncio) — Python Intermediate — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">Python Intermediate</a><span class="sep">›</span>Async Python (asyncio)</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>Async Python (asyncio)</h1>
+      <p class="meta-line"><span>⏱ ~3 hrs</span><span>📍 Chapter 4 of 6</span></p>
+      <p><strong>One-line summary:</strong> <code>asyncio</code> gives Python the same single-threaded,
+      event-loop-driven concurrency model Node has always had by default — the syntax (<code>async</code>/<code>await</code>)
+      is nearly identical, but Python makes you opt in explicitly and never implicitly awaits anything for you.</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>You already understand event loops, microtasks, and non-blocking I/O deeply from Node — this chapter
+      is mostly about mapping that mental model onto asyncio's specific vocabulary (tasks, futures, the event
+      loop API) and learning the handful of places where Python's explicitness bites you if you assume Node's
+      implicit behavior. FastAPI (chapter 5) is built entirely on asyncio, so this chapter is the load-bearing
+      prerequisite for writing production Python web services correctly rather than accidentally serializing
+      every request.</p>
+      <div class="box why"><h4>Why</h4><p>The single most common production bug in Python async code —
+      a blocking call inside an <code>async def</code> stalling the entire event loop — is invisible in
+      testing with light load and catastrophic in production under concurrency. Understanding exactly why it
+      happens (not just "don't do that") is what separates someone who can debug it at 2am from someone who can't.</p></div>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>Strongly build on <a href="02-data-structures.html">Data Structures, Comprehensions, Generators</a>
+      (coroutines are generator-based under the hood) and <a href="01-python-for-js-devs.html">Python for JS Developers</a>
+      (the GIL discussion). Related: <a href="05-fastapi.html">FastAPI</a>.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="async-basics">async/await (bridge from JS — the syntax is nearly 1:1)</h3>
+      <table>
+        <tr><th>JS/Node</th><th>Python</th><th>Notes</th></tr>
+        <tr><td><code>async function f() {}</code></td><td><code>async def f():</code></td><td>Calling it returns a Promise (JS) / coroutine object (Python) — neither runs the body yet.</td></tr>
+        <tr><td><code>await somePromise</code></td><td><code>await some_coroutine()</code></td><td>Suspends until resolved; Python only lets you <code>await</code> an "awaitable" (coroutine, Task, or Future) — not arbitrary values.</td></tr>
+        <tr><td><code>Promise.all([...])</code></td><td><code>asyncio.gather(*coros)</code></td><td>Run concurrently, wait for all; both fail-fast by default on first exception unless configured otherwise.</td></tr>
+        <tr><td><code>Promise.race([...])</code></td><td><code>asyncio.wait(..., return_when=FIRST_COMPLETED)</code></td><td>Python's version is more verbose and returns done/pending sets rather than just the winning value.</td></tr>
+        <tr><td>event loop is implicit, always running</td><td><code>asyncio.run(main())</code> — you create/manage the loop explicitly</td><td>No "ambient" event loop the way Node always has one — a script with zero <code>asyncio.run</code> never gets async behavior.</td></tr>
+        <tr><td><code>setTimeout(fn, ms)</code></td><td><code>asyncio.sleep(seconds)</code> (must be awaited)</td><td><code>time.sleep()</code> is the blocking trap — see gotchas.</td></tr>
+      </table>
+
+      <h3 id="tasks-futures">Tasks, futures, and the event loop API</h3>
+      <ul>
+        <li>A <strong>coroutine object</strong> (what calling an <code>async def</code> function gives you)
+        does nothing until it's awaited or scheduled — it's inert, like an unresolved Promise factory, not
+        a running Promise.</li>
+        <li><code>asyncio.create_task(coro())</code> schedules the coroutine to run concurrently on the event
+        loop <em>right now</em>, returning a <code>Task</code> you can await later or let run in the
+        background — this is the actual Node-like "fire it and move on" primitive; a bare
+        <code>await coro()</code> does not run concurrently with anything, it runs that one coroutine to
+        completion before continuing.</li>
+        <li>A <strong>Future</strong> is the lower-level primitive a Task wraps — a placeholder for a result
+        that will exist later, conceptually identical to a bare Promise before any <code>.then</code> is attached.</li>
+        <li>The event loop itself (<code>asyncio.get_running_loop()</code>) is Python's equivalent of
+        Node's libuv loop — it schedules callbacks, polls I/O readiness (via <code>select</code>/<code>epoll</code>/<code>kqueue</code>
+        depending on OS, same underlying OS mechanisms libuv uses), and resumes suspended coroutines when
+        their awaited operation completes.</li>
+      </ul>
+
+      <h3 id="async-generators-context">Async generators, async context managers, async comprehensions</h3>
+      <p>Just as a generator suspends at <code>yield</code>, an <strong>async generator</strong>
+      (<code>async def</code> containing <code>yield</code>) suspends at both <code>yield</code> and
+      <code>await</code> — consumed with <code>async for</code>. <code>async with</code> handles setup/teardown
+      that itself needs to await (e.g., acquiring a DB connection from an async pool) via
+      <code>__aenter__</code>/<code>__aexit__</code>, the async counterparts of <code>__enter__</code>/<code>__exit__</code>.
+      These have no close JS equivalent as language syntax (JS doesn't have async generators as commonly used
+      for resource management, though async iterables exist) but the underlying need — "this cleanup must
+      await something" — is the same problem Node solves with <code>try/finally</code> plus manual awaited cleanup.</p>
+
+      <h2 id="under-the-hood">How It Works Under the Hood: asyncio's loop vs Node's libuv loop</h2>
+      <p>Both are single-threaded, cooperative-multitasking event loops — the core idea (don't block the one
+      thread; suspend and resume logical tasks around I/O waits) is identical. The differences that matter
+      for a senior discussion:</p>
+      <table>
+        <tr><th>Aspect</th><th>Node (libuv)</th><th>Python (asyncio)</th></tr>
+        <tr><td>Suspension mechanism</td><td>Callback registration; async/await is syntactic sugar over Promises, which are themselves callback chains under the hood</td><td>Native coroutine frame suspension (the same generator-frame mechanism from chapter 2) — <code>await</code> literally suspends the Python call stack frame</td></tr>
+        <tr><td>I/O polling</td><td>libuv abstracts epoll/kqueue/IOCP across platforms, with a dedicated thread pool for things that can't be made non-blocking (DNS, some fs ops)</td><td>asyncio's event loop uses <code>selectors</code> (epoll/kqueue/select depending on OS) directly for socket I/O; blocking calls need explicit offload via <code>loop.run_in_executor</code></td></tr>
+        <tr><td>Microtask/callback ordering</td><td>Well-defined phases: timers, pending callbacks, poll, check, close callbacks, with microtasks (Promise callbacks) drained between phases</td><td>Simpler single ready-queue model: the loop repeatedly runs ready callbacks/tasks, checks I/O readiness, runs due timers — no distinct "microtask vs macrotask" phase split like Node's</td></tr>
+        <tr><td>What blocks the loop</td><td>Any synchronous CPU-bound JS code, or a blocking syscall not routed through libuv</td><td>Any synchronous blocking call inside a running coroutine (e.g., <code>requests.get()</code>, <code>time.sleep()</code>, CPU-bound work) — identical failure mode, same fix (offload it)</td></tr>
+        <tr><td>Concurrency primitive exposed to you</td><td>Promises (then-chains) or async/await sugar over them</td><td>Coroutines + Tasks, explicitly scheduled with <code>create_task</code>/<code>gather</code> — "fire and continue" isn't automatic, you must explicitly create a Task</td></tr>
+      </table>
+      <p>The most important practical divergence: in Node, calling an async function and not awaiting it
+      still starts executing synchronously up to the first <code>await</code>, and continues in the
+      background automatically once you move on. In Python, calling an <code>async def</code> function
+      <strong>does not even start running it</strong> — you get back an inert coroutine object; nothing
+      executes until you either <code>await</code> it or wrap it in <code>asyncio.create_task()</code>. This
+      trips up almost everyone coming from JS at least once.</p>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+sequenceDiagram
+  participant Code
+  participant Loop as asyncio event loop
+  participant IO as OS I/O (epoll/kqueue)
+  Code->>Loop: asyncio.run(main())
+  Loop->>Code: run main() coroutine
+  Code->>Loop: create_task(fetch_a()), create_task(fetch_b())
+  Note over Loop: both tasks scheduled, run concurrently
+  Loop->>IO: fetch_a issues non-blocking socket read
+  Loop->>IO: fetch_b issues non-blocking socket read
+  IO-->>Loop: fetch_b's socket ready first
+  Loop->>Code: resume fetch_b coroutine frame
+  IO-->>Loop: fetch_a's socket ready
+  Loop->>Code: resume fetch_a coroutine frame
+  Code->>Loop: await gather(task_a, task_b) returns both results
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-python">
+import asyncio
+import time
+
+# ---- BAD: blocking call inside async def stalls the WHOLE event loop ----
+async def bad_fetch_all(urls: list[str]):
+    import requests   # synchronous, blocking HTTP library
+    results = []
+    for url in urls:
+        results.append(requests.get(url))   # blocks the ENTIRE loop, not just this task
+    return results
+# while this runs, every other concurrent coroutine on the same loop is frozen --
+# identical failure mode to a synchronous CPU-bound loop blocking Node's event loop
+
+# ---- GOOD: async-native HTTP client, real concurrency ----
+import httpx
+
+async def good_fetch_all(urls: list[str]):
+    async with httpx.AsyncClient() as client:
+        tasks = [asyncio.create_task(client.get(url)) for url in urls]
+        return await asyncio.gather(*tasks)
+
+# ---- The classic "forgot to await/schedule it" bug ----
+async def send_email(to: str) -> None:
+    await asyncio.sleep(0.5)   # simulate I/O
+    print(f"sent to {to}")
+
+async def handler_bug():
+    send_email("user@x.com")   # BUG: this does NOTHING -- returns an unawaited
+                                 # coroutine object, Python even warns about this
+    print("handled")            # prints immediately, email never sent
+
+async def handler_fixed():
+    asyncio.create_task(send_email("user@x.com"))  # fire-and-continue, like Node
+    print("handled")             # runs immediately, email sends concurrently
+
+# ---- Offloading a genuinely CPU-bound or blocking-library call ----
+def cpu_heavy_sync(n: int) -> int:
+    return sum(i * i for i in range(n))
+
+async def offloaded():
+    loop = asyncio.get_running_loop()
+    # run_in_executor hands this to a thread pool (or process pool) so the
+    # event loop keeps serving other coroutines while this runs
+    result = await loop.run_in_executor(None, cpu_heavy_sync, 10_000_000)
+    return result
+
+# ---- Async context manager + async generator ----
+class AsyncDBConnection:
+    async def __aenter__(self):
+        await asyncio.sleep(0.01)   # simulate async connect
+        print("connected")
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        await asyncio.sleep(0.01)   # simulate async close
+        print("closed")
+
+    async def stream_rows(self):
+        for i in range(3):
+            await asyncio.sleep(0.01)
+            yield {"id": i}
+
+async def query_rows():
+    async with AsyncDBConnection() as conn:
+        async for row in conn.stream_rows():
+            print(row)
+
+asyncio.run(query_rows())
+</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4><p>A FastAPI service handling a few hundred requests/sec starts
+      showing p99 latency spikes to several seconds under load, despite each individual endpoint being fast
+      when tested alone. Root cause: a single endpoint calls a third-party SDK that internally uses the
+      blocking <code>requests</code> library, inside an <code>async def</code> route handler. Every request
+      hitting that endpoint freezes the entire event loop — and therefore every other concurrent request on
+      that worker process — for the duration of that blocking call, exactly like one synchronous CPU-bound
+      handler starving every other connection in a single Node process. The fix mirrors the Node playbook:
+      either swap the SDK for an async-native client, or wrap the blocking call in
+      <code>loop.run_in_executor</code> so it runs on a thread pool instead of the event loop thread. This is
+      consistently the top production asyncio bug reported by teams migrating from Node, because the failure
+      is silent under light load and only shows up under real concurrency.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Calling an <code>async def</code> function without
+      <code>await</code>ing or scheduling it does <strong>not</strong> run its body at all — it silently
+      returns an unawaited coroutine object (Python does emit a <code>RuntimeWarning: coroutine was never
+      awaited</code> in many cases, but it's easy to miss in logs). This is the single most common "my async
+      Python code doesn't do what I expected" bug for developers coming from JS, where calling an async
+      function always starts executing it immediately.</p></div>
+      <ul>
+        <li>Never use <code>time.sleep()</code> inside an <code>async def</code> — it blocks the whole
+        thread/loop. Always <code>await asyncio.sleep()</code>.</li>
+        <li><code>asyncio.gather()</code> without <code>return_exceptions=True</code> cancels remaining tasks
+        and raises on the first exception — decide deliberately whether partial failure should be tolerated,
+        same design question as <code>Promise.all</code> vs <code>Promise.allSettled</code>.</li>
+        <li>Mixing sync and async DB drivers in the same codebase is a frequent source of "why is this
+        endpoint slow" bugs — pick one async-native driver (asyncpg, aiomysql, motor) and use it consistently
+        for request-path code.</li>
+        <li>Unhandled exceptions inside a "fire and forget" <code>create_task()</code> are swallowed silently
+        unless you keep a reference and check/await it later, or add a done-callback that logs exceptions —
+        easy to lose errors this way in production.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td><code>asyncio</code> (single-threaded concurrency)</td><td>I/O-bound work, many concurrent network/DB calls, want Node-like scalability per process</td><td>CPU-bound work exists in the request path</td><td><code>run_in_executor</code> for the CPU-bound slice, or multiprocessing for heavier CPU work</td></tr>
+        <tr><td><code>asyncio.gather</code></td><td>You need all results and want to fail fast on the first error (or collect all with <code>return_exceptions=True</code>)</td><td>You want the first result and don't care about the rest</td><td><code>asyncio.wait(..., return_when=FIRST_COMPLETED)</code></td></tr>
+        <tr><td>Blocking thread pool (<code>run_in_executor</code>)</td><td>Interfacing with a blocking library you can't swap, or genuinely short CPU-bound bursts</td><td>Heavy, sustained CPU-bound work — GIL still serializes actual Python execution across the pool's threads</td><td><code>ProcessPoolExecutor</code> for real CPU parallelism</td></tr>
+        <tr><td>Sync (plain, no asyncio)</td><td>Simple scripts, low concurrency needs, CPU-bound dominant workload</td><td>Many concurrent I/O-bound operations where sync would serialize unnecessarily</td><td>asyncio or threading</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic">
+        <h4>Basic</h4>
+        <details class="qa"><summary>What happens when you call an `async def` function without `await`ing it?</summary><div class="answer"><p>
+        Nothing runs — you get back an inert coroutine object. The function body doesn't execute until that
+        coroutine is awaited or scheduled via `asyncio.create_task()`. This differs from JS, where calling an
+        async function always begins executing synchronously up to the first `await`.</p></div><div class="followup">Follow-up: what warning (if any) does Python give you when this happens accidentally?</div></details>
+        <details class="qa"><summary>What's the difference between `await some_coro()` and `asyncio.create_task(some_coro())`?</summary><div class="answer"><p>
+        `await some_coro()` runs that coroutine to completion before the current coroutine continues — no
+        concurrency with anything else. `create_task()` schedules it to run concurrently on the event loop
+        right away, returning a Task you can await later or let run in the background — this is the "fire
+        and continue" pattern.</p></div><div class="followup">Follow-up: what happens to a created Task if the program exits before it's awaited?</div></details>
+        <details class="qa"><summary>Why does calling `time.sleep()` inside an `async def` function break concurrency?</summary><div class="answer"><p>
+        `time.sleep()` is a blocking call — it blocks the entire OS thread, including the event loop running
+        on it, so every other coroutine scheduled on that loop is frozen for the sleep duration. `asyncio.sleep()`
+        is a proper awaitable that yields control back to the loop, letting other coroutines run during the wait.</p></div><div class="followup">Follow-up: is this analogous to anything in Node? What's the exact parallel?</div></details>
+        <details class="qa"><summary>What's a Future, and how does a Task relate to it?</summary><div class="answer"><p>
+        A Future is a low-level placeholder object representing a result that will become available later — like
+        an unresolved Promise. A Task is a Future subclass that specifically wraps and drives a coroutine's
+        execution on the event loop; most application code works with Tasks, Futures being the lower-level
+        primitive underneath.</p></div><div class="followup">Follow-up: when would you create a bare Future directly instead of a Task?</div></details>
+        <details class="qa"><summary>What's Python's equivalent of `Promise.all`?</summary><div class="answer"><p>
+        `asyncio.gather(*coroutines_or_tasks)` — runs them concurrently and returns a list of results in the
+        same order, raising on the first exception by default unless `return_exceptions=True` is passed.</p></div><div class="followup">Follow-up: what's the equivalent of `Promise.allSettled`?</div></details>
+      </div>
+      <div class="qa-level medium">
+        <h4>Medium</h4>
+        <details class="qa"><summary>Compare asyncio's event loop to Node's libuv loop in terms of how suspension/resumption actually works.</summary><div class="answer"><p>
+        Node's async/await is sugar over Promises, which are themselves callback-registration chains — the
+        JS engine doesn't suspend "the call stack frame" in the same literal sense; it schedules a
+        continuation callback. Python's `await` genuinely suspends the coroutine's actual stack frame
+        (reusing the generator frame-suspension mechanism) and the event loop resumes execution at the exact
+        bytecode instruction after `await` once the awaited thing is ready. Conceptually both achieve "don't
+        block the thread, come back to this later," but Python's mechanism is closer to true coroutines while
+        JS's is callback/continuation-based under a syntactic veneer.</p></div><div class="followup">Follow-up: does this difference have any observable effect on stack traces or debugging experience?</div></details>
+        <details class="qa"><summary>Why is "fire and forget" with `create_task()` dangerous for error handling in production?</summary><div class="answer"><p>
+        If you call `asyncio.create_task(coro())` and never keep a reference or await it, any exception
+        raised inside that task is swallowed — it's only reported (as a warning in the event loop's exception
+        handler, often just logged, not raised) when the task object is garbage collected, which can be much
+        later or never observed. Production code should keep a reference to background tasks (e.g., in a set)
+        and either await them at shutdown or attach a `done_callback` that explicitly logs/handles exceptions.</p></div><div class="followup">Follow-up: how would you implement a "background task registry" pattern to avoid this?</div></details>
+        <details class="qa"><summary>What's the practical effect of running CPU-bound work via `run_in_executor` with a `ThreadPoolExecutor` vs a `ProcessPoolExecutor`?</summary><div class="answer"><p>
+        A `ThreadPoolExecutor` still shares the GIL with the main interpreter — it frees the event loop thread
+        to keep serving I/O-bound coroutines while the CPU-bound work runs on another thread, but that other
+        thread still competes for the GIL with any other Python-level work, so it doesn't give you real
+        multi-core parallelism for the CPU-bound task itself. A `ProcessPoolExecutor` runs the work in a
+        separate process with its own GIL, giving genuine parallel CPU execution, at the cost of
+        serialization (pickling) overhead to send arguments/results across the process boundary.</p></div><div class="followup">Follow-up: when would the pickling overhead of ProcessPoolExecutor outweigh the parallelism benefit?</div></details>
+        <details class="qa"><summary>Explain what `async with` buys you over a plain `try/finally` with manual awaited setup/teardown.</summary><div class="answer"><p>
+        `async with obj:` calls `await obj.__aenter__()` and guarantees `await obj.__aexit__(...)` runs even
+        on exception, exactly like a sync context manager but for resources whose setup/teardown themselves
+        need to await (e.g., an async DB pool acquiring/releasing a connection). You could hand-roll this with
+        `try/finally` and manual awaits, but `async with` makes the contract explicit, reusable across many
+        call sites, and composable with multiple context managers in one statement.</p></div><div class="followup">Follow-up: how would you implement a custom async context manager using `contextlib.asynccontextmanager` instead of writing `__aenter__`/`__aexit__` by hand?</div></details>
+        <details class="qa"><summary>How would you detect, in code review, that a third-party library call inside an async route handler is secretly blocking?</summary><div class="answer"><p>
+        Check whether the library's client is explicitly documented as async-native (uses `async def` methods,
+        built on asyncio/httpx/aiohttp internally) vs a synchronous client called directly inside `async def`
+        — any plain function call without `await` that does network/disk I/O is a red flag. In practice, also
+        profile: if p99 latency under concurrent load is dramatically worse than single-request latency times
+        expected concurrency, suspect a blocking call serializing requests on one event loop.</p></div><div class="followup">Follow-up: what tooling (e.g., `asyncio` debug mode, `blockbuster`-style libraries) can detect blocking calls in async code automatically?</div></details>
+      </div>
+      <div class="qa-level advanced">
+        <h4>Advanced</h4>
+        <details class="qa"><summary>Design the concurrency architecture for a FastAPI service that must call three downstream APIs per request (two independent, one depending on the first two's results) plus run a moderate CPU-bound scoring function on the combined result.</summary><div class="answer"><p>
+        Issue the two independent downstream calls as concurrently scheduled tasks via `asyncio.gather`,
+        await both, then make the dependent third call with their combined result. For the CPU-bound scoring
+        step, if it's light enough not to meaningfully stall the loop (measure this, don't guess), leave it
+        inline; if it's heavy, offload via `run_in_executor` with a `ProcessPoolExecutor` sized to available
+        cores, shared across requests (not spun up per-request, which adds process-start overhead on the hot
+        path) — a process pool initialized once at app startup and reused.</p></div><div class="followup">Follow-up: how would you apply a per-downstream-call timeout without one slow call stalling the whole gather?</div></details>
+        <details class="qa"><summary>Explain exactly how `asyncio.CancelledError` propagates through nested awaits, and why cancellation in asyncio is sometimes called "cooperative."</summary><div class="answer"><p>
+        Calling `task.cancel()` schedules a `CancelledError` to be raised at the next suspension point inside
+        that task's coroutine (the next `await`) — it doesn't interrupt mid-execution of non-async code. The
+        exception propagates up through the chain of awaited coroutines like any other exception, and each
+        level can catch it to do cleanup (though re-raising is expected convention, since swallowing it
+        silently breaks cancellation semantics for callers awaiting that task). It's "cooperative" because a
+        coroutine that never hits another `await` (e.g., stuck in a blocking call or a tight sync loop) cannot
+        be cancelled until it does — cancellation is a request, not a forced interrupt, unlike OS-level thread
+        termination.</p></div><div class="followup">Follow-up: what's the correct pattern for a coroutine that must guarantee cleanup runs even on cancellation?</div></details>
+        <details class="qa"><summary>A service runs fine under moderate load but under a traffic spike, p99 latency degrades non-linearly (not just proportionally) worse than CPU/memory metrics would suggest. You suspect the asyncio event loop itself is the bottleneck, not downstream services. How would you confirm or rule this out?</summary><div class="answer"><p>
+        Instrument event loop lag directly (schedule a cheap periodic callback via `loop.call_later` and
+        measure actual vs expected delay, or use `asyncio`'s debug mode / a library like `aiomonitor`) to see
+        if the loop itself is falling behind scheduling ready callbacks — a sign something is blocking it.
+        Cross-check with per-request tracing to see if latency is uniformly spread (suggesting true loop
+        contention from many legitimate concurrent tasks, possibly meaning you need more worker processes) vs
+        concentrated on requests hitting a specific code path (suggesting one blocking call type is the
+        culprit). Non-linear degradation specifically suggests a resource (loop capacity, a connection pool
+        size limit, a blocking call whose frequency scales with load) hitting a hard ceiling rather than
+        gradual resource exhaustion.</p></div><div class="followup">Follow-up: how does the number of worker processes (e.g., Uvicorn workers) interact with this — does adding more always help?</div></details>
+        <details class="qa"><summary>Compare Python's structured concurrency (`asyncio.TaskGroup`, 3.11+) to manually managed `gather`/`create_task`, and explain what problem it specifically fixes.</summary><div class="answer"><p>
+        `asyncio.TaskGroup` (via `async with asyncio.TaskGroup() as tg: tg.create_task(...)`) guarantees that
+        if any child task raises, all sibling tasks in the group are cancelled and the group's `__aexit__`
+        waits for all of them to actually finish (cancelled or completed) before propagating a combined
+        exception (`ExceptionGroup`), eliminating the "orphaned task that outlives its logical scope and
+        silently fails" problem that plain `create_task()` + manual bookkeeping is prone to. This mirrors the
+        structured-concurrency principle from other ecosystems (and is conceptually similar to disciplined use
+        of `Promise.all` plus explicit cleanup in JS, but enforced by the language construct rather than
+        convention) — a task's lifetime is scoped to a block, not left dangling.</p></div><div class="followup">Follow-up: how does an `ExceptionGroup` from a TaskGroup differ from a single exception raised by `gather`, and how do you handle multiple distinct exception types from it?</div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment">
+        <span class="level-tag">Beginner (30-60 min)</span>
+        <h4>Fix the "forgot to await" bugs</h4>
+        <p>Given 4 small async functions with deliberately introduced bugs (missing await, missing
+        create_task where concurrency was intended, a blocking <code>time.sleep</code> inside async code, a
+        gather that should have used <code>return_exceptions=True</code>), identify and fix each one, with a
+        comment explaining the symptom you'd observe before the fix.</p>
+        <ul><li>Each fix must be demonstrated with a runnable before/after comparison (timing or print-order output).</li></ul>
+        <p><strong>Acceptance criteria:</strong> Running each fixed function produces the expected concurrent/non-blocking behavior, measurably (e.g., via timing) different from the buggy version.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>Use `asyncio.sleep` calls of a known duration as stand-ins for I/O and measure total elapsed time with `time.perf_counter()` — concurrency bugs become obvious as "took N times longer than expected."</p></div></details>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Intermediate (2-4 hrs)</span>
+        <h4>Build a rate-limited concurrent fetcher</h4>
+        <p>Build an async function that fetches N URLs concurrently but respects a maximum concurrency limit
+        (e.g., 5 at a time) using <code>asyncio.Semaphore</code>, with per-request timeout and retry-with-backoff
+        on failure, collecting both successes and failures without one failure aborting the whole batch.</p>
+        <ul><li>Must use a Semaphore to bound concurrency, not just gather everything at once.</li>
+        <li>Must implement timeout per request (`asyncio.wait_for` or `asyncio.timeout`) and exponential backoff retry.</li>
+        <li>Must return a structured result distinguishing successes from failures (not raise on partial failure).</li></ul>
+        <p><strong>Acceptance criteria:</strong> Against a mock server/endpoint with injected failures and delays, your fetcher respects the concurrency cap (verify this by tracking max concurrent in-flight requests) and correctly separates successes/failures.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>Use `httpbin.org`'s delay and status endpoints, or run a tiny local test server, to simulate real latency and failures rather than mocking at the function level — you want to actually exercise the concurrency behavior.</p></div></details>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Advanced (1-2 days)</span>
+        <h4>Build a tiny async task queue with graceful shutdown</h4>
+        <p>Implement an in-process async task queue: producers submit coroutine-producing jobs, a fixed pool
+        of worker coroutines consumes from an `asyncio.Queue` and runs them, with graceful shutdown (SIGTERM
+        handling) that stops accepting new jobs, lets in-flight jobs finish (with a maximum drain timeout),
+        and reports any jobs that didn't complete in time.</p>
+        <ul><li>Must use `asyncio.Queue` for job distribution across a configurable number of worker coroutines.</li>
+        <li>Must handle signal-based shutdown using `asyncio`'s signal handling integration, not a busy-poll flag.</li>
+        <li>Must guarantee no job is silently lost or silently swallows an exception.</li>
+        <li>Include a pytest-asyncio test suite covering normal operation, a worker raising an exception mid-job, and shutdown with in-flight jobs.</li></ul>
+        <p><strong>Acceptance criteria:</strong> Shutdown under load completes within the configured drain timeout, reports incomplete jobs accurately, and the test suite demonstrates no swallowed exceptions. No full reference solution — this is meant to force real engagement with asyncio's cancellation and shutdown semantics.</p>
+      </div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet"><ul>
+        <li>Calling `async def` without awaiting/scheduling it does nothing — you get an inert coroutine object.</li>
+        <li><code>await coro()</code> = sequential; <code>create_task(coro())</code> = concurrent, fire-and-continue.</li>
+        <li>Never call blocking functions (`time.sleep`, sync HTTP/DB libs) inside `async def` — use async-native equivalents or `run_in_executor`.</li>
+        <li><code>asyncio.gather</code> ≈ `Promise.all`; pass `return_exceptions=True` for `Promise.allSettled`-like behavior.</li>
+        <li>asyncio's loop uses real coroutine frame suspension at `await`; Node's async/await is sugar over Promise callback chains.</li>
+        <li>`ThreadPoolExecutor` offload still shares the GIL; use `ProcessPoolExecutor` for real CPU parallelism.</li>
+        <li>Unreferenced background tasks silently swallow exceptions — keep references or attach done-callbacks.</li>
+        <li>Cancellation is cooperative — a `CancelledError` only fires at the next `await` suspension point.</li>
+        <li><code>asyncio.TaskGroup</code> (3.11+) gives structured concurrency: child failures cancel siblings and propagate together.</li>
+      </ul></div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://docs.python.org/3/library/asyncio-task.html">Python docs: Coroutines and Tasks</a></li>
+        <li><a href="https://docs.python.org/3/library/asyncio-eventloop.html">Python docs: Event Loop</a></li>
+        <li><a href="https://docs.python.org/3/library/asyncio-task.html#task-groups">Python docs: asyncio.TaskGroup</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="03-oop-dataclasses.html"><span class="dir">← Previous</span>OOP, Dataclasses, Type Hints</a>
+        <a class="next" href="05-fastapi.html"><span class="dir">Next →</span>FastAPI in Production</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · Python Intermediate</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "08-python-intermediate", chapterKey: "04-async-python" });</script>
+</body>
+</html>

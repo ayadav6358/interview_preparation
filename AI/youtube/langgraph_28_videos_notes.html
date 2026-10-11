@@ -1,0 +1,1442 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LangGraph Course Notes</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#f7f8fb; --panel:#ffffff; --text:#1d2433; --muted:#5b6478; --line:#e3e7ef;
+  --accent:#7c3aed; --accent-soft:#f1eafe; --code-bg:#0f172a; --code-text:#e2e8f0;
+  --tip:#0f9d6b; --tip-soft:#e6f7f0; --warn:#c2410c; --warn-soft:#fff1e8;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0d1117; --panel:#151b24; --text:#e6e9ef; --muted:#9aa4b6; --line:#263040;
+    --accent:#a78bfa; --accent-soft:#231a3a; --code-bg:#0a0e14; --code-text:#d8dee9;
+    --tip:#34d399; --tip-soft:#10261e; --warn:#fb923c; --warn-soft:#2a1a10;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0d1117; --panel:#151b24; --text:#e6e9ef; --muted:#9aa4b6; --line:#263040;
+  --accent:#a78bfa; --accent-soft:#231a3a; --code-bg:#0a0e14; --code-text:#d8dee9;
+  --tip:#34d399; --tip-soft:#10261e; --warn:#fb923c; --warn-soft:#2a1a10;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,system-ui,sans-serif;line-height:1.65;font-size:16px}
+.layout{display:grid;grid-template-columns:290px 1fr;min-height:100vh}
+nav{position:sticky;top:0;height:100vh;overflow-y:auto;background:var(--panel);border-right:1px solid var(--line);padding:20px 14px}
+nav h1{font-size:17px;margin:0 0 4px}
+nav .sub{font-size:12px;color:var(--muted);margin-bottom:14px}
+nav input{width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--text);font:inherit;font-size:14px;margin-bottom:10px}
+nav ol{list-style:none;padding:0;margin:0}
+nav li a{display:flex;gap:8px;padding:5px 8px;border-radius:6px;color:var(--text);text-decoration:none;font-size:14px}
+nav li a:hover{background:var(--accent-soft)}
+nav li a span.n{color:var(--accent);font-weight:600;min-width:22px}
+.phase{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:14px 8px 4px}
+main{padding:32px 40px;max-width:1000px}
+header.hero{margin-bottom:28px}
+header.hero h2{font-size:30px;margin:0 0 8px;line-height:1.25}
+header.hero p{color:var(--muted);margin:0 0 6px}
+section.video{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:28px;margin-bottom:28px;scroll-margin-top:16px}
+.tag{display:inline-block;background:var(--accent-soft);color:var(--accent);font-weight:600;font-size:12px;padding:3px 10px;border-radius:999px;margin-bottom:8px}
+section.video h2{margin:0 0 10px;font-size:24px;line-height:1.3}
+section.video h3{margin:24px 0 8px;font-size:18px}
+section.video h4{margin:16px 0 4px;font-size:15.5px}
+.lead{color:var(--muted);font-size:16.5px}
+ul,ol.inner{padding-left:22px}
+li{margin:4px 0}
+pre{background:var(--code-bg);color:var(--code-text);padding:14px 16px;border-radius:10px;overflow-x:auto;font-family:"JetBrains Mono",monospace;font-size:13.5px;line-height:1.55}
+code{font-family:"JetBrains Mono",monospace;font-size:.9em;background:var(--accent-soft);padding:1px 5px;border-radius:4px}
+pre code{background:none;padding:0;font-size:inherit}
+.diagram{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:14px;margin:12px 0;overflow-x:auto;text-align:center}
+.box{border-radius:10px;padding:12px 16px;margin:14px 0}
+.tip{background:var(--tip-soft);border-left:4px solid var(--tip)}
+.warn{background:var(--warn-soft);border-left:4px solid var(--warn)}
+table{border-collapse:collapse;width:100%;margin:10px 0;font-size:14.5px}
+th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+th{background:var(--accent-soft)}
+.tablewrap{overflow-x:auto}
+.toggle{position:fixed;top:14px;right:14px;z-index:5;border:1px solid var(--line);background:var(--panel);color:var(--text);border-radius:8px;padding:6px 10px;cursor:pointer;font:inherit;font-size:13px}
+.menu-btn{display:none}
+@media (max-width:860px){
+  .layout{grid-template-columns:1fr}
+  nav{position:fixed;inset:0 25% 0 0;transform:translateX(-100%);transition:transform .2s;z-index:10;height:100%}
+  nav.open{transform:none;box-shadow:0 0 40px rgba(0,0,0,.4)}
+  .menu-btn{display:block;position:fixed;top:14px;left:16px;z-index:11;border:1px solid var(--line);background:var(--panel);color:var(--text);border-radius:8px;padding:6px 10px;font:inherit;font-size:13px}
+  main{padding:64px 16px 24px}
+  section.video{padding:18px}
+  header.hero h2{font-size:24px}
+}
+</style>
+</head>
+<body>
+<button class="menu-btn" id="menuBtn">☰ Topics</button>
+<button class="toggle" id="themeBtn">◐ Theme</button>
+<div class="layout">
+<nav id="nav">
+  <h1>LangGraph — 28 Videos</h1>
+  <div class="sub">Agentic AI: topic-wise notes with diagrams</div>
+  <input id="search" placeholder="Search topics…">
+  <ol id="toc">
+    <div class="phase">A · Agentic AI foundations</div>
+    <li><a href="#v1"><span class="n">1</span>Generative AI vs Agentic AI</a></li>
+    <li><a href="#v2"><span class="n">2</span>What is Agentic AI</a></li>
+    <li><a href="#v3"><span class="n">3</span>Components of Agentic AI</a></li>
+    <li><a href="#v4"><span class="n">4</span>LangChain vs LangGraph</a></li>
+    <li><a href="#v5"><span class="n">5</span>LangGraph Core Concepts</a></li>
+    <li><a href="#v6"><span class="n">6</span>LLM Workflow Patterns</a></li>
+    <div class="phase">B · Workflows</div>
+    <li><a href="#v7"><span class="n">7</span>Sequential Workflows</a></li>
+    <li><a href="#v8"><span class="n">8</span>Parallel Workflows &amp; Reducers</a></li>
+    <li><a href="#v9"><span class="n">9</span>Conditional Workflows</a></li>
+    <li><a href="#v10"><span class="n">10</span>Iterative Workflows (Loops)</a></li>
+    <div class="phase">C · Chatbot project</div>
+    <li><a href="#v11"><span class="n">11</span>Chatbot in LangGraph</a></li>
+    <li><a href="#v12"><span class="n">12</span>Persistence &amp; Checkpointers</a></li>
+    <li><a href="#v13"><span class="n">13</span>Streamlit UI for Chatbot</a></li>
+    <li><a href="#v14"><span class="n">14</span>Streaming</a></li>
+    <li><a href="#v15"><span class="n">15</span>Threads &amp; Resume Chat</a></li>
+    <li><a href="#v16"><span class="n">16</span>Observability with LangSmith</a></li>
+    <li><a href="#v17"><span class="n">17</span>Database Persistence (SQLite)</a></li>
+    <div class="phase">D · Tools &amp; integrations</div>
+    <li><a href="#v18"><span class="n">18</span>Tools in LangGraph</a></li>
+    <li><a href="#v19"><span class="n">19</span>MCP Integration</a></li>
+    <li><a href="#v20"><span class="n">20</span>Agentic RAG</a></li>
+    <div class="phase">E · Control &amp; memory</div>
+    <li><a href="#v21"><span class="n">21</span>Human-in-the-Loop</a></li>
+    <li><a href="#v22"><span class="n">22</span>Subgraphs</a></li>
+    <li><a href="#v23"><span class="n">23</span>Short-term Memory</a></li>
+    <li><a href="#v24"><span class="n">24</span>Long-term Memory (Store)</a></li>
+    <div class="phase">F · Advanced &amp; production</div>
+    <li><a href="#v25"><span class="n">25</span>Multi-Agent Systems</a></li>
+    <li><a href="#v26"><span class="n">26</span>Fault Tolerance &amp; Time Travel</a></li>
+    <li><a href="#v27"><span class="n">27</span>Deployment</a></li>
+    <li><a href="#v28"><span class="n">28</span>Capstone &amp; Recap</a></li>
+  </ol>
+</nav>
+
+<main>
+<header class="hero">
+  <span class="tag">Course map</span>
+  <h2>LangGraph &amp; Agentic AI: Complete Topic Notes</h2>
+  <p>28 sections following the "Agentic AI using LangGraph" series progression: concepts → workflows → chatbot → tools → memory → multi-agent → production. Each section has explanation, subtopics, a diagram, code and key takeaways.</p>
+  <p>Code uses current LangGraph APIs (<code>langgraph</code>, <code>langchain-openai</code>, <code>langchain-mcp-adapters</code>).</p>
+  <div class="diagram"><pre class="mermaid">
+flowchart LR
+  A["1-6 Agentic AI and core concepts"] --> B["7-10 Workflows&lt;br/&gt;sequential, parallel, conditional, loop"]
+  B --> C["11-17 Chatbot&lt;br/&gt;persistence, UI, streaming, LangSmith, DB"]
+  C --> D["18-20 Tools, MCP, Agentic RAG"]
+  D --> E["21-24 HITL, Subgraphs, Memory"]
+  E --> F["25-28 Multi-agent, Fault tolerance, Deploy, Capstone"]
+  </pre></div>
+</header>
+
+<!-- ================= 1 ================= -->
+<section class="video" id="v1">
+  <span class="tag">Video 1</span>
+  <h2>Generative AI vs Agentic AI</h2>
+  <p class="lead">Generative AI <b>creates content</b> when asked. Agentic AI <b>pursues a goal</b>: it plans, takes actions with tools, checks results and adapts — with little human guidance.</p>
+  <h3>1. Generative AI</h3>
+  <p>Models that learn patterns from data and generate new text, images, audio or code (LLMs, diffusion models). Examples: ChatGPT answering a question, Midjourney making an image.</p>
+  <ul>
+    <li><b>Reactive</b> — waits for a prompt, gives one response.</li>
+    <li>No memory of goals, doesn't take actions on its own.</li>
+  </ul>
+  <h3>2. The evolution (example: an HR recruiter hiring a backend engineer)</h3>
+  <div class="diagram"><pre class="mermaid">
+flowchart LR
+  G["Plain GenAI chatbot&lt;br/&gt;writes a JD when asked"] --> R["RAG chatbot&lt;br/&gt;uses company docs and past JDs"]
+  R --> T["Tool-augmented chatbot&lt;br/&gt;can post jobs, read resumes, send mail&lt;br/&gt;but human drives each step"]
+  T --> A["Agentic AI&lt;br/&gt;given the goal, it plans and runs&lt;br/&gt;the whole hiring process"]
+  </pre></div>
+  <ol class="inner">
+    <li><b>LLM chatbot</b> — writes a job description, but generic and not company-specific.</li>
+    <li><b>RAG chatbot</b> — grounded in company data, but still only answers.</li>
+    <li><b>Tool-augmented chatbot</b> — can call LinkedIn / email / calendar APIs, but the recruiter must ask for every step.</li>
+    <li><b>Agentic AI</b> — the recruiter says "Hire a backend engineer" and the agent drafts the JD, posts it, monitors applications, shortlists, schedules interviews, and asks the human only for approvals.</li>
+  </ol>
+  <h3>3. Comparison</h3>
+  <div class="tablewrap"><table>
+    <tr><th></th><th>Generative AI</th><th>Agentic AI</th></tr>
+    <tr><td>Nature</td><td>Reactive</td><td>Proactive, goal-driven</td></tr>
+    <tr><td>Output</td><td>Content</td><td>Completed task / outcome</td></tr>
+    <tr><td>Steps</td><td>Single turn</td><td>Multi-step plan + execution</td></tr>
+    <tr><td>Tools &amp; memory</td><td>Optional</td><td>Core</td></tr>
+    <tr><td>Relation</td><td colspan="2">Generative AI is a <b>building block</b> (the brain) of Agentic AI.</td></tr>
+  </table></div>
+  <div class="box tip"><b>Key takeaway:</b> GenAI answers; Agentic AI acts. An agent = LLM + planning + tools + memory + feedback loop.</div>
+</section>
+
+<!-- ================= 2 ================= -->
+<section class="video" id="v2">
+  <span class="tag">Video 2</span>
+  <h2>What is Agentic AI — Characteristics</h2>
+  <p class="lead">Agentic AI is software that takes a goal from a user and works towards it autonomously, planning, acting, adapting and asking for help only when needed.</p>
+  <div class="diagram"><pre class="mermaid">
+mindmap
+  root((Agentic AI))
+    Autonomous
+      decides next step
+      controlled autonomy
+    Goal oriented
+      persistent goal
+      constraints
+    Planning
+      break into sub-goals
+      choose best plan
+    Reasoning
+      decisions
+      tool selection
+    Adaptability
+      failures
+      changing info
+    Context aware
+      short-term memory
+      long-term memory
+  </pre></div>
+  <h3>1. Autonomy</h3>
+  <p>Makes decisions and executes steps without a human prompting every step. It can be autonomous in <b>execution</b>, <b>decision making</b> and <b>tool usage</b>.</p>
+  <div class="box warn"><b>Controlled autonomy:</b> too much autonomy is risky (e.g. sending an offer letter with a wrong salary). Use permission scopes, human-in-the-loop checkpoints, override controls and guardrails.</div>
+  <h3>2. Goal-oriented</h3>
+  <p>A persistent objective guides every action. Goals can have constraints ("hire within ₹X budget, in 3 weeks") and are often stored in memory as structured data (goal, status, progress).</p>
+  <h3>3. Planning</h3>
+  <p>Break a high-level goal into a sequence of steps: generate candidate plans → evaluate them (efficiency, tools available, cost, risk) → select the best one.</p>
+  <h3>4. Reasoning</h3>
+  <p>Cognitive process for interpreting information and deciding: during planning (goal decomposition) and during execution (decision making, tool selection, error handling).</p>
+  <h3>5. Adaptability</h3>
+  <p>Modify plans when things change: a tool fails (job portal API down → use another), external feedback (few applications → widen the JD), or goal changes.</p>
+  <h3>6. Context awareness</h3>
+  <p>Understand and use relevant information: original goal, progress, environment state, tool responses, user preferences. Implemented through <b>short-term memory</b> (current session) and <b>long-term memory</b> (across sessions).</p>
+  <div class="box tip"><b>Key takeaway:</b> Six traits — Autonomy, Goal, Planning, Reasoning, Adaptability, Context. Every LangGraph feature later maps to one of these.</div>
+</section>
+
+<!-- ================= 3 ================= -->
+<section class="video" id="v3">
+  <span class="tag">Video 3</span>
+  <h2>Components of Agentic AI</h2>
+  <p class="lead">An agentic system is built from five parts. LangGraph gives you a way to wire them together.</p>
+  <div class="diagram"><pre class="mermaid">
+flowchart TB
+  U["User goal"] --> B["Brain (LLM)&lt;br/&gt;goal interpretation, planning,&lt;br/&gt;reasoning, tool selection"]
+  B <--> O["Orchestrator&lt;br/&gt;task sequencing, conditional routing,&lt;br/&gt;retries, loops"]
+  O <--> T["Tools&lt;br/&gt;APIs, DBs, RAG, code exec"]
+  O <--> M["Memory&lt;br/&gt;short-term + long-term"]
+  S["Supervisor / Human&lt;br/&gt;approvals, guardrails, escalation"] --> O
+  O --> R["Result"]
+  </pre></div>
+  <h3>1. Brain (LLM)</h3>
+  <p>Understands the goal, plans, reasons, chooses tools and generates responses.</p>
+  <h3>2. Orchestrator</h3>
+  <p>Executes the plan: sequencing steps, conditional routing, retries and loops, passing data between steps. <b>LangGraph is the orchestrator.</b></p>
+  <h3>3. Tools</h3>
+  <p>Let the agent interact with the world: external APIs, knowledge bases (RAG), code execution, databases.</p>
+  <h3>4. Memory</h3>
+  <ul>
+    <li><b>Short-term</b> — the current session's messages and intermediate state.</li>
+    <li><b>Long-term</b> — facts, preferences and history that persist across sessions.</li>
+    <li>Also: state tracking (what's done, what's pending).</li>
+  </ul>
+  <h3>5. Supervisor</h3>
+  <p>Human-in-the-loop approvals, guardrails, edge-case handling and escalation.</p>
+  <div class="box tip"><b>Key takeaway:</b> Brain decides, Orchestrator executes, Tools act, Memory remembers, Supervisor keeps it safe.</div>
+</section>
+
+<!-- ================= 4 ================= -->
+<section class="video" id="v4">
+  <span class="tag">Video 4</span>
+  <h2>LangChain vs LangGraph — Why LangGraph?</h2>
+  <p class="lead">LangChain is great for linear chains. LangGraph is an orchestration framework for <b>stateful, multi-step, branching and looping</b> LLM workflows, represented as a graph.</p>
+  <h3>1. The use case: automated hiring workflow</h3>
+  <p>Create JD → human approval → post job → wait → check applications → (if few, modify JD and repost — a loop) → shortlist → interview → (pass/fail branch) → offer letter.</p>
+  <h3>2. Problems when building this with LangChain</h3>
+  <div class="tablewrap"><table>
+    <tr><th>Challenge</th><th>LangChain</th><th>LangGraph</th></tr>
+    <tr><td>Control flow (branches, loops, jumps)</td><td>Lots of glue Python code around chains</td><td>Native: conditional edges and cycles</td></tr>
+    <tr><td>State handling</td><td>Manual dictionaries passed around</td><td>Shared typed <b>State</b> object</td></tr>
+    <tr><td>Event-driven / long waits</td><td>Chains run start-to-end in one go</td><td>Pause and resume with checkpointers</td></tr>
+    <tr><td>Fault tolerance</td><td>Restart from beginning</td><td>Resume from last checkpoint</td></tr>
+    <tr><td>Human-in-the-loop</td><td>Hard to pause for days</td><td><code>interrupt()</code> + resume</td></tr>
+    <tr><td>Nested workflows</td><td>Messy</td><td>Subgraphs</td></tr>
+    <tr><td>Observability</td><td>Partial (glue code not traced)</td><td>Full graph traced in LangSmith</td></tr>
+  </table></div>
+  <div class="diagram"><pre class="mermaid">
+flowchart LR
+  S((START)) --> JD["Create JD"] --> H{"Approved?"}
+  H -->|no| JD
+  H -->|yes| P["Post job"] --> W["Wait / monitor"] --> C{"Enough applicants?"}
+  C -->|no| M["Modify JD"] --> P
+  C -->|yes| SH["Shortlist"] --> I["Interview"] --> D{"Selected?"}
+  D -->|yes| O["Send offer"] --> E((END))
+  D -->|no| R["Reject mail"] --> E
+  </pre></div>
+  <h3>3. When to use which</h3>
+  <ul>
+    <li><b>LangChain</b> — simple linear pipelines: prompt → LLM → parser, basic RAG.</li>
+    <li><b>LangGraph</b> — agents, multi-step workflows with branching/loops, long-running or human-approved processes. LangGraph is built <i>on top of</i> LangChain components (models, tools, retrievers still come from LangChain).</li>
+  </ul>
+  <div class="box tip"><b>Key takeaway:</b> LangChain = building blocks. LangGraph = the flowchart engine that connects them with state, loops and checkpoints.</div>
+</section>
+
+<!-- ================= 5 ================= -->
+<section class="video" id="v5">
+  <span class="tag">Video 5</span>
+  <h2>LangGraph Core Concepts</h2>
+  <p class="lead">Every LangGraph app is a graph: <b>nodes</b> (work), <b>edges</b> (flow), and a shared <b>state</b> that every node can read and update.</p>
+  <div class="diagram"><pre class="mermaid">
+flowchart LR
+  S((START)) --> N1["Node A&lt;br/&gt;function(state) returns update"]
+  N1 --> N2["Node B"]
+  N1 --> N3["Node C"]
+  N2 --> N4["Node D"]
+  N3 --> N4
+  N4 --> E((END))
+  ST[("Shared State&lt;br/&gt;TypedDict / Pydantic")] -. read and update .-> N1
+  ST -.-> N2
+  ST -.-> N3
+  ST -.-> N4
+  </pre></div>
+  <h3>1. Graph, Nodes, Edges</h3>
+  <ul>
+    <li><b>Node</b> — a Python function: takes the state, returns a <i>partial</i> update (dict of changed keys). Can call an LLM, a tool, or plain logic.</li>
+    <li><b>Edge</b> — decides which node runs next. Types: normal (fixed), conditional (router function), parallel (fan-out), and loops (edge back to an earlier node).</li>
+    <li><b>START / END</b> — special entry and exit points.</li>
+  </ul>
+  <h3>2. State</h3>
+  <p>A shared, mutable memory that flows through the graph — like a shared whiteboard. Defined with <code>TypedDict</code> (or Pydantic).</p>
+<pre><code>from typing import TypedDict
+class HiringState(TypedDict):
+    job_description: str
+    approved: bool
+    applicants: list[str]
+    shortlisted: list[str]</code></pre>
+  <h3>3. Reducers</h3>
+  <p>A reducer defines <b>how</b> an update is merged into the state for a key. Default = <b>replace</b>. With a reducer you can <b>append/merge</b> instead — essential for chat history and parallel branches.</p>
+<pre><code>from typing import Annotated
+import operator
+class State(TypedDict):
+    messages: Annotated[list, operator.add]   # append instead of overwrite</code></pre>
+  <h3>4. Execution model (Pregel-inspired)</h3>
+  <ol class="inner">
+    <li><b>Graph definition</b> — declare state, nodes, edges.</li>
+    <li><b>Compilation</b> — <code>graph.compile()</code> checks structure (no orphan nodes etc.).</li>
+    <li><b>Execution</b> — runs in <b>super-steps</b>: nodes that are triggered run (in parallel if several), send updates, reducers merge them, then the next set of nodes is activated. Ends when no node is active.</li>
+  </ol>
+  <div class="box tip"><b>Key takeaway:</b> State = data, Nodes = what to do, Edges = when to do it, Reducers = how updates merge.</div>
+</section>
+
+<!-- ================= 6 ================= -->
+<section class="video" id="v6">
+  <span class="tag">Video 6</span>
+  <h2>LLM Workflow Patterns</h2>
+  <p class="lead">A <b>workflow</b> is a series of tasks executed in order to reach a goal. These five common LLM workflow patterns are the building blocks of agentic systems — and each maps directly to LangGraph features.</p>
+  <h3>1. Prompt chaining</h3>
+  <p>Call the LLM several times in sequence; each output feeds the next (topic → outline → blog). Optional "gate" checks in between.</p>
+  <div class="diagram"><pre class="mermaid">
+flowchart LR
+  I["Topic"] --> L1["LLM: outline"] --> G{"Gate check"} --> L2["LLM: blog"] --> O["Output"]
+  </pre></div>
+  <h3>2. Routing</h3>
+  <p>An LLM classifies the input and sends it to the right specialized handler (refund query → refund flow, technical query → tech flow).</p>
+  <div class="diagram"><pre class="mermaid">
+flowchart LR
+  Q["Query"] --> R{"LLM router"}
+  R --> A["Refund handler"]
+  R --> B["Tech support handler"]
+  R --> C["Sales handler"]
+  </pre></div>
+  <h3>3. Parallelization</h3>
+  <p>Split a task into independent subtasks that run at the same time, then aggregate (e.g. check a YouTube video for community guidelines, misinformation and sexual content in parallel).</p>
+  <h3>4. Orchestrator–Workers</h3>
+  <p>Like parallelization, but the subtasks are <b>not known in advance</b> — an orchestrator LLM decides them at runtime and spawns workers (e.g. a research assistant deciding which sources to search). In LangGraph this uses the <code>Send</code> API.</p>
+  <div class="diagram"><pre class="mermaid">
+flowchart LR
+  Q["Task"] --> O["Orchestrator LLM&lt;br/&gt;plans subtasks"]
+  O --> W1["Worker 1"]
+  O --> W2["Worker 2"]
+  O --> W3["Worker N"]
+  W1 --> S["Synthesizer"]
+  W2 --> S
+  W3 --> S
+  </pre></div>
+  <h3>5. Evaluator–Optimizer</h3>
+  <p>One LLM generates, another evaluates and gives feedback; loop until accepted (e.g. writing an email or a tweet).</p>
+  <div class="diagram"><pre class="mermaid">
+flowchart LR
+  G["Generator LLM"] --> E{"Evaluator LLM&lt;br/&gt;approved?"}
+  E -->|no + feedback| G
+  E -->|yes| O["Final output"]
+  </pre></div>
+  <div class="box tip"><b>Key takeaway:</b> Chaining = sequential edges, Routing = conditional edges, Parallel = fan-out edges, Orchestrator = Send API, Evaluator = loop.</div>
+</section>
+
+<!-- ================= 7 ================= -->
+<section class="video" id="v7">
+  <span class="tag">Video 7</span>
+  <h2>Sequential Workflows</h2>
+  <p class="lead">The simplest graph: nodes run one after another. The video builds three examples of increasing complexity.</p>
+  <h3>1. Non-LLM example: BMI calculator</h3>
+<pre><code>from langgraph.graph import StateGraph, START, END
+from typing import TypedDict
+
+class BMIState(TypedDict):
+    weight_kg: float
+    height_m: float
+    bmi: float
+    category: str
+
+def calculate_bmi(state: BMIState) -> BMIState:
+    bmi = state["weight_kg"] / (state["height_m"] ** 2)
+    return {"bmi": round(bmi, 2)}          # partial update
+
+def label_bmi(state: BMIState) -> BMIState:
+    b = state["bmi"]
+    cat = "Underweight" if b &lt; 18.5 else "Normal" if b &lt; 25 else "Overweight" if b &lt; 30 else "Obese"
+    return {"category": cat}
+
+graph = StateGraph(BMIState)
+graph.add_node("calculate_bmi", calculate_bmi)
+graph.add_node("label_bmi", label_bmi)
+graph.add_edge(START, "calculate_bmi")
+graph.add_edge("calculate_bmi", "label_bmi")
+graph.add_edge("label_bmi", END)
+
+workflow = graph.compile()
+print(workflow.invoke({"weight_kg": 80, "height_m": 1.73}))</code></pre>
+  <div class="diagram"><pre class="mermaid">
+flowchart LR
+  S((START)) --> A["calculate_bmi"] --> B["label_bmi"] --> E((END))
+  </pre></div>
+  <h3>2. Simple LLM workflow: Q&amp;A</h3>
+<pre><code>from langchain_openai import ChatOpenAI
+model = ChatOpenAI(model="gpt-4o-mini")
+
+class LLMState(TypedDict):
+    question: str
+    answer: str
+
+def llm_qa(state: LLMState):
+    return {"answer": model.invoke(f"Answer: {state['question']}").content}</code></pre>
+  <h3>3. Prompt chaining: Blog generator</h3>
+  <p>State: <code>title, outline, content</code> (+ optionally <code>evaluation</code>). Node 1 creates an outline, node 2 writes the blog from title + outline, node 3 rates it.</p>
+  <div class="diagram"><pre class="mermaid">
+flowchart LR
+  S((START)) --> O["create_outline"] --> B["create_blog"] --> R["evaluate_blog"] --> E((END))
+  </pre></div>
+  <h3>4. Visualizing the graph</h3>
+<pre><code>from IPython.display import Image
+Image(workflow.get_graph().draw_mermaid_png())</code></pre>
+  <div class="box tip"><b>Key takeaway:</b> Steps: define State → write node functions → add nodes &amp; edges → compile → invoke with initial state. Nodes return only the keys they change.</div>
+</section>
+
+<!-- ================= 8 ================= -->
+<section class="video" id="v8">
+  <span class="tag">Video 8</span>
+  <h2>Parallel Workflows &amp; Reducers</h2>
+  <p class="lead">Fan-out to several nodes that run in the same super-step, then fan-in to a node that combines their results.</p>
+  <h3>1. Non-LLM example: Cricket batsman stats</h3>
+  <p>From runs, balls, 4s, 6s compute <b>strike rate</b>, <b>balls per boundary</b> and <b>boundary %</b> in parallel, then build a summary.</p>
+<pre><code>class BatsmanState(TypedDict):
+    runs: int; balls: int; fours: int; sixes: int
+    sr: float; bpb: float; boundary_percent: float
+    summary: str
+
+def calculate_sr(state):  return {"sr": state["runs"] / state["balls"] * 100}
+def calculate_bpb(state): return {"bpb": state["balls"] / (state["fours"] + state["sixes"])}
+def calculate_boundary_percent(state):
+    return {"boundary_percent": (state["fours"]*4 + state["sixes"]*6) / state["runs"] * 100}
+
+g = StateGraph(BatsmanState)
+for n, f in [("sr", calculate_sr), ("bpb", calculate_bpb), ("bp", calculate_boundary_percent), ("summary", summary)]:
+    g.add_node(n, f)
+for n in ["sr", "bpb", "bp"]:
+    g.add_edge(START, n)
+    g.add_edge(n, "summary")
+g.add_edge("summary", END)</code></pre>
+  <div class="diagram"><pre class="mermaid">
+flowchart LR
+  S((START)) --> A["strike rate"]
+  S --> B["balls per boundary"]
+  S --> C["boundary %"]
+  A --> D["summary"]
+  B --> D
+  C --> D
+  D --> E((END))
+  </pre></div>
+  <div class="box warn"><b>Common error:</b> if parallel nodes return the <i>whole</i> state, LangGraph raises <code>InvalidUpdateError</code> (multiple values for the same key in one step). Always return only the keys you update.</div>
+  <h3>2. LLM example: UPSC essay evaluator</h3>
+  <p>Three parallel evaluators check <b>language</b>, <b>depth of analysis</b> and <b>clarity of thought</b>, each returning feedback + score (via structured output). A final node averages the scores and writes overall feedback.</p>
+<pre><code>from pydantic import BaseModel, Field
+class EvaluationSchema(BaseModel):
+    feedback: str = Field(description="Detailed feedback")
+    score: int = Field(description="Score out of 10", ge=0, le=10)
+structured_model = model.with_structured_output(EvaluationSchema)
+
+class UPSCState(TypedDict):
+    essay: str
+    language_feedback: str
+    analysis_feedback: str
+    clarity_feedback: str
+    overall_feedback: str
+    individual_scores: Annotated[list[int], operator.add]   # reducer!
+    avg_score: float
+
+def evaluate_language(state):
+    out = structured_model.invoke(f"Evaluate the language quality:\n{state['essay']}")
+    return {"language_feedback": out.feedback, "individual_scores": [out.score]}</code></pre>
+  <h3>3. Why the reducer matters</h3>
+  <p>All three branches write to <code>individual_scores</code> in the same super-step. With <code>Annotated[list, operator.add]</code>, the lists are <b>concatenated</b> → <code>[7, 8, 6]</code>. Without it, LangGraph doesn't know how to merge and raises an error.</p>
+  <div class="box tip"><b>Key takeaway:</b> Parallel = multiple edges from one node. Fan-in node waits for all. Shared keys written in parallel need a reducer.</div>
+</section>
+
+<!-- ================= 9 ================= -->
+<section class="video" id="v9">
+  <span class="tag">Video 9</span>
+  <h2>Conditional Workflows</h2>
+  <p class="lead">Route to different nodes based on the current state using <code>add_conditional_edges</code> and a router function.</p>
+  <h3>1. Non-LLM example: Quadratic equation solver</h3>
+  <p>Compute discriminant <code>D = b² − 4ac</code>; then branch: D &gt; 0 → two real roots, D = 0 → repeated root, D &lt; 0 → no real roots.</p>
+<pre><code>from typing import Literal
+def check_condition(state) -> Literal["real_roots", "repeated_root", "no_real_roots"]:
+    d = state["discriminant"]
+    if d > 0:  return "real_roots"
+    if d == 0: return "repeated_root"
+    return "no_real_roots"
+
+g.add_edge(START, "show_equation")
+g.add_edge("show_equation", "calculate_discriminant")
+g.add_conditional_edges("calculate_discriminant", check_condition)
+for n in ["real_roots", "repeated_root", "no_real_roots"]:
+    g.add_edge(n, END)</code></pre>
+  <div class="diagram"><pre class="mermaid">
+flowchart LR
+  S((START)) --> A["show_equation"] --> B["calculate_discriminant"] --> C{"check_condition"}
+  C -->|D gt 0| R1["real_roots"]
+  C -->|D eq 0| R2["repeated_root"]
+  C -->|D lt 0| R3["no_real_roots"]
+  R1 --> E((END))
+  R2 --> E
+  R3 --> E
+  </pre></div>
+  <h3>2. LLM example: Customer review reply system</h3>
+  <ol class="inner">
+    <li><b>find_sentiment</b> — structured output: <code>Literal["positive","negative"]</code>.</li>
+    <li>If positive → <b>positive_response</b>: thank-you message.</li>
+    <li>If negative → <b>run_diagnosis</b>: structured output with <code>issue_type</code> (UX/Performance/Bug/Support), <code>tone</code> (angry/frustrated/calm), <code>urgency</code> (low/medium/high) → <b>negative_response</b>: empathetic reply that uses the diagnosis.</li>
+  </ol>
+  <div class="diagram"><pre class="mermaid">
+flowchart LR
+  S((START)) --> F["find_sentiment"] --> C{"sentiment?"}
+  C -->|positive| P["positive_response"] --> E((END))
+  C -->|negative| D["run_diagnosis"] --> N["negative_response"] --> E
+  </pre></div>
+  <p>Optional third argument maps router output to node names: <code>add_conditional_edges("x", fn, {"yes": "a", "no": "b"})</code>.</p>
+  <div class="box tip"><b>Key takeaway:</b> The router function reads state and returns the <b>name</b> of the next node. Use structured output so the LLM's decision is reliable.</div>
+</section>
+
+<!-- ================= 10 ================= -->
+<section class="video" id="v10">
+  <span class="tag">Video 10</span>
+  <h2>Iterative Workflows (Loops)</h2>
+  <p class="lead">Graphs can have cycles. This implements the <b>evaluator–optimizer</b> pattern: generate → evaluate → improve → evaluate… until approved or a max iteration limit.</p>
+  <h3>Project: X (Twitter) post generator</h3>
+  <ul>
+    <li><b>generate</b> — LLM writes a funny, original tweet on a topic.</li>
+    <li><b>evaluate</b> — a second LLM (strict critic) returns <code>evaluation: "approved" | "needs_improvement"</code> + <code>feedback</code> (structured output).</li>
+    <li><b>optimize</b> — rewrites the tweet using the feedback, increments <code>iteration</code>.</li>
+    <li>Loop back to evaluate until approved or <code>iteration &gt;= max_iteration</code>.</li>
+  </ul>
+<pre><code>class TweetState(TypedDict):
+    topic: str
+    tweet: str
+    evaluation: Literal["approved", "needs_improvement"]
+    feedback: str
+    iteration: int
+    max_iteration: int
+    tweet_history: Annotated[list[str], operator.add]
+    feedback_history: Annotated[list[str], operator.add]
+
+def route_evaluation(state):
+    if state["evaluation"] == "approved" or state["iteration"] >= state["max_iteration"]:
+        return "approved"
+    return "needs_improvement"
+
+g.add_edge(START, "generate")
+g.add_edge("generate", "evaluate")
+g.add_conditional_edges("evaluate", route_evaluation,
+                        {"approved": END, "needs_improvement": "optimize"})
+g.add_edge("optimize", "evaluate")      # the loop
+
+workflow.invoke({"topic": "Indian Railways", "iteration": 1, "max_iteration": 5})</code></pre>
+  <div class="diagram"><pre class="mermaid">
+flowchart LR
+  S((START)) --> G["generate"] --> EV{"evaluate"}
+  EV -->|approved or max iter| E((END))
+  EV -->|needs_improvement| O["optimize"]
+  O --> EV
+  </pre></div>
+  <div class="box warn"><b>Always add a stop condition.</b> Without <code>max_iteration</code> the loop could run forever (LangGraph also has a default <code>recursion_limit</code> of 25 steps).</div>
+  <div class="box tip"><b>Tip:</b> Use different models (or temperatures) for generator and evaluator, and history lists with reducers to inspect how the output improved.</div>
+</section>
+
+<!-- ================= 11 ================= -->
+<section class="video" id="v11">
+  <span class="tag">Video 11</span>
+  <h2>Building a Chatbot in LangGraph</h2>
+  <p class="lead">The simplest chatbot is a one-node graph whose state is a list of messages.</p>
+  <h3>1. State with add_messages</h3>
+<pre><code>from langgraph.graph.message import add_messages
+from langchain_core.messages import BaseMessage, HumanMessage
+
+class ChatState(TypedDict):
+    messages: Annotated[list[BaseMessage], add_messages]</code></pre>
+  <p><code>add_messages</code> is a reducer specialised for messages: it appends new ones, and updates a message if the same ID comes again. (<code>MessagesState</code> is a ready-made class with exactly this.)</p>
+  <h3>2. Graph</h3>
+<pre><code>llm = ChatOpenAI()
+def chat_node(state: ChatState):
+    response = llm.invoke(state["messages"])
+    return {"messages": [response]}
+
+g = StateGraph(ChatState)
+g.add_node("chat_node", chat_node)
+g.add_edge(START, "chat_node")
+g.add_edge("chat_node", END)
+chatbot = g.compile()</code></pre>
+  <div class="diagram"><pre class="mermaid">
+flowchart LR
+  S((START)) --> C["chat_node&lt;br/&gt;llm.invoke(messages)"] --> E((END))
+  </pre></div>
+  <h3>3. The memory problem</h3>
+<pre><code>while True:
+    user = input("You: ")
+    if user in ("exit", "quit", "bye"): break
+    out = chatbot.invoke({"messages": [HumanMessage(content=user)]})
+    print("AI:", out["messages"][-1].content)</code></pre>
+  <div class="box warn">Each <code>invoke</code> starts with a <b>fresh state</b>, so "My name is Amit" → "What's my name?" fails. The state is erased after the graph ends. Solution: <b>persistence</b> (next video).</div>
+  <div class="box tip"><b>Key takeaway:</b> Chatbot = MessagesState + one LLM node. Memory across turns needs a checkpointer.</div>
+</section>
+
+<!-- ================= 12 ================= -->
+<section class="video" id="v12">
+  <span class="tag">Video 12</span>
+  <h2>Persistence &amp; Checkpointers</h2>
+  <p class="lead">Persistence = saving the graph's state so it can be restored later. LangGraph saves a <b>checkpoint</b> at every super-step.</p>
+  <div class="diagram"><pre class="mermaid">
+flowchart LR
+  subgraph T1["thread_id = 1"]
+    C0["checkpoint 0&lt;br/&gt;input"] --> C1["checkpoint 1&lt;br/&gt;after node A"] --> C2["checkpoint 2&lt;br/&gt;after node B"]
+  end
+  subgraph T2["thread_id = 2"]
+    D0["checkpoint 0"] --> D1["checkpoint 1"]
+  end
+  CP[("Checkpointer&lt;br/&gt;InMemorySaver / SqliteSaver / Postgres")] --- T1
+  CP --- T2
+  </pre></div>
+  <h3>1. Checkpointer + threads</h3>
+<pre><code>from langgraph.checkpoint.memory import InMemorySaver
+checkpointer = InMemorySaver()
+chatbot = g.compile(checkpointer=checkpointer)
+
+config = {"configurable": {"thread_id": "1"}}
+chatbot.invoke({"messages": [HumanMessage("Hi, my name is Amit")]}, config=config)
+chatbot.invoke({"messages": [HumanMessage("What is my name?")]}, config=config)  # remembers!</code></pre>
+  <p>A <b>thread</b> = one conversation / one run history. Different <code>thread_id</code> = separate memory.</p>
+  <h3>2. Inspecting state</h3>
+<pre><code>chatbot.get_state(config)                 # latest snapshot: values, next, config
+list(chatbot.get_state_history(config))   # all checkpoints, newest first</code></pre>
+  <h3>3. Benefits of persistence</h3>
+  <ul>
+    <li><b>Short-term memory</b> — chat history across turns.</li>
+    <li><b>Fault tolerance</b> — if a node crashes, re-invoke with <code>None</code> input and same thread to resume from the last checkpoint.</li>
+    <li><b>Human-in-the-loop</b> — pause indefinitely and resume.</li>
+    <li><b>Time travel</b> — replay or fork from any old checkpoint (<code>checkpoint_id</code>), or edit state with <code>update_state</code>.</li>
+  </ul>
+<pre><code># resume after a crash
+chatbot.invoke(None, config)
+# time travel: replay from an older checkpoint
+old = {"configurable": {"thread_id": "1", "checkpoint_id": "1ef..."}}
+chatbot.invoke(None, old)
+# edit the past and fork
+chatbot.update_state(old, {"topic": "samosa"})</code></pre>
+  <div class="box tip"><b>Key takeaway:</b> <code>compile(checkpointer=...)</code> + <code>thread_id</code> unlocks memory, fault tolerance, HITL and time travel.</div>
+</section>
+
+<!-- ================= 13 ================= -->
+<section class="video" id="v13">
+  <span class="tag">Video 13</span>
+  <h2>Streamlit UI for the Chatbot</h2>
+  <p class="lead">Separate the project into a <b>backend</b> (the LangGraph chatbot) and a <b>frontend</b> (Streamlit chat UI).</p>
+  <div class="diagram"><pre class="mermaid">
+flowchart LR
+  U["User"] --> FE["Streamlit frontend&lt;br/&gt;st.chat_input, st.chat_message"]
+  FE -->|invoke with thread_id| BE["LangGraph backend&lt;br/&gt;chatbot = graph.compile(checkpointer)"]
+  BE --> LLM["LLM"]
+  BE --> FE
+  FE --> SS[("st.session_state&lt;br/&gt;message_history")]
+  </pre></div>
+  <h3>1. Backend file</h3>
+  <p><code>langgraph_backend.py</code> exports the compiled <code>chatbot</code> with an <code>InMemorySaver</code>.</p>
+  <h3>2. Frontend</h3>
+<pre><code>import streamlit as st
+from langgraph_backend import chatbot
+from langchain_core.messages import HumanMessage
+
+CONFIG = {"configurable": {"thread_id": "thread-1"}}
+if "message_history" not in st.session_state:
+    st.session_state["message_history"] = []
+
+for m in st.session_state["message_history"]:          # re-draw old messages
+    with st.chat_message(m["role"]):
+        st.text(m["content"])
+
+user_input = st.chat_input("Type here")
+if user_input:
+    st.session_state["message_history"].append({"role": "user", "content": user_input})
+    with st.chat_message("user"): st.text(user_input)
+    resp = chatbot.invoke({"messages": [HumanMessage(user_input)]}, config=CONFIG)
+    ai = resp["messages"][-1].content
+    st.session_state["message_history"].append({"role": "assistant", "content": ai})
+    with st.chat_message("assistant"): st.text(ai)</code></pre>
+  <div class="box warn">Streamlit re-runs the whole script on every interaction — that's why messages are stored in <code>st.session_state</code> and re-drawn.</div>
+  <div class="box tip"><b>Key takeaway:</b> Backend owns memory (checkpointer); frontend only displays and sends messages with a thread_id.</div>
+</section>
+
+<!-- ================= 14 ================= -->
+<section class="video" id="v14">
+  <span class="tag">Video 14</span>
+  <h2>Streaming</h2>
+  <p class="lead">Show the response token-by-token as the LLM generates it, instead of waiting for the full answer — like ChatGPT's typing effect.</p>
+  <h3>1. Why stream?</h3>
+  <ul>
+    <li>Faster perceived response (low time-to-first-token).</li>
+    <li>Better UX for long answers; user can stop early.</li>
+    <li>Shows progress in multi-step agents (which node is running, which tool was called).</li>
+  </ul>
+  <h3>2. Stream modes</h3>
+  <div class="tablewrap"><table>
+    <tr><th>stream_mode</th><th>What you get</th></tr>
+    <tr><td><code>"values"</code></td><td>Full state after each step</td></tr>
+    <tr><td><code>"updates"</code></td><td>Only what each node changed</td></tr>
+    <tr><td><code>"messages"</code></td><td>LLM tokens as (message_chunk, metadata) — for chat UIs</td></tr>
+    <tr><td><code>"custom"</code></td><td>Your own events from inside nodes</td></tr>
+  </table></div>
+<pre><code>for chunk, meta in chatbot.stream(
+        {"messages": [HumanMessage("Write a recipe for pasta")]},
+        config=CONFIG, stream_mode="messages"):
+    if chunk.content:
+        print(chunk.content, end="", flush=True)</code></pre>
+  <h3>3. Streaming in Streamlit</h3>
+<pre><code>with st.chat_message("assistant"):
+    ai_message = st.write_stream(
+        chunk.content for chunk, meta in chatbot.stream(
+            {"messages": [HumanMessage(user_input)]}, config=CONFIG, stream_mode="messages")
+    )
+st.session_state["message_history"].append({"role": "assistant", "content": ai_message})</code></pre>
+  <div class="diagram"><pre class="mermaid">
+sequenceDiagram
+  participant UI as Streamlit
+  participant G as LangGraph
+  participant L as LLM
+  UI->>G: stream(input, stream_mode=messages)
+  G->>L: invoke
+  L-->>G: token 1
+  G-->>UI: chunk 1
+  L-->>G: token 2
+  G-->>UI: chunk 2
+  L-->>G: ...done
+  G-->>UI: final state saved to checkpoint
+  </pre></div>
+  <div class="box tip"><b>Key takeaway:</b> <code>stream_mode="messages"</code> + <code>st.write_stream</code> = ChatGPT-style typing.</div>
+</section>
+
+<!-- ================= 15 ================= -->
+<section class="video" id="v15">
+  <span class="tag">Video 15</span>
+  <h2>Threads &amp; Resume Chat (Multiple Conversations)</h2>
+  <p class="lead">Add a sidebar with "New Chat" and a list of past conversations, each mapped to its own <code>thread_id</code>.</p>
+  <div class="diagram"><pre class="mermaid">
+flowchart TB
+  NB["New Chat button"] --> NT["generate uuid thread_id&lt;br/&gt;reset message_history&lt;br/&gt;add to chat_threads"]
+  SB["Sidebar: list of thread_ids"] --> CL["click a thread"]
+  CL --> LS["chatbot.get_state(thread_id)&lt;br/&gt;load messages"]
+  LS --> CV["convert to role/content&lt;br/&gt;for display"]
+  </pre></div>
+<pre><code>import uuid
+def generate_thread_id(): return uuid.uuid4()
+
+def reset_chat():
+    tid = generate_thread_id()
+    st.session_state["thread_id"] = tid
+    st.session_state["chat_threads"].append(tid)
+    st.session_state["message_history"] = []
+
+def load_conversation(thread_id):
+    state = chatbot.get_state(config={"configurable": {"thread_id": thread_id}})
+    return state.values.get("messages", [])
+
+st.sidebar.title("LangGraph Chatbot")
+if st.sidebar.button("New Chat"): reset_chat()
+for tid in st.session_state["chat_threads"][::-1]:
+    if st.sidebar.button(str(tid)):
+        st.session_state["thread_id"] = tid
+        msgs = load_conversation(tid)
+        st.session_state["message_history"] = [
+            {"role": "user" if isinstance(m, HumanMessage) else "assistant", "content": m.content}
+            for m in msgs]</code></pre>
+  <h3>Improvements</h3>
+  <ul>
+    <li>Show a chat title (first message or an LLM-generated title) instead of the raw UUID.</li>
+    <li>Persist threads in a DB so they survive app restarts (video 17).</li>
+  </ul>
+  <div class="box tip"><b>Key takeaway:</b> The checkpointer already stores every conversation by thread_id — the UI just needs to remember the list of ids and call <code>get_state</code>.</div>
+</section>
+
+<!-- ================= 16 ================= -->
+<section class="video" id="v16">
+  <span class="tag">Video 16</span>
+  <h2>Observability with LangSmith</h2>
+  <p class="lead">LLM apps are non-deterministic and multi-step. LangSmith records every run as a <b>trace</b> so you can debug, measure and improve.</p>
+  <h3>1. Why observability?</h3>
+  <ul>
+    <li>Find which node/LLM call failed or was slow.</li>
+    <li>See exact prompts, outputs, tool inputs and token costs.</li>
+    <li>Monitor latency, errors and cost in production; collect feedback; build datasets for evaluation.</li>
+  </ul>
+  <h3>2. Setup (no code changes needed)</h3>
+<pre><code># .env
+LANGSMITH_TRACING=true
+LANGSMITH_ENDPOINT=https://api.smith.langchain.com
+LANGSMITH_API_KEY=your_key
+LANGSMITH_PROJECT=langgraph-chatbot</code></pre>
+  <h3>3. Concepts</h3>
+  <div class="diagram"><pre class="mermaid">
+flowchart TB
+  P["Project"] --> T1["Trace = one full graph run"]
+  P --> T2["Trace"]
+  T1 --> R1["Run: chat_node"]
+  T1 --> R2["Run: tools"]
+  R1 --> R3["Run: ChatOpenAI call&lt;br/&gt;prompt, output, tokens, latency"]
+  P --> TH["Threads&lt;br/&gt;group traces by thread_id"]
+  </pre></div>
+  <ul>
+    <li><b>Project</b> — collection of traces for one app.</li>
+    <li><b>Trace</b> — one end-to-end execution; <b>Run</b> — one step inside it (node, LLM call, tool).</li>
+    <li><b>Threads</b> — traces with the same thread_id show as one conversation.</li>
+    <li>Add <code>metadata</code>, <code>tags</code> and <code>run_name</code> in the config for filtering; <code>@traceable</code> to trace plain Python functions.</li>
+  </ul>
+<pre><code>config = {"configurable": {"thread_id": tid},
+          "metadata": {"thread_id": tid}, "run_name": "chat_turn"}</code></pre>
+  <div class="box tip"><b>Key takeaway:</b> Set 4 env variables and every LangGraph run becomes inspectable — essential before going to production.</div>
+</section>
+
+<!-- ================= 17 ================= -->
+<section class="video" id="v17">
+  <span class="tag">Video 17</span>
+  <h2>Database Persistence (SQLite)</h2>
+  <p class="lead"><code>InMemorySaver</code> loses everything when the app restarts. Use a database-backed checkpointer for real persistence.</p>
+<pre><code>import sqlite3
+from langgraph.checkpoint.sqlite import SqliteSaver
+
+conn = sqlite3.connect("chatbot.db", check_same_thread=False)  # Streamlit uses multiple threads
+checkpointer = SqliteSaver(conn=conn)
+chatbot = g.compile(checkpointer=checkpointer)
+
+def retrieve_all_threads():
+    threads = set()
+    for cp in checkpointer.list(None):
+        threads.add(cp.config["configurable"]["thread_id"])
+    return list(threads)</code></pre>
+  <div class="diagram"><pre class="mermaid">
+flowchart LR
+  APP["Streamlit + LangGraph"] --> CP["SqliteSaver"]
+  CP --> DB[("chatbot.db&lt;br/&gt;checkpoints + writes tables")]
+  APP -->|on startup| L["retrieve_all_threads()"] --> DB
+  </pre></div>
+  <h3>Checkpointer options</h3>
+  <div class="tablewrap"><table>
+    <tr><th>Checkpointer</th><th>Package</th><th>Use</th></tr>
+    <tr><td>InMemorySaver</td><td>langgraph</td><td>Learning / tests</td></tr>
+    <tr><td>SqliteSaver / AsyncSqliteSaver</td><td>langgraph-checkpoint-sqlite</td><td>Local apps, single server</td></tr>
+    <tr><td>PostgresSaver</td><td>langgraph-checkpoint-postgres</td><td>Production</td></tr>
+  </table></div>
+  <div class="box tip"><b>Key takeaway:</b> Swap the checkpointer — graph code stays the same. On app start, list threads from the DB to rebuild the sidebar.</div>
+</section>
+
+<!-- ================= 18 ================= -->
+<section class="video" id="v18">
+  <span class="tag">Video 18</span>
+  <h2>Tools in LangGraph</h2>
+  <p class="lead">Give the chatbot tools (search, calculator, stock price API). The LLM decides when to call them; a <code>ToolNode</code> executes them; the graph loops back to the LLM.</p>
+<pre><code>from langgraph.prebuilt import ToolNode, tools_condition
+from langchain_community.tools import DuckDuckGoSearchRun
+from langchain_core.tools import tool
+import requests
+
+search_tool = DuckDuckGoSearchRun(region="us-en")
+
+@tool
+def calculator(first_num: float, second_num: float, operation: str) -> dict:
+    """Perform add, sub, mul, div on two numbers."""
+    ops = {"add": first_num + second_num, "sub": first_num - second_num,
+           "mul": first_num * second_num,
+           "div": first_num / second_num if second_num else "division by zero"}
+    return {"result": ops.get(operation, "unsupported operation")}
+
+@tool
+def get_stock_price(symbol: str) -> dict:
+    """Fetch latest stock price for a symbol (e.g. AAPL) using Alpha Vantage."""
+    url = f"https://www.alphavantage.co/query?function=GLOBAL_QUOTE&amp;symbol={symbol}&amp;apikey=KEY"
+    return requests.get(url).json()
+
+tools = [search_tool, calculator, get_stock_price]
+llm_with_tools = llm.bind_tools(tools)
+
+def chat_node(state: ChatState):
+    return {"messages": [llm_with_tools.invoke(state["messages"])]}
+
+g = StateGraph(ChatState)
+g.add_node("chat_node", chat_node)
+g.add_node("tools", ToolNode(tools))
+g.add_edge(START, "chat_node")
+g.add_conditional_edges("chat_node", tools_condition)   # tool_calls? -> "tools" else END
+g.add_edge("tools", "chat_node")                        # loop back
+chatbot = g.compile(checkpointer=checkpointer)</code></pre>
+  <div class="diagram"><pre class="mermaid">
+flowchart LR
+  S((START)) --> C["chat_node&lt;br/&gt;LLM with tools"]
+  C --> D{"tools_condition&lt;br/&gt;has tool_calls?"}
+  D -->|yes| T["ToolNode&lt;br/&gt;runs tools, returns ToolMessages"]
+  T --> C
+  D -->|no| E((END))
+  </pre></div>
+  <p>This loop is the <b>ReAct agent</b> pattern. The prebuilt shortcut is <code>create_react_agent(model, tools)</code>.</p>
+  <h3>Showing tool use in the UI</h3>
+  <p>While streaming, check <code>isinstance(chunk, ToolMessage)</code> and show a status like "🔧 Using calculator…" with <code>st.status</code>; only display AIMessage chunks as text.</p>
+  <div class="box tip"><b>Key takeaway:</b> bind_tools + ToolNode + tools_condition + edge back = a working agent in ~10 lines.</div>
+</section>
+
+<!-- ================= 19 ================= -->
+<section class="video" id="v19">
+  <span class="tag">Video 19</span>
+  <h2>MCP Integration</h2>
+  <p class="lead">MCP (Model Context Protocol) is an open standard to expose tools to any AI app. Instead of writing every tool yourself, connect to MCP servers (local or remote) and LangGraph gets their tools automatically.</p>
+  <h3>1. Why MCP?</h3>
+  <ul>
+    <li>Without MCP: every app writes its own integration for GitHub, Drive, DBs… (M apps × N tools).</li>
+    <li>With MCP: a tool provider writes one server; any MCP client can use it (M + N).</li>
+  </ul>
+  <div class="diagram"><pre class="mermaid">
+flowchart LR
+  subgraph Client["Your LangGraph app (MCP client)"]
+    G["Graph"] --> MC["MultiServerMCPClient"]
+  end
+  MC -->|stdio| S1["Local server&lt;br/&gt;math / expense tracker"]
+  MC -->|streamable http| S2["Remote server&lt;br/&gt;e.g. GitHub, Notion"]
+  S1 --> T1["tools"]
+  S2 --> T2["tools"]
+  </pre></div>
+  <h3>2. Code</h3>
+<pre><code>import asyncio
+from langchain_mcp_adapters.client import MultiServerMCPClient
+
+client = MultiServerMCPClient({
+    "arith": {"command": "python", "args": ["math_server.py"], "transport": "stdio"},
+    "expense": {"url": "https://example.com/mcp", "transport": "streamable_http"},
+})
+
+async def build_graph():
+    tools = await client.get_tools()          # MCP tools become LangChain tools
+    llm_with_tools = llm.bind_tools(tools)
+
+    async def chat_node(state: ChatState):
+        return {"messages": [await llm_with_tools.ainvoke(state["messages"])]}
+
+    g = StateGraph(ChatState)
+    g.add_node("chat_node", chat_node)
+    g.add_node("tools", ToolNode(tools))
+    g.add_edge(START, "chat_node")
+    g.add_conditional_edges("chat_node", tools_condition)
+    g.add_edge("tools", "chat_node")
+    return g.compile()
+
+async def main():
+    chatbot = await build_graph()
+    out = await chatbot.ainvoke({"messages": [HumanMessage("Add 45 and 23")]})
+    print(out["messages"][-1].content)
+asyncio.run(main())</code></pre>
+  <div class="box warn"><b>Async:</b> MCP tools are async, so use <code>ainvoke</code>/<code>astream</code> and async checkpointers (<code>AsyncSqliteSaver</code>). In Streamlit, run a background event loop and submit coroutines to it.</div>
+  <div class="box tip"><b>Key takeaway:</b> MCP turns "write a tool" into "connect a server". The graph shape stays the same as video 18.</div>
+</section>
+
+<!-- ================= 20 ================= -->
+<section class="video" id="v20">
+  <span class="tag">Video 20</span>
+  <h2>Agentic RAG with LangGraph</h2>
+  <p class="lead">Instead of always retrieving, the agent <b>decides</b> when to retrieve, checks if the documents are relevant, and can rewrite the question and retry.</p>
+  <h3>1. RAG as a tool (simple version)</h3>
+<pre><code>loader = PyPDFLoader("intro-to-ml.pdf"); docs = loader.load()
+chunks = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200).split_documents(docs)
+retriever = FAISS.from_documents(chunks, OpenAIEmbeddings()).as_retriever(search_kwargs={"k": 4})
+
+@tool
+def rag_tool(query: str) -> dict:
+    """Retrieve relevant information from the PDF document for the query."""
+    result = retriever.invoke(query)
+    return {"query": query, "context": [d.page_content for d in result],
+            "metadata": [d.metadata for d in result]}
+
+tools = [rag_tool, search_tool, calculator]   # the agent chooses</code></pre>
+  <h3>2. Full agentic RAG (with grading &amp; rewriting)</h3>
+  <div class="diagram"><pre class="mermaid">
+flowchart LR
+  S((START)) --> A["agent&lt;br/&gt;decide: retrieve or answer"]
+  A -->|tool call| R["retrieve"]
+  A -->|no tool| E((END))
+  R --> G{"grade_documents&lt;br/&gt;relevant?"}
+  G -->|yes| GEN["generate answer"] --> E
+  G -->|no| RW["rewrite question"] --> A
+  </pre></div>
+  <ul>
+    <li><b>agent</b> — LLM with the retriever tool bound; small talk is answered directly.</li>
+    <li><b>grade_documents</b> — structured output <code>binary_score: "yes"/"no"</code> for relevance.</li>
+    <li><b>rewrite</b> — LLM improves the query (clearer, better keywords), then tries again.</li>
+    <li><b>generate</b> — answer using only the relevant context.</li>
+  </ul>
+  <h3>3. Per-thread documents (chat with your PDF UI)</h3>
+  <p>Store a separate retriever per <code>thread_id</code> (dict in backend), upload a PDF from the Streamlit sidebar, and pass <code>thread_id</code> into the tool so each chat only searches its own document.</p>
+  <div class="box tip"><b>Key takeaway:</b> Classic RAG = fixed pipeline. Agentic RAG = graph with decisions: retrieve? relevant? rewrite?</div>
+</section>
+
+<!-- ================= 21 ================= -->
+<section class="video" id="v21">
+  <span class="tag">Video 21</span>
+  <h2>Human-in-the-Loop (HITL)</h2>
+  <p class="lead">Pause the graph, ask a human to approve / edit / provide input, then resume exactly where it stopped. Needs a checkpointer.</p>
+  <h3>1. Why HITL?</h3>
+  <ul>
+    <li>High-stakes actions: buying stocks, sending emails, payments, deleting data.</li>
+    <li>Ambiguity: the agent needs clarification.</li>
+    <li>Quality review: approve a draft before publishing.</li>
+  </ul>
+  <h3>2. interrupt() and Command(resume=...)</h3>
+<pre><code>from langgraph.types import interrupt, Command
+
+@tool
+def purchase_stock(symbol: str, quantity: int) -> dict:
+    """Purchase given quantity of stock for the symbol."""
+    decision = interrupt(f"Approve buying {quantity} shares of {symbol}? (yes/no)")
+    if isinstance(decision, str) and decision.lower() == "yes":
+        return {"status": "success", "message": f"Bought {quantity} {symbol}"}
+    return {"status": "cancelled", "message": "Purchase declined by human"}
+
+# run
+config = {"configurable": {"thread_id": "t1"}}
+result = chatbot.invoke({"messages": [HumanMessage("Buy 10 shares of AAPL")]}, config)
+if "__interrupt__" in result:
+    question = result["__interrupt__"][0].value
+    answer = input(question)
+    result = chatbot.invoke(Command(resume=answer), config)   # continues from the pause</code></pre>
+  <div class="diagram"><pre class="mermaid">
+sequenceDiagram
+  participant U as Human
+  participant G as Graph
+  participant CP as Checkpointer
+  U->>G: Buy 10 AAPL
+  G->>G: chat_node -> tool call purchase_stock
+  G->>CP: save state
+  G-->>U: __interrupt__ Approve?
+  Note over U: can take minutes or days
+  U->>G: Command(resume="yes")
+  CP->>G: restore state
+  G->>G: node re-runs, interrupt returns "yes"
+  G-->>U: Bought 10 AAPL
+  </pre></div>
+  <div class="box warn"><b>Important:</b> on resume, the node runs again <b>from its start</b>; <code>interrupt()</code> then returns the resume value. Keep side-effects after the interrupt, not before.</div>
+  <h3>3. Common HITL patterns</h3>
+  <ul>
+    <li><b>Approve / reject</b> an action.</li>
+    <li><b>Edit state</b> — human corrects a draft, resume with the edited value.</li>
+    <li><b>Review tool calls</b> — edit tool arguments before execution.</li>
+    <li><b>Validate input</b> — ask again until valid.</li>
+  </ul>
+  <div class="box tip"><b>Key takeaway:</b> <code>interrupt()</code> pauses, the checkpointer remembers, <code>Command(resume=...)</code> continues.</div>
+</section>
+
+<!-- ================= 22 ================= -->
+<section class="video" id="v22">
+  <span class="tag">Video 22</span>
+  <h2>Subgraphs</h2>
+  <p class="lead">A subgraph is a compiled graph used as a node inside another graph — for modularity, reuse, and building multi-agent systems.</p>
+  <h3>1. Why subgraphs?</h3>
+  <ul>
+    <li>Break big workflows into smaller, testable modules.</li>
+    <li>Reuse one graph (e.g. a "translator" or "research" agent) in many parent graphs.</li>
+    <li>Different teams can own different subgraphs.</li>
+  </ul>
+  <h3>2. Case A — Shared state keys: add the subgraph directly as a node</h3>
+<pre><code>class ParentState(TypedDict):
+    question: str
+    answer_eng: str
+    answer_hin: str
+
+class SubState(TypedDict):        # shares answer_eng / answer_hin keys
+    answer_eng: str
+    answer_hin: str
+
+def translate(state: SubState):
+    return {"answer_hin": llm.invoke(f"Translate to Hindi:\n{state['answer_eng']}").content}
+
+sub = StateGraph(SubState)
+sub.add_node("translate", translate)
+sub.add_edge(START, "translate"); sub.add_edge("translate", END)
+translator = sub.compile()
+
+parent = StateGraph(ParentState)
+parent.add_node("answer", answer_node)
+parent.add_node("translator", translator)     # compiled graph as a node
+parent.add_edge(START, "answer"); parent.add_edge("answer", "translator"); parent.add_edge("translator", END)</code></pre>
+  <h3>3. Case B — Different state: call the subgraph inside a node function</h3>
+<pre><code>class SubState(TypedDict):
+    input_text: str
+    translated_text: str
+
+def translate_node(state: ParentState):
+    out = translator.invoke({"input_text": state["answer_eng"]})   # map in
+    return {"answer_hin": out["translated_text"]}                   # map out</code></pre>
+  <div class="diagram"><pre class="mermaid">
+flowchart LR
+  S((START)) --> A["answer (English)"] --> SG
+  subgraph SG["translator subgraph"]
+    T1((start)) --> T["translate"] --> T2((end))
+  end
+  SG --> E((END))
+  </pre></div>
+  <div class="box tip"><b>Key takeaway:</b> Same keys → add compiled subgraph as a node. Different schema → wrap it in a function that maps state in and out.</div>
+</section>
+
+<!-- ================= 23 ================= -->
+<section class="video" id="v23">
+  <span class="tag">Video 23</span>
+  <h2>Short-term Memory Management</h2>
+  <p class="lead">Short-term memory = the message history in a thread (via checkpointer). Long chats grow too large for the context window and cost more — so we manage it.</p>
+  <h3>1. Problems with long history</h3>
+  <ul>
+    <li>Exceeds the model's context window.</li>
+    <li>Higher latency and token cost.</li>
+    <li>Model gets distracted by old, irrelevant messages.</li>
+  </ul>
+  <h3>2. Techniques</h3>
+  <div class="diagram"><pre class="mermaid">
+flowchart TB
+  M["Long message history"] --> T["Trim&lt;br/&gt;keep last N tokens / messages"]
+  M --> D["Delete&lt;br/&gt;RemoveMessage by id"]
+  M --> S["Summarize&lt;br/&gt;replace old messages with a summary"]
+  </pre></div>
+  <h4>a) Trimming (only what is sent to the LLM)</h4>
+<pre><code>from langchain_core.messages.utils import trim_messages, count_tokens_approximately
+def chat_node(state):
+    msgs = trim_messages(state["messages"], strategy="last",
+                         token_counter=count_tokens_approximately, max_tokens=150)
+    return {"messages": [llm.invoke(msgs)]}</code></pre>
+  <h4>b) Deleting from state</h4>
+<pre><code>from langchain_core.messages import RemoveMessage
+def delete_old(state):
+    if len(state["messages"]) > 6:
+        return {"messages": [RemoveMessage(id=m.id) for m in state["messages"][:-6]]}
+    return {}</code></pre>
+  <h4>c) Summarization</h4>
+<pre><code>class ChatState(MessagesState):
+    summary: str
+
+def summarize(state):
+    prompt = f"Existing summary: {state.get('summary','')}\nExtend it with the new messages above."
+    resp = llm.invoke(state["messages"] + [HumanMessage(prompt)])
+    return {"summary": resp.content,
+            "messages": [RemoveMessage(id=m.id) for m in state["messages"][:-2]]}
+
+def should_summarize(state):
+    return "summarize" if len(state["messages"]) > 6 else END</code></pre>
+  <div class="diagram"><pre class="mermaid">
+flowchart LR
+  S((START)) --> C["chat_node&lt;br/&gt;system: summary + recent msgs"] --> D{"more than 6 messages?"}
+  D -->|yes| SU["summarize + delete old"] --> E((END))
+  D -->|no| E
+  </pre></div>
+  <div class="box tip"><b>Key takeaway:</b> Trim what you send, delete what you don't need, summarize what you want to keep compactly.</div>
+</section>
+
+<!-- ================= 24 ================= -->
+<section class="video" id="v24">
+  <span class="tag">Video 24</span>
+  <h2>Long-term Memory (Store)</h2>
+  <p class="lead">Checkpointers remember within a <b>thread</b>. A <b>Store</b> remembers across <b>all threads</b> — user name, preferences, past facts — like ChatGPT's memory feature.</p>
+  <div class="diagram"><pre class="mermaid">
+flowchart TB
+  subgraph ST["Short-term (checkpointer)"]
+    T1["thread 1 messages"]
+    T2["thread 2 messages"]
+  end
+  subgraph LT["Long-term (Store)"]
+    N["namespace: (user_id, 'memories')&lt;br/&gt;key: uuid, value: fact"]
+  end
+  T1 -->|extract facts| LT
+  LT -->|retrieve relevant facts| T2
+  </pre></div>
+  <h3>1. Types of long-term memory</h3>
+  <ul>
+    <li><b>Semantic</b> — facts about the user ("works in React, lives in Noida").</li>
+    <li><b>Episodic</b> — past experiences / interactions (few-shot examples of what worked).</li>
+    <li><b>Procedural</b> — rules/instructions the agent learns (updated system prompt).</li>
+  </ul>
+  <h3>2. Store API</h3>
+<pre><code>from langgraph.store.memory import InMemoryStore   # PostgresStore for production
+store = InMemoryStore(index={"embed": OpenAIEmbeddings(model="text-embedding-3-small"), "dims": 1536})
+
+ns = ("user_1", "memories")
+store.put(ns, "m1", {"data": "User likes Python and React"})
+store.get(ns, "m1")
+store.search(ns, query="what languages does the user know?", limit=3)   # semantic search</code></pre>
+  <h3>3. Using the store inside nodes</h3>
+<pre><code>from langgraph.store.base import BaseStore
+from langchain_core.runnables import RunnableConfig
+
+def chat_node(state: MessagesState, config: RunnableConfig, *, store: BaseStore):
+    user_id = config["configurable"]["user_id"]
+    ns = (user_id, "memories")
+    mems = store.search(ns, query=state["messages"][-1].content, limit=3)
+    info = "\n".join(m.value["data"] for m in mems)
+    system = SystemMessage(f"You are helpful. Known user info:\n{info}")
+    return {"messages": [llm.invoke([system] + state["messages"])]}
+
+def remember_node(state, config, *, store: BaseStore):
+    # LLM extracts new facts (structured output) and stores them
+    ...
+
+graph = g.compile(checkpointer=checkpointer, store=store)
+graph.invoke({...}, {"configurable": {"thread_id": "1", "user_id": "user_1"}})</code></pre>
+  <div class="box tip"><b>Key takeaway:</b> thread_id → short-term (checkpointer). user_id namespace → long-term (store). Extract facts, store them, search them in new chats.</div>
+</section>
+
+<!-- ================= 25 ================= -->
+<section class="video" id="v25">
+  <span class="tag">Video 25</span>
+  <h2>Multi-Agent Systems</h2>
+  <p class="lead">One agent with too many tools and responsibilities gets confused. Split into specialised agents that collaborate.</p>
+  <h3>1. Why multi-agent?</h3>
+  <ul>
+    <li><b>Specialization</b> — each agent has a focused prompt and few tools.</li>
+    <li><b>Modularity</b> — develop, test and improve agents separately.</li>
+    <li><b>Control</b> — explicit communication between agents.</li>
+  </ul>
+  <h3>2. Architectures</h3>
+  <div class="diagram"><pre class="mermaid">
+flowchart TB
+  subgraph SUP["Supervisor"]
+    S["Supervisor LLM"] --> A1["Research agent"]
+    S --> A2["Math agent"]
+    S --> A3["Writer agent"]
+    A1 --> S
+    A2 --> S
+    A3 --> S
+  end
+  subgraph NET["Network"]
+    B1["Agent A"] <--> B2["Agent B"]
+    B2 <--> B3["Agent C"]
+    B1 <--> B3
+  end
+  </pre></div>
+  <ul>
+    <li><b>Network</b> — any agent can hand off to any other.</li>
+    <li><b>Supervisor</b> — a central agent decides who works next (most common).</li>
+    <li><b>Hierarchical</b> — supervisors of supervisors (teams), built with subgraphs.</li>
+    <li><b>Custom workflow</b> — fixed edges between agents.</li>
+  </ul>
+  <h3>3. Supervisor with Command (handoffs)</h3>
+<pre><code>from langgraph.prebuilt import create_react_agent
+from langgraph.types import Command
+
+research_agent = create_react_agent(llm, [search_tool], prompt="You are a researcher.")
+math_agent     = create_react_agent(llm, [calculator],  prompt="You are a math expert.")
+
+class Router(BaseModel):
+    next: Literal["researcher", "math", "FINISH"]
+
+def supervisor(state: MessagesState) -> Command[Literal["researcher", "math", "__end__"]]:
+    decision = llm.with_structured_output(Router).invoke(
+        [SystemMessage("Decide which worker acts next, or FINISH.")] + state["messages"])
+    return Command(goto=END if decision.next == "FINISH" else decision.next)
+
+def researcher(state) -> Command[Literal["supervisor"]]:
+    out = research_agent.invoke(state)
+    return Command(update={"messages": [AIMessage(out["messages"][-1].content, name="researcher")]},
+                   goto="supervisor")</code></pre>
+  <p><code>Command(update=..., goto=...)</code> lets a node update state <b>and</b> choose the next node in one return — no separate conditional edge needed.</p>
+  <div class="box tip"><b>Key takeaway:</b> Supervisor pattern = router LLM + worker agents (often subgraphs) + Command handoffs.</div>
+</section>
+
+<!-- ================= 26 ================= -->
+<section class="video" id="v26">
+  <span class="tag">Video 26</span>
+  <h2>Fault Tolerance, Retries &amp; Time Travel</h2>
+  <p class="lead">Long-running agents will hit API errors, timeouts and crashes. LangGraph's checkpoints make recovery cheap.</p>
+  <h3>1. Resume after failure</h3>
+  <p>If node 3 of 5 crashes, nodes 1–2's results are already checkpointed. Fix the issue and call <code>graph.invoke(None, config)</code> — execution resumes from the failed node, not from the beginning. (Successful writes from other parallel nodes in the same step are also kept — "pending writes".)</p>
+  <div class="diagram"><pre class="mermaid">
+flowchart LR
+  S((START)) --> A["step 1 ✓"] --> B["step 2 ✓"] --> C["step 3 ✗ crash"]
+  C -.->|"invoke(None, same thread)"| C2["step 3 retried"] --> D["step 4"] --> E((END))
+  </pre></div>
+  <h3>2. Automatic retries</h3>
+<pre><code>from langgraph.types import RetryPolicy
+g.add_node("call_api", call_api,
+           retry_policy=RetryPolicy(max_attempts=3, initial_interval=1.0, backoff_factor=2.0))</code></pre>
+  <h3>3. Time travel</h3>
+  <ul>
+    <li><b>Replay</b> — re-run from a past checkpoint (debug a decision).</li>
+    <li><b>Fork</b> — <code>update_state</code> on an old checkpoint to change a value, then continue on a new branch ("what if the topic was different?").</li>
+  </ul>
+<pre><code>history = list(graph.get_state_history(config))
+target = history[2].config                          # an older checkpoint
+new_cfg = graph.update_state(target, {"topic": "pizza"})
+graph.invoke(None, new_cfg)                          # alternate timeline</code></pre>
+  <h3>4. Durability modes</h3>
+  <p>Control how often checkpoints are written: <code>"exit"</code> (fastest, only at end), <code>"async"</code> (default balance), <code>"sync"</code> (safest).</p>
+  <div class="box tip"><b>Key takeaway:</b> Checkpoints = save game. Retry policies handle flaky APIs; time travel helps debugging and "what-if" exploration.</div>
+</section>
+
+<!-- ================= 27 ================= -->
+<section class="video" id="v27">
+  <span class="tag">Video 27</span>
+  <h2>Deployment</h2>
+  <p class="lead">Moving a LangGraph agent from notebook to a real service that others can use.</p>
+  <div class="diagram"><pre class="mermaid">
+flowchart LR
+  FE["Frontend&lt;br/&gt;Streamlit / React"] -->|HTTP / SSE stream| API["API server&lt;br/&gt;FastAPI or LangGraph Server"]
+  API --> G["Compiled graph"]
+  G --> CP[("Postgres&lt;br/&gt;checkpointer + store")]
+  G --> LLM["LLM provider"]
+  G --> TL["Tools / MCP servers"]
+  API --> LS["LangSmith&lt;br/&gt;tracing and monitoring"]
+  </pre></div>
+  <h3>1. Option A — Your own API (FastAPI)</h3>
+<pre><code>from fastapi import FastAPI
+from fastapi.responses import StreamingResponse
+app = FastAPI()
+
+@app.post("/chat/{thread_id}")
+async def chat(thread_id: str, body: dict):
+    cfg = {"configurable": {"thread_id": thread_id}}
+    async def gen():
+        async for chunk, meta in graph.astream(
+                {"messages": [HumanMessage(body["message"])]}, cfg, stream_mode="messages"):
+            if chunk.content: yield chunk.content
+    return StreamingResponse(gen(), media_type="text/plain")</code></pre>
+  <p>Containerize with Docker, use <code>AsyncPostgresSaver</code>, keep API keys in environment variables / secrets, and deploy to any cloud (EC2, Cloud Run, Render…).</p>
+  <h3>2. Option B — LangGraph Platform / Server</h3>
+  <ul>
+    <li><code>langgraph.json</code> points to your graph (<code>"graphs": {"agent": "./agent.py:graph"}</code>).</li>
+    <li><code>langgraph dev</code> runs a local server + <b>LangGraph Studio</b> (visual debugger: see the graph, step through, edit state).</li>
+    <li>Built-in: threads, persistence, streaming, background runs, cron jobs, HITL endpoints, scaling.</li>
+  </ul>
+  <h3>3. Production checklist</h3>
+  <ul>
+    <li>Persistent checkpointer + store (Postgres).</li>
+    <li>Tracing &amp; alerts (LangSmith), evaluation datasets.</li>
+    <li>Rate limits, retries, timeouts, recursion limit.</li>
+    <li>Guardrails + HITL on risky tools; authentication per user/thread.</li>
+  </ul>
+  <div class="box tip"><b>Key takeaway:</b> Graph code stays the same; production adds a server, a real database, streaming endpoints and monitoring.</div>
+</section>
+
+<!-- ================= 28 ================= -->
+<section class="video" id="v28">
+  <span class="tag">Video 28</span>
+  <h2>Capstone Project &amp; Course Recap</h2>
+  <p class="lead">Putting everything together into one agentic chatbot application.</p>
+  <div class="diagram"><pre class="mermaid">
+flowchart TB
+  UI["Streamlit UI&lt;br/&gt;threads sidebar, streaming, PDF upload, approvals"] --> G
+  subgraph G["LangGraph agent"]
+    S((START)) --> C["chat_node&lt;br/&gt;LLM + tools + memory"]
+    C --> D{"tools_condition"}
+    D -->|yes| T["ToolNode&lt;br/&gt;search, calculator, stock,&lt;br/&gt;RAG, MCP tools"]
+    T --> C
+    D -->|no| E((END))
+    T -. risky tool .-> H["interrupt for approval"]
+  end
+  G --> CP[("SQLite / Postgres checkpointer")]
+  G --> ST[("Store: long-term memory")]
+  G --> LS["LangSmith traces"]
+  </pre></div>
+  <h3>Feature → concept map</h3>
+  <div class="tablewrap"><table>
+    <tr><th>Feature</th><th>LangGraph concept</th><th>Video</th></tr>
+    <tr><td>Multi-step logic</td><td>StateGraph, nodes, edges, reducers</td><td>5–10</td></tr>
+    <tr><td>Remembers the conversation</td><td>Checkpointer + thread_id</td><td>12, 17</td></tr>
+    <tr><td>Typing effect</td><td>stream_mode="messages"</td><td>14</td></tr>
+    <tr><td>Multiple chats</td><td>Threads + get_state</td><td>15</td></tr>
+    <tr><td>Debugging</td><td>LangSmith</td><td>16</td></tr>
+    <tr><td>Takes actions</td><td>bind_tools, ToolNode, tools_condition</td><td>18</td></tr>
+    <tr><td>External tool servers</td><td>MCP adapters</td><td>19</td></tr>
+    <tr><td>Answers from documents</td><td>Agentic RAG</td><td>20</td></tr>
+    <tr><td>Approval before risky actions</td><td>interrupt + Command(resume)</td><td>21</td></tr>
+    <tr><td>Modular design</td><td>Subgraphs, multi-agent</td><td>22, 25</td></tr>
+    <tr><td>Remembers the user</td><td>Trimming/summary + Store</td><td>23, 24</td></tr>
+    <tr><td>Reliability</td><td>Retries, resume, time travel</td><td>26</td></tr>
+    <tr><td>Shipping</td><td>FastAPI / LangGraph Server</td><td>27</td></tr>
+  </table></div>
+  <h3>Learning path after this course</h3>
+  <ul>
+    <li>Build 2–3 projects end to end (e.g. a resume screener with HITL, a research assistant with orchestrator–workers, a support bot with agentic RAG).</li>
+    <li>Learn evaluation (LangSmith datasets, LLM-as-judge).</li>
+    <li>Explore deep-agent patterns (planning with to-do lists, sub-agents, file systems).</li>
+  </ul>
+  <div class="box tip"><b>Final takeaway:</b> Agentic AI = LLM brain + LangGraph orchestration + tools + memory + human supervision.</div>
+</section>
+
+<footer style="color:var(--muted);font-size:13px;padding:10px 0 40px">
+  Study notes following the "Agentic AI using LangGraph" playlist topic progression. LangGraph APIs change often — check the official docs for the latest imports.
+</footer>
+</main>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script>
+(function(){
+  var root=document.documentElement;
+  function isDark(){
+    var t=root.getAttribute("data-theme");
+    if(t) return t==="dark";
+    return window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+  }
+  var blocks=[].slice.call(document.querySelectorAll("pre.mermaid"));
+  blocks.forEach(function(b){ b.dataset.src=b.textContent; });
+  function render(){
+    if(!window.mermaid) return;
+    blocks.forEach(function(b){ b.removeAttribute("data-processed"); b.textContent=b.dataset.src; });
+    mermaid.initialize({startOnLoad:false, theme:isDark()?"dark":"default", securityLevel:"loose", flowchart:{useMaxWidth:true}});
+    mermaid.run({nodes:blocks}).catch(function(e){console.error(e);});
+  }
+  window.addEventListener("load", render);
+  document.getElementById("themeBtn").addEventListener("click",function(){
+    root.setAttribute("data-theme", isDark()?"light":"dark"); render();
+  });
+  var nav=document.getElementById("nav");
+  document.getElementById("menuBtn").addEventListener("click",function(){ nav.classList.toggle("open"); });
+  nav.addEventListener("click",function(e){ if(e.target.closest("a")) nav.classList.remove("open"); });
+  document.getElementById("search").addEventListener("input",function(e){
+    var q=e.target.value.toLowerCase();
+    document.querySelectorAll("#toc li").forEach(function(li){
+      var id=li.querySelector("a").getAttribute("href").slice(1);
+      var sec=document.getElementById(id);
+      var hit=!q || li.textContent.toLowerCase().indexOf(q)>-1 || sec.textContent.toLowerCase().indexOf(q)>-1;
+      li.style.display=hit?"":"none";
+    });
+  });
+})();
+</script>
+</body>
+</html>

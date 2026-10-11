@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Testing Strategy & Pyramid — Testing — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">Testing</a><span class="sep">›</span>Testing Strategy &amp; Pyramid</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>Testing Strategy: Test Pyramid, What to Test and What Not To</h1>
+      <p class="meta-line"><span>⏱ 2 hrs</span><span>📍 Chapter 1 of 6</span></p>
+      <p><strong>One-line summary:</strong> A test strategy is a set of deliberate tradeoffs about where you spend
+      confidence-per-dollar — the pyramid shape, the boundary of a "unit", and the explicit list of things you
+      choose not to test — not a reflex to write tests everywhere.</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>Junior and mid-level engineers are evaluated on whether they write tests. Senior and staff engineers are
+      evaluated on whether the test suite as a whole is an asset or a liability. A team with 95% coverage and a
+      30-minute, flaky CI pipeline that everyone re-runs three times before merging is in a worse position than a
+      team with 70% coverage and a 4-minute deterministic pipeline that nobody doubts. Interviewers ask "how would
+      you test this system" specifically to see whether you reach for exhaustive E2E coverage (expensive, slow,
+      brittle) or whether you can articulate a pyramid: many fast isolated unit tests, fewer integration tests,
+      a handful of E2E tests for the critical paths only. The ability to say "I would <em>not</em> test this" with
+      a clear reason is a stronger signal than reflexively saying "test everything."</p>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>No hard prerequisite — this chapter sets vocabulary used throughout the rest of the topic. Related:
+      <a href="02-unit-testing.html">Unit Testing</a>, <a href="06-tdd-coverage-ci.html">TDD, Coverage, CI</a>.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="the-pyramid">The test pyramid, and why it's shaped that way</h3>
+      <p>The classic pyramid (Mike Cohn, popularized further by Martin Fowler) has three layers, widest at the
+      bottom:</p>
+      <ul>
+        <li><strong>Unit tests</strong> — test a single function/class/module in isolation, no real I/O. Milliseconds
+        each. You should have thousands.</li>
+        <li><strong>Integration tests</strong> — test how two or more real pieces work together: your API route
+        against a real (test) database, a service calling another internal module without mocking it. Tens to
+        hundreds of milliseconds each. You should have hundreds.</li>
+        <li><strong>E2E tests</strong> — drive the whole system through the UI or a public API, as a user would.
+        Seconds each, and flaky by nature (real browser, real network, real timing). You should have dozens, not
+        hundreds.</li>
+      </ul>
+      <p>The shape is driven by a cost/confidence curve, not dogma: as you move up the pyramid, each test gives you
+      more confidence that the <em>whole system</em> works, but costs exponentially more — slower to run, slower to
+      write, slower to debug when it fails (a failing E2E test tells you "something somewhere broke," a failing
+      unit test tells you exactly which function and which line). The right strategy pushes as much verification as
+      possible down to the cheapest layer that can actually catch the bug class you care about, and reserves the
+      expensive layers for things only they can catch: real network behavior, real browser rendering, real
+      cross-service wiring.</p>
+
+      <h3 id="testing-trophy">The "testing trophy" and honeycomb — the pyramid isn't universal</h3>
+      <p>Kent C. Dodds' <strong>testing trophy</strong> reshapes the pyramid for frontend-heavy apps: it shrinks
+      the unit layer, puts the biggest weight on <strong>integration tests</strong> (component tests that render
+      real component trees with RTL, mocking only the network boundary), keeps a thin E2E layer on top, and adds a
+      base of <strong>static analysis</strong> (TypeScript, ESLint) below unit tests — because type errors and lint
+      rules catch a huge class of bugs for near-zero cost before a test even runs. Spotify's <strong>honeycomb</strong>
+      model for microservices inverts the pyramid differently again: it argues integration tests (verifying a
+      service's contract with its real dependencies) deserve the most weight, because in a service-oriented system
+      the risk is almost entirely at integration boundaries, not inside a single service's internal logic. The
+      lesson for an interview: cite the shape that matches the architecture you're asked about, and justify it —
+      don't recite "pyramid" as a fixed law.</p>
+
+      <h3 id="what-to-test">What actually deserves a test</h3>
+      <ul>
+        <li><strong>Business logic with branches</strong> — pricing calculations, permission checks, state
+        machines, anything with if/else or multiple return paths. High bug density, high regression risk.</li>
+        <li><strong>Public contracts / API boundaries</strong> — anything another team or another service depends
+        on. Breaking it silently is expensive.</li>
+        <li><strong>Historically fragile code</strong> — modules that have caused production incidents before.
+        Past bugs predict future bugs in the same area far better than code "feels risky."</li>
+        <li><strong>Edge cases that are easy to get wrong</strong> — off-by-one in pagination, timezone math,
+        currency rounding, empty-array/null handling.</li>
+      </ul>
+
+      <h3 id="what-not-to-test">What to deliberately skip (and say so out loud)</h3>
+      <ul>
+        <li><strong>Trivial code</strong> — a getter that returns a field, a one-line wrapper around a library
+        call with no logic of your own. Testing it tests the language, not your code.</li>
+        <li><strong>Third-party library internals</strong> — don't write tests whose only job is to verify that
+        <code>lodash.debounce</code> or React itself works. Trust the library's own test suite; test your usage of
+        it only where your usage has logic (e.g., you chose a debounce delay for a reason — that choice might
+        deserve a test, the debounce mechanism itself doesn't).</li>
+        <li><strong>Generated code / config glue</strong> — ORM-generated migration files, simple DI wiring.</li>
+        <li><strong>Implementation details</strong> — internal state shape, private method names, the exact
+        sequence of internal function calls. Tests that assert on these break on every refactor even when behavior
+        is unchanged — this is the single most common cause of a test suite people learn to hate and start
+        deleting.</li>
+      </ul>
+      <p>The discipline of explicitly naming what you're <em>not</em> testing, and why, is what separates a
+      strategy from a habit. It also gives you an artifact (an ADR or a comment block) you can point to later when
+      someone asks "why isn't this tested" — the answer should never be "nobody got to it," it should be a
+      decision.</p>
+
+      <h3 id="test-doubles-vocab">Vocabulary: unit vs. integration boundary, and "sociable" vs "solitary" unit tests</h3>
+      <p>A "unit" is not defined by a single function — it's defined by whatever boundary you choose to isolate.
+      Martin Fowler distinguishes <strong>solitary unit tests</strong> (the thing under test has every collaborator
+      replaced by a test double) from <strong>sociable unit tests</strong> (the thing under test is allowed to call
+      real, fast, in-process collaborators — just not slow I/O like a real network call or real database). Most
+      senior-level teams lean sociable: mocking every collaborator produces tests that pass even when the real
+      integration between two units is broken, because the mock enforces an assumption about the collaborator's
+      behavior that may have drifted from reality. Reserve full isolation (solitary) for genuinely expensive or
+      nondeterministic collaborators (network, clock, random, filesystem) — mock the boundary, not every internal
+      class.</p>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>The economics that justify the pyramid shape come from two measurable properties of a test: <strong>feedback
+      latency</strong> (how long between breaking something and finding out) and <strong>localization</strong> (how
+      precisely the failure tells you where the bug is). A unit test suite that runs in 10 seconds on every save
+      gives feedback latency near zero and perfect localization (one function, one assertion). An E2E suite that
+      takes 20 minutes in CI gives feedback latency measured in the time it takes a human to notice CI went red,
+      often after they've already moved on to other work, and poor localization (a failed "user can check out"
+      test could mean a broken button, a broken API, a broken database migration, or a flaky selector — you don't
+      know until you dig in). A good strategy maximizes the fraction of bugs caught at the layer with the best
+      latency/localization tradeoff that is still <em>capable</em> of catching that bug class — some bugs (a CSS
+      change hiding a button, a CORS misconfiguration, a real race condition between two services) are structurally
+      invisible to unit tests and can only be caught by something closer to production reality.</p>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+graph TD
+  A["E2E tests<br/>few, slow, real browser/network<br/>catches: wiring, UX regressions"] --> B["Integration tests<br/>moderate count, real DB/API boundary<br/>catches: contract breaks, wiring bugs"]
+  B --> C["Unit tests<br/>many, milliseconds, isolated logic<br/>catches: logic bugs, edge cases"]
+  C --> D["Static analysis: types, lint<br/>catches: typos, type errors, forbidden patterns"]
+  style A fill:#dc2626,color:#fff
+  style B fill:#d97706,color:#fff
+  style C fill:#16a34a,color:#fff
+  style D fill:#2563eb,color:#fff
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-typescript">// Example: deciding WHERE a test belongs, not just whether to write one.
+
+// discount.ts — business logic with branches: definitely unit-test this.
+export function calculateDiscount(subtotal: number, loyaltyTier: "none" | "silver" | "gold"): number {
+  if (subtotal <= 0) return 0;
+  const rate = loyaltyTier === "gold" ? 0.15 : loyaltyTier === "silver" ? 0.08 : 0;
+  // rounding to cents matters for money — this is exactly the kind of edge case worth a test
+  return Math.round(subtotal * rate * 100) / 100;
+}
+
+// BAD: testing a trivial pass-through — adds maintenance cost, catches nothing real
+export function getUserName(user: { name: string }): string {
+  return user.name;
+}
+// test('getUserName returns name', () => {
+//   expect(getUserName({ name: 'Alice' })).toBe('Alice'); // tests the language, not your logic
+// });
+
+// BAD: asserting on implementation details — breaks on harmless refactors
+// test('uses a Map internally', () => {
+//   expect(cache['_store']).toBeInstanceOf(Map); // private detail, not behavior
+// });
+
+// GOOD: asserting on observable behavior only
+test('calculateDiscount rounds to the nearest cent for gold tier', () => {
+  expect(calculateDiscount(19.995, 'gold')).toBe(3.0); // 19.995 * 0.15 = 2.99925 -> rounds to 3.00
+});
+
+test('calculateDiscount returns 0 for non-positive subtotal regardless of tier', () => {
+  expect(calculateDiscount(0, 'gold')).toBe(0);
+  expect(calculateDiscount(-5, 'gold')).toBe(0);
+});</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4><p>A payments team at a mid-size fintech had 2,400 Jest tests and a
+      CI pipeline that took 42 minutes, with roughly 1 in 8 runs failing for reasons unrelated to the change (flaky
+      E2E tests hitting a shared staging environment). Engineers started adding <code>test.skip</code> to flaky
+      tests "temporarily" and re-running failed CI jobs by habit — the suite had stopped being trusted. The fix was
+      not "write more tests" — it was a strategy rewrite: they moved 80% of what had been E2E-only assertions
+      (form validation, pricing display logic) down into component and unit tests that ran in under 90 seconds,
+      cut the E2E suite to 12 true critical-path journeys running against an ephemeral per-PR environment instead
+      of shared staging, and enforced a rule that any new test proposed for the E2E layer needed a one-line
+      justification for why it couldn't live lower in the pyramid. CI dropped to 6 minutes, flake rate dropped to
+      near zero because the ephemeral environment removed cross-test state pollution, and — critically — engineers
+      started trusting red CI again, which is the actual point of a test suite.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4><p>"100% code coverage" is a line-coverage number by default in most
+      tools, and line coverage does not mean every <em>branch</em> or <em>condition</em> was exercised, let alone
+      that assertions are meaningful. A test that calls a function and asserts nothing, or asserts
+      <code>expect(result).toBeDefined()</code>, drives line coverage to 100% while verifying almost nothing. Chasing
+      the coverage number as a goal in itself, instead of as a diagnostic for unexercised code, is one of the most
+      common senior-interview red flags — know the difference between coverage as a floor (catches obviously
+      untested code) and coverage as a proxy for quality (it isn't one).</p></div>
+      <ul>
+        <li><strong>Mistake:</strong> writing the test pyramid in reverse — lots of E2E tests because they "feel"
+        more realistic, few unit tests because logic feels "too simple to test." This is the "ice cream cone"
+        anti-pattern and it is the single most common failure mode in real codebases.</li>
+        <li><strong>Mistake:</strong> treating "untested" and "untestable" as the same thing. Code that's hard to
+        test is usually a design smell (hidden dependencies, mixed I/O and logic) — the fix is often to refactor
+        for testability, not to give up or reach for a heavier test layer.</li>
+        <li><strong>Best practice:</strong> write the test strategy down (even a short paragraph in the repo) before
+        writing code for a new feature area — decide the pyramid shape for that feature deliberately, not
+        test-by-test as an afterthought.</li>
+        <li><strong>Best practice:</strong> re-balance periodically. A pyramid that was right at 10k lines of code
+        may be wrong at 200k lines — integration test counts in particular tend to need deliberate pruning as a
+        codebase grows, or CI time grows unboundedly.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>Classic pyramid (many unit, fewer integration, few E2E)</td><td>Backend-heavy service with complex internal logic and few UI surfaces</td><td>Frontend-heavy app where most risk is in component composition and user flows</td><td>Testing trophy</td></tr>
+        <tr><td>Testing trophy (integration-heavy)</td><td>React/frontend app where component behavior and wiring matter more than isolated function logic</td><td>Library code or algorithm-heavy backend logic</td><td>Classic pyramid</td></tr>
+        <tr><td>Honeycomb (integration-heaviest)</td><td>Microservices where most bugs are at service boundaries, not inside a single service</td><td>Monoliths or single-service apps with little cross-service risk</td><td>Classic pyramid with strong contract tests</td></tr>
+        <tr><td>Solitary unit tests (mock every collaborator)</td><td>Collaborator is slow, nondeterministic, or external (network, clock, random)</td><td>Collaborator is fast, in-process, and stable — mocking it hides real integration bugs</td><td>Sociable unit tests</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic">
+        <h4>Basic</h4>
+        <details class="qa"><summary>What is the test pyramid and why is it shaped the way it is?</summary><div class="answer"><p>A model with many fast, isolated unit tests at the base, fewer integration tests in the middle, and a small number of slow, realistic E2E tests at the top. The shape follows a cost/confidence tradeoff: lower layers are cheap to write, run in milliseconds, and localize failures precisely; higher layers are expensive, slow, and flaky but catch things lower layers structurally cannot (real rendering, real network, real cross-service wiring).</p></div><div class="followup">Follow-up: name one bug class that only an E2E test can catch.</div></details>
+        <details class="qa"><summary>What's the difference between a unit test and an integration test?</summary><div class="answer"><p>A unit test isolates a single piece of logic from its collaborators (especially I/O); an integration test exercises two or more real components together, typically crossing a boundary like a database, filesystem, or another internal service, to verify they work correctly as wired.</p></div><div class="followup">Follow-up: is a test that calls two pure functions together a unit test or an integration test?</div></details>
+        <details class="qa"><summary>Should you aim for 100% code coverage?</summary><div class="answer"><p>No — coverage is a floor/diagnostic, not a target. 100% line coverage can still leave untested branches, edge cases, and meaningless assertions. Chasing the number encourages low-value tests and can hide gaps in actual behavior verification.</p></div><div class="followup">Follow-up: what's the difference between line coverage and branch coverage?</div></details>
+        <details class="qa"><summary>Give an example of code that doesn't need a dedicated test.</summary><div class="answer"><p>A trivial getter/pass-through with no logic, or a thin wrapper around a well-tested library call with no added behavior. Testing it mostly verifies the language or the library, not your code, and adds maintenance cost without catching real regressions.</p></div><div class="followup">Follow-up: what would make that same getter worth testing?</div></details>
+        <details class="qa"><summary>What's an "ice cream cone" anti-pattern?</summary><div class="answer"><p>An inverted pyramid: many slow, brittle E2E/manual tests and few unit tests. It results in slow, flaky CI, poor failure localization, and expensive maintenance, because most verification happens at the most expensive layer.</p></div><div class="followup">Follow-up: how would you migrate a codebase out of this shape incrementally?</div></details>
+        <details class="qa"><summary>Why might you choose not to test a specific piece of code?</summary><div class="answer"><p>Because it's trivial, it's third-party library behavior, it's generated/config glue, or testing it would require asserting on implementation details rather than observable behavior. The decision should be explicit and documented, not a result of neglect.</p></div><div class="followup">Follow-up: what's the risk of leaving that decision undocumented?</div></details>
+        <details class="qa"><summary>What is a test double, broadly?</summary><div class="answer"><p>Any object that stands in for a real collaborator in a test — mocks, stubs, spies, and fakes are all test doubles, each with different behavior and different intent, covered in depth in the unit testing chapter.</p></div><div class="followup">Follow-up: which test double would you use to verify a function was called with specific arguments?</div></details>
+      </div>
+      <div class="qa-level medium">
+        <h4>Medium</h4>
+        <details class="qa"><summary>Explain the "testing trophy" and when you'd choose it over the classic pyramid.</summary><div class="answer"><p>The testing trophy (Kent C. Dodds) shrinks the unit layer, weights integration tests (e.g., RTL component tests exercising real component trees) the heaviest, keeps a thin E2E layer, and adds static analysis as a free base layer below. Choose it for frontend-heavy apps where most real bugs occur in component composition and wiring rather than in isolated pure functions.</p></div><div class="followup">Follow-up: why does static analysis belong "below" unit tests in cost terms?</div></details>
+        <details class="qa"><summary>What's the difference between "solitary" and "sociable" unit tests, and which should be the default?</summary><div class="answer"><p>Solitary tests mock every collaborator of the unit under test; sociable tests let the unit call real, fast, in-process collaborators and only mock slow/nondeterministic boundaries (network, DB, clock, random). Sociable should usually be the default — mocking every internal collaborator can let tests pass while the real integration between units is broken, since the mock encodes a possibly-stale assumption.</p></div><div class="followup">Follow-up: give a concrete example where solitary testing hid a real bug.</div></details>
+        <details class="qa"><summary>How do you decide the right pyramid shape for a specific team/codebase, rather than applying one universally?</summary><div class="answer"><p>Look at where the actual historical bugs and incidents have come from: isolated logic bugs favor a unit-heavy pyramid; component/UI wiring bugs favor a trophy shape; cross-service contract breaks favor a honeycomb. Also factor in CI time budget, team size, and how expensive a production bug is in that domain (e.g., payments logic justifies heavier coverage than an internal admin tool).</p></div><div class="followup">Follow-up: how would you re-evaluate this shape as the codebase grows 10x?</div></details>
+        <details class="qa"><summary>A teammate says "we should E2E test this form validation rule because it's critical." How do you respond?</summary><div class="answer"><p>Agree it's critical, disagree on the layer — push back that form validation logic is almost always better covered by a unit test on the validation function plus a component test verifying the error message renders; reserve the E2E test for confirming the whole submit flow works end to end once, not for re-verifying every validation rule at the most expensive layer.</p></div><div class="followup">Follow-up: what's the cost difference in CI time between these two approaches at 50 validation rules?</div></details>
+        <details class="qa"><summary>What is "localization" in the context of test failures, and why does it matter for test strategy?</summary><div class="answer"><p>Localization is how precisely a failing test tells you where the bug is. A unit test failure points to one function; an E2E failure might only say "checkout broke," requiring further investigation across the whole stack. Strategy should favor pushing verification to the layer with the best localization that can still catch the bug class.</p></div><div class="followup">Follow-up: how does poor localization affect mean-time-to-fix in an incident?</div></details>
+        <details class="qa"><summary>How would you convince a team that's proud of "100% coverage" that their suite might still be weak?</summary><div class="answer"><p>Show them mutation testing results or a branch-coverage report — line coverage can hit 100% while branches and edge cases (null inputs, error paths, boundary values) remain unexercised, and assertions can be trivially weak (e.g., `toBeDefined()`). Propose auditing a sample of "covered" tests for assertion strength rather than trusting the aggregate number.</p></div><div class="followup">Follow-up: what's mutation testing and how does it expose weak assertions?</div></details>
+        <details class="qa"><summary>Describe a strategy for migrating a codebase from an "ice cream cone" shape to a healthier pyramid without a big-bang rewrite.</summary><div class="answer"><p>Freeze the E2E suite size (no new E2E tests without justification), start pushing new feature coverage to lower layers by default, identify the highest-value existing E2E tests and port their assertions down to component/unit tests incrementally, and only delete the E2E test once the lower-layer equivalent is proven stable — measuring CI time and flake rate as the success metric.</p></div><div class="followup">Follow-up: how do you handle resistance from engineers who find E2E tests "more real" and trust them more?</div></details>
+      </div>
+      <div class="qa-level advanced">
+        <h4>Advanced</h4>
+        <details class="qa"><summary>How would you design a test strategy for a system where some bugs are only reproducible under real concurrent load (race conditions between services)?</summary><div class="answer"><p>Accept that unit and most integration tests structurally cannot catch true concurrency races. Add a dedicated layer: targeted concurrency/load tests that deliberately trigger the race (e.g., firing N parallel requests against a real service and asserting invariants hold), separate from the main CI gate due to cost/flakiness, run on a schedule or pre-release instead of per-PR. Pair this with runtime invariant checks/assertions in production (canary analysis) as a second line of defense, since no pre-production test suite can fully substitute for production-scale concurrency.</p></div><div class="followup">Follow-up: how do you prevent this specialized layer from becoming untrusted/ignored like a flaky E2E suite?</div></details>
+        <details class="qa"><summary>Your org wants a single coverage threshold (e.g., 80%) enforced globally across very different services (a pure algorithm library vs. a thin CRUD gateway). Critique this policy.</summary><div class="answer"><p>A single global threshold ignores that coverage-worthiness varies by code shape: an algorithm library has high logic density and should have very high coverage; a thin CRUD gateway may be mostly framework glue where high line coverage is trivially achievable but low-value. The policy either forces low-value tests on the gateway to hit the number, or lets genuinely under-tested logic in the library slide through at exactly 80%. Better: set thresholds per-module based on risk/logic density, or replace a blanket line-coverage gate with a diff-coverage gate (new/changed lines must be covered) plus periodic mutation-testing audits for critical modules.</p></div><div class="followup">Follow-up: how would you roll out per-module thresholds without a painful one-time migration?</div></details>
+        <details class="qa"><summary>How does test strategy change for a system built around event-driven/async messaging (Kafka, SQS) versus a synchronous REST API?</summary><div class="answer"><p>Synchronous REST testing can rely on request/response assertions directly. Event-driven systems need the pyramid re-interpreted: unit tests still cover handler logic in isolation; integration tests need to verify producer/consumer contracts (schema compatibility, idempotent handling of redelivery) often via contract tests against a real broker or a lightweight in-memory one; E2E-equivalent tests need to account for eventual consistency — asserting "eventually true" with bounded polling rather than immediate assertions, and explicitly testing failure modes like out-of-order delivery, duplicate delivery, and poison messages that a synchronous system wouldn't need to consider at all.</p></div><div class="followup">Follow-up: how would you test consumer backward-compatibility when a producer schema evolves?</div></details>
+        <details class="qa"><summary>How would you quantify, in a way that would convince a skeptical VP of Engineering, that investing in test strategy pays off?</summary><div class="answer"><p>Tie it to measurable incident/DORA metrics rather than coverage numbers: change failure rate, mean time to restore, and deploy frequency before/after a strategy change; CI wall-clock time and flake rate as a developer-velocity proxy; and a sampled root-cause breakdown of recent production incidents showing what fraction would have been caught by the proposed test layer. Present it as a cost model: X minutes of CI time and Y engineer-hours of test maintenance versus Z production incidents avoided and their cost.</p></div><div class="followup">Follow-up: how would you avoid this becoming a vanity metrics exercise that gets gamed?</div></details>
+        <details class="qa"><summary>When, if ever, is a strict "ice cream cone" (E2E-heavy) strategy actually the right call?</summary><div class="answer"><p>Rare but real cases: a legacy system with no tests, poor internal seams, and high risk of regression, where the fastest path to any safety net is a thin layer of E2E "characterization tests" over the whole system before attempting any refactor (a documented, temporary scaffold — the Michael Feathers "legacy code" approach) — with an explicit plan to push coverage down into unit/integration tests as the code is incrementally made testable. Treating it as a permanent strategy, rather than a bridge, is the actual anti-pattern.</p></div><div class="followup">Follow-up: how do you keep this "temporary" phase from becoming permanent in practice?</div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment">
+        <span class="level-tag">Beginner (30-60 min)</span>
+        <h4>Classify an existing test suite</h4>
+        <p>Pick any small open-source repo (or one of your own side projects) with a test folder. For each test
+        file, classify every test as unit, integration, or E2E based on this chapter's definitions.</p>
+        <ul>
+          <li>Produce a simple table: file name, test name, classification, one-sentence justification.</li>
+          <li>Flag any test that asserts on implementation details rather than observable behavior.</li>
+        </ul>
+        <p><strong>Acceptance criteria:</strong> every test in the suite is classified with a justification; at
+        least one implementation-detail-testing example is found or you explicitly note there are none.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>Look for real I/O (network calls, filesystem, database clients) as the signal for integration/E2E; a test that mocks everything and asserts on a pure return value is a unit test even if the file is named "integration.test.ts".</p></div></details>
+        <p><strong>Bonus:</strong> estimate the pyramid shape (count per layer) and say whether it matches the
+        codebase's risk profile.</p>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Intermediate (2-4 hrs)</span>
+        <h4>Write a test strategy document for a feature</h4>
+        <p>Pick a nontrivial feature (real or hypothetical) — e.g., "a promo code system that applies discounts
+        with stacking rules and expiry dates." Write a one-page test strategy doc before writing any test code.</p>
+        <ul>
+          <li>Define the pyramid shape you'll use and why.</li>
+          <li>List the specific business logic that gets unit tests, with the edge cases you'll cover.</li>
+          <li>List what integration points need integration tests.</li>
+          <li>List the 1-2 E2E journeys worth covering, and explicitly list 3+ things you will NOT test, with reasons.</li>
+        </ul>
+        <p><strong>Acceptance criteria:</strong> the doc would let a teammate implement the tests without
+        re-deriving the strategy; every "won't test" item has a real reason, not "ran out of time."</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>Think about failure modes specific to promo codes: stacking order, expiry boundary (exactly at expiry timestamp), currency rounding, invalid/unknown codes, codes that become invalid mid-checkout.</p></div></details>
+        <p><strong>Bonus:</strong> implement the unit-test layer from your own strategy doc.</p>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Advanced (1-2 days)</span>
+        <h4>Audit and re-balance a real, imbalanced test suite</h4>
+        <p>Take a codebase (yours or a well-known OSS project) with an "ice cream cone" shape — heavy E2E/manual
+        testing, thin unit coverage — or simulate one by writing a small app with only E2E tests (Playwright)
+        covering business logic that should really be unit-tested.</p>
+        <ul>
+          <li>Measure baseline: CI time, test count per layer, and (if possible) flake rate over several runs.</li>
+          <li>Pick 3 E2E tests whose core assertions are really testing business logic, not wiring/UX.</li>
+          <li>Port their logic assertions down to unit tests, and reduce the E2E test to just verifying the journey completes.</li>
+          <li>Re-measure CI time and flake rate.</li>
+        </ul>
+        <p><strong>Acceptance criteria:</strong> measurable CI time reduction; the ported unit tests cover the
+        same edge cases the E2E tests implicitly covered; no loss of actual bug-catching ability (explain why).</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>This assignment is intentionally open — focus on the before/after measurement and the written justification, since that's what an interview or a real PR review would scrutinize, not the exact app chosen.</p></div></details>
+        <p><strong>Bonus:</strong> write the ADR you'd attach to the PR explaining the re-balance to skeptical teammates.</p>
+      </div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet"><ul>
+        <li>Pyramid shape = cost/confidence tradeoff: cheap+precise at the bottom, expensive+realistic at the top.</li>
+        <li>Testing trophy (frontend-heavy): static analysis → unit → integration (heaviest) → E2E (thin).</li>
+        <li>Honeycomb (microservices): integration/contract tests carry the most weight.</li>
+        <li>Sociable unit tests (real fast collaborators) > solitary (everything mocked) as the default.</li>
+        <li>Test business logic with branches, public contracts, historically fragile code, tricky edge cases.</li>
+        <li>Don't test trivial pass-throughs, library internals, generated code, or implementation details.</li>
+        <li>100% line coverage ≠ well tested — check branch coverage and assertion quality, not just the percentage.</li>
+        <li>"Ice cream cone" (E2E-heavy, unit-light) is the most common real-world anti-pattern — watch for it.</li>
+        <li>Document what you chose NOT to test and why — it's a decision, not a gap.</li>
+        <li>Re-balance the pyramid as the codebase grows; a shape that was right at 10k LOC may be wrong at 200k.</li>
+      </ul></div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://martinfowler.com/articles/practical-test-pyramid.html">Martin Fowler — The Practical Test Pyramid</a></li>
+        <li><a href="https://kentcdodds.com/blog/write-tests">Kent C. Dodds — Write Tests. Not Too Many. Mostly Integration.</a></li>
+        <li><a href="https://engineering.atspotify.com/2018/01/testing-of-microservices/">Spotify Engineering — Testing of Microservices (Honeycomb)</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="index.html"><span class="dir">← Previous</span>Topic Overview</a>
+        <a class="next" href="02-unit-testing.html"><span class="dir">Next →</span>Unit Testing (Jest/Vitest)</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · Testing</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-typescript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-jsx.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "05-testing", chapterKey: "01-testing-strategy" });</script>
+</body>
+</html>

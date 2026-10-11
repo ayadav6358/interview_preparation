@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Building & Training a Modern LLM from Scratch (RMSNorm, RoPE, GQA, SwiGLU)</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <input class="searchbox" placeholder="Search topics..." />
+    <a href="../index.html">← Home</a>
+    <h3>100x_AI</h3>
+    <a href="ai-ml-orientation.html">AI & ML Course Orientation</a>
+    <a href="fasttracking-ai-what-is-ai-to-how-chatgpt-works.html">Fast-Tracking AI: What is AI → How ChatGPT Works</a>
+    <a href="neural-networks-from-scratch.html">Neural Networks from Scratch</a>
+    <a href="transformers-part-1-tokenization-embeddings-positional-encoding.html">Transformers Part 1: Text → Attention</a>
+    <a href="tensors-and-pytorch.html">Tensors, Matrices & PyTorch</a>
+    <a href="transformers-part-2-self-attention-qkv-multihead.html">Transformers Part 2: Self-Attention, Q/K/V & Multi-Head</a>
+    <a href="what-changed-since-2017-modern-transformer-upgrades.html">What Changed Since 2017: The Four Upgrades</a>
+    <a href="building-training-modern-llm-from-scratch.html">Building & Training a Modern LLM from Scratch</a>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumbs"><a href="../index.html">Home</a> / 100x_AI</div>
+      <button class="theme-toggle" onclick="toggleTheme()">🌓 Theme</button>
+    </div>
+    <h1>Building & Training a Modern LLM from Scratch — RMSNorm · RoPE · GQA · SwiGLU</h1>
+    <span class="tag good">Stable</span><span class="tag">Last verified: 2026-10-07</span>
+    <p class="callout">Source: Week 7 — AI &amp; ML: Training Your First Model, Class 5 (Code Walkthrough). This page re-explains that walkthrough end-to-end: a character-level transformer language model trained on Shakespeare text, built with the exact same architectural components (RMSNorm, RoPE, GQA, SwiGLU, pre-norm residual blocks) used in real production LLMs like LLaMA, Mistral, and Gemma — just smaller.</p>
+
+    <div class="toc">
+      <b>On this page</b>
+      <a href="#what">1. What is this?</a>
+      <a href="#whyexist">2. Why does it exist?</a>
+      <a href="#whyimportant">3. Why is it important?</a>
+      <a href="#whereused">4. Where is it used?</a>
+      <a href="#prereq">5. Prerequisites</a>
+      <a href="#core">6. Core concepts</a>
+      <a href="#terms">7. Terminology</a>
+      <a href="#arch">8. Architecture</a>
+      <a href="#internal">9. How it works internally</a>
+      <a href="#steps">10. Step-by-step explanation</a>
+      <a href="#simple">11. Simple example</a>
+      <a href="#real">12. Real-world example</a>
+      <a href="#code">13. Code example</a>
+      <a href="#advanced">14. Advanced example</a>
+      <a href="#mistakes">15. Common mistakes</a>
+      <a href="#best">16. Best practices</a>
+      <a href="#production">17. Production considerations</a>
+      <a href="#security">18. Security considerations</a>
+      <a href="#performance">19. Performance considerations</a>
+      <a href="#cost">20. Cost considerations</a>
+      <a href="#debug">21. Debugging/troubleshooting</a>
+      <a href="#related">22. Related concepts</a>
+      <a href="#comparison">23. Comparison with alternatives</a>
+      <a href="#exercise">24. Mini practical exercise</a>
+      <a href="#project">25. Practical project</a>
+      <a href="#projectarch">26. Project architecture</a>
+      <a href="#interview-b">27. Interview Questions — Beginner</a>
+      <a href="#interview-i">28. Interview Questions — Intermediate</a>
+      <a href="#interview-a">29. Interview Questions — Advanced</a>
+      <a href="#interview-s">30. Interview Questions — Senior/Architect</a>
+      <a href="#interview-sc">31. Scenario-Based Questions</a>
+      <a href="#revision">32. Quick revision notes</a>
+      <a href="#cheat">33. Cheat sheet</a>
+      <a href="#further">34. Further topics to learn</a>
+    </div>
+
+    <h2 id="what">1. What is this?</h2>
+    <p>This is a complete, from-scratch implementation of a small, modern decoder-only transformer language model ("MiniLLM") trained character-by-character on Shakespeare's text. It is not a simplified toy transformer — it uses the <b>exact four architectural upgrades</b> that separate "GPT-2-style" transformers from the LLMs used in production today:</p>
+    <ul>
+      <li><b>RMSNorm</b> instead of LayerNorm (normalization)</li>
+      <li><b>RoPE</b> (Rotary Positional Embeddings) instead of absolute/sinusoidal position encoding</li>
+      <li><b>GQA</b> (Grouped Query Attention) instead of standard Multi-Head Attention</li>
+      <li><b>SwiGLU</b> instead of a plain ReLU feed-forward network</li>
+    </ul>
+    <p>The walkthrough covers tokenization, batching, each architectural component, assembling them into transformer blocks, the training loop, evaluation, and autoregressive text generation — i.e., the entire life cycle of training your first LLM.</p>
+
+    <h2 id="whyexist">2. Why does it exist?</h2>
+    <p>Understanding an LLM only through its API (prompt in → text out) hides exactly how next-token prediction, attention, and position-awareness are implemented. This class exists to demystify that black box by building a working, trainable language model line-by-line, using a small enough dataset (Shakespeare, 65 unique characters) and model (4 layers, 256 dimensions) that it trains in ~15–20 minutes on a single T4 GPU, while still using real, modern production components rather than outdated simplifications.</p>
+
+    <h2 id="whyimportant">3. Why is it important?</h2>
+    <p>Every major open-weight LLM released since ~2023 (LLaMA, Mistral, Gemma, Qwen, Phi) uses this exact combination — RMSNorm, RoPE, GQA, SwiGLU, pre-norm residual blocks. If you understand this walkthrough, you understand the architectural backbone of essentially every modern open LLM, not just a historical/pedagogical version of a transformer. This is heavily tested in ML/AI engineering interviews, especially for roles touching model training, fine-tuning, or inference optimization.</p>
+
+    <h2 id="whereused">4. Where is it used?</h2>
+    <ul>
+      <li>Pretraining and fine-tuning of modern open-source LLMs (LLaMA family, Mistral, Gemma, Qwen).</li>
+      <li>Any custom/from-scratch LLM training pipeline (startups training domain-specific small LLMs).</li>
+      <li>Efficient on-device/edge LLMs, where GQA's smaller KV cache and RMSNorm's cheaper compute matter most.</li>
+      <li>Research and educational contexts for understanding transformer internals before touching frameworks like Hugging Face Transformers or nanoGPT/litGPT.</li>
+    </ul>
+
+    <h2 id="prereq">5. Prerequisites</h2>
+    <p><a href="../04-Transformers/">Transformers fundamentals</a> (attention, embeddings, feed-forward networks), basic PyTorch (<code>nn.Module</code>, tensors, autograd), the standard 6-step training loop (forward → zero_grad → backward → clip → step), and basic linear algebra (dot products, matrix multiplication, rotation matrices).</p>
+
+    <h2 id="core">6. Core concepts</h2>
+    <table>
+      <tr><th>Component</th><th>Replaces</th><th>Core idea</th></tr>
+      <tr><td>Character tokenizer</td><td>Subword tokenizer (BPE)</td><td>Every unique character is its own token (65 tokens for Shakespeare's text) — simplest possible tokenization, good for learning.</td></tr>
+      <tr><td>RMSNorm</td><td>LayerNorm</td><td>Normalizes by root-mean-square only (no mean-subtraction, no learned bias) — fewer ops, fewer params, same effectiveness.</td></tr>
+      <tr><td>RoPE</td><td>Sinusoidal / learned absolute position embeddings</td><td>Rotates Query and Key vectors by an angle proportional to position, so attention naturally captures <i>relative</i> distance between tokens.</td></tr>
+      <tr><td>GQA</td><td>Multi-Head Attention (MHA)</td><td>Multiple Query heads share a smaller number of Key/Value heads, shrinking the KV cache (here 4×) with minimal quality loss.</td></tr>
+      <tr><td>SwiGLU</td><td>ReLU/GELU feed-forward network</td><td>A gated, dual-path feed-forward network — one path learns "how much" of each dimension to pass through.</td></tr>
+      <tr><td>Pre-norm residual block</td><td>Post-norm (original Transformer paper)</td><td>Normalize before each sub-layer, then add the sub-layer's output back to the input — far more stable to train at depth.</td></tr>
+      <tr><td>Weight tying</td><td>Separate embedding + output projection matrices</td><td>The token embedding matrix and the final output (LM head) matrix are the literal same tensor, halving that parameter count.</td></tr>
+    </table>
+
+    <h2 id="terms">7. Terminology</h2>
+    <table>
+      <tr><th>Term</th><th>Meaning</th></tr>
+      <tr><td>Vocabulary / vocab_size</td><td>The number of distinct tokens the model can emit/consume (65 characters here).</td></tr>
+      <tr><td>Context length / seq_len</td><td>How many previous tokens the model can "see" at once (256 here).</td></tr>
+      <tr><td>d_model</td><td>The size of the embedding vector representing each token (256 here).</td></tr>
+      <tr><td>Causal mask</td><td>A triangular mask that prevents a token from attending to future tokens — required for autoregressive (next-token) generation.</td></tr>
+      <tr><td>KV cache</td><td>Stored Key/Value tensors from previous tokens, reused during generation so they aren't recomputed every step.</td></tr>
+      <tr><td>Logits</td><td>Raw, unnormalized scores the model outputs for each possible next token, before softmax.</td></tr>
+      <tr><td>Temperature</td><td>A scalar dividing logits before softmax — lower = more deterministic output, higher = more random/creative.</td></tr>
+      <tr><td>Autoregressive generation</td><td>Generating text one token at a time, feeding each new token back in as input for the next prediction.</td></tr>
+      <tr><td>Residual connection</td><td><code>x + sublayer(x)</code> — lets gradients flow directly through addition, avoiding vanishing gradients in deep networks.</td></tr>
+      <tr><td>Gradient clipping</td><td>Capping the norm of gradients before the optimizer step, to prevent exploding gradients.</td></tr>
+    </table>
+
+    <h2 id="arch">8. Architecture</h2>
+    <pre><code>"ROMEO:" → encode → [44, 41, 37, 29, 41, 26]
+            ↓
+   Token Embedding (65 → 256)
+            ↓
+   ┌─────────────────────────────────────┐
+   │ Transformer Block ×4                 │
+   │   RMSNorm → GQA (8Q, 2KV + RoPE)     │
+   │     + residual                       │
+   │   RMSNorm → SwiGLU (256→680→256)     │
+   │     + residual                       │
+   └─────────────────────────────────────┘
+            ↓
+      Final RMSNorm
+            ↓
+   LM Head (256 → 65)  [weight-tied with embedding]
+            ↓
+   logits → softmax → sample → next char</code></pre>
+    <p>This is not a toy diagram — production LLMs use these exact same components, just with far larger dimensions, many more layers, and subword tokenization instead of character tokenization.</p>
+
+    <h2 id="internal">9. How it works internally</h2>
+    <ol>
+      <li><b>Tokenize:</b> text → list of integer character IDs via a simple lookup dictionary.</li>
+      <li><b>Batch:</b> randomly sample fixed-length windows from the training text; the target sequence is the input shifted right by one character, so a single sequence of length N yields N training examples (predict the next character at every position simultaneously).</li>
+      <li><b>Embed:</b> each token ID is looked up in a learned embedding table, producing a 256-dim vector per token.</li>
+      <li><b>Transformer blocks (×4):</b> each block first normalizes with RMSNorm, runs Grouped Query Attention (with RoPE applied inside to inject position information), adds the result back to the input (residual), then normalizes again and runs a SwiGLU feed-forward network, again with a residual add.</li>
+      <li><b>Final norm + LM head:</b> one last RMSNorm, then a linear projection back to vocabulary size (65) to produce logits — un-normalized scores for every possible next character.</li>
+      <li><b>Loss:</b> cross-entropy between predicted logits and the actual next character, averaged across the whole batch and sequence.</li>
+      <li><b>Backprop + update:</b> standard gradient descent (AdamW) adjusts every weight to reduce that loss.</li>
+      <li><b>Generation:</b> repeatedly feed the current sequence in, take the logits for only the last position, sample a next character (via temperature + softmax + multinomial sampling), append it, and repeat.</li>
+    </ol>
+
+    <h2 id="steps">10. Step-by-step explanation</h2>
+    <ol>
+      <li><b>Section 0 — Setup & Data:</b> build a character tokenizer (<code>encode</code>/<code>decode</code>), and a <code>get_batch()</code> function that produces random <code>(x, y)</code> training pairs, where <code>y</code> is <code>x</code> shifted by one character.</li>
+      <li><b>Section 1 — RMSNorm:</b> replace LayerNorm with a simpler, cheaper normalization that only divides by root-mean-square and scales by a learned weight vector — plus dropout for regularization.</li>
+      <li><b>Section 2 — RoPE:</b> precompute rotation angles per dimension-pair and position, then rotate Query and Key vectors so their dot product encodes relative, not absolute, position.</li>
+      <li><b>Section 3 — GQA:</b> project input into 8 Query heads but only 2 Key/Value heads, expand (repeat) the KV heads to match Q head count, apply RoPE to Q and K, compute causally-masked scaled dot-product attention, then merge heads back and project out.</li>
+      <li><b>Section 4 — SwiGLU:</b> a gated feed-forward network with two parallel linear paths (gate with SiLU activation, and a raw "up" path) multiplied together before a final down-projection.</li>
+      <li><b>Section 5 — Assembly:</b> combine RMSNorm + GQA + RMSNorm + SwiGLU into one <code>TransformerBlock</code> using the pre-norm residual pattern, then stack 4 of these blocks plus an embedding layer and weight-tied output head into the full <code>MiniLLM</code> model.</li>
+      <li><b>Section 6 — Training:</b> run the standard 6-step training loop (get batch → forward → zero_grad → backward → clip gradients → optimizer step) for 3000 steps, periodically evaluating train/val loss with dropout disabled.</li>
+      <li><b>Section 7 — Generation:</b> implement autoregressive sampling with temperature control, feeding the model's own previous output back in as the next input.</li>
+    </ol>
+
+    <h2 id="simple">11. Simple example</h2>
+    <p>Character shift-by-one training example, from the text <code>"To be o"</code>:</p>
+    <table>
+      <tr><th>Position</th><th>Given (context so far)</th><th>Predict</th></tr>
+      <tr><td>0</td><td><code>T</code></td><td><code>o</code></td></tr>
+      <tr><td>1</td><td><code>To</code></td><td>(space)</td></tr>
+      <tr><td>2</td><td><code>To␣</code></td><td><code>b</code></td></tr>
+      <tr><td>3</td><td><code>To␣b</code></td><td><code>e</code></td></tr>
+      <tr><td>4</td><td><code>To␣be</code></td><td><code>,</code></td></tr>
+    </table>
+    <p>One training sequence of length N therefore produces N separate next-character prediction examples — this is why even a small Shakespeare corpus provides enormous numbers of training signals.</p>
+
+    <h2 id="real">12. Real-world example</h2>
+    <p>LLaMA 2/3, Mistral 7B, and Gemma all use this identical stack: RMSNorm for normalization, RoPE for positions, GQA (or its extreme variant, Multi-Query Attention) to shrink the KV cache for faster inference, and SwiGLU feed-forward blocks. The only real differences from this Shakespeare walkthrough are scale (billions of parameters vs. ~a few million), a subword tokenizer (e.g., BPE/SentencePiece) instead of per-character tokens, many more layers/heads, and training on trillions of tokens of diverse text instead of one Shakespeare corpus.</p>
+
+    <h2 id="code">13. Code example</h2>
+    <pre><code class="language-python">class RMSNorm(nn.Module):
+    def __init__(self, dim, eps=1e-6):
+        super().__init__()
+        self.eps = eps
+        self.weight = nn.Parameter(torch.ones(dim))
+
+    def forward(self, x):
+        rms = torch.sqrt(x.pow(2).mean(dim=-1, keepdim=True) + self.eps)
+        return (x / rms) * self.weight
+
+
+class SwiGLU(nn.Module):
+    def __init__(self, d_model, hidden_dim):
+        super().__init__()
+        self.w_gate = nn.Linear(d_model, hidden_dim)
+        self.w_up   = nn.Linear(d_model, hidden_dim)
+        self.w_down = nn.Linear(hidden_dim, d_model)
+
+    def forward(self, x):
+        gate = F.silu(self.w_gate(x))   # gated path
+        up = self.w_up(x)               # raw value path
+        return self.w_down(gate * up)
+
+
+class TransformerBlock(nn.Module):
+    def __init__(self, d_model, n_heads, n_kv_heads, ffn_hidden_dim):
+        super().__init__()
+        self.attn_norm = RMSNorm(d_model)
+        self.attention = GroupedQueryAttention(d_model, n_heads, n_kv_heads)
+        self.ffn_norm = RMSNorm(d_model)
+        self.ffn = SwiGLU(d_model, ffn_hidden_dim)
+
+    def forward(self, x, rope_cos, rope_sin):
+        x = x + self.attention(self.attn_norm(x), rope_cos, rope_sin)
+        x = x + self.ffn(self.ffn_norm(x))
+        return x
+</code></pre>
+
+    <h2 id="advanced">14. Advanced example</h2>
+    <p>Grouped Query Attention — the piece that actually shrinks the KV cache. 8 Query heads share only 2 Key/Value heads (a 4:1 ratio), and <code>repeat_kv()</code> expands the 2 KV heads back to 8 (memory-efficient, no data copy) before the attention computation:</p>
+    <pre><code class="language-python">def repeat_kv(x, n_rep):
+    if n_rep == 1:
+        return x
+    b, n_kv, seq, hd = x.shape
+    return (x[:, :, None, :, :]
+            .expand(b, n_kv, n_rep, seq, hd)
+            .reshape(b, n_kv * n_rep, seq, hd))
+
+def apply_rope(x, cos, sin):
+    seq_len = x.shape[2]
+    cos = cos[:seq_len].unsqueeze(0).unsqueeze(0)
+    sin = sin[:seq_len].unsqueeze(0).unsqueeze(0)
+    x1, x2 = x[..., ::2], x[..., 1::2]       # even / odd dims
+    out1 = x1 * cos - x2 * sin
+    out2 = x1 * sin + x2 * cos
+    return torch.stack([out1, out2], dim=-1).flatten(-2)
+
+# forward pass (inside GroupedQueryAttention):
+q = self.q_proj(x).view(b, seq, 8, 32).transpose(1, 2)   # [b,8,seq,32]
+k = self.k_proj(x).view(b, seq, 2, 32).transpose(1, 2)   # [b,2,seq,32]
+v = self.v_proj(x).view(b, seq, 2, 32).transpose(1, 2)   # [b,2,seq,32]
+
+q = apply_rope(q, rope_cos, rope_sin)
+k = apply_rope(k, rope_cos, rope_sin)
+k = repeat_kv(k, n_rep=4)     # [b,2,seq,32] -> [b,8,seq,32]
+v = repeat_kv(v, n_rep=4)
+
+scale = 1.0 / math.sqrt(32)
+scores = (q @ k.transpose(-2, -1)) * scale
+mask = torch.triu(torch.ones(seq, seq), diagonal=1).bool()
+scores = scores.masked_fill(mask, float("-inf"))        # causal mask
+weights = F.softmax(scores, dim=-1)
+out = weights @ v
+out = out.transpose(1, 2).contiguous().view(b, seq, -1)
+return self.o_proj(out)
+</code></pre>
+
+    <h2 id="mistakes">15. Common mistakes</h2>
+    <ul>
+      <li>Forgetting <code>.contiguous()</code> before <code>.view()</code> after a <code>.transpose()</code> — PyTorch will raise a runtime error because the tensor's memory layout is no longer contiguous.</li>
+      <li>Applying RoPE to the Value vectors as well as Query/Key — RoPE must only be applied to Q and K, never V.</li>
+      <li>Forgetting to call <code>model.eval()</code> (disabling dropout) during evaluation/generation, which produces noisy, non-deterministic loss estimates and generation quality.</li>
+      <li>Mismatching <code>n_heads</code> and <code>n_kv_heads</code> such that <code>n_heads % n_kv_heads != 0</code>, which breaks the <code>repeat_kv</code> expansion.</li>
+      <li>Not scaling attention scores by <code>1/√head_dim</code>, causing softmax saturation and vanishing gradients.</li>
+      <li>Skipping gradient clipping — transformer training is prone to occasional exploding gradients, especially early in training or with higher learning rates.</li>
+      <li>Not weight-tying the embedding and output head when parameter count matters — it's a free ~17% parameter reduction in this toy model and much more at scale.</li>
+    </ul>
+
+    <h2 id="best">16. Best practices</h2>
+    <ul>
+      <li>Always verify the model is "wired correctly" by checking the initial (untrained) loss roughly equals <code>ln(vocab_size)</code> — here <code>ln(65) ≈ 4.17</code>, matching random guessing.</li>
+      <li>Use pre-norm (normalize before each sub-layer) rather than post-norm — far more stable for deep transformer stacks.</li>
+      <li>Keep RoPE's rotation frequencies precomputed once and reused every forward pass rather than recomputed per call.</li>
+      <li>Always apply the causal mask during training, even though the model sees the whole sequence at once — it's what makes the model autoregressive-valid at inference time.</li>
+      <li>Monitor train vs. validation loss gap during training to catch overfitting early.</li>
+      <li>Use dropout during training but always disable it (<code>model.eval()</code>) for evaluation and generation.</li>
+    </ul>
+
+    <h2 id="production">17. Production considerations</h2>
+    <p>At production scale, the same architecture is combined with mixed-precision training (bf16/fp16), distributed data/model parallelism, learning-rate warmup + cosine decay schedules, much larger and more diverse training corpora, and a proper subword tokenizer. GQA specifically exists as a production-driven optimization — it directly reduces the KV cache size that must be stored in GPU memory during serving, which is often the real bottleneck for serving long-context models to many concurrent users.</p>
+
+    <h2 id="security">18. Security considerations</h2>
+    <p>A model trained from scratch on your own data avoids third-party data/model supply-chain risk, but introduces training-data provenance and data-leakage concerns of your own — if any sensitive data is in the training corpus, the model can memorize and regurgitate it (verbatim completions of memorized sequences are a known risk, especially at small dataset sizes / many training epochs). Always audit training data for secrets/PII before training.</p>
+
+    <h2 id="performance">19. Performance considerations</h2>
+    <ul>
+      <li>GQA directly reduces the KV cache from 8 heads worth of K/V to 2 heads worth — a 4× memory/bandwidth reduction here, which speeds up inference significantly, especially for long contexts.</li>
+      <li>RMSNorm is cheaper than LayerNorm (fewer ops — no mean-subtraction, no bias term), a small but real per-layer speedup that compounds across many layers and training steps.</li>
+      <li>Gradient clipping prevents wasted training steps caused by exploding gradients derailing optimization.</li>
+      <li><code>@torch.no_grad()</code> during evaluation/generation avoids building the autograd graph, significantly reducing memory and compute during inference.</li>
+    </ul>
+
+    <h2 id="cost">20. Cost considerations</h2>
+    <p>This specific model (4 layers, 256-dim, 3000 training steps) trains in ~15–20 minutes on a single T4 GPU — effectively free on most cloud free tiers or a local GPU. The cost lessons generalize directly to larger training runs: batch size and context length determine GPU memory usage, GQA's smaller KV cache reduces serving cost per request at scale, and weight tying reduces total parameter count (and thus storage/serving cost) for free.</p>
+
+    <h2 id="debug">21. Debugging/troubleshooting</h2>
+    <ul>
+      <li><b>Loss stuck near <code>ln(vocab_size)</code> and not decreasing:</b> check the learning rate isn't too low, verify gradients are actually flowing (no accidental <code>torch.no_grad()</code> around the training forward pass), and confirm the optimizer is actually stepping on the model's parameters.</li>
+      <li><b>Loss becomes NaN:</b> almost always exploding gradients — confirm gradient clipping is active and consider lowering the learning rate.</li>
+      <li><b>Generated text is complete gibberish after training:</b> verify <code>model.eval()</code> is called before generation and that the tokenizer's <code>encode</code>/<code>decode</code> round-trip correctly matches training-time vocabulary.</li>
+      <li><b>Shape mismatch errors in attention:</b> almost always a GQA head-count mismatch — confirm <code>n_heads % n_kv_heads == 0</code> and that <code>repeat_kv</code>'s <code>n_rep</code> equals <code>n_heads / n_kv_heads</code>.</li>
+      <li><b>Train loss keeps falling but val loss rises:</b> classic overfitting — reduce model size, increase dropout, or add more/more-diverse training data.</li>
+    </ul>
+
+    <h2 id="related">22. Related concepts</h2>
+    <p><a href="../04-Transformers/">Transformers Fundamentals</a> · <a href="../05-LLM-Fundamentals/what-is-llm.html">What is an LLM</a> · <a href="../05-LLM-Fundamentals/tokens-and-context-window.html">Tokens & Context Window</a> · <a href="../05-LLM-Fundamentals/sampling-and-hallucination.html">Sampling & Hallucination</a> · <a href="../28-LLM-Inference/">LLM Inference</a> · <a href="../29-Fine-Tuning/">Fine-Tuning</a></p>
+
+    <h2 id="comparison">23. Comparison with alternatives</h2>
+    <table>
+      <tr><th>Component</th><th>Older approach</th><th>Modern approach (this walkthrough)</th><th>Why modern wins</th></tr>
+      <tr><td>Normalization</td><td>LayerNorm (subtract mean, divide by std, scale + shift)</td><td>RMSNorm (divide by RMS, scale only)</td><td>Fewer ops and parameters, equal or better training stability/quality.</td></tr>
+      <tr><td>Position encoding</td><td>Sinusoidal/absolute embeddings (added to token embedding)</td><td>RoPE (rotates Q/K vectors)</td><td>Captures relative position naturally; generalizes better to longer sequences than trained on.</td></tr>
+      <tr><td>Attention</td><td>Multi-Head Attention (every Q head has its own K/V head)</td><td>Grouped Query Attention (Q heads share fewer K/V heads)</td><td>Much smaller KV cache → faster, cheaper inference with minimal quality loss.</td></tr>
+      <tr><td>Feed-forward</td><td>Single-path expand → ReLU/GELU → contract</td><td>SwiGLU (gated dual-path)</td><td>The gate lets the network learn which dimensions matter, improving quality at similar parameter cost.</td></tr>
+      <tr><td>Tokenization</td><td>Character-level (this toy example)</td><td>Subword (BPE/SentencePiece) in real LLMs</td><td>Character-level is simple for learning but wasteful/slow for real-world vocabularies — real models use subwords.</td></tr>
+    </table>
+
+    <h2 id="exercise">24. Mini practical exercise</h2>
+    <p>Modify <code>n_kv_heads</code> from 2 to 1 (full Multi-Query Attention) and re-train the same model for the same number of steps. Compare final train/val loss and generation quality against the GQA (2 KV heads) version — this demonstrates the quality/efficiency trade-off GQA sits between standard MHA and extreme MQA.</p>
+
+    <h2 id="project">25. Practical project</h2>
+    <p><b>Train Your Own Mini Character-Level LLM:</b> swap the Shakespeare corpus for a different plain-text dataset (song lyrics, a book from Project Gutenberg, your own notes), keep the same architecture (RMSNorm + RoPE + GQA + SwiGLU, 4 layers), train for 3000 steps, then generate text from various prompts at different temperatures and compare qualitative output.</p>
+
+    <h2 id="projectarch">26. Project architecture</h2>
+    <pre><code>raw text file
+   → character tokenizer (encode/decode, vocab_size = N unique chars)
+   → get_batch() samples random (x, y) windows, y = x shifted by 1
+   → MiniLLM (embedding → 4× TransformerBlock[RMSNorm+GQA+RoPE, RMSNorm+SwiGLU] → norm → tied LM head)
+   → training loop (AdamW, 3000 steps, grad clipping, periodic eval)
+   → generate() — autoregressive sampling with temperature
+eval: track train/val loss curve; sample generations every N steps to monitor qualitative improvement</code></pre>
+
+    <h2 id="interview-b">27. Interview Questions — Beginner</h2>
+    <div class="qa"><b>Q1.</b> What does RMSNorm do differently from LayerNorm?<br><b>A.</b> RMSNorm only divides by the root-mean-square of the input and scales by a learned weight — it skips mean-subtraction and the learned bias/shift that LayerNorm uses, making it cheaper while performing just as well.</div>
+    <div class="qa"><b>Q2.</b> What problem does RoPE solve?<br><b>A.</b> It injects positional information into attention by rotating Query and Key vectors by an angle based on position, so the attention dot product naturally reflects the relative distance between tokens rather than their absolute positions.</div>
+    <div class="qa"><b>Q3.</b> What is Grouped Query Attention (GQA)?<br><b>A.</b> An attention variant where multiple Query heads share a smaller number of Key/Value heads (e.g., 8 Q heads sharing 2 KV heads), shrinking the KV cache and speeding up inference.</div>
+    <div class="qa"><b>Q4.</b> What does the causal mask do?<br><b>A.</b> It prevents a token's attention from looking at future tokens (sets their scores to <code>-inf</code> before softmax), which is required for autoregressive, next-token prediction to be valid.</div>
+    <div class="qa"><b>Q5.</b> Why is the target sequence just the input shifted by one position?<br><b>A.</b> Because the training objective is next-character/token prediction — at every position, the model should predict whatever character comes immediately after.</div>
+    <div class="qa"><b>Q6.</b> What does the temperature parameter control during generation?<br><b>A.</b> It scales the logits before softmax — lower temperature makes the output more deterministic/conservative, higher temperature makes it more random/creative.</div>
+    <div class="qa"><b>Q7.</b> Why do we call <code>model.eval()</code> before generating text?<br><b>A.</b> To disable dropout, so all neurons/values are active — training-time stochastic regularization would otherwise make generation noisier and worse.</div>
+    <div class="qa"><b>Q8.</b> What is weight tying?<br><b>A.</b> Sharing the same weight matrix between the token embedding layer and the final output (LM head) projection, reducing total parameter count.</div>
+    <div class="qa"><b>Q9.</b> Why is the initial loss expected to be around <code>ln(vocab_size)</code>?<br><b>A.</b> An untrained model effectively guesses randomly among all possible tokens, and the cross-entropy loss of uniform random guessing over V classes is <code>ln(V)</code> — seeing this value confirms the model is wired up correctly before training.</div>
+    <div class="qa"><b>Q10.</b> What does SwiGLU's "gate" path do?<br><b>A.</b> It learns, per dimension, how much of the "up" (value) path should pass through, via an element-wise multiplication after a SiLU activation — this lets the network suppress irrelevant dimensions dynamically.</div>
+
+    <h2 id="interview-i">28. Interview Questions — Intermediate</h2>
+    <div class="qa"><b>Q1.</b> Why does RoPE only need to be applied to Query and Key vectors, not Value vectors?<br><b>A.</b> Position information needs to influence how much attention one token pays to another (which depends on the Q·K dot product), but the Value vectors just carry the content being aggregated — rotating them would scramble the content itself without providing any benefit, since the weighted sum over V doesn't need positional encoding.</div>
+    <div class="qa"><b>Q2.</b> Why does GQA's <code>repeat_kv()</code> use <code>.expand()</code> instead of <code>.repeat()</code>?<br><b>A.</b> <code>.expand()</code> creates a view with stride tricks (no actual memory copy) while <code>.repeat()</code> would physically duplicate the underlying data — expand is far more memory-efficient when you just need the broadcasted shape for a matmul.</div>
+    <div class="qa"><b>Q3.</b> Why is pre-norm (normalize before sub-layer) preferred over post-norm (normalize after) in deep transformer stacks?<br><b>A.</b> Pre-norm keeps the residual stream (the running sum of <code>x</code> across layers) unnormalized and directly connected end-to-end, giving gradients a clean, un-obstructed path back through the network — this makes very deep stacks (dozens to hundreds of layers) much easier to train without careful learning-rate warmup tuning, which post-norm often requires.</div>
+    <div class="qa"><b>Q4.</b> How does the choice of <code>n_kv_heads</code> trade off quality against inference efficiency?<br><b>A.</b> Fewer KV heads mean a smaller KV cache and faster/cheaper inference, but force more Query heads to share the same Key/Value representations, which can reduce representational flexibility; <code>n_kv_heads = n_heads</code> is standard MHA (max quality, max cost), <code>n_kv_heads = 1</code> is Multi-Query Attention (min cost, more quality risk), and GQA sits as a tunable middle ground.</div>
+    <div class="qa"><b>Q5.</b> Why does gradient clipping matter specifically for transformer training?<br><b>A.</b> Transformers, especially early in training or with aggressive learning rates, are prone to occasional large gradient spikes (e.g., from attention score outliers) that can destabilize or diverge training; clipping the gradient norm (e.g., to 1.0) caps the size of any single update step without changing its direction, preventing these spikes from derailing optimization.</div>
+    <div class="qa"><b>Q6.</b> What's the purpose of dividing attention scores by <code>1/√head_dim</code>?<br><b>A.</b> Without scaling, the dot products of Q and K grow in magnitude with head dimension, pushing softmax into a saturated regime where gradients vanish; scaling by <code>1/√head_dim</code> keeps the scores at a magnitude where softmax remains well-behaved and gradients flow properly.</div>
+
+    <h2 id="interview-a">29. Interview Questions — Advanced</h2>
+    <div class="qa"><b>Q1.</b> Explain why RoPE's "low dimensions rotate fast, high dimensions rotate slow" design lets a single mechanism capture both short-range and long-range patterns.<br><b>A.</b> Each dimension-pair is assigned a different rotation frequency (<code>1/base^(2i/head_dim)</code>): low-index pairs have high frequency, so their relative angle changes rapidly even for small position gaps, making them sensitive to fine-grained, short-range relationships; high-index pairs have low frequency, changing angle slowly even across large position gaps, so they encode coarser, long-range relationships. The combination across all dimension-pairs gives the model a multi-resolution view of relative position, somewhat like how different frequencies in a Fourier basis capture different scales of structure.</div>
+    <div class="qa"><b>Q2.</b> Why is weight tying (sharing the embedding matrix and LM head) mathematically sensible, not just a parameter-saving trick?<br><b>A.</b> The embedding matrix maps token IDs to vectors, and the LM head maps the final hidden state back to a score per token — both matrices are fundamentally relating the same vocabulary to the same vector space. Tying them encourages the model to represent "the direction in embedding space associated with token X" consistently for both reading and writing tokens, which empirically improves perplexity for smaller models, since it halves the number of independent parameters that must be learned to represent that relationship, effectively regularizing it.</div>
+
+    <h2 id="interview-s">30. Interview Questions — Senior/Architect</h2>
+    <div class="qa"><b>Q1.</b> You're designing a from-scratch LLM training pipeline that must serve long-context (32K+ tokens) requests cost-effectively at inference time. Walk through which architectural decisions from this walkthrough you'd prioritize and why.<br><b>A.</b> GQA (or even more aggressive MQA) becomes critical at long context, since KV cache size scales linearly with both sequence length and number of KV heads — at 32K context, an 8:1 or higher GQA ratio dramatically reduces the memory bandwidth bottleneck that otherwise limits batch size and latency during serving. RoPE is preferred over absolute position embeddings because it generalizes more gracefully to context lengths at or somewhat beyond what was seen in training (with techniques like RoPE scaling/NTK-aware interpolation for further extension). RMSNorm's lower per-layer compute cost compounds meaningfully across the many layers in a production-scale model, both in training throughput and inference latency. I would also ensure gradient clipping and a proper learning-rate warmup/decay schedule are in place, since long-context training is more prone to instability. Overall: every component here is still the right choice at scale — the Shakespeare toy walkthrough isn't a simplified stand-in, it's literally the production recipe at smaller dimensions.</div>
+
+    <h2 id="interview-sc">31. Scenario-Based Questions</h2>
+    <div class="qa"><b>Scenario 1.</b> Your team's custom-trained model produces fluent but repetitive, low-diversity text even at temperature 1.0. What architectural or training factors would you investigate?<br><b>A.</b> First check if this is a sampling issue (consider top-k/top-p/nucleus sampling in addition to temperature, since pure temperature scaling with multinomial sampling can still concentrate probability mass on a few tokens if the underlying distribution is already peaked) rather than an architectural one. If diversity issues persist, investigate whether the model is overfit (compare train vs. val loss — an overfit model memorizes high-frequency patterns from training data, producing repetitive completions), whether dropout was sufficiently applied during training, and whether the training corpus itself lacks diversity.</div>
+    <div class="qa"><b>Scenario 2.</b> After training, your model's loss plateaus well above <code>ln(vocab_size)</code>'s reasonable target and never meaningfully drops below it. What would you check first?<br><b>A.</b> First verify the model is actually learning anything beyond random guessing by checking loss at step 0 ≈ <code>ln(vocab_size)</code> as a sanity check — if it's already near that value and never moves, suspect gradients aren't flowing (check for accidentally frozen parameters, a learning rate that's effectively zero, or an optimizer not actually attached to the model's parameters) rather than an architecture issue.</div>
+    <div class="qa"><b>Scenario 3.</b> You need to cut inference serving costs for your trained model by 50% without retraining from scratch. Which of RMSNorm/RoPE/GQA/SwiGLU gives you the most leverage, and how?<br><b>A.</b> GQA gives the most direct leverage on serving cost, since it's specifically about reducing the KV cache footprint — if the model wasn't already trained with an aggressive KV-head ratio, options include: quantizing the KV cache itself, reducing max served context length, or (more involved) a conversion/fine-tuning procedure to convert an existing MHA-trained checkpoint into a GQA-equivalent one by averaging/grouping existing KV head weights, then briefly fine-tuning to recover quality — a known technique used by some production LLM teams when retrofitting GQA onto an already-trained MHA model.</div>
+
+    <h2 id="revision">32. Quick revision notes</h2>
+    <ul>
+      <li>RMSNorm = cheaper LayerNorm (no mean-subtract, no bias, scale only).</li>
+      <li>RoPE = rotates Q/K by position-dependent angle → captures relative position via dot product.</li>
+      <li>GQA = fewer KV heads shared across more Q heads → smaller KV cache, faster inference.</li>
+      <li>SwiGLU = gated dual-path FFN (<code>SiLU(W_gate·x) * (W_up·x)</code> then down-project).</li>
+      <li>Pre-norm residual blocks: <code>x = x + sublayer(norm(x))</code> — stable deep training.</li>
+      <li>Weight tying: embedding matrix == LM head matrix, fewer params.</li>
+      <li>Shift-by-1 next-token prediction: one sequence of length N → N training examples.</li>
+      <li>Causal mask: token i can only attend to tokens ≤ i.</li>
+      <li>Initial loss ≈ ln(vocab_size) is the "model is wired correctly" sanity check.</li>
+      <li>Temperature controls generation randomness; same mechanism used in ChatGPT/Claude.</li>
+    </ul>
+
+    <h2 id="cheat">33. Cheat sheet</h2>
+    <div class="callout">RMSNorm = RMS-divide + scale (no mean/bias). RoPE = rotate Q/K by angle(position) → relative position in Q·K. GQA = N_q heads share N_kv heads (N_kv &lt; N_q) → KV cache ÷ (N_q/N_kv). SwiGLU = SiLU(gate) × up → down-project. Block = x + Attn(Norm(x)); x + FFN(Norm(x)). Loss@start ≈ ln(vocab_size). Generation = logits[-1]/temp → softmax → multinomial sample → append → repeat.</div>
+
+    <h2 id="further">34. Further topics to learn</h2>
+    <p><a href="../28-LLM-Inference/">LLM Inference & KV Cache Optimization</a> → <a href="../29-Fine-Tuning/">Fine-Tuning</a> → <a href="../26-Open-Source-LLMs/">Open-Source LLMs (LLaMA/Mistral/Gemma architecture comparisons)</a> → <a href="../41-AI-Performance-and-Scaling/">AI Performance & Scaling</a> → Flash Attention, RoPE scaling / long-context extension techniques, Multi-Query Attention (MQA), Mixture-of-Experts (MoE) architectures.</p>
+
+    <div class="prevnext">
+      <a href="what-changed-since-2017-modern-transformer-upgrades.html">← What Changed Since 2017</a>
+      <a href="../28-LLM-Inference/">Next: LLM Inference →</a>
+    </div>
+  </main>
+</div>
+<script src="../assets/app.js"></script>
+</body>
+</html>

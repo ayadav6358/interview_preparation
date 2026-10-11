@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Advanced CI/CD — Cloud, AWS, Docker &amp; K8s — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">Cloud, AWS, Docker &amp; K8s</a><span class="sep">›</span>Advanced CI/CD</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>Advanced CI/CD: Blue-Green, Canary, Rollbacks, Feature Flags</h1>
+      <p class="meta-line"><span>⏱ 3 hrs</span><span>📍 Chapter 7 of 7</span></p>
+      <p><strong>One-line summary:</strong> Deploying new code and releasing it to users are two separable
+      operations — the deployment strategies here exist entirely to control blast radius and give you an
+      automated, fast way to undo a mistake before most users ever see it.</p>
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>You already ship through a CI/CD pipeline daily. What's usually missing at the "I run the pipeline"
+      level is the mechanics underneath the labels: how a load balancer or service mesh actually shifts traffic
+      percentage-by-percentage during a canary, what signal should trigger an automated rollback versus a human
+      decision, and how a feature flag's kill switch differs architecturally from a deploy rollback. At senior
+      and tech-lead level, you're the one designing the release strategy and the rollback triggers, not just
+      clicking "deploy" — and in an interview, "we use canary deployments" without being able to explain the
+      traffic-shifting mechanism or the exact SLO breach that auto-rolls-back is a surface-level answer.</p>
+      <div class="box why"><h4>Why</h4><p>A bad deploy that isn't caught and rolled back fast is the single
+      biggest preventable cause of customer-facing incidents. The entire discipline here is about shrinking
+      time-to-detect and time-to-rollback toward zero, automatically.</p></div>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>Already comfortable running CI/CD pipelines and basic deployments. Related:
+      <a href="06-infrastructure-as-code.html">Infrastructure as Code</a>,
+      <a href="../07-observability-security/index.html">Observability &amp; Security</a>.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="blue-green">Blue-green deployment mechanics</h3>
+      <p>Blue-green runs two complete, independent environments (blue = currently live, green = new version)
+      behind the same traffic-routing layer, cutting traffic from blue to green atomically (or near-atomically)
+      rather than gradually. The mechanism is almost always a load balancer target-group swap (AWS ALB:
+      register the green target group, deregister/drain the blue one) or a DNS/service-mesh virtual-service
+      pointer flip — the key property is that 100% of traffic moves at once, so the blast radius of a bad
+      deploy is either "zero users affected" (caught before the swap) or "all users affected" (caught after) —
+      there's no partial exposure window by design. Rollback is symmetric and fast: flip routing back to blue,
+      which is still fully running and warm, not redeployed from scratch. The real cost is running two full
+      production-sized environments simultaneously (2x compute during the deploy window) and handling any
+      stateful component (a database schema migration) that both versions must remain compatible with during
+      the overlap, since blue is still serving live traffic against the same data store while green is up.</p>
+
+      <h3 id="canary">Canary deployment: real traffic-shifting mechanics</h3>
+      <p>Canary exposes the new version to a small, controlled percentage of real traffic first, then ramps up
+      incrementally while watching metrics — the mechanism differs by layer: an ALB with weighted target groups
+      splits traffic by weight at the connection/request level before it ever reaches either version; a service
+      mesh (Istio, Linkerd, App Mesh) does the same at L7 via a VirtualService/traffic-split resource, often with
+      finer control (route by header, by percentage, by both, enabling canarying for specific user cohorts
+      rather than a random percentage sample); Kubernetes-native tooling (Argo Rollouts, Flagger) automates the
+      ramp steps (e.g. 5% → 25% → 50% → 100%) with pauses between each step for metric evaluation, querying a
+      metrics provider (Prometheus, Datadog, CloudWatch) directly as part of the rollout controller's own
+      reconciliation loop, not a separate manual check. The critical design question is what population sees
+      the canary — random traffic percentage is simplest but can under-sample a bug that only triggers for a
+      specific user segment (enterprise tier, a specific region, a specific device type), which is why
+      header/cohort-based canarying exists as a more deliberate alternative.</p>
+
+      <h3 id="automated-rollback">Automated rollback triggers tied to SLOs</h3>
+      <p>A rollback trigger that depends on a human noticing a dashboard is strictly worse than one wired
+      directly into the rollout controller's evaluation loop — the standard pattern is an
+      <code>AnalysisTemplate</code> (Argo Rollouts) or equivalent that queries error rate, p99/p999 latency, and
+      sometimes a business metric (checkout success rate) at each canary step, comparing the canary's values
+      against the stable version's baseline over the same window, and automatically pausing or reverting if a
+      defined threshold is breached (e.g. error rate &gt;2x baseline, or absolute error rate &gt;1%, sustained
+      for N consecutive evaluation windows — not a single noisy data point). The "sustained for N windows"
+      detail matters: a single-sample threshold breach triggers on noise constantly; requiring consecutive
+      breaches (or a statistical significance check against the baseline's own variance) is what makes automated
+      rollback trustworthy enough to actually leave unattended. Rollback execution itself is just re-pointing
+      traffic back to the last known-good revision — which is why keeping the previous version's pods/target
+      group warm and ready during the canary window (not scaled to zero) is what makes the rollback actually
+      fast rather than itself triggering a cold deploy.</p>
+      <div class="box gotcha"><h4>Gotcha</h4><p>An automated rollback wired to a single metric sample (not a
+      sustained window) will flap constantly on ordinary traffic noise, teaching the team to distrust and
+      eventually disable automated rollback entirely — defeating the entire point. Always require sustained
+      breach across multiple evaluation windows, or a statistical comparison against the baseline's own normal
+      variance.</p></div>
+
+      <h3 id="feature-flags">Feature flag architecture and kill switches</h3>
+      <p>A feature flag decouples code deployment from feature exposure entirely — the code for a new feature
+      ships to 100% of production in a deployed-but-dark state, and a flag evaluation (typically an SDK call
+      against a flag service like LaunchDarkly, Unleash, or a homegrown config service, often with a local
+      cache so evaluation doesn't add a network round-trip per request) decides at runtime whether a given
+      request/user sees it. This is architecturally distinct from a deploy rollback: a flag flip is
+      instantaneous (no redeploy, no traffic-shift ramp, just a config/cache update propagating, typically via a
+      streaming connection or short-TTL poll) and reversible in seconds regardless of how deployment itself
+      works, which is exactly why a <strong>kill switch</strong> — a flag specifically designed to disable a
+      feature/code path immediately under incident conditions — is a fundamentally faster mitigation than
+      rolling back a deploy, provided the flagged code path was actually designed to fail safe when disabled
+      (not just skip a UI element while still running backend logic that was the actual problem).</p>
+
+      <h3 id="choosing-a-strategy">Choosing between strategies for a given workload</h3>
+      <p>Blue-green suits stateless services with cheap enough compute to double temporarily and a need for fast,
+      all-or-nothing rollback; it's a poor fit when 2x cost is prohibitive or when the deploy involves a
+      long-running stateful migration that can't cleanly run twice. Canary suits services with enough steady
+      traffic volume to get a statistically meaningful signal from a small percentage quickly, and where
+      incremental exposure genuinely reduces risk — it's a poor fit for low-traffic services where 5% of traffic
+      is too few requests to detect anything meaningful before the ramp completes anyway. Feature flags are
+      strategy-agnostic and complementary to both — they control exposure of a specific capability independent
+      of which deployment mechanism shipped the code, and are the right tool when you need the fastest possible
+      mitigation path or need to decouple a product/business decision ("turn this feature off for EU users")
+      from any deployment event at all.</p>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>In a Kubernetes canary via Argo Rollouts: the Rollout controller replaces a standard Deployment,
+      managing two ReplicaSets (stable, canary) directly. On a new rollout, it scales up the canary ReplicaSet
+      to the first step's percentage, updates a traffic-split resource (an Istio VirtualService's weighted
+      routes, or an ALB Ingress's weighted target groups via the AWS Load Balancer Controller) to match that
+      percentage, then pauses and runs the step's AnalysisTemplate, issuing a PromQL (or equivalent) query for
+      the canary ReplicaSet's error rate/latency specifically (selected by pod labels, since both ReplicaSets
+      share a Service otherwise), comparing it against the stable ReplicaSet's same-window metrics. If the
+      analysis passes, the controller advances to the next step (more canary replicas, higher traffic weight);
+      if it fails sustained-breach criteria, the controller scales the canary ReplicaSet back to zero and resets
+      the traffic-split weights to 100% stable — all without a human invoking anything, because the rollback
+      decision and the rollback mechanism live in the same reconciliation loop that drove the rollout forward.</p>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+graph TD
+  DEPLOY[New version deployed] --> STEP1[Canary: 5% traffic weight]
+  STEP1 --> EVAL1{Error rate / latency within SLO vs baseline?}
+  EVAL1 -->|pass, sustained| STEP2[Canary: 25% traffic weight]
+  EVAL1 -->|fail, sustained breach| ROLLBACK[Auto-rollback: weight to 0%, scale down canary]
+  STEP2 --> EVAL2{SLO check}
+  EVAL2 -->|pass| STEP3[Canary: 100% - promote to stable]
+  EVAL2 -->|fail| ROLLBACK
+      </div>
+      <div class="mermaid">
+sequenceDiagram
+  participant User
+  participant LB as Load Balancer / Mesh
+  participant Stable as Stable version
+  participant Canary as Canary version
+  participant Flag as Feature Flag Service
+  User->>LB: Request
+  LB->>Canary: 10% of requests (weighted routing)
+  LB->>Stable: 90% of requests
+  Canary->>Flag: Evaluate flag for this user/request
+  Flag-->>Canary: Feature enabled: false (dark launch)
+  Canary-->>User: Response (new code path, feature hidden)
+  Note over Flag: Incident detected — kill switch flipped
+  Flag-->>Canary: Feature enabled: false for everyone, instantly
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-yaml"># Argo Rollouts canary with automated analysis-driven rollback
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: checkout-api
+spec:
+  replicas: 10
+  strategy:
+    canary:
+      steps:
+        - setWeight: 5
+        - pause: { duration: 5m }
+        - analysis:
+            templates:
+              - templateName: error-rate-check
+        - setWeight: 25
+        - pause: { duration: 5m }
+        - analysis:
+            templates:
+              - templateName: error-rate-check
+        - setWeight: 100
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: error-rate-check
+spec:
+  metrics:
+    - name: error-rate
+      interval: 1m
+      count: 5                     # require 5 consecutive windows, not one sample
+      successCondition: result[0] <= 0.01
+      failureLimit: 2               # 2 failed windows out of 5 triggers rollback
+      provider:
+        prometheus:
+          address: http://prometheus.monitoring:9090
+          query: |
+            sum(rate(http_requests_total{job="checkout-api",status=~"5.."}[1m]))
+            /
+            sum(rate(http_requests_total{job="checkout-api"}[1m]))
+</code></pre>
+      <pre><code class="language-yaml"># BAD: feature flag check only hides UI, backend logic still runs unconditionally
+def checkout(request):
+    discount = apply_new_discount_engine(request)   # runs regardless of flag
+    if feature_flags.is_enabled("new-discount-ui", request.user):
+        return render_new_discount_ui(discount)
+    return render_classic_ui(discount)
+
+# GOOD: flag actually gates the risky code path end-to-end, true kill switch
+def checkout(request):
+    if feature_flags.is_enabled("new-discount-engine", request.user):
+        try:
+            discount = apply_new_discount_engine(request)
+        except Exception:
+            feature_flags.record_error("new-discount-engine")
+            discount = apply_legacy_discount_engine(request)   # fail safe, not fail open
+    else:
+        discount = apply_legacy_discount_engine(request)
+    return render_ui(discount)
+</code></pre>
+      <pre><code class="language-bash"># Check current canary traffic weight and analysis status (Argo Rollouts)
+kubectl argo rollouts get rollout checkout-api --watch
+
+# Manually promote a paused canary (skip remaining analysis, human override)
+kubectl argo rollouts promote checkout-api
+
+# Manually abort and roll back a canary mid-flight
+kubectl argo rollouts abort checkout-api
+</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4><p>A payments service used blue-green with a single post-deploy
+      smoke test as the only gate before flipping 100% of traffic. A new version passed the smoke test (a
+      synthetic health check hitting a trivial endpoint) but had a subtle bug only triggered by a specific
+      payment provider's response shape, affecting roughly 8% of real transactions — invisible to the smoke test
+      but immediately costly once live, since blue-green's all-or-nothing traffic model meant the bug hit 100%
+      of users instantly with no gradual exposure to limit blast radius. Fix: moved to a canary strategy with a
+      5% initial weight and an AnalysisTemplate checking actual payment-success-rate by provider (not just HTTP
+      200 smoke checks) over sustained windows, plus a kill-switch feature flag specifically wrapping the new
+      payment-provider integration code path so that even mid-incident, on-call could disable just that
+      provider's new code path in seconds without touching the deployment pipeline at all, while the rollout
+      controller independently caught the metric regression and auto-rolled-back the canary within minutes.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Gating an automated rollback on a shallow health check (HTTP 200
+      on a root endpoint) instead of real business/error metrics catches crashes but misses subtle correctness
+      bugs that return 200 with wrong data — the deploy "looks" healthy by every signal the pipeline checks
+      while actively harming users.</p></div>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Keeping the previous stable version scaled down or torn down
+      immediately after a canary promotes to 100% removes your fast-rollback safety net — a problem discovered
+      an hour after full promotion now requires a fresh deploy of the old version from scratch instead of an
+      instant traffic-weight flip back.</p></div>
+      <ul>
+        <li>Base automated rollback triggers on real business/error-rate/latency SLOs, never a shallow liveness
+        check alone.</li>
+        <li>Require sustained breach across multiple evaluation windows, not a single noisy sample, to avoid
+        rollback flapping.</li>
+        <li>Keep the previous stable version warm for a defined soak period after full promotion, not
+        immediately scaled to zero.</li>
+        <li>Design feature-flagged code paths to fail safe (fallback to known-good behavior) when the flag is
+        off, not just hide UI while risky logic still runs.</li>
+        <li>Pick canary traffic percentage based on actual traffic volume — too small a percentage on a
+        low-traffic service yields no statistically meaningful signal before the ramp completes anyway.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>Blue-green</td><td>Stateless service, need fast all-or-nothing rollback, can afford 2x compute
+        briefly</td><td>Cost-sensitive, long-running stateful migration spanning both versions</td>
+        <td>Canary with smaller resource overhead</td></tr>
+        <tr><td>Canary (weighted traffic)</td><td>High enough traffic volume for a small percentage to be
+        statistically meaningful, want gradual risk exposure</td><td>Low-traffic service, or a change too risky
+        for any live user exposure at all</td><td>Blue-green, or shadow traffic/dark launch with no real user
+        impact</td></tr>
+        <tr><td>Automated rollback (metric-gated)</td><td>Well-instrumented service with reliable baseline
+        metrics</td><td>Noisy/low-volume metrics that can't distinguish signal from normal variance</td>
+        <td>Manual gate with human review at each step</td></tr>
+        <tr><td>Feature flag kill switch</td><td>Need instant mitigation independent of deploy pipeline, or
+        business-driven on/off control</td><td>The risky logic can't be cleanly isolated behind a flag
+        boundary</td><td>Deployment rollback as the only mitigation path</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic"><h4>Basic</h4>
+        <details class="qa"><summary>What's the core difference between blue-green and canary deployment?</summary><div class="answer"><p>Blue-green cuts 100% of traffic from old to new atomically; canary gradually shifts an increasing percentage of traffic to the new version in steps, pausing to check metrics between steps.</p></div><div class="followup">Follow-up: which gives you a smaller blast radius for a bad deploy?</div></details>
+        <details class="qa"><summary>What is a feature flag kill switch?</summary><div class="answer"><p>A feature flag specifically designed so that flipping it immediately and safely disables a feature/code path in production, without requiring a redeploy or traffic-shift ramp.</p></div><div class="followup">Follow-up: why is flipping a flag faster than a deployment rollback?</div></details>
+        <details class="qa"><summary>Why does blue-green deployment require roughly double the compute during a deploy?</summary><div class="answer"><p>Both the old (blue) and new (green) environments run at full production capacity simultaneously until traffic is cut over, since the swap is atomic rather than gradual.</p></div><div class="followup">Follow-up: how does canary avoid this cost?</div></details>
+        <details class="qa"><summary>What does a load balancer's weighted target group actually control in a canary deployment?</summary><div class="answer"><p>The percentage of incoming requests routed to each target group (old vs new version) at the connection/request level, implementing the traffic-shifting mechanism underlying canary.</p></div><div class="followup">Follow-up: what's the equivalent concept in a service mesh instead of a load balancer?</div></details>
+        <details class="qa"><summary>Why is a shallow health check (HTTP 200) insufficient as the only automated rollback trigger?</summary><div class="answer"><p>It catches crashes and total outages but misses subtle correctness bugs that still return a successful status code with wrong data or degraded business metrics.</p></div><div class="followup">Follow-up: what metrics would actually catch that kind of bug?</div></details>
+        <details class="qa"><summary>Can a feature flag and a canary deployment be used together?</summary><div class="answer"><p>Yes — they operate at different layers; canary controls which version of deployed code serves a given request, while a feature flag controls which capability within that code is active for a given user, independent of which version they're on.</p></div><div class="followup">Follow-up: give an example where you'd want both simultaneously.</div></details>
+      </div>
+      <div class="qa-level medium"><h4>Medium</h4>
+        <details class="qa"><summary>Walk through exactly how an Argo Rollouts canary decides to advance to the next step versus roll back.</summary><div class="answer"><p>At each step, the controller sets the traffic weight, pauses, and runs the step's AnalysisTemplate, which queries a metrics provider (e.g. Prometheus) for the canary's error rate/latency over a defined interval, comparing against a success/failure condition across a configured number of consecutive evaluation windows. If the required number of windows pass, it advances to the next step's weight; if the configured failure count is hit, it aborts — scaling the canary back down and resetting traffic weight to 100% stable, automatically.</p></div><div class="followup">Follow-up: why does requiring multiple consecutive windows matter instead of a single evaluation?</div></details>
+        <details class="qa"><summary>Why is random-percentage canary traffic sometimes insufficient to catch a real bug, and what's the alternative?</summary><div class="answer"><p>A bug that only manifests for a specific user segment (a region, a device type, an account tier) may be statistically under-represented in a small random sample, letting the canary pass clean metrics while the bug exists. Header- or cohort-based canarying routes a deliberately chosen segment (or routes based on explicit request attributes) to the canary instead of a random sample, giving you control over exactly which population is exposed first.</p></div><div class="followup">Follow-up: what's a risk of cohort-based canarying that random sampling doesn't have?</div></details>
+        <details class="qa"><summary>Explain architecturally why a feature flag flip is faster to execute than a deployment rollback, even on a well-optimized pipeline.</summary><div class="answer"><p>A deploy rollback, even a fast one like blue-green's traffic-flip, still depends on the previous version actually still being warm/available, and in canary's case may need to wait for or trigger a reconciliation loop. A feature flag flip is a config/cache update that typically propagates via a persistent streaming connection or short-TTL poll directly to already-running application instances — no new traffic routing decision, no pod scaling, no load balancer reconfiguration, just a boolean the already-executing code reads differently on its next evaluation.</p></div><div class="followup">Follow-up: what has to be true about the flagged code for this speed advantage to actually translate into a safe mitigation?</div></details>
+        <details class="qa"><summary>A team's automated canary rollback keeps firing on ordinary traffic noise and they're considering disabling it. What's actually wrong, and what's the fix?</summary><div class="answer"><p>Most likely the rollback is gated on a single evaluation sample or too tight a threshold relative to the metric's normal variance, rather than requiring sustained breach across multiple consecutive windows or a statistically meaningful comparison against the baseline's own noise profile. The fix is tuning the AnalysisTemplate's window count/failure-limit (or switching to a statistical significance comparison) rather than disabling automated rollback entirely, which would remove the safety net instead of fixing the noisy signal.</p></div><div class="followup">Follow-up: how would you determine the right failure-limit/window-count values empirically rather than guessing?</div></details>
+        <details class="qa"><summary>Why might a team choose feature flags over canary deployment for a specific risky change, even though both reduce risk?</summary><div class="answer"><p>If the risky logic can be cleanly isolated behind a flag boundary, flags give instant, granular control (per-user, per-region, instant kill) independent of any deployment event, which is strictly faster and more targeted than waiting for a canary ramp or triggering a redeploy. Canary is still the right tool when the risk isn't isolable to a flaggable code path — e.g. a change to the runtime, a dependency upgrade, infrastructure-level changes that can't be conditionally executed by a flag at all.</p></div><div class="followup">Follow-up: what kind of change can only be de-risked by canary/blue-green and not by a feature flag?</div></details>
+      </div>
+      <div class="qa-level advanced"><h4>Advanced</h4>
+        <details class="qa"><summary>Design a release pipeline for a payments service that must catch both infrastructure-level regressions and subtle business-logic correctness bugs, with automated rollback for both.</summary><div class="answer"><p>Use canary with weighted traffic shifting for gradual exposure, with two tiers of AnalysisTemplates evaluated at each step: infrastructure-level (error rate, latency, pod restart count) and business-level (payment success rate by provider, refund rate, a synthetic transaction run against each provider specifically). Require sustained breach across multiple windows for both tiers independently — a business-metric breach should trigger rollback even if infra metrics look clean, since that's exactly the subtle-bug case infra metrics miss. Wrap the highest-risk new code path (e.g. a new payment provider integration) in its own kill-switch feature flag as an independent, faster mitigation layer that on-call can use without waiting for or interacting with the rollout controller at all, and keep the previous stable version warm for a defined soak period post-promotion so a delayed-discovery issue still has a fast rollback path.</p></div><div class="followup">Follow-up: how would you prevent the two rollback mechanisms (canary auto-rollback and manual kill switch) from fighting each other or producing confusing state?</div></details>
+        <details class="qa"><summary>Explain the actual mechanism by which a service mesh canary avoids the "both versions share a Service" metrics-attribution problem.</summary><div class="answer"><p>Both the stable and canary ReplicaSets are typically fronted by the same Kubernetes Service (so neither needs separate DNS/discovery), but their pods carry distinguishing labels (e.g. a rollouts-pod-template-hash label). The metrics query in the AnalysisTemplate selects by that label specifically, scoping the PromQL/metrics query to only the canary pods' metrics rather than the Service's aggregate traffic — this is what lets the analysis correctly attribute an error-rate spike to the canary version specifically rather than being diluted/masked by the much larger volume of stable traffic hitting the same logical Service.</p></div><div class="followup">Follow-up: what breaks if your metrics pipeline only has Service-level granularity and not pod-level labels?</div></details>
+        <details class="qa"><summary>A canary deployment auto-rolled-back correctly, but the feature flag controlling a related capability was left enabled, causing a confusing partial-incident state. How do you design around this class of problem?</summary><div class="answer"><p>Treat flag state and deployment version as coupled release metadata rather than fully independent systems — a rollback runbook/automation should include a step (ideally automated) that also reverts any feature flags that were specifically introduced as part of that release, not just the code version. Practically this means tagging flags with the release/rollout they belong to and having the rollback automation (or a documented, scripted runbook invoked by the same incident trigger) flip associated flags back as part of the same rollback action, rather than relying on a human to remember a flag exists at all during an incident.</p></div><div class="followup">Follow-up: how would you detect this kind of drift between deployed version and flag state before it causes an incident?</div></details>
+        <details class="qa"><summary>Why is "sustained breach across N windows" alone sometimes still insufficient, and what's a more rigorous statistical approach?</summary><div class="answer"><p>A fixed threshold with a fixed window count doesn't account for the baseline metric's own natural variance — a baseline with high natural variance will still flap against a fixed threshold, while a baseline with very low variance might let a real, smaller regression slip through underneath a threshold set too loose for it. A more rigorous approach computes the canary's metric distribution against the stable baseline's own distribution over the same time window (e.g. a statistical test comparing means/variances, or simply requiring the canary's value to be N standard deviations outside the baseline's recent historical range) rather than a single hardcoded absolute threshold, adapting automatically to each metric's actual noise characteristics.</p></div><div class="followup">Follow-up: what operational complexity does a statistical-comparison approach add that a fixed threshold doesn't have?</div></details>
+        <details class="qa"><summary>How would you decide, for a specific service, whether to invest in canary + automated rollback infrastructure at all, versus simpler blue-green with manual verification?</summary><div class="answer"><p>Weigh traffic volume (enough for a canary percentage to be statistically meaningful within an acceptable time window), blast-radius tolerance (can this service afford even a small percentage of users hitting a bug, or does any real exposure require instead testing fully pre-production), metrics maturity (do you have reliable, low-noise business/error metrics to gate on, or would automated rollback just be gating on noise), and operational cost of building/maintaining the automation versus the incident cost it prevents. A low-traffic internal tool with strong pre-prod testing and low incident cost may not justify canary infrastructure at all — blue-green with a human watching dashboards for ten minutes may be the right amount of process, not an under-investment.</p></div><div class="followup">Follow-up: what signal would tell you it's time to graduate from manual blue-green to automated canary for a given service?</div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment"><span class="level-tag">Beginner (30-60 min)</span><h4>Simulate a blue-green traffic flip</h4>
+      <p>Using any load balancer you have access to (a local nginx config, an AWS ALB, or even a simple reverse
+      proxy script), run two versions of a trivial app (v1 returns "blue", v2 returns "green") and flip traffic
+      100% from one to the other, then flip back.</p>
+      <ul><li>Confirm zero dropped requests during the flip using a simple continuous curl loop</li><li>Time how
+      long the flip itself takes versus how long a full redeploy of v1 would take if it had been scaled to
+      zero</li></ul>
+      <p><strong>Acceptance criteria:</strong> Documented request log showing the exact moment of cutover with
+      no errors, and the timing comparison.</p>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>nginx upstream weight changes or an ALB target group registration/deregistration both work fine for this at small scale.</p></div></details>
+      <p><strong>Bonus:</strong> Keep v1 running (not scaled down) after the flip and measure how fast a rollback is compared to if it had been torn down.</p>
+      </div>
+      <div class="assignment"><span class="level-tag">Intermediate (2-4 hrs)</span><h4>Build a canary with an automated, metric-gated rollback</h4>
+      <p>Deploy a simple app to Kubernetes with Argo Rollouts (or build an equivalent with a weighted Ingress/
+      service mesh plus a script), configure a canary with at least 2 steps, and wire an AnalysisTemplate (or
+      equivalent scripted check) against a real metric (error rate from Prometheus, or even a simple log-based
+      error count). Deliberately ship a version with an elevated error rate and confirm it auto-rolls-back.</p>
+      <ul><li>Canary with at least 2 weighted steps</li><li>Automated analysis gating step advancement</li><li>
+      Demonstrated auto-rollback on a deliberately broken version</li></ul>
+      <p><strong>Acceptance criteria:</strong> Logs/output showing the rollout reaching an analysis failure and
+      automatically reverting traffic weight, with no manual intervention.</p>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>If you don't have a full Prometheus setup, a simple HTTP endpoint on your app exposing a current error-rate number that your script polls works as a stand-in analysis provider.</p></div></details>
+      <p><strong>Bonus:</strong> Tune the failure-limit/window-count and demonstrate it no longer flaps on injected random noise that isn't a real regression.</p>
+      </div>
+      <div class="assignment"><span class="level-tag">Advanced (1-2 days)</span><h4>Design and build a combined canary + feature-flag kill-switch release for a risky change</h4>
+      <p>Pick (or build) a small service with one genuinely risky code path (e.g. a new third-party integration
+      stub that can be made to fail). Ship it behind both a canary rollout and a feature flag kill switch
+      specifically wrapping that code path, with a fail-safe fallback when the flag is off. Simulate an
+      incident and compare mitigation speed: canary auto-rollback versus flipping the kill switch.</p>
+      <ul><li>Risky code path is flaggable and fails safe when disabled</li><li>Canary auto-rollback configured
+      independently</li><li>Documented timing comparison between the two mitigation paths under the same
+      simulated incident</li></ul>
+      <p><strong>Acceptance criteria:</strong> left as an exercise — think through which mitigation path you'd
+      actually reach for first during a live incident and why, backed by your own measured timings.</p>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>Even a simple in-memory flag toggled by an admin endpoint is enough to demonstrate the speed difference versus waiting on a rollout controller's evaluation loop.</p></div></details>
+      </div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet"><ul>
+        <li>Blue-green = atomic 100% traffic cutover, 2x compute during deploy, fast symmetric rollback.</li>
+        <li>Canary = gradual weighted traffic shift with metric evaluation between steps, smaller blast radius.</li>
+        <li>Traffic shifting happens at the LB (weighted target groups) or service mesh (VirtualService weights) layer.</li>
+        <li>Automated rollback must gate on sustained breach across multiple windows, never a single noisy sample.</li>
+        <li>Gate rollback on real business/error metrics, not just shallow liveness/HTTP-200 checks.</li>
+        <li>Feature flags decouple deploy from exposure; a kill switch is a flag designed for instant, fail-safe disablement.</li>
+        <li>Keep the previous stable version warm post-promotion — a torn-down "rollback" is really a fresh redeploy.</li>
+        <li>Cohort/header-based canarying catches segment-specific bugs that random-percentage sampling can miss.</li>
+        <li>Couple flag state to release/rollout metadata so a deploy rollback and a flag rollback stay in sync.</li>
+      </ul></div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://argo-rollouts.readthedocs.io/en/stable/concepts/">Argo Rollouts concepts</a></li>
+        <li><a href="https://istio.io/latest/docs/tasks/traffic-management/traffic-shifting/">Istio traffic shifting</a></li>
+        <li><a href="https://docs.aws.amazon.com/elasticloadbalancing/latest/application/listener-update-rules.html">ALB weighted target groups</a></li>
+        <li><a href="https://docs.aws.amazon.com/whitepapers/latest/overview-deployment-options/canary-deployment.html">AWS deployment strategies overview</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="06-infrastructure-as-code.html"><span class="dir">← Previous</span>Infrastructure as Code (Terraform)</a>
+        <a class="next" href="../07-observability-security/index.html"><span class="dir">Next →</span>Observability &amp; Security</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · Cloud, AWS, Docker &amp; K8s</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-yaml.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-hcl.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-docker.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "06-cloud-aws-docker-k8s", chapterKey: "07-advanced-cicd" });</script>
+</body>
+</html>

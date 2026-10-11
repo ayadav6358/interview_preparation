@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Incident Handling & Post-Mortems — Observability & Security — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">Observability &amp; Security</a><span class="sep">›</span>Incident Handling &amp; Post-Mortems</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>Incident Handling and Post-Mortems</h1>
+      <p class="meta-line"><span>⏱ ~3 hrs</span><span>📍 Chapter 6 of 6</span></p>
+      <p><strong>One-line summary:</strong> This chapter goes deep on how production incidents are actually
+      classified, commanded, communicated, and learned from at a senior level — severity taxonomies, on-call
+      escalation mechanics, the incident commander role during a live outage, and how to run a blameless
+      post-mortem that produces action items which actually get done.</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>Anyone can write code that works most of the time; what separates a senior/staff engineer is how they
+      behave in the 2am window when it doesn't. Interviewers probe this because it's one of the few scenarios that
+      reveals judgment under pressure, communication discipline, and systems thinking simultaneously — "tell me
+      about a production incident you handled" is asked specifically to see whether you can stay calm, triage
+      correctly, communicate status without causing panic, and extract a real structural fix afterward rather
+      than a superficial one. Teams that handle incidents well don't have fewer outages than everyone else — they
+      have faster detection, faster mitigation, and a post-mortem process that actually reduces repeat incidents,
+      which is a measurable, interview-relevant signal of engineering maturity.</p>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>Logging, metrics and alerting fundamentals, and basic production operations. Related: see the
+      <a href="index.html">Observability &amp; Security</a> topic overview, and especially the chapters on
+      <a href="01-logging-metrics-tracing.html">logging, metrics and tracing</a> and
+      <a href="02-alerting-slo-sli.html">alerting, SLOs and SLIs</a> for the detection layer that feeds into
+      everything below, plus <a href="05-secure-auth-secrets.html">secure auth &amp; secrets</a> for the kind of
+      security incident this process also has to cover.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="severity-classification">Severity classification: SEV1 through SEV4</h3>
+      <p>Every mature org classifies incidents by a severity level the moment they're declared, because severity
+      determines who gets paged, how loudly, and how fast. A practical, widely-used taxonomy:</p>
+      <p><strong>SEV1 (Critical)</strong>: complete outage or major data-integrity/security breach affecting all
+      or most users — site down, payments failing for everyone, customer data exposed. Requires immediate
+      all-hands response, an incident commander, and typically executive/customer communication within minutes.
+      <strong>SEV2 (High)</strong>: significant degradation or a major feature broken for a large subset of users
+      — checkout works but is slow for 30% of traffic, search is down but browsing works. Urgent response, but
+      not necessarily a company-wide page. <strong>SEV3 (Medium)</strong>: a minor feature broken or degraded
+      affecting a small subset of users or an internal tool — handled during business hours by the owning team,
+      tracked but not paged. <strong>SEV4 (Low)</strong>: cosmetic issue, edge case, or a problem with an easy
+      workaround — logged as a ticket, no incident process invoked. The senior-level point: severity is about
+      <strong>user/business impact</strong>, not about how technically interesting or scary the underlying bug is
+      — a terrifying-looking stack trace that affects zero real users is a SEV4, and a boring off-by-one that
+      silently drops 10% of payment webhooks is a SEV1.</p>
+
+      <h3 id="oncall-escalation">On-call mechanics and escalation</h3>
+      <p>An on-call rotation (via PagerDuty, Opsgenie, or similar) defines who gets paged first for a given
+      service, with a defined <strong>escalation policy</strong>: if the primary on-call doesn't acknowledge
+      within N minutes (typically 5-15), the page automatically escalates to a secondary, then to the team lead,
+      then to a broader engineering-management chain. This isn't bureaucracy — it's a safety net against the very
+      real failure mode of "the one person who knows this system is asleep/on a plane/has a dead phone." A good
+      on-call setup also has clear <strong>paging criteria</strong> tied to SLO burn-rate alerts (see the
+      alerting/SLO chapter) rather than raw threshold alerts, so people are paged for symptoms that matter to
+      users, not for every noisy metric blip — alert fatigue from over-paging is one of the most common root
+      causes of a slow SEV1 response, because the on-call engineer has learned to triage pages by ignoring them.</p>
+
+      <h3 id="incident-command">Incident command roles during a live SEV1/SEV2</h3>
+      <p>Borrowed from FEMA's Incident Command System and adapted by Google/PagerDuty-style SRE practice, a live
+      major incident needs explicit roles, not an ad-hoc scramble: <strong>Incident Commander (IC)</strong> —
+      owns the overall response, makes the call on severity/escalation/when it's resolved, and explicitly does
+      <em>not</em> personally debug the issue; their job is coordination, not root-causing. <strong>Operations
+      Lead / Subject Matter Expert</strong> — the engineer(s) actually in the code/infra fixing it.
+      <strong>Communications Lead</strong> — owns the status page, Slack incident channel updates, and
+      customer/stakeholder messaging on a fixed cadence (e.g., every 15-30 minutes even if the update is "still
+      investigating"), so the IC and SMEs are never interrupted by "any updates?" pings. <strong>Scribe</strong> —
+      keeps a real-time timeline of what was tried, when, and what happened, which becomes the raw material for
+      the post-mortem. The core senior insight: separating "who's fixing it" from "who's deciding/communicating"
+      is what prevents a SEV1 from degenerating into five engineers simultaneously debugging in isolation while
+      nobody tells customer support what to tell customers.</p>
+
+      <h3 id="postmortem-structure">Blameless post-mortem structure</h3>
+      <p>A post-mortem is written within 1-3 business days after resolution, while memory is fresh, and follows a
+      fixed structure: <strong>Summary</strong> (one paragraph: what broke, impact, duration).
+      <strong>Timeline</strong> (timestamped, factual: "14:02 — deploy of v2.3.1 began," "14:07 — error rate
+      alert fired," "14:11 — on-call acknowledged," "14:19 — rollback initiated," "14:24 — error rate normal").
+      <strong>Root cause</strong>, found via the <strong>5 whys</strong> technique: ask "why did this happen" five
+      times (or until you hit a structural/process answer, not necessarily exactly 5), e.g. "Why did checkout
+      fail?" → "A null pointer in the pricing service." → "Why was it null?" → "A new discount field wasn't
+      populated for legacy SKUs." → "Why wasn't it populated?" → "The migration script skipped SKUs created before
+      2023." → "Why did the migration skip them?" → "It filtered on a 'created_at' column that didn't exist on the
+      oldest rows." → "Why did nobody catch this in testing?" → "Staging data was seeded only with post-2023 SKUs"
+      — the real root cause is the last one (staging data doesn't represent production data shape), not the null
+      pointer. <strong>Contributing factors</strong> (things that made it worse or slower to detect/fix, distinct
+      from the root cause — e.g., "the relevant dashboard didn't have an alert on this metric," "the runbook was
+      out of date"). <strong>Action items</strong>, each with an explicit owner and due date, categorized by
+      whether they prevent recurrence, improve detection, or improve response speed — a post-mortem with no
+      concrete, owned action items is a story, not a process improvement.</p>
+
+      <h3 id="blameless-culture">Why "blameless" is a mechanism, not a slogan</h3>
+      <p>Blameless doesn't mean "nobody is responsible" — it means the write-up and discussion focus on systemic
+      and process causes rather than individual fault, because the senior-level recognition is that a competent
+      engineer who followed the documented process and still caused an outage is evidence the <em>process</em> is
+      broken, not that the engineer is incompetent. The practical reason this matters beyond psychological safety:
+      if post-mortems assign blame, the incentive shifts to hiding information, hedging language in the timeline,
+      and avoiding volunteering for risky deploys/on-call — which directly degrades the quality of the data you
+      need to actually prevent recurrence. A post-mortem that names "the deploy script allowed a migration to run
+      without a dry-run gate" produces a fixable action item; one that names "Priya should have been more
+      careful" produces nothing actionable and discourages the next person from being honest about their own
+      near-misses.</p>
+
+      <h2 id="under-the-hood">How It Works Under the Hood (In Practice)</h2>
+      <p>In a mature org, the mechanics behind the roles above are concrete tooling, not just culture: a paging
+      system (PagerDuty/Opsgenie) integrates with alerting (Datadog/Prometheus Alertmanager/CloudWatch) so an
+      SLO burn-rate breach fires a page with a deep link to the relevant dashboard and runbook already attached.
+      Declaring an incident is usually a single slash-command (e.g., <code>/incident declare</code> in Slack) that
+      auto-creates a dedicated incident channel, pulls in a bot that posts the timeline as people react with
+      emoji/commands, creates a shared doc pre-populated with the post-mortem template, and opens an entry on the
+      public status page if the severity crosses a threshold. The IC role is often assigned by whoever declares
+      the incident by default, with an explicit hand-off if a more senior IC needs to take over — the hand-off
+      itself gets a timeline entry ("14:31 — IC handed off from Alice to Bob") because continuity of who's in
+      charge matters as much as the technical fix. The timeline the scribe keeps is the single most valuable
+      artifact for the post-mortem — teams that skip live timeline-keeping and try to reconstruct it from memory
+      afterward consistently produce worse post-mortems, because exact sequencing (what was tried before the
+      actual fix, and why those earlier things didn't work) gets lost.</p>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+flowchart TD
+  A[Alert fires: SLO burn-rate breach] --> B[On-call engineer paged]
+  B --> C{Ack within 5-15 min?}
+  C -->|No| D[Auto-escalate to secondary / lead]
+  D --> C
+  C -->|Yes| E[Engineer triages severity]
+  E --> F{SEV1/SEV2?}
+  F -->|Yes| G[Declare incident: IC + Comms Lead + Scribe assigned]
+  F -->|No| H[Handle as normal ticket, no incident process]
+  G --> I[Mitigate: rollback / feature-flag off / scale up]
+  I --> J{Impact resolved?}
+  J -->|No| I
+  J -->|Yes| K[Declare resolved, close incident channel]
+  K --> L[Write post-mortem within 1-3 days]
+  L --> M[5 whys to root cause + contributing factors]
+  M --> N[Action items with owners + due dates]
+  N --> O[Review in post-mortem meeting]
+  O --> P[Track action items to completion]
+      </div>
+      <div class="mermaid">
+sequenceDiagram
+  participant Eng as On-call Engineer
+  participant Page as Paging System
+  participant Sec as Secondary On-call
+  participant Lead as Team Lead
+  participant IC as Incident Commander
+  participant Comms as Comms Lead
+  Page->>Eng: Page fired (SEV candidate)
+  Note over Eng: 8 minutes pass, no ack
+  Page->>Sec: Auto-escalate (no ack within policy window)
+  Sec->>Page: Acknowledge
+  Sec->>Sec: Confirms SEV1 - full outage
+  Sec->>Lead: Pages Lead to take IC role
+  Lead->>IC: Assumes Incident Commander role
+  IC->>Comms: Assigns Comms Lead
+  Comms->>Comms: Posts initial status page update
+  IC->>Sec: Assigns as Operations Lead (fix the issue)
+  loop Every 15-30 min
+    Comms->>Comms: Posts status update regardless of fix progress
+  end
+  Sec->>IC: Mitigation deployed, error rate dropping
+  IC->>Comms: Authorize "resolved" update
+  IC->>IC: Declares incident resolved, schedules post-mortem
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-markdown"># Post-Mortem Template (Blameless)
+
+## Summary
+One paragraph: what broke, who/what was impacted, how long, how it was detected and resolved.
+
+## Severity & Impact
+- Severity: SEV1 / SEV2 / SEV3 / SEV4
+- Duration: start timestamp -> resolved timestamp (total minutes)
+- User impact: e.g. "12% of checkout requests returned 500 for 34 minutes"
+- Business impact: e.g. estimated revenue impact, SLA credit exposure
+
+## Timeline (all timestamps in UTC)
+| Time  | Event |
+|-------|-------|
+| 14:02 | Deploy of payments-service v2.3.1 began |
+| 14:07 | Error-rate SLO burn-rate alert fired, paged on-call |
+| 14:11 | On-call acknowledged, began investigating logs |
+| 14:15 | Identified correlation with the 14:02 deploy |
+| 14:19 | Rollback to v2.3.0 initiated |
+| 14:24 | Error rate returned to baseline |
+| 14:30 | Incident declared resolved |
+
+## Root Cause (5 Whys)
+1. Why did checkout fail? -> Null pointer exception in discount calculation.
+2. Why was the discount field null? -> Migration didn't backfill legacy SKUs.
+3. Why didn't the migration backfill them? -> It filtered on a column absent on pre-2023 rows.
+4. Why wasn't this caught in staging? -> Staging seed data only contains post-2023 SKUs.
+5. Why does staging data not represent production? -> No process requires staging data to be
+   periodically refreshed from an anonymized production snapshot.
+
+**Root cause:** Staging environment data does not represent the shape/age distribution of
+production data, so schema-dependent bugs on old rows are undetectable before deploy.
+
+## Contributing Factors
+- No alert existed specifically on discount-calculation error rate; detection relied on the
+  generic checkout error-rate SLO, delaying root-cause identification by ~4 minutes.
+- The rollback runbook was last updated 6 months ago and referenced a deprecated deploy tool.
+
+## Action Items
+| Action | Owner | Due | Category |
+|--------|-------|-----|----------|
+| Refresh staging data from anonymized prod snapshot monthly | @dana | 2026-10-20 | Prevention |
+| Add schema-null-check alert on discount field specifically | @raj | 2026-10-10 | Detection |
+| Update rollback runbook to current deploy tooling | @sam | 2026-10-08 | Response speed |
+| Add migration dry-run gate requiring row-count diff review | @dana | 2026-10-24 | Prevention |
+
+## What Went Well
+- Burn-rate alert fired within 5 minutes of the regression starting.
+- Rollback was executed within 8 minutes of root-cause identification.
+</code></pre>
+      <pre><code class="language-typescript">// =========================================================================
+// Incident comms: BAD vs GOOD status updates during a live SEV1
+// =========================================================================
+
+// BAD — vague, no timestamp, implies certainty that doesn't exist yet,
+// gives no indication of when the next update will come (forces people
+// to keep pinging the incident channel for status, interrupting the fix).
+const badUpdate = `We're looking into some issues. Should be fixed soon.`;
+
+// GOOD — timestamped, states current understanding without overclaiming,
+// states concrete impact, and commits to the next update time so nobody
+// needs to ask "any news?" in the meantime.
+function postStatusUpdate(params: {
+  timestampUtc: string;
+  impact: string;
+  currentAction: string;
+  nextUpdateInMinutes: number;
+}) {
+  return (
+    `[${params.timestampUtc} UTC] Investigating degraded checkout performance ` +
+    `affecting an estimated 15% of requests. Current theory: a recent deploy ` +
+    `increased database query latency. Rolling back the suspect deploy now. ` +
+    `Next update in ${params.nextUpdateInMinutes} minutes or sooner if status changes.`
+  );
+}
+
+// =========================================================================
+// 5 Whys as a structured helper — forces explicit "why" chaining instead
+// of jumping straight to the first proximate cause (the common mistake).
+// =========================================================================
+interface WhyStep {
+  question: string;
+  answer: string;
+}
+
+function fiveWhys(symptom: string, chain: WhyStep[]): string {
+  if (chain.length < 3) {
+    throw new Error(
+      "Root-cause analysis stopped too early — fewer than 3 'whys' usually " +
+      "means you've found a proximate cause, not a structural root cause."
+    );
+  }
+  const lastAnswer = chain[chain.length - 1].answer;
+  return `Symptom: ${symptom}\nRoot cause: ${lastAnswer}`;
+}
+
+// =========================================================================
+// Escalation policy modeled explicitly — the actual mechanism that
+// prevents "nobody saw the page" from stalling a SEV1 response.
+// =========================================================================
+interface EscalationStep {
+  target: string;
+  ackTimeoutMinutes: number;
+}
+
+async function pageWithEscalation(
+  steps: EscalationStep[],
+  sendPage: (target: string) => Promise<void>,
+  waitForAck: (target: string, timeoutMs: number) => Promise<boolean>
+): Promise<string> {
+  for (const step of steps) {
+    await sendPage(step.target);
+    const acked = await waitForAck(step.target, step.ackTimeoutMinutes * 60_000);
+    if (acked) return step.target; // this person/team owns the response now
+  }
+  throw new Error("Escalation policy exhausted with no acknowledgment — page a human directly.");
+}
+</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod">
+        <h4>At scale</h4>
+        <p>An e-commerce platform's payment webhook processor silently dropped ~8% of webhooks during a database
+        failover, because the retry logic only retried on HTTP 5xx and the failover produced a brief run of
+        connection-reset errors that the client library surfaced as a different exception type, which the retry
+        wrapper didn't catch. No alert fired, because the error rate on the webhook endpoint itself stayed low
+        (the drops happened before the handler even executed) — it was only discovered three weeks later when
+        finance reconciliation flagged a mismatch between expected and recorded payments. The incident was
+        retroactively classified SEV2 (real financial impact, but not customer-facing/time-critical once
+        understood), and the post-mortem's 5-whys traced it past "retry logic didn't catch this exception type"
+        to the actual structural root cause: there was no end-to-end reconciliation check comparing
+        upstream-sent vs. downstream-received event counts, so any silent drop — regardless of its specific
+        cause — would have gone undetected for an arbitrary length of time. The highest-leverage action item
+        wasn't fixing that one retry bug (which only prevents that exact recurrence); it was adding a continuous
+        reconciliation job, which would catch an entire class of future silent-drop bugs regardless of cause.</p>
+      </div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha">
+        <h4>Gotcha</h4>
+        <p>Stopping the 5-whys at the first technical answer (e.g., "a null pointer") and writing that as the
+        root cause produces an action item that only prevents that exact bug from recurring, not the class of
+        bugs it belongs to. A root cause stated as "staging data didn't represent production data shape" is
+        reusable — it informs a prevention strategy for every future schema-dependent bug, not just this one.
+        If your 5-whys chain stops after two "whys," you almost certainly haven't reached a structural cause yet.</p>
+      </div>
+      <div class="box gotcha">
+        <h4>Gotcha</h4>
+        <p>Conflating the Incident Commander role with "the most senior engineer" or "whoever's debugging it" is
+        a common and costly mistake — the IC's job is coordination and decision-making, not hands-on-keyboard
+        debugging, and an IC who also tries to be the one fixing the code loses the ability to make clear-headed
+        calls about escalation, rollback-vs-forward-fix, and customer communication timing. On a real SEV1, the
+        most technically capable person is often better used as the Operations Lead while someone else — even
+        someone less senior — runs the IC role, as long as they're trained in it.</p>
+      </div>
+      <ul>
+        <li>Writing a post-mortem that reads like a confession rather than a systems analysis invites blame
+        culture and makes future incidents less likely to be reported honestly or quickly.</li>
+        <li>Action items with no owner or due date are, in practice, never completed — track them in the same
+        system as regular engineering work (sprint board, not a forgotten doc), and review completion rate as a
+        team metric.</li>
+        <li>Classifying severity by how scary the error message looks rather than by actual user/business impact
+        leads to either under-reacting to a quiet-but-severe data-corruption bug or over-reacting to a loud but
+        harmless one.</li>
+        <li>Skipping a live, timestamped timeline during the incident and trying to reconstruct it afterward from
+        memory and Slack scrollback produces a materially worse post-mortem — assign a scribe from the start of
+        any SEV1/SEV2.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>Full IC/Comms/Scribe role split</td><td>SEV1/SEV2, multi-team involvement, customer-visible impact</td><td>SEV3/SEV4, single-engineer, single-service issue</td><td>Owning engineer self-manages with lightweight ticket tracking</td></tr>
+        <tr><td>Rollback-first mitigation</td><td>Recent deploy is the likely cause and rollback is fast/safe</td><td>Rollback itself risks data inconsistency (e.g., schema migration already applied)</td><td>Forward-fix with a targeted hotfix, or feature-flag kill switch</td></tr>
+        <tr><td>Public status page updates</td><td>Customer-facing impact, SLA-bound customers, regulatory disclosure needs</td><td>Fully internal tooling incident with no external impact</td><td>Internal-only incident channel, no public comms</td></tr>
+        <tr><td>Formal written post-mortem for every incident</td><td>SEV1/SEV2 always; SEV3 for recurring patterns</td><td>One-off SEV4 cosmetic issues with an obvious, already-fixed cause</td><td>Lightweight ticket note for low-severity, non-recurring issues</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic">
+        <h4>Basic</h4>
+        <details class="qa"><summary>What determines an incident's severity level — the technical scariness of the bug or something else?</summary><div class="answer"><p>User and business impact — scope of affected users, revenue/data/compliance exposure, and urgency — not how alarming the underlying stack trace or bug looks technically.</p></div><div class="followup">Follow-up: give an example of a technically trivial bug that would still be SEV1.</div></details>
+        <details class="qa"><summary>What's the difference between SEV1 and SEV3?</summary><div class="answer"><p>SEV1 is a complete outage or major breach affecting most/all users requiring an immediate all-hands incident response; SEV3 is a minor feature degradation affecting a small subset, handled by the owning team during business hours without invoking the full incident process.</p></div><div class="followup">Follow-up: who typically decides the severity, and when during the response?</div></details>
+        <details class="qa"><summary>What does "blameless" mean in a blameless post-mortem?</summary><div class="answer"><p>The analysis and write-up focus on systemic and process causes rather than individual fault — the goal is extracting fixable structural causes, not assigning blame, because blame-focused post-mortems discourage honest reporting and hide the information needed to actually prevent recurrence.</p></div><div class="followup">Follow-up: why does blame-assignment specifically degrade the quality of future incident data?</div></details>
+        <details class="qa"><summary>What is the 5 whys technique?</summary><div class="answer"><p>Repeatedly asking "why did this happen" starting from the symptom, chaining each answer into the next question, until you reach a structural/process-level root cause rather than stopping at the first proximate technical cause.</p></div><div class="followup">Follow-up: how do you know when you've reached the "real" root cause versus stopping too early?</div></details>
+        <details class="qa"><summary>What is an escalation policy in an on-call system?</summary><div class="answer"><p>A defined chain of who gets paged next if the current person doesn't acknowledge within a set time window — primary, then secondary, then team lead, etc. — so an unresponsive on-call engineer doesn't stall the response indefinitely.</p></div><div class="followup">Follow-up: what's a reasonable ack timeout, and why not make it very short?</div></details>
+        <details class="qa"><summary>Why should action items from a post-mortem have an explicit owner and due date?</summary><div class="answer"><p>Without an owner and date, action items are, in practice, never completed — they need to be tracked like regular engineering work, not left in a static document nobody revisits.</p></div><div class="followup">Follow-up: how would you track completion rate as a team-level metric?</div></details>
+        <details class="qa"><summary>What's the role of the Incident Commander, and what do they explicitly NOT do?</summary><div class="answer"><p>The IC owns coordination, severity/escalation decisions, and declaring resolution; they explicitly do not personally debug the code — that's the Operations Lead/SME's job — so the IC can keep a clear head for decision-making.</p></div><div class="followup">Follow-up: why is combining the IC and SME roles risky on a real SEV1?</div></details>
+      </div>
+      <div class="qa-level medium">
+        <h4>Medium</h4>
+        <details class="qa"><summary>Walk through why a post-mortem's root cause should usually be a process/structural statement rather than a single line of buggy code.</summary><div class="answer"><p>A root cause stated as a specific code bug ("null pointer on line 42") only prevents that exact recurrence; chaining the 5 whys further to something like "staging data doesn't represent production data shape" or "no dry-run gate exists for migrations" identifies a class of future bugs the same gap would also cause, making the resulting action item far higher-leverage.</p></div><div class="followup">Follow-up: how do you decide when you've gone "far enough" and not kept whying into generic organizational issues unrelated to this incident?</div></details>
+        <details class="qa"><summary>Why separate the Communications Lead role from the engineers actually fixing the issue during a SEV1?</summary><div class="answer"><p>Without a dedicated comms lead, SMEs and the IC get repeatedly interrupted by "any updates?" pings from stakeholders/support/customers, which slows the actual fix; a comms lead posting on a fixed cadence (e.g., every 15-30 min) absorbs that need independently, letting the technical responders stay focused.</p></div><div class="followup">Follow-up: what should a status update communicate even when there's no real progress to report?</div></details>
+        <details class="qa"><summary>A recurring SEV2 keeps happening every few months with slightly different proximate causes each time. What does that pattern suggest about the post-mortem process itself?</summary><div class="answer"><p>If the proximate cause differs but the incident recurs, the previous post-mortems likely stopped the 5-whys too early and fixed only the specific trigger each time rather than the shared structural weakness enabling all of them (e.g., a missing class of test coverage, a fragile shared dependency, or an organizational gap like no ownership of a particular pipeline) — the right move is a dedicated cross-incident review looking at all the post-mortems together for the common thread.</p></div><div class="followup">Follow-up: how would you present this pattern to leadership to get investment in the real structural fix?</div></details>
+        <details class="qa"><summary>How should severity classification interact with SLO burn-rate alerting discussed in the alerting chapter?</summary><div class="answer"><p>Paging criteria should be tied to SLO burn-rate (how fast you're consuming error budget) rather than raw threshold breaches, so severity roughly tracks how quickly the situation threatens to exhaust the error budget / breach the SLA — a slow burn might be a SEV3 ticket, a fast burn consuming a month's error budget in an hour is a SEV1 page regardless of the absolute error count being technically small.</p></div><div class="followup">Follow-up: why is raw error-count threshold alerting prone to both false positives and dangerously late true positives compared to burn-rate alerting?</div></details>
+        <details class="qa"><summary>Why might a less senior engineer sometimes be a better Incident Commander than the most senior engineer available during a SEV1?</summary><div class="answer"><p>IC is a coordination and communication skill distinct from technical debugging skill — a strong IC stays calm, delegates clearly, manages comms cadence, and makes timely escalation/rollback calls without needing to personally understand every line of the failing code; the most senior engineer is often more valuable heads-down as the Operations Lead actually fixing the issue, and trying to do both roles at once degrades both.</p></div><div class="followup">Follow-up: what training or practice would you put in place so more engineers are comfortable taking the IC role?</div></details>
+      </div>
+      <div class="qa-level advanced">
+        <h4>Advanced</h4>
+        <details class="qa"><summary>Design an incident response program from scratch for a 40-engineer company that currently has no formal process (outages get fixed ad hoc, no post-mortems). What do you build first, and in what order?</summary><div class="answer"><p>First: a severity taxonomy (SEV1-4) with clear impact-based criteria, because nothing else works without a shared definition of "how bad is this." Second: an on-call rotation and escalation policy per service with paging tied to existing alerts, even if those alerts are imperfect initially. Third: a lightweight incident-declaration mechanism (even a Slack command/channel convention) that assigns IC/Comms/Scribe roles for SEV1/SEV2 only at first — don't try to formalize SEV3/4 yet. Fourth: a blameless post-mortem template and a recurring review meeting where action items are tracked to completion as a visible team metric. Only after these are running smoothly for a few incidents would you invest in deeper tooling (status pages, automated timeline bots, SLO burn-rate paging) — process and culture come before tooling, because good tooling on top of a blame-driven or inconsistent process doesn't fix the underlying dysfunction.</p></div><div class="followup">Follow-up: how would you get buy-in from engineers who see this as "process overhead" after years of ad hoc firefighting?</div></details>
+        <details class="qa"><summary>Critique: "Every incident needs a full post-mortem meeting with the whole team, or we're not learning from it." What's wrong with this as a blanket policy?</summary><div class="answer"><p>Mandating a full synchronous meeting for every incident, including low-severity recurring ones with already-understood causes, creates meeting fatigue that erodes the perceived value of the process and discourages timely incident declaration for smaller issues (engineers under-report to avoid triggering overhead). The senior approach scales the process to severity: SEV1/SEV2 get a full written post-mortem and a review meeting; SEV3 gets a lightweight written note with action items tracked but no mandatory meeting, with periodic batch reviews looking for patterns across several SEV3s; SEV4 gets a ticket. The goal is consistent learning capture at low overhead, not uniform ceremony regardless of severity.</p></div><div class="followup">Follow-up: how would you still catch a dangerous pattern hiding across many individually-minor SEV3/4 incidents if they don't get full review?</div></details>
+        <details class="qa"><summary>How do you handle a post-mortem when the root cause traces back to a decision made by a team or individual who is no longer at the company, or to a vendor's internal bug you have no visibility into?</summary><div class="answer"><p>For a departed-employee cause: focus entirely on the current-state structural gap (e.g., "this decision was undocumented and un-reviewed, which is why nobody caught it") rather than the absent person, and the action item becomes a process fix (mandatory design review, documentation requirement) rather than anything about the individual. For a vendor's internal bug: the 5-whys should stop at your own boundary of control — the real actionable root cause on your side is usually "we had no fallback/circuit-breaker for this dependency" or "we had no contractual SLA/monitoring on this vendor's behavior," since you can't fix their code, but you can fix your blast-radius exposure to their failures.</p></div><div class="followup">Follow-up: how would you incorporate vendor incident post-mortems (if they publish one) into your own action items?</div></details>
+        <details class="qa"><summary>Your org measures incident response success primarily by MTTR (mean time to resolution). What perverse incentives can this metric create, and how would you counter them?</summary><div class="answer"><p>Optimizing purely for MTTR incentivizes quick-but-fragile mitigations (e.g., a rollback that papers over data inconsistency, or silencing an alert instead of fixing the underlying issue) because "resolved" gets measured the instant symptoms disappear, not whether the fix is durable or whether it created a slower-burning secondary problem. It also discourages thorough root-causing, since time spent understanding the real cause before mitigating looks bad on the clock. Counter with a balanced scorecard: track MTTR alongside repeat-incident rate for the same root cause, percentage of post-mortems with completed action items, and a qualitative review of whether the mitigation was a durable fix vs. a stopgap — and explicitly normalize "we took 10 extra minutes to understand this correctly before acting" as good behavior, not something MTTR alone would reward.</p></div><div class="followup">Follow-up: what's a leading indicator (not just MTTR/MTTD) that predicts incident response quality before the next incident even happens?</div></details>
+        <details class="qa"><summary>How would you design the handoff process for a long-running SEV1 that spans a shift change or multiple time zones, without losing context or accountability?</summary><div class="answer"><p>Treat IC handoff as a first-class, explicitly logged event in the timeline (who, when, confirmed acknowledgment from the incoming IC), paired with a mandatory structured handoff summary covering: current working theory, what's been tried and ruled out, current mitigation status, and the next planned action — delivered synchronously (a call, not just a Slack message dump) so the incoming IC can ask clarifying questions before taking over. The outgoing IC remains reachable for a defined window (e.g., 30 minutes) in case the incoming IC needs clarification. The scribe's running timeline is the single source of truth that makes this possible — without it, every handoff re-derives context from scratch and risks repeating already-ruled-out mitigation attempts.</p></div><div class="followup">Follow-up: what's the risk of NOT having a defined overlap window between outgoing and incoming IC?</div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment">
+        <span class="level-tag">Beginner (30-60 min)</span>
+        <h4>Write a severity-classification rubric and classify sample incidents</h4>
+        <p>Write a one-page SEV1-4 rubric with concrete, impact-based criteria (not technical-severity-based) for
+        a hypothetical e-commerce app. Then classify five short incident scenarios you write yourself (e.g.,
+        "checkout 500s for all users for 10 minutes," "a typo in a marketing banner," "an internal admin tool is
+        slow for 3 employees," "a data export silently drops 2% of rows for a week before detection") against
+        your rubric.</p>
+        <ul>
+          <li>Each SEV level in your rubric must state a concrete, measurable criterion, not a vague description.</li>
+          <li>For each sample scenario, write one sentence justifying the severity you assigned.</li>
+        </ul>
+        <p><strong>Acceptance criteria:</strong> A rubric document plus five classified scenarios with justification sentences.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>Base your criteria on affected-user percentage, revenue/data/compliance exposure, and whether a workaround exists — not on how scary the bug sounds.</p></div></details>
+        <p><strong>Bonus:</strong> Add a column for "who gets paged" at each severity level.</p>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Intermediate (2-4 hrs)</span>
+        <h4>Run a simulated incident and write a full post-mortem</h4>
+        <p>Pick (or recall) a real bug you've fixed before, or construct a plausible one in a toy app. Simulate an
+        incident timeline for it (write out realistic timestamps for detection, acknowledgment, investigation,
+        and mitigation), then write a complete post-mortem using the template from this chapter's code examples,
+        including a genuine 5-whys chain that goes at least 4 levels deep and reaches a structural root cause, not
+        a single line of code.</p>
+        <ul>
+          <li>Timeline must have at least 6 distinct timestamped events.</li>
+          <li>5-whys chain must have at least 4 "why" steps and end in a process/structural statement.</li>
+          <li>At least 3 action items, each with an owner (can be a role, e.g. "on-call lead") and a due date.</li>
+        </ul>
+        <p><strong>Acceptance criteria:</strong> A complete post-mortem document following the template, reviewed against the checklist above.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>If your 5-whys chain stops at "a bug in the code," you've stopped too early — ask why that specific bug wasn't caught by tests, review, or staging, and why that gap exists.</p></div></details>
+        <p><strong>Bonus:</strong> Add a "contributing factors" section distinct from the root cause.</p>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Advanced (1-2 days)</span>
+        <h4>Design and tabletop-exercise a full incident response program</h4>
+        <p>Design an end-to-end incident response program for a hypothetical 50-person engineering org with no
+        existing process: severity taxonomy, on-call rotation and escalation policy design, IC/Comms/Scribe role
+        definitions and training plan, a post-mortem template and review cadence, and a tracking mechanism for
+        action-item completion as a team metric. Then run a tabletop exercise: write a realistic SEV1 scenario and
+        simulate the full response end-to-end on paper — who gets paged, who declares the incident, who takes
+        each role, what the comms updates say at each interval, and the resulting post-mortem.</p>
+        <ul>
+          <li>Program design must address at least 3 time zones / follow-the-sun on-call handoff.</li>
+          <li>Tabletop must include at least one escalation (an initial page going unacknowledged).</li>
+          <li>Tabletop must include at least one IC handoff mid-incident with a structured handoff summary.</li>
+        </ul>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>This is intentionally open-ended — think about what breaks the process under realistic friction (someone's asleep, a key person is on vacation, two incidents happen simultaneously) rather than designing only for the clean-path case.</p></div></details>
+        <p><strong>Bonus:</strong> Add a cross-incident review step that looks for a recurring root-cause pattern across multiple post-mortems.</p>
+      </div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet">
+        <ul>
+          <li>Severity (SEV1-4) is driven by user/business impact, not how scary the bug looks technically.</li>
+          <li>On-call escalation policies auto-escalate an unacknowledged page to a secondary/lead — a safety net against one unreachable person stalling response.</li>
+          <li>Incident Commander coordinates and decides; they do not personally debug — that's the Operations Lead/SME's job.</li>
+          <li>A Comms Lead posts updates on a fixed cadence so SMEs aren't interrupted by status-check pings.</li>
+          <li>A Scribe's live, timestamped timeline is the single most valuable post-mortem input — don't reconstruct it from memory afterward.</li>
+          <li>5 whys: keep chaining past the first proximate technical cause until you reach a structural/process-level root cause.</li>
+          <li>Contributing factors are distinct from root cause — they made things worse/slower, but aren't "why it happened."</li>
+          <li>Action items need an explicit owner and due date, tracked like normal engineering work, or they never get done.</li>
+          <li>Blameless means focusing on systemic causes, not because individuals don't matter, but because blame destroys the honest reporting the whole process depends on.</li>
+          <li>Scale post-mortem ceremony to severity — not every SEV3/4 needs a full meeting, but every SEV1/2 does.</li>
+        </ul>
+      </div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://sre.google/sre-book/postmortem-culture/">Google SRE Book: Postmortem Culture</a></li>
+        <li><a href="https://response.pagerduty.com/">PagerDuty Incident Response Documentation</a></li>
+        <li><a href="https://sre.google/sre-book/managing-incidents/">Google SRE Book: Managing Incidents</a></li>
+        <li><a href="https://www.atlassian.com/incident-management/postmortem">Atlassian: Incident Postmortems Guide</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="05-secure-auth-secrets.html"><span class="dir">← Previous</span>Secure Auth, Secrets, CORS/CSP/XSS/CSRF</a>
+        <a class="next" href="../08-python-intermediate/index.html"><span class="dir">Next →</span>Python Intermediate</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · Observability &amp; Security</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-typescript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-yaml.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-sql.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "07-observability-security", chapterKey: "06-incident-handling" });</script>
+</body>
+</html>

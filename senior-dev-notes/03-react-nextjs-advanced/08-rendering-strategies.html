@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Rendering Strategies: CSR, SSR, SSG, ISR, PPR — React & Next.js Advanced — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">React &amp; Next.js Advanced</a><span class="sep">›</span>Rendering Strategies</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>Rendering Strategies: CSR, SSR, SSG, ISR, PPR</h1>
+      <p class="meta-line"><span>⏱ 3 hrs</span><span>📍 Chapter 8 of 11</span></p>
+      <p><strong>One-line summary:</strong> Every rendering strategy is really just a different answer to one
+      question — "when, and how often, does the server re-run the render function to produce this page's
+      HTML?" — and Partial Prerendering is Next.js's attempt to let a single route answer that question
+      differently per-section instead of picking one answer for the whole page.</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>Picking the wrong rendering strategy is one of the most expensive architectural mistakes a team can
+      make — it's baked into routing conventions, cache headers, CDN behavior, and infra cost, and it's painful
+      to retrofit. Interviewers use this topic to separate candidates who memorized "SSG is for blogs" from
+      candidates who can reason about staleness tolerance, request volume, and personalization constraints to
+      justify a strategy per-route. By 2025-26, "when would you use ISR vs PPR vs plain SSR" is a standard
+      Staff-level question, and most candidates can't explain the stale-while-revalidate mechanics underneath
+      ISR or what "partial" actually means in Partial Prerendering.</p>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>Read <a href="06-nextjs-app-router.html">Next.js App Router</a> and
+      <a href="07-server-client-components.html">Server vs Client Components</a> first — rendering strategy
+      decisions are made per route segment, and you need to understand Server Components to understand what's
+      being cached. Related: <a href="09-core-web-vitals.html">Core Web Vitals</a> (rendering strategy is the
+      single biggest lever on LCP/TTFB).</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="the-spectrum">The spectrum: who runs the render, and when</h3>
+      <p><strong>CSR (Client-Side Rendering):</strong> the server ships a near-empty HTML shell plus a JS
+      bundle; the browser downloads React, runs it, fetches data, and renders — the user sees a blank page or
+      spinner until JS executes. <strong>SSR (Server-Side Rendering):</strong> on every request, the server
+      runs the render function fresh, producing full HTML immediately — fast first paint, but every request
+      pays the render + data-fetch cost. <strong>SSG (Static Site Generation):</strong> the render runs once,
+      at build time, producing HTML that's then served identically to every visitor from a CDN edge — zero
+      per-request render cost, but the content is frozen until the next build. <strong>ISR (Incremental Static
+      Regeneration):</strong> SSG's output but with a background refresh mechanism, so static pages can go
+      stale and silently re-generate without a full rebuild. <strong>PPR (Partial Prerendering):</strong> a
+      single response that's a static shell (prerendered at build time, served instantly from the edge) with
+      dynamic "holes" streamed in after, combining SSG's instant shell with SSR's per-request freshness for the
+      parts that need it.</p>
+
+      <h3 id="isr-internals">ISR internals: stale-while-revalidate, not instant invalidation</h3>
+      <p>When you set <code>export const revalidate = 60</code> on a route (or pass <code>revalidate</code> to
+      a <code>fetch</code> call), Next.js doesn't set a timer that regenerates the page every 60 seconds. It
+      tags the cached HTML with an expiry timestamp. The <em>next request after that timestamp passes</em> is
+      the trigger: Next.js serves that request the <strong>existing stale HTML immediately</strong> (so the
+      user never waits on a regeneration), and kicks off a regeneration in the background. Once the new HTML
+      finishes rendering, it atomically replaces the cached version for all subsequent requests. This is
+      exactly the stale-while-revalidate pattern from HTTP caching — the staleness window is bounded by your
+      <code>revalidate</code> value plus however long one regeneration takes, but no single user is ever
+      blocked waiting for that regeneration. On-demand revalidation (<code>revalidatePath</code> /
+      <code>revalidateTag</code> from a Server Action or webhook handler) skips the timer entirely and marks
+      the cache stale immediately, so the very next request triggers regeneration — this is how a CMS webhook
+      can make a published change visible within seconds instead of waiting for the next timer tick.</p>
+
+      <h3 id="ppr-internals">PPR internals: static shell + Suspense boundaries as the dynamic seam</h3>
+      <p>PPR works by rendering a route in two passes conceptually. At build time (or first request, then
+      cached), Next.js renders the route and walks the tree: anything <em>outside</em> a <code>&lt;Suspense&gt;</code>
+      boundary that doesn't depend on per-request data (no <code>cookies()</code>, <code>headers()</code>, or
+      uncached dynamic <code>fetch</code>) gets fully resolved into static HTML — this becomes the
+      "static shell," served instantly from the edge with no server round-trip, identical to an SSG response.
+      Anything <em>inside</em> a Suspense boundary that does depend on per-request data is left as an
+      unresolved placeholder in that shell. On an actual request, the server streams the static shell
+      immediately (perceived as instant), then runs only the dynamic subtrees (now with access to the real
+      request's cookies/headers/params) and streams their resolved content into the placeholders as each
+      resolves — technically the same streaming SSR mechanism from Ch. 7's RSC payload, just scoped to only
+      the parts of the tree that actually need it, with the rest already delivered. The practical effect: a
+      product page can have a fully static shell (layout, static copy, non-personalized recommendations) that
+      loads instantly, with a personalized "recommended for you" rail and a per-user cart icon streamed in a
+      beat later — one route, two rendering strategies, chosen automatically by where you place
+      Suspense and what APIs each subtree touches.</p>
+
+      <h3 id="choosing-strategy">Choosing a strategy per route, not per app</h3>
+      <p>The App Router's model explicitly rejects "pick one strategy for the whole app" — rendering mode is a
+      per-segment decision driven by what APIs a segment touches (<code>cookies()</code>/<code>headers()</code>
+      force dynamic rendering for that subtree) and explicit config (<code>export const dynamic</code>,
+      <code>revalidate</code>). A senior engineer's job is mapping each route's actual staleness tolerance and
+      personalization need onto this spectrum: a marketing page is SSG, a dashboard needing the logged-in
+      user's data on every load is SSR (or dynamic), a product catalog that changes a few times a day is ISR,
+      and a page that's "mostly static but with one personalized widget" is the textbook PPR case.</p>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>Next.js's build step statically analyzes each route segment to decide its rendering mode. If a
+      segment (or anything it imports/calls) reads request-specific data — <code>cookies()</code>,
+      <code>headers()</code>, <code>searchParams</code>, or an uncached <code>fetch</code> — it's marked
+      dynamic, forcing that subtree (and, pre-PPR, the whole route) to render per-request. The Data Cache sits
+      underneath <code>fetch</code> calls: a <code>fetch</code> with <code>{ cache: 'force-cache' }</code> (the
+      default for GET requests unless opted out) is memoized on disk/in the deployment's cache layer, keyed by
+      URL+options, and that cache entry is what <code>revalidate</code> and <code>revalidateTag</code> actually
+      operate on — ISR's "regenerate the page" is really "re-run the render, which re-runs the fetches, which
+      hit a now-invalidated or expired cache entry and refetch." At the CDN/edge layer, the platform (Vercel's
+      Edge Network or equivalent) caches the actual rendered HTML response itself, respecting the same
+      revalidate window, so a request can be served entirely from the edge without reaching your origin server
+      at all until the staleness window expires.</p>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+flowchart TD
+  A[Request arrives for ISR route] --> B{Cached HTML expired?}
+  B -->|No, fresh| C[Serve cached HTML from edge, no origin hit]
+  B -->|Yes, stale| D[Serve existing stale HTML immediately]
+  D --> E[Trigger background regeneration on origin]
+  E --> F[Re-run render + fetches]
+  F --> G[Atomically swap cache with new HTML]
+  G --> H[Next request gets fresh HTML]
+      </div>
+      <div class="mermaid">
+flowchart TD
+  A[Route render starts] --> B[Walk tree: static vs dynamic subtrees]
+  B --> C[Static parts: no cookies/headers/uncached fetch]
+  B --> D[Dynamic parts: inside Suspense, touches request data]
+  C --> E[Prerendered once, becomes the static shell]
+  D --> F[Left as placeholder in the shell]
+  E --> G[Request hits route]
+  F --> G
+  G --> H[Static shell streamed instantly from edge]
+  H --> I[Dynamic subtrees rendered per-request with real cookies/headers]
+  I --> J[Resolved content streamed into placeholders]
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-tsx">// app/products/page.tsx -- ISR: regenerate at most every 5 minutes, stale-while-revalidate
+export const revalidate = 300;
+
+async function getProducts() {
+  // this fetch's cache entry is what `revalidate` governs
+  const res = await fetch("https://api.example.com/products", {
+    next: { revalidate: 300, tags: ["products"] },
+  });
+  return res.json();
+}
+
+export default async function ProductsPage() {
+  const products = await getProducts();
+  return <ProductGrid products={products} />;
+}
+
+// app/actions.ts -- on-demand revalidation, bypasses the timer entirely
+"use server";
+import { revalidateTag } from "next/cache";
+
+export async function onProductUpdated() {
+  revalidateTag("products"); // next request triggers immediate regeneration
+}
+
+// app/dashboard/page.tsx -- PPR: static shell + dynamic per-user hole
+import { Suspense } from "react";
+import { cookies } from "next/headers";
+
+export const experimental_ppr = true; // opt this route into Partial Prerendering
+
+async function PersonalizedGreeting() {
+  const session = (await cookies()).get("session"); // forces this subtree dynamic
+  const user = await getUser(session?.value);
+  return <h2>Welcome back, {user.name}</h2>;
+}
+
+export default function DashboardPage() {
+  return (
+    <div>
+      {/* Static shell: no request-specific data, prerendered once */}
+      <DashboardNav />
+      <StaticPromoBanner />
+
+      {/* Dynamic hole: streamed in per-request after the shell is already shown */}
+      <Suspense fallback={<GreetingSkeleton />}>
+        <PersonalizedGreeting />
+      </Suspense>
+    </div>
+  );
+}</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4>
+      <p>An e-commerce team rendered their entire product catalog (80,000 SKUs) as SSR because a handful of
+      pages needed per-user pricing (B2B accounts with negotiated discounts). Every page load — even for the
+      95% of anonymous traffic seeing the same public price — paid the full render + DB round-trip cost,
+      origin servers were scaled for peak SSR load, and TTFB regularly exceeded 800ms under traffic spikes.
+      Migrating to PPR let the product shell (images, description, public price, reviews) be prerendered and
+      served instantly from the edge for all traffic, with only the B2B-pricing widget and "add to cart with
+      your account's terms" section inside a Suspense boundary reading cookies. Result: edge cache hit rate on
+      the shell went to effectively 100% for anonymous traffic, origin load dropped by roughly 90%, and median
+      TTFB fell from ~800ms to under 100ms, with the per-user pricing widget still correctly dynamic for the 5%
+      of traffic that needed it.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4>
+      <p>Calling <code>cookies()</code> or <code>headers()</code> anywhere in a route's module graph — even in
+      a utility function nobody expects to be "the dynamic part" — opts that whole subtree out of static
+      rendering. A team adding an analytics helper that reads a cookie for A/B bucketing at the top of an
+      otherwise-static page accidentally converted the entire page to fully dynamic SSR, silently losing all
+      the edge-caching benefit they'd architected for, without a single build warning pointing at the cause.</p></div>
+      <ul>
+        <li>Assuming ISR's <code>revalidate</code> window is a hard guarantee of freshness — it's a lower bound on staleness tolerance, not an upper bound on actual staleness (a slow regeneration or low-traffic route can serve stale content well past the window if no request arrives to trigger the check).</li>
+        <li>Using <code>revalidatePath</code> broadly ("just revalidate everything") instead of tag-based <code>revalidateTag</code> scoped to the actual changed data, causing unnecessary full-route regenerations and origin load on unrelated routes.</li>
+        <li>Forgetting that PPR's static shell is computed once (at build/deploy, or lazily cached) — if the "static" part of a page actually needs to change per deploy-cycle dynamically without a full redeploy, it needs its own revalidate strategy, not just "put it outside Suspense."</li>
+        <li>Choosing CSR for an SEO-critical, content-heavy page just because it was the path of least resistance from an existing SPA — crawlers and Core Web Vitals both penalize the blank-shell-then-fetch pattern that CSR produces.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>CSR</td><td>Internal tools, authenticated-only dashboards where SEO is irrelevant and a loading state is acceptable</td><td>Public, SEO-relevant, or first-paint-sensitive content</td><td>SSR or PPR</td></tr>
+        <tr><td>SSR</td><td>Fully personalized or highly volatile per-request content where caching isn't viable</td><td>Content shared across most users — wastes render cost repeating identical work</td><td>ISR or PPR</td></tr>
+        <tr><td>SSG</td><td>Content that changes only on deploy (docs, marketing pages)</td><td>Content that changes between deploys</td><td>ISR</td></tr>
+        <tr><td>ISR</td><td>Mostly-static content with periodic or event-driven updates (catalogs, CMS-driven pages)</td><td>Needs true per-request personalization</td><td>PPR</td></tr>
+        <tr><td>PPR</td><td>Pages that are mostly static/shared but have small personalized/dynamic sections</td><td>Page is almost entirely dynamic/personalized anyway (little static shell to gain from)</td><td>SSR</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic"><h4>Basic</h4>
+      <details class="qa"><summary>What's the core difference between SSR and SSG?</summary><div class="answer"><p>SSR runs the render on every request (fresh HTML each time); SSG runs the render once at build time and serves identical cached HTML to every visitor until the next build.</p></div><div class="followup">Follow-up: Which one scales better under high traffic, and why?</div></details>
+      <details class="qa"><summary>What problem does ISR solve that plain SSG doesn't?</summary><div class="answer"><p>SSG's content is frozen until the next full rebuild; ISR lets static pages refresh periodically (or on-demand) without requiring a full site rebuild, by regenerating individual pages in the background.</p></div><div class="followup">Follow-up: What triggers an ISR regeneration?</div></details>
+      <details class="qa"><summary>In plain terms, what does Partial Prerendering combine?</summary><div class="answer"><p>A statically prerendered shell (like SSG, served instantly) with dynamic, per-request content streamed into specific holes in that shell (like SSR), on the same route.</p></div><div class="followup">Follow-up: What marks the boundary between the static shell and a dynamic hole?</div></details>
+      <details class="qa"><summary>Why does CSR typically hurt SEO and perceived performance compared to SSR/SSG?</summary><div class="answer"><p>The server ships a near-empty HTML shell; the browser must download and execute JS, then fetch data, before any real content appears — crawlers and users both see a blank/loading state for longer than with server-rendered HTML.</p></div><div class="followup">Follow-up: Do modern search crawlers execute JavaScript at all?</div></details>
+      <details class="qa"><summary>What Next.js APIs, when called in a route segment, force that segment into dynamic rendering?</summary><div class="answer"><p><code>cookies()</code> and <code>headers()</code> (reading request-specific data), and an uncached <code>fetch</code> call — any of these mark the segment as needing per-request execution rather than static.</p></div><div class="followup">Follow-up: Does using `searchParams` in a Server Component have the same effect?</div></details>
+      <details class="qa"><summary>What does `export const revalidate = 60` actually configure?</summary><div class="answer"><p>The number of seconds after which the cached page/fetch is considered stale; it doesn't set a timer that regenerates automatically — regeneration is triggered by the next request arriving after that window expires.</p></div><div class="followup">Follow-up: What does the user who triggers that regeneration actually see?</div></details>
+      </div>
+      <div class="qa-level medium"><h4>Medium</h4>
+      <details class="qa"><summary>Explain stale-while-revalidate as it applies to ISR, step by step.</summary><div class="answer"><p>When a cached page's revalidate window expires, the next incoming request is served the existing (now-stale) HTML immediately with no added latency; in the background, Next.js reruns the render (and its underlying fetches), and once that completes, the cache is atomically swapped to the fresh HTML for all subsequent requests. No single user is ever blocked waiting on the regeneration — the staleness window is bounded by the revalidate value plus one regeneration's duration.</p></div><div class="followup">Follow-up: What happens if two requests arrive simultaneously right after expiry — do you get two concurrent regenerations?</div></details>
+      <details class="qa"><summary>How does `revalidateTag` differ from `revalidatePath`, and when would you prefer one over the other?</summary><div class="answer"><p>`revalidatePath` invalidates the cache for a specific route path; `revalidateTag` invalidates every cached fetch across any route that was tagged with that tag, regardless of which route it lives in. Tag-based invalidation is preferable when a single piece of underlying data (e.g., one product) is rendered across multiple routes (listing page, detail page, search results) — one `revalidateTag("product-123")` call invalidates all of them precisely, instead of manually enumerating every affected path.</p></div><div class="followup">Follow-up: How would you tag fetches so that updating one product doesn't accidentally invalidate the entire catalog's cache?</div></details>
+      <details class="qa"><summary>Concretely, what determines whether a piece of a PPR route ends up in the static shell versus a dynamic hole?</summary><div class="answer"><p>Two things: whether it's wrapped in a `&lt;Suspense&gt;` boundary, and whether anything in that subtree calls a request-specific API (`cookies()`, `headers()`) or does an uncached dynamic fetch. Anything outside Suspense and free of those APIs gets resolved at prerender time into the static shell; anything inside Suspense that does touch request-specific data is deferred and streamed in per-request.</p></div><div class="followup">Follow-up: What happens if you put request-specific code outside any Suspense boundary on a PPR route?</div></details>
+      <details class="qa"><summary>Why would a senior engineer reject "just use SSR everywhere, it's always correct" as an architecture default?</summary><div class="answer"><p>SSR is always correct in the sense of freshness, but it throws away all caching benefit for content that's actually shared across most requests — every single request re-pays full render + data-fetch cost that could've been served once from a CDN edge. At scale this means unnecessarily high origin load, higher latency under traffic spikes (no edge cache absorbing load), and higher infra cost, for content that didn't need per-request freshness in the first place.</p></div><div class="followup">Follow-up: What's a legitimate case where SSR actually is the only correct choice?</div></details>
+      </div>
+      <div class="qa-level advanced"><h4>Advanced</h4>
+      <details class="qa"><summary>Walk through what Next.js's Data Cache actually stores and how it relates to the CDN/edge cache layer for an ISR route.</summary><div class="answer"><p>The Data Cache sits beneath individual `fetch` calls (or React's `cache()`-wrapped functions) inside your render — it's keyed by request URL+options, and `revalidate`/`revalidateTag` operate directly on these entries, causing the next render to refetch rather than reuse a stale cached response. Separately, the edge/CDN layer caches the actual rendered HTML output of the whole route, respecting the same revalidate window conceptually, so a request within the freshness window can be served entirely from the edge without the origin server executing anything at all — ISR's "regeneration" is the origin re-running the render (which re-populates the Data Cache) only when the edge cache has expired and a request actually reaches origin.</p></div><div class="followup">Follow-up: What happens to the edge cache entry when you call `revalidateTag` from a Server Action — is it invalidated instantly everywhere, or lazily on next request?</div></details>
+      <details class="qa"><summary>Design the rendering strategy for a news site's article page: public articles, a live comment count, and a paywall-gated "subscriber" section. Justify each choice.</summary><div class="answer"><p>The article body/headline/images should be ISR (or PPR's static shell) — content is identical for all anonymous readers and changes infrequently once published, with on-demand revalidation via a CMS webhook triggering `revalidateTag` on publish/edit for near-immediate freshness. The live comment count and the subscriber-gated section both depend on live/per-request state (comment count changes constantly; subscriber status requires reading an auth cookie) — both belong inside Suspense boundaries as PPR's dynamic holes, so the static shell (article content) still serves instantly from the edge while those two sections stream in per-request. Plain full-page SSR would be wrong here: it would force every anonymous reader's request to pay full render cost just to show a comment count that could've been fetched client-side or in a small dynamic hole.</p></div><div class="followup">Follow-up: Would you fetch the live comment count via PPR's dynamic hole, or client-side with polling/websockets instead — what's the tradeoff?</div></details>
+      <details class="qa"><summary>Why can't PPR's static shell simply be "whatever doesn't use cookies/headers," without the Suspense boundary requirement?</summary><div class="answer"><p>Suspense boundaries give React (and Next.js's prerenderer) an explicit, structural signal for where streaming can safely resume independently — without one, there's no defined point to stop resolving the static pass and start treating a subtree as deferred; the renderer would have to either fully resolve everything (no partial prerendering possible) or guess at arbitrary cut points. Suspense also already defines fallback UI and the streaming contract from Ch.5's concurrent rendering, so PPR reuses that exact mechanism rather than inventing a parallel one — the dynamic API usage (cookies/headers) determines *that* a subtree must be dynamic, while Suspense determines *where* the shell can structurally stop waiting for it.</p></div><div class="followup">Follow-up: What happens if a dynamic API is called outside any Suspense boundary on a PPR-enabled route — does the build fail, or does the whole route silently become fully dynamic?</div></details>
+      <details class="qa"><summary>A route using ISR with `revalidate: 3600` experiences a traffic spike exactly when the cache expires, with 500 concurrent requests arriving in the same second. What actually happens, and is there a thundering-herd risk?</summary><div class="answer"><p>In Next.js's model, the stale HTML continues being served to all 500 requests while regeneration happens — the regeneration itself is deduplicated (only one regeneration is triggered per expiry, not 500 separate ones), so there's no thundering herd against the origin's render pipeline in the way there would be with naive "regenerate on every request past expiry" logic. The real risk is elsewhere: if the regeneration's underlying data fetch (e.g., a DB query or upstream API call) is itself slow or that upstream service has its own concurrency limits, a spike in *unrelated* routes expiring simultaneously could still produce many concurrent regeneration-triggered fetches system-wide.</p></div><div class="followup">Follow-up: How would you stagger revalidation windows across many similar routes to avoid synchronized expiry spikes?</div></details>
+      <details class="qa"><summary>Critique: "PPR makes the CSR-vs-SSR-vs-SSG decision obsolete — just use PPR everywhere." Where does this break down?</summary><div class="answer"><p>It breaks down for routes that are either fully static (a pure marketing page gains nothing from PPR's dynamic-hole machinery — plain SSG/ISR is simpler and has zero per-request server execution at all) or fully dynamic/personalized (a user's private dashboard where almost everything depends on the session has little to no static shell to extract, so PPR's benefit shrinks toward zero while adding the conceptual overhead of reasoning about Suspense-boundary placement for no real gain). PPR is specifically valuable for the middle case — mostly-shared content with a meaningfully small dynamic slice — and forcing it onto the two extremes adds complexity without the payoff.</p></div><div class="followup">Follow-up: How would you decide, for a given route, whether the "dynamic slice" is small enough for PPR to be worth the complexity?</div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment"><span class="level-tag">Beginner (30-60 min)</span><h4>Convert a fully-SSR page to ISR and measure the difference</h4>
+      <p>Take a route doing a full dynamic fetch on every request and add <code>export const revalidate = 60</code>. Hit it repeatedly and observe (via response timing or a logged timestamp in the rendered output) that the content doesn't change on every request, then changes after the window passes.</p>
+      <p><strong>Acceptance criteria:</strong> You can show a request served instantly with stale timestamped content, followed by a background regeneration reflected on a later request.</p>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>Log a `new Date().toISOString()` into the rendered page from inside the data-fetching function to make staleness visible.</p></div></details>
+      <p><strong>Bonus:</strong> Add an API route that calls `revalidateTag` and trigger an immediate refresh without waiting for the window.</p></div>
+
+      <div class="assignment"><span class="level-tag">Intermediate (2-4 hrs)</span><h4>Build a PPR page with a static shell and two independent dynamic holes</h4>
+      <p>Build a product page where the product details are static (prerendered), and both a "live stock count" widget and a "signed-in user's cart badge" are separate Suspense-wrapped dynamic sections, each reading different request-specific data.</p>
+      <ul><li>Confirm via network inspection or logging that the shell renders before either dynamic section resolves.</li></ul>
+      <p><strong>Acceptance criteria:</strong> The static shell is visibly rendered/paints before the two dynamic sections resolve, and each dynamic section streams in independently (not blocking on the other).</p>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>Add an artificial `await new Promise(r => setTimeout(r, 1500))` of differing durations in each dynamic section to make the independent streaming visible.</p></div></details>
+      <p><strong>Bonus:</strong> Add a deliberate `cookies()` call outside any Suspense boundary and observe how it affects the whole route's prerendering.</p></div>
+
+      <div class="assignment"><span class="level-tag">Advanced (1-2 days)</span><h4>Design and justify a full rendering-strategy map for a multi-route app</h4>
+      <p>Pick (or design) an app with at least 5 distinct route types (marketing/landing, blog/content, product catalog, authenticated dashboard, checkout/payment flow). For each, choose and justify CSR/SSR/SSG/ISR/PPR, including specific revalidate windows and what data would live inside vs. outside Suspense boundaries for any PPR routes. Document expected origin-load and cache-hit-rate implications for each choice.</p>
+      <ul><li>Identify at least one route where your first instinct would be wrong and explain why.</li></ul>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>Think separately about "how often does the underlying data actually change" versus "how personalized is the content" — they drive different parts of the decision (ISR window vs. PPR dynamic-hole boundary).</p></div></details>
+      </div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet"><ul>
+        <li>CSR: blank shell + client fetch. SSR: fresh render every request. SSG: render once at build. ISR: SSG + background refresh. PPR: static shell + streamed dynamic holes, per route.</li>
+        <li>ISR's `revalidate` window is a staleness lower bound, not a guarantee — regeneration is triggered by the next request after expiry, served stale in the meantime.</li>
+        <li>On-demand revalidation (`revalidatePath`/`revalidateTag`) bypasses the timer, marking cache stale immediately for the next request.</li>
+        <li>`revalidateTag` invalidates every cached fetch tagged with it across all routes; `revalidatePath` is scoped to one route.</li>
+        <li>PPR's static shell = outside Suspense + no request-specific API usage; dynamic holes = inside Suspense + touches cookies()/headers()/uncached fetch.</li>
+        <li>Calling `cookies()`/`headers()` anywhere in a module's reachable graph, even in a shared utility, forces that subtree dynamic.</li>
+        <li>The Data Cache (per-fetch) and the edge/CDN HTML cache are two different layers — revalidation operates on the Data Cache, which then feeds a fresh render that repopulates the edge cache.</li>
+        <li>Choose rendering strategy per route segment based on staleness tolerance and personalization need, not one strategy for the whole app.</li>
+      </ul></div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://nextjs.org/docs/app/building-your-application/rendering">Next.js — Rendering Fundamentals</a></li>
+        <li><a href="https://nextjs.org/docs/app/building-your-application/data-fetching/incremental-static-regeneration">Next.js — Incremental Static Regeneration</a></li>
+        <li><a href="https://nextjs.org/docs/app/api-reference/next-config-js/ppr">Next.js — Partial Prerendering</a></li>
+        <li><a href="https://react.dev/reference/react/Suspense">react.dev — Suspense</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="07-server-client-components.html"><span class="dir">← Previous</span>Server vs Client Components</a>
+        <a class="next" href="09-core-web-vitals.html"><span class="dir">Next →</span>Core Web Vitals</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · React &amp; Next.js Advanced</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-jsx.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-typescript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-tsx.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "03-react-nextjs-advanced", chapterKey: "08-rendering-strategies" });</script>
+</body>
+</html>

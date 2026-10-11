@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Roadmap — Senior Dev Notes</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand">
+      <button id="menu-toggle" class="icon-btn menu-toggle">☰</button>
+      <a href="index.html">📘 Senior Dev Notes</a>
+    </div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="index.html">Home</a><span class="sep">›</span>Roadmap</div>
+      <div class="topbar-actions">
+        <button id="theme-toggle" class="icon-btn" title="Toggle dark mode">🌙</button>
+      </div>
+    </div>
+
+    <div class="content">
+      <h1>4–6 Month Roadmap</h1>
+      <p class="meta-line"><span>⏱ ~1–2 hrs/day, 6 days/week</span><span>🎯 Senior / Tech Lead readiness</span></p>
+      <p>This plan assumes ~20 weeks. If you have 4 months, compress weeks 17–20 into parallel study.
+      Check items off as you go — checkboxes are saved in this browser.</p>
+
+      <div id="roadmap-root"></div>
+    </div>
+
+    <footer class="page-footer">Senior Dev Notes · roadmap</footer>
+  </main>
+</div>
+
+<script src="assets/script.js"></script>
+<script>
+const WEEKS = [
+  { range: "Weeks 1–3", title: "System Design Foundations", items: [
+    "01-system-design: Fundamentals, Networking, Load Balancing, Caching",
+    "01-system-design: Databases, Database Scaling, Transactions",
+    "01-system-design: Message Queues, Microservices, API Design",
+  ]},
+  { range: "Week 4", title: "System Design: Resilience, LLD & HLD", items: [
+    "01-system-design: Resilience Patterns, LLD/SOLID/Design Patterns",
+    "01-system-design: HLD Case Studies + Interview Framework",
+    "Practice: whiteboard 2 HLD case studies from memory",
+  ]},
+  { range: "Week 5", title: "TypeScript Advanced", items: [
+    "02-typescript-advanced: all 6 chapters",
+    "Assignment: build a typed API client with generics + conditional types",
+  ]},
+  { range: "Weeks 6–8", title: "React & Next.js Internals", items: [
+    "03-react: Internals, Hooks Deep Dive, State Management",
+    "03-react: Performance, Concurrent React",
+    "03-react: Next.js App Router, Server/Client Components, Rendering Strategies",
+    "03-react: Core Web Vitals, Frontend Architecture, Accessibility/SEO",
+  ]},
+  { range: "Weeks 9–10", title: "Node.js Advanced", items: [
+    "04-nodejs: Event Loop, Streams/Buffers, Worker Threads",
+    "04-nodejs: Memory/GC, Error Handling, Production APIs",
+    "04-nodejs: Authentication, Background Jobs, Scaling Node",
+  ]},
+  { range: "Week 11", title: "Testing", items: [
+    "05-testing: all 6 chapters",
+    "Assignment: add Jest + RTL + Playwright to a sample app",
+  ]},
+  { range: "Weeks 12–13", title: "Cloud, AWS, Docker & K8s", items: [
+    "06-cloud: Docker deep dive, Compose, Kubernetes core",
+    "06-cloud: AWS core, Serverless, IaC, Advanced CI/CD",
+  ]},
+  { range: "Week 14", title: "Observability & Security", items: [
+    "07-observability-security: Logging, Metrics, Tracing",
+    "07-observability-security: OWASP Top 10, Secure Auth, Incident Handling",
+  ]},
+  { range: "Weeks 15–16", title: "Python Intermediate", items: [
+    "08-python: syntax, data structures, OOP/dataclasses",
+    "08-python: async, FastAPI, packaging/pytest",
+    "Assignment: port one Node API endpoint to FastAPI",
+  ]},
+  { range: "Weeks 17–18", title: "AI Integration", items: [
+    "09-ai-integration: How LLMs work, LLM APIs, Embeddings/Vector DB",
+    "09-ai-integration: RAG, AI Agents, AI in Production, AI features in React/Node",
+    "Assignment: build a small RAG chatbot over your own docs",
+  ]},
+  { range: "Weeks 19–20", title: "Soft Skills, Leadership & Mock Interviews", items: [
+    "10-soft-skills: Design docs, Code reviews, Mentoring, Estimation",
+    "10-soft-skills: Stakeholder comms, Decision making, Behavioral/STAR prep",
+    "Do 2–3 mock system design interviews (45 min each)",
+    "Do 2–3 mock behavioral interviews using STAR answers",
+  ]},
+];
+
+function renderRoadmap() {
+  const root = document.getElementById("roadmap-root");
+  let html = "";
+  WEEKS.forEach((wk, wi) => {
+    html += `<div class="week-block"><h3>${wk.range}: ${wk.title}</h3>`;
+    wk.items.forEach((item, ii) => {
+      const id = `wk-${wi}-${ii}`;
+      html += `<label><input type="checkbox" data-id="${id}"> <span>${item}</span></label>`;
+    });
+    html += `</div>`;
+  });
+  root.innerHTML = html;
+  const saved = JSON.parse(localStorage.getItem("sdn-roadmap") || "{}");
+  root.querySelectorAll("input[type=checkbox]").forEach(cb => {
+    cb.checked = !!saved[cb.dataset.id];
+    cb.addEventListener("change", () => {
+      const state = JSON.parse(localStorage.getItem("sdn-roadmap") || "{}");
+      state[cb.dataset.id] = cb.checked;
+      localStorage.setItem("sdn-roadmap", JSON.stringify(state));
+    });
+  });
+}
+renderRoadmap();
+initPage({ rootPrefix: "" });
+</script>
+</body>
+</html>

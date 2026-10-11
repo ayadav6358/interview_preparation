@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Stack — DSA Notes</title>
+<style>
+  :root{
+    --ink:#12181B; --ink2:#1A2226; --ink3:#232C31;
+    --amber:#E8A33D; --amber-soft:#3A2E19;
+    --teal:#4FB3A9; --teal-soft:#12312D;
+    --rust:#D9695F; --rust-soft:#3A1F1C;
+    --slate:#8B9199;
+    --text:#E8E6E1; --text-dim:#A9AFAE;
+    --border: rgba(255,255,255,0.08);
+    --radius: 10px;
+    --mono: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{background:var(--ink); color:var(--text); font-family:var(--sans); line-height:1.65; font-size:16px;}
+  a{color:var(--amber);}
+  code, pre{font-family:var(--mono);}
+  #main{max-width:900px; margin:0 auto; padding:30px 22px 100px;}
+  h1{font-size:2rem; letter-spacing:-.01em; margin:0 0 6px;}
+  h2{font-size:1.5rem; margin-top:52px; padding-top:14px; border-top:1px solid var(--border); letter-spacing:-.01em;}
+  h2:first-of-type{border-top:none; margin-top:20px;}
+  h3{font-size:1.15rem; margin-top:30px; color:var(--amber);}
+  h4{font-size:1rem; margin-top:22px;}
+  .eyebrow{font-size:11px; text-transform:uppercase; letter-spacing:.12em; color:var(--teal); font-weight:700; margin-bottom:4px;}
+  .subtitle{color:var(--text-dim); font-size:15px; margin-bottom:28px;}
+  .callout{border-radius:var(--radius); padding:14px 16px; margin:18px 0; border:1px solid var(--border); font-size:14.5px;}
+  .callout .ctitle{font-weight:700; margin-bottom:4px; display:flex; gap:8px; align-items:center;}
+  .callout.concept{background:var(--teal-soft); border-color:var(--teal);}
+  .callout.concept .ctitle{color:var(--teal);}
+  .callout.example{background:var(--ink3);}
+  .callout.mistake{background:var(--rust-soft); border-color:var(--rust);}
+  .callout.mistake .ctitle{color:var(--rust);}
+  .callout.tip{background:var(--amber-soft); border-color:var(--amber);}
+  .callout.tip .ctitle{color:var(--amber);}
+  .codewrap{position:relative; margin:14px 0;}
+  pre{background:var(--ink3); border:1px solid var(--border); border-radius:var(--radius); padding:16px 18px; overflow-x:auto; font-size:13.5px; line-height:1.6;}
+  .copybtn{position:absolute; top:8px; right:8px; background:var(--ink); color:var(--text-dim); border:1px solid var(--border); border-radius:6px; padding:4px 9px; font-size:11px; cursor:pointer; font-family:var(--sans);}
+  .copybtn:hover{color:var(--amber); border-color:var(--amber);}
+  .lang-tag{font-size:10px; text-transform:uppercase; letter-spacing:.08em; color:var(--slate); margin-bottom:-4px; display:block;}
+  :not(pre) > code{background:var(--ink3); padding:2px 6px; border-radius:4px; font-size:.88em;}
+  table{width:100%; border-collapse:collapse; margin:16px 0; font-size:14px;}
+  th,td{border:1px solid var(--border); padding:9px 12px; text-align:left;}
+  th{background:var(--ink3); font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:var(--slate);}
+  .badge{display:inline-block; font-size:11px; font-weight:700; padding:3px 9px; border-radius:20px; text-transform:uppercase; letter-spacing:.03em;}
+  .badge.easy{background:var(--teal-soft); color:var(--teal);}
+  .badge.medium{background:var(--amber-soft); color:var(--amber);}
+  .badge.hard{background:var(--rust-soft); color:var(--rust);}
+  .qcard{border:1px solid var(--border); border-radius:var(--radius); padding:16px 18px; margin:14px 0; background:var(--ink2);}
+  .qcard .qhead{display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; gap:10px;}
+  .qcard .qhead b{font-size:14.5px;}
+  .qcard .meta{color:var(--text-dim); font-size:13px; margin:6px 0;}
+  .qcard .hint{color:var(--text-dim); font-size:13.5px; margin-top:8px; padding-top:8px; border-top:1px dashed var(--border);}
+  .qcard .hint b{color:var(--amber);}
+  hr.div{border:none; border-top:1px solid var(--border); margin:40px 0;}
+  .navlinks{display:flex; justify-content:space-between; gap:12px; font-size:14px; margin:18px 0; flex-wrap:wrap;}
+  .navlinks a{text-decoration:none; border:1px solid var(--border); padding:8px 14px; border-radius:8px; background:var(--ink2);}
+  .navlinks a:hover{border-color:var(--amber);}
+  .home{font-size:13px; color:var(--text-dim); margin-bottom:10px; display:inline-block;}
+</style>
+</head>
+<body>
+<div id="main">
+
+<a class="home" href="../index.html">&larr; Back to Index</a>
+<div class="navlinks">
+  <a href="../Phase-08-LinkedList/01-linked-list.html">&larr; Prev: Linked List</a>
+  <a href="02-queue.html">Next: Queue &rarr;</a>
+</div>
+
+<div class="eyebrow">Phase 9 · Stack &amp; Queue</div>
+<h1>Stack</h1>
+<p class="subtitle">Stack ek LIFO (Last In, First Out) data structure hai. Bahut saare "matching", "undo", "nested", "monotonic" pattern wale problems isi par based hote hain.</p>
+
+<h2>Concept</h2>
+
+<h3>1. What is it?</h3>
+<p>Stack ek data structure hai jo <b>LIFO</b> (Last In, First Out) order follow karta hai — jo element sabse aakhri mein daala gaya, wahi sabse pehle nikalega.</p>
+
+<h3>2. Real-Life Analogy</h3>
+<div class="callout example">
+  <div class="ctitle">📝 Pile of Plates</div>
+  Plates ka dher — tum hamesha upar se plate uthate ho (jo sabse last mein rakhi gayi thi), aur naya plate bhi upar hi rakhte ho. Neeche wali plate tab tak nahi nikal sakti jab tak upar wali hata na do.
+</div>
+
+<h3>3. Operations + Diagram</h3>
+<pre><code>Push(10) → Push(20) → Push(30)
+
+Stack (top → bottom):
+[30]  ← top (last in)
+[20]
+[10]
+
+Pop() → removes 30, returns 30
+Peek() → looks at top (30) without removing</code></pre>
+
+<div class="codewrap"><button class="copybtn" onclick="copyCode(this)">Copy</button>
+<pre><code>class Stack {
+  constructor() { this.items = []; }
+  push(val) { this.items.push(val); }     // O(1)
+  pop() { return this.items.pop(); }       // O(1)
+  peek() { return this.items[this.items.length - 1]; } // O(1)
+  isEmpty() { return this.items.length === 0; }
+}</code></pre></div>
+
+<h3>Application 1: Valid Parentheses</h3>
+<div class="codewrap"><button class="copybtn" onclick="copyCode(this)">Copy</button>
+<pre><code>function isValid(s) {
+  const stack = [];
+  const pairs = { ')': '(', ']': '[', '}': '{' };
+  for (const ch of s) {
+    if (ch === '(' || ch === '[' || ch === '{') {
+      stack.push(ch);
+    } else {
+      if (stack.pop() !== pairs[ch]) return false; // mismatch or empty stack
+    }
+  }
+  return stack.length === 0; // all brackets matched
+}</code></pre></div>
+<p><b>Why Stack works here:</b> Har opening bracket ko "remember" karna padta hai until uska matching closing bracket aaye — aur sabse <b>recent</b> opening bracket hi sabse pehle close hona chahiye (nested structure). Ye exactly LIFO behavior hai.</p>
+<div class="callout example">
+  <div class="ctitle">📝 Dry Run: "([)]"</div>
+  '(' → push → [(]<br>
+  '[' → push → [(,[]<br>
+  ')' → pop → '[' ≠ expected '(' → <b>return false</b> ❌ (correctly invalid!)
+</div>
+
+<h3>Application 2: Next Greater Element (Monotonic Stack)</h3>
+<div class="codewrap"><button class="copybtn" onclick="copyCode(this)">Copy</button>
+<pre><code>function nextGreaterElement(arr) {
+  const result = new Array(arr.length).fill(-1);
+  const stack = []; // stores indices, values are in decreasing order
+
+  for (let i = 0; i < arr.length; i++) {
+    while (stack.length && arr[stack[stack.length - 1]] < arr[i]) {
+      const idx = stack.pop();
+      result[idx] = arr[i]; // arr[i] is the "next greater" for this popped index
+    }
+    stack.push(i);
+  }
+  return result;
+}</code></pre></div>
+<p><b>Why faster than brute force:</b> Brute force checks every element against every future element — O(n²). The monotonic stack ensures each index is pushed and popped at most once — O(n) total.</p>
+
+<h3>Complexity Summary</h3>
+<table>
+  <tr><th>Structure</th><th>Push</th><th>Pop</th><th>Peek</th><th>Space</th></tr>
+  <tr><td>Stack (array-based)</td><td>O(1)</td><td>O(1)</td><td>O(1)</td><td>O(n)</td></tr>
+</table>
+
+<h3>When Should I Use a Stack?</h3>
+<div class="callout tip">
+  <div class="ctitle">🎯 Checklist</div>
+  <ul>
+    <li>"Undo" functionality, matching/nesting (brackets, HTML tags)</li>
+    <li>DFS, expression evaluation</li>
+    <li>"Next greater/smaller element" style problems (monotonic stack)</li>
+  </ul>
+</div>
+
+<h3>Common Mistakes</h3>
+<div class="callout mistake">
+  <ul>
+    <li>Empty stack par pop/peek call karna bina check kiye — crash ya undefined behavior.</li>
+    <li>Monotonic stack mein galat comparison (&lt; vs &lt;=) use karna — duplicates ke handling mein bug aa sakta hai.</li>
+    <li>Stack ko application ke hisaab se select na karna (jaise BFS ke liye Stack use karna) — ye galat traversal order dega.</li>
+  </ul>
+</div>
+
+<h3>Interview Tips</h3>
+<div class="callout tip">
+  Jab bhi "matching", "nested", "balanced", "undo" jaisa kuch dikhe — Stack socho. Monotonic stack pattern "next greater/smaller", "daily temperatures", "histogram" jaisे problems mein turant recognize karo — ye keyword-to-structure mapping interview mein turant decide karne mein madad karti hai.
+</div>
+
+<hr class="div">
+<h2>Interview Questions</h2>
+
+<h3>Easy <span class="badge easy">Easy</span></h3>
+
+<div class="qcard">
+  <div class="qhead"><b>Q1. Valid Parentheses</b><span class="badge easy">Easy</span></div>
+  <p>Given a string of brackets ( ) [ ] { }, determine if it's valid (properly matched and nested).</p>
+  <p><b>Example:</b> "()[]{}" → Output: true, "(]" → Output: false</p>
+  <div class="hint"><b>Hint:</b> Push opening brackets; on a closing bracket, pop and check it matches.</div>
+</div>
+
+<div class="qcard">
+  <div class="qhead"><b>Q2. Min Stack (get minimum in O(1))</b><span class="badge easy">Easy</span></div>
+  <p>Design a stack that supports push, pop, top, and retrieving the minimum element, all in O(1).</p>
+  <p><b>Example:</b> push(-2), push(0), push(-3), getMin()→-3, pop(), getMin()→-2</p>
+  <div class="hint"><b>Hint:</b> Maintain a second stack that tracks the minimum at each level, pushed/popped alongside the main stack.</div>
+</div>
+
+<div class="qcard">
+  <div class="qhead"><b>Q3. Implement Stack using Array vs Linked List</b><span class="badge easy">Easy</span></div>
+  <p>Implement a stack using both an array and a singly linked list, comparing trade-offs.</p>
+  <p><b>Example:</b> push(1), push(2), pop() → 2</p>
+  <div class="hint"><b>Hint:</b> Array-based: push/pop at the end. Linked-list-based: push/pop at the head.</div>
+</div>
+
+<div class="qcard">
+  <div class="qhead"><b>Q4. Remove All Adjacent Duplicates in a String</b><span class="badge easy">Easy</span></div>
+  <p>Repeatedly remove adjacent duplicate characters until none remain.</p>
+  <p><b>Example:</b> "abbaca" → Output: "ca"</p>
+  <div class="hint"><b>Hint:</b> Push characters onto a stack; if the top equals the current character, pop instead of pushing.</div>
+</div>
+
+<div class="qcard">
+  <div class="qhead"><b>Q5. Implement Two Stacks in One Array</b><span class="badge easy">Easy</span></div>
+  <p>Implement two stacks using a single array efficiently.</p>
+  <p><b>Example:</b> stack1 grows from left, stack2 grows from right</p>
+  <div class="hint"><b>Hint:</b> Grow one stack from index 0 forward and the other from the last index backward.</div>
+</div>
+
+<h3>Medium <span class="badge medium">Medium</span></h3>
+
+<div class="qcard">
+  <div class="qhead"><b>Q6. Next Greater Element</b><span class="badge medium">Medium</span></div>
+  <p>For each element, find the next element to its right that's greater than it.</p>
+  <p><b>Example:</b> [2,1,2,4,3] → Output: [4,2,4,-1,-1]</p>
+  <div class="hint"><b>Hint:</b> Use a monotonic decreasing stack of indices, popping whenever a bigger value is found.</div>
+</div>
+
+<div class="qcard">
+  <div class="qhead"><b>Q7. Daily Temperatures</b><span class="badge medium">Medium</span></div>
+  <p>Given daily temperatures, return how many days you'd have to wait for a warmer temperature.</p>
+  <p><b>Example:</b> [73,74,75,71,69,72,76,73] → Output: [1,1,4,2,1,1,0,0]</p>
+  <div class="hint"><b>Hint:</b> Same monotonic stack pattern as Next Greater Element, but store index differences instead of values.</div>
+</div>
+
+<div class="qcard">
+  <div class="qhead"><b>Q8. Evaluate Reverse Polish Notation</b><span class="badge medium">Medium</span></div>
+  <p>Evaluate an arithmetic expression given in postfix (Reverse Polish) notation.</p>
+  <p><b>Example:</b> ["2","1","+","3","*"] → Output: 9</p>
+  <div class="hint"><b>Hint:</b> Push numbers onto a stack; on an operator, pop two numbers, apply the operator, push the result.</div>
+</div>
+
+<div class="qcard">
+  <div class="qhead"><b>Q9. Decode String</b><span class="badge medium">Medium</span></div>
+  <p>Decode a string with nested k[encoded_string] pattern.</p>
+  <p><b>Example:</b> "3[a2[c]]" → Output: "accaccacc"</p>
+  <div class="hint"><b>Hint:</b> Use a stack to save (count, partial string) pairs whenever you hit "[", and build the repeated string on "]".</div>
+</div>
+
+<h3>Hard <span class="badge hard">Hard</span></h3>
+
+<div class="qcard">
+  <div class="qhead"><b>Q10. Largest Rectangle in Histogram</b><span class="badge hard">Hard</span></div>
+  <p>Given bar heights of a histogram, find the area of the largest rectangle that fits.</p>
+  <p><b>Example:</b> heights = [2,1,5,6,2,3] → Output: 10</p>
+  <div class="hint"><b>Hint:</b> Use a monotonic increasing stack of indices; when a smaller bar appears, pop and compute area using popped height times width to current index.</div>
+</div>
+
+<div class="qcard">
+  <div class="qhead"><b>Q11. Trapping Rain Water (stack approach)</b><span class="badge hard">Hard</span></div>
+  <p>Given elevation heights, compute how much water can be trapped after raining.</p>
+  <p><b>Example:</b> [0,1,0,2,1,0,1,3,2,1,2,1] → Output: 6</p>
+  <div class="hint"><b>Hint:</b> Maintain a decreasing stack of indices; when a taller bar comes, pop and calculate trapped water using the bounded width and height difference.</div>
+</div>
+
+<div class="qcard">
+  <div class="qhead"><b>Q12. Basic Calculator (with parentheses)</b><span class="badge hard">Hard</span></div>
+  <p>Evaluate a string expression containing +, -, parentheses, and spaces.</p>
+  <p><b>Example:</b> "(1+(4+5+2)-3)+(6+8)" → Output: 23</p>
+  <div class="hint"><b>Hint:</b> Use a stack to save the running result and sign whenever you enter a new "(" scope, restoring on ")".</div>
+</div>
+
+<hr class="div">
+<div class="navlinks">
+  <a href="../Phase-08-LinkedList/01-linked-list.html">&larr; Prev: Linked List</a>
+  <a href="02-queue.html">Next: Queue &rarr;</a>
+</div>
+
+</div>
+<script>
+function copyCode(btn){
+  const code = btn.parentElement.querySelector('code');
+  if(code){ navigator.clipboard.writeText(code.innerText); btn.textContent='Copied!'; setTimeout(()=>btn.textContent='Copy',1200); }
+}
+</script>
+</body>
+</html>

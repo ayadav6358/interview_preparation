@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LLM APIs and SDKs</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <input class="searchbox" placeholder="Search topics..." />
+    <a href="../index.html">← Home</a>
+    <h3>07-LLM-APIs-and-SDKs</h3>
+    <a href="llm-apis-and-sdks.html">LLM APIs and SDKs</a>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumbs"><a href="../index.html">Home</a> / 07-LLM-APIs-and-SDKs</div>
+      <button class="theme-toggle" onclick="toggleTheme()">🌓 Theme</button>
+    </div>
+    <h1>LLM APIs and SDKs</h1>
+    <span class="tag good">Stable</span><span class="tag">Last verified: 2026-10-06</span>
+
+    <div class="toc">
+      <b>On this page</b>
+      <a href="#what">1. What is this?</a>
+      <a href="#whyexist">2. Why does it exist?</a>
+      <a href="#whyimportant">3. Why is it important?</a>
+      <a href="#whereused">4. Where is it used?</a>
+      <a href="#prereq">5. Prerequisites</a>
+      <a href="#core">6. Core concepts</a>
+      <a href="#terms">7. Terminology</a>
+      <a href="#arch">8. Architecture (provider abstraction)</a>
+      <a href="#internal">9. How it works internally</a>
+      <a href="#steps">10. Step-by-step: a resilient API call</a>
+      <a href="#simple">11. Simple example</a>
+      <a href="#real">12. Real-world example</a>
+      <a href="#code">13. Code example</a>
+      <a href="#advanced">14. Advanced example</a>
+      <a href="#mistakes">15. Common mistakes</a>
+      <a href="#best">16. Best practices</a>
+      <a href="#production">17. Production considerations</a>
+      <a href="#security">18. Security considerations</a>
+      <a href="#performance">19. Performance considerations</a>
+      <a href="#cost">20. Cost considerations</a>
+      <a href="#debug">21. Debugging/troubleshooting</a>
+      <a href="#related">22. Related concepts</a>
+      <a href="#comparison">23. Comparison with alternatives</a>
+      <a href="#exercise">24. Mini practical exercise</a>
+      <a href="#project">25. Practical project</a>
+      <a href="#projectarch">26. Project architecture</a>
+      <a href="#interview-b">27. Interview Questions — Beginner</a>
+      <a href="#interview-i">28. Interview Questions — Intermediate</a>
+      <a href="#interview-a">29. Interview Questions — Advanced</a>
+      <a href="#interview-s">30. Interview Questions — Senior/Architect</a>
+      <a href="#interview-sc">31. Scenario-Based Questions</a>
+      <a href="#revision">32. Quick revision notes</a>
+      <a href="#cheat">33. Cheat sheet</a>
+      <a href="#further">34. Further topics to learn</a>
+    </div>
+
+    <h2 id="what">1. What is this?</h2>
+    <p>The practical engineering layer for calling LLMs reliably in production: authentication, request/response handling, streaming, structured output, tool/function calling, retries, timeouts, rate limits, batch processing, token/cost tracking, and model fallback.</p>
+
+    <h2 id="whyexist">2. Why does it exist?</h2>
+    <p>Raw model capability is only half the story — LLM APIs are network services with real-world failure modes (timeouts, rate limits, transient errors) just like any other external dependency, and production systems need the same engineering discipline (retries, circuit breakers, abstraction) applied to any unreliable third-party API.</p>
+
+    <h2 id="whyimportant">3. Why is it important?</h2>
+    <p>Most production LLM incidents are not "the model got dumber" — they're API-integration issues: unhandled rate limits, missing retries, no fallback, or untracked cost/token usage. This is the engineering discipline that separates a demo from a production system.</p>
+
+    <h2 id="whereused">4. Where is it used?</h2>
+    <p>Every production LLM application's networking/integration layer.</p>
+
+    <h2 id="prereq">5. Prerequisites</h2>
+    <p><a href="../06-LLM-Providers/llm-providers-comparison.html">LLM Providers</a>, <a href="../01-Python-for-AI/python-for-ai-fundamentals.html">Python for AI (async)</a>.</p>
+
+    <h2 id="core">6. Core concepts</h2>
+    <ul>
+      <li><b>Streaming:</b> receiving tokens incrementally rather than waiting for the full response.</li>
+      <li><b>Structured output / JSON schema:</b> constraining the model's output to match a defined schema.</li>
+      <li><b>Tool/function calling:</b> the model requests a defined function be called with structured arguments.</li>
+      <li><b>Retries with backoff:</b> automatically retrying transient failures (rate limits, timeouts) with increasing delay.</li>
+      <li><b>Model fallback:</b> switching to a secondary model/provider when the primary fails or is unavailable.</li>
+      <li><b>Provider abstraction:</b> a common interface decoupling business logic from any single provider's SDK.</li>
+    </ul>
+
+    <h2 id="terms">7. Terminology</h2>
+    <table>
+      <tr><th>Term</th><th>Meaning</th></tr>
+      <tr><td>API authentication</td><td>Typically an API key sent via header; some providers support OAuth/service accounts for enterprise use.</td></tr>
+      <tr><td>Rate limit</td><td>Maximum requests/tokens per time window a client can send, returned as 429 errors when exceeded.</td></tr>
+      <tr><td>Exponential backoff</td><td>A retry strategy that increases delay between attempts exponentially to avoid overwhelming a struggling service.</td></tr>
+      <tr><td>Batch API</td><td>Submitting many requests for asynchronous bulk processing, often at a cost discount vs. real-time calls.</td></tr>
+      <tr><td>Token usage</td><td>Input/output token counts returned per response, used for cost tracking.</td></tr>
+      <tr><td>Circuit breaker</td><td>A pattern that stops sending requests to a failing dependency after repeated failures, to avoid cascading overload.</td></tr>
+    </table>
+
+    <h2 id="arch">8. Architecture (provider abstraction)</h2>
+    <pre><code>Application
+ → LLM Client Wrapper (retries, timeout, logging, cost tracking)
+      → Provider Interface
+           → OpenAI / Anthropic / Gemini / Local Model
+      → Fallback Provider (on failure)</code></pre>
+
+    <h2 id="internal">9. How it works internally</h2>
+    <p>A streaming API call opens a persistent connection (typically Server-Sent Events) and the server pushes partial tokens as they're generated, rather than buffering the full response — the client's SDK exposes this as an iterator/async-generator the application consumes incrementally. Structured output modes typically work either via constrained decoding (the server restricts sampling to only schema-valid tokens) or via a strong prompting + validation + retry loop, depending on provider maturity.</p>
+
+    <h2 id="steps">10. Step-by-step: a resilient API call</h2>
+    <ol>
+      <li>Set a reasonable request timeout.</li>
+      <li>Wrap the call in try/except for provider-specific exceptions (rate limit, timeout, server error).</li>
+      <li>On rate limit/transient error, retry with exponential backoff up to a max attempt count.</li>
+      <li>On repeated failure, fail over to a secondary model/provider if configured.</li>
+      <li>Log request/response metadata (tokens, latency, model, success/failure) for observability.</li>
+      <li>Surface a graceful degraded response to the end user if all retries/fallbacks exhaust.</li>
+    </ol>
+
+    <h2 id="simple">11. Simple example</h2>
+    <pre><code class="language-python">response = client.messages.create(
+    model="claude-sonnet-5", max_tokens=100,
+    messages=[{"role": "user", "content": "Hello!"}],
+)
+</code></pre>
+
+    <h2 id="real">12. Real-world example</h2>
+    <p>A production customer-support bot wraps every LLM call with: a 10-second timeout, 3 retries with exponential backoff on 429/5xx errors, fallback to a secondary model on persistent failure, and structured logging of token usage per request for cost dashboards — turning a simple API call into a resilient production dependency.</p>
+
+    <h2 id="code">13. Code example</h2>
+    <pre><code class="language-python">import time
+from anthropic import Anthropic, APIStatusError, APITimeoutError
+
+client = Anthropic()
+
+def call_with_retry(messages, max_retries=3):
+    for attempt in range(max_retries):
+        try:
+            return client.messages.create(
+                model="claude-sonnet-5", max_tokens=300,
+                messages=messages, timeout=10.0,
+            )
+        except (APIStatusError, APITimeoutError) as e:
+            wait = 2 ** attempt
+            print(f"Retrying in {wait}s due to {e}")
+            time.sleep(wait)
+    raise RuntimeError("Max retries exceeded")
+</code></pre>
+
+    <h2 id="advanced">14. Advanced example</h2>
+    <pre><code class="language-python"># Provider fallback with cost/usage tracking
+def call_with_fallback(messages, primary, fallback):
+    try:
+        resp = primary.complete(messages)
+        log_usage(provider="primary", tokens=resp.usage)
+        return resp
+    except Exception as e:
+        log_error("primary_failed", error=str(e))
+        resp = fallback.complete(messages)
+        log_usage(provider="fallback", tokens=resp.usage)
+        return resp
+</code></pre>
+
+    <h2 id="mistakes">15. Common mistakes</h2>
+    <ul>
+      <li>No timeout set, causing requests to hang indefinitely on network issues.</li>
+      <li>Retrying immediately without backoff, worsening rate-limit storms.</li>
+      <li>Not tracking token usage per request, leading to surprise cost bills.</li>
+      <li>Treating structured-output "JSON mode" as a 100% guarantee without validation.</li>
+    </ul>
+
+    <h2 id="best">16. Best practices</h2>
+    <ul>
+      <li>Always set explicit timeouts.</li>
+      <li>Implement exponential backoff retries for transient errors.</li>
+      <li>Validate structured outputs with a schema library regardless of provider guarantees.</li>
+      <li>Log token usage and cost per request from day one.</li>
+      <li>Build a provider abstraction layer to enable fallback.</li>
+    </ul>
+
+    <h2 id="production">17. Production considerations</h2>
+    <p>Treat the LLM API exactly like any other critical third-party dependency: circuit breakers, health checks, fallback providers, and SLA monitoring. Rate-limit your own outbound request rate proactively rather than reactively handling 429s.</p>
+
+    <h2 id="security">18. Security considerations</h2>
+    <p>Store API keys in a secret manager, rotate regularly, and scope keys with least privilege where providers support it. Validate/sanitize any user input that flows into tool-call arguments before executing them.</p>
+
+    <h2 id="performance">19. Performance considerations</h2>
+    <p>Use streaming for user-facing responses to improve perceived latency. Use async/concurrent calls for batch workloads. Consider the provider's dedicated Batch API for large non-real-time workloads, often at a cost/throughput advantage.</p>
+
+    <h2 id="cost">20. Cost considerations</h2>
+    <p>Log input/output tokens per call; aggregate into per-feature and per-user cost dashboards; use cheaper model tiers and prompt/context caching wherever quality permits.</p>
+
+    <h2 id="debug">21. Debugging/troubleshooting</h2>
+    <ul>
+      <li><b>Intermittent timeouts:</b> check network/provider status, increase timeout cautiously, add retries.</li>
+      <li><b>429 rate limit errors under normal load:</b> check your actual tier limits and implement client-side rate limiting/queuing.</li>
+      <li><b>Unexpected cost spike:</b> audit per-request token logs for a regression (e.g., unbounded context growth).</li>
+    </ul>
+
+    <h2 id="related">22. Related concepts</h2>
+    <p><a href="../06-LLM-Providers/llm-providers-comparison.html">LLM Providers</a> · <a href="../09-Structured-Output/">Structured Output</a> · <a href="../39-AI-Gateways/">AI Gateways</a></p>
+
+    <h2 id="comparison">23. Comparison with alternatives</h2>
+    <table>
+      <tr><th>Approach</th><th>When to use</th></tr>
+      <tr><td>Direct provider SDK</td><td>Simple projects, single provider, fast to start</td></tr>
+      <tr><td>Custom abstraction layer</td><td>Need multi-provider fallback/routing without heavy dependency</td></tr>
+      <tr><td>AI Gateway (LiteLLM/Portkey)</td><td>Need robust built-in routing, fallback, observability across many providers</td></tr>
+    </table>
+
+    <h2 id="exercise">24. Mini practical exercise</h2>
+    <p>Add retry-with-backoff logic to a simple API call, then simulate a rate-limit error (mock the client) and verify the retry logic triggers correctly.</p>
+
+    <h2 id="project">25. Practical project</h2>
+    <p><b>Resilient LLM Client Wrapper:</b> build a reusable client wrapping any provider's SDK with timeout, retry-with-backoff, fallback provider, and structured usage logging to a local file/database.</p>
+
+    <h2 id="projectarch">26. Project architecture</h2>
+    <pre><code>Application → ResilientLLMClient.complete(messages)
+   → try primary provider (timeout + retry)
+   → on failure: fallback provider
+   → log {provider, tokens, latency, success} to usage_log.jsonl</code></pre>
+
+    <h2 id="interview-b">27. Interview Questions — Beginner</h2>
+    <div class="qa"><b>Q1.</b> What does streaming mean in the context of an LLM API?<br><b>A.</b> Receiving generated tokens incrementally as they're produced, rather than waiting for the full response.</div>
+    <div class="qa"><b>Q2.</b> What's a rate limit?<br><b>A.</b> A cap on how many requests/tokens a client can send in a given time window, enforced by the provider.</div>
+    <div class="qa"><b>Q3.</b> Why should you set a timeout on API calls?<br><b>A.</b> To prevent a request from hanging indefinitely if the network or provider is slow/unresponsive.</div>
+    <div class="qa"><b>Q4.</b> What is exponential backoff?<br><b>A.</b> A retry strategy that increases the wait time between attempts exponentially, reducing load on a struggling service.</div>
+    <div class="qa"><b>Q5.</b> What is model fallback?<br><b>A.</b> Switching to a secondary model/provider when the primary one fails or is unavailable.</div>
+    <div class="qa"><b>Q6.</b> What is a provider abstraction layer?<br><b>A.</b> A common interface that decouples application logic from any single provider's specific SDK.</div>
+    <div class="qa"><b>Q7.</b> Why track token usage per request?<br><b>A.</b> To monitor and control cost, and to detect regressions like unbounded context growth.</div>
+    <div class="qa"><b>Q8.</b> What is a Batch API?<br><b>A.</b> An interface for submitting many requests for asynchronous bulk processing, often at a cost discount for non-real-time workloads.</div>
+    <div class="qa"><b>Q9.</b> Should you retry every type of API error?<br><b>A.</b> No — retry transient errors (rate limits, timeouts, server errors); don't retry errors caused by invalid input, which will just fail again.</div>
+    <div class="qa"><b>Q10.</b> What is a circuit breaker pattern?<br><b>A.</b> A pattern that stops sending requests to a failing dependency after repeated failures, to avoid cascading overload, resuming only after a cooldown or health check passes.</div>
+
+    <h2 id="interview-i">28. Interview Questions — Intermediate</h2>
+    <div class="qa"><b>Q1.</b> How would you implement exponential backoff with jitter, and why add jitter?<br><b>A.</b> Compute delay as `base * 2^attempt` plus a small random jitter value; jitter prevents many clients retrying in lockstep (thundering herd) from all hammering the service at the exact same moments after a shared outage.</div>
+    <div class="qa"><b>Q2.</b> Why might you want client-side rate limiting even though the provider already enforces limits server-side?<br><b>A.</b> Proactively throttling your own request rate avoids wasting time on guaranteed-to-fail requests, reduces 429 error-handling overhead, and smooths load rather than bursting up to the limit and backing off reactively.</div>
+    <div class="qa"><b>Q3.</b> What's a risk of blindly retrying a failed tool-call request without checking the error type?<br><b>A.</b> If the failure was due to invalid arguments or a permanent error (not transient), retrying identically will just fail again, wasting time/cost; the retry logic should distinguish transient (retry-worthy) from permanent (don't retry) failures.</div>
+    <div class="qa"><b>Q4.</b> How would you design cost tracking that attributes LLM spend to specific product features or users?<br><b>A.</b> Tag every LLM call with metadata (feature name, user/tenant ID) at call time, log token usage alongside that metadata, and aggregate in a cost dashboard grouped by feature/user — enabling per-feature cost accountability.</div>
+    <div class="qa"><b>Q5.</b> Why is a Batch API not suitable for a user-facing chat feature?<br><b>A.</b> Batch APIs are designed for asynchronous, non-real-time bulk processing (results may take minutes to hours), incompatible with the low-latency, synchronous response a chat interface requires.</div>
+
+    <h2 id="interview-a">29. Interview Questions — Advanced</h2>
+    <div class="qa"><b>Q1.</b> How would you design a circuit breaker for an LLM API dependency, including its state transitions?<br><b>A.</b> Track a rolling failure rate; transition from Closed (normal) to Open (reject calls immediately, serve fallback/cached response) after failures exceed a threshold within a time window; after a cooldown period, transition to Half-Open (allow a small number of test requests through); if those succeed, return to Closed, else back to Open — preventing cascading overload while allowing automatic recovery detection.</div>
+    <div class="qa"><b>Q2.</b> What's a subtle issue with naive retry logic on a non-idempotent LLM call that also triggers a side-effecting tool call?<br><b>A.</b> If a tool call (e.g., "send an email," "charge a payment") succeeded but the response delivery failed/timed out, a naive retry could re-execute the side effect; mitigate with idempotency keys on tool executions or by only retrying the LLM reasoning step, not already-executed side effects.</div>
+
+    <h2 id="interview-s">30. Interview Questions — Senior/Architect</h2>
+    <div class="qa"><b>Q1.</b> Design the resiliency architecture for a company-wide internal LLM gateway serving dozens of product teams.<br><b>A.</b> Centralize provider credentials and routing behind a gateway service; implement per-team rate limiting/quotas, circuit breakers per provider, automatic fallback chains, centralized cost/usage logging and dashboards per team, and a consistent structured-output validation layer — so individual product teams don't each reimplement resiliency logic inconsistently.</div>
+
+    <h2 id="interview-sc">31. Scenario-Based Questions</h2>
+    <div class="qa"><b>Scenario 1.</b> Your LLM-powered feature starts throwing 429 errors during a traffic spike, even though you have retry logic. What's missing?<br><b>A.</b> Retry-with-backoff alone doesn't prevent exceeding limits; add client-side rate limiting/request queuing to stay under the provider's actual rate limit proactively, rather than relying solely on reactive retries.</div>
+    <div class="qa"><b>Scenario 2.</b> A tool-calling feature occasionally double-charges a customer because a retry re-executed a payment tool call after a network timeout masked a successful first attempt. How do you fix the architecture?<br><b>A.</b> Add idempotency keys to the payment tool call so a retry with the same key is recognized as a duplicate and safely no-ops, decoupling retry safety from whether the original request actually succeeded server-side.</div>
+
+    <h2 id="revision">32. Quick revision notes</h2>
+    <ul>
+      <li>Treat the LLM API like any critical third-party dependency: timeouts, retries, circuit breakers, fallback.</li>
+      <li>Track tokens/cost per request from day one.</li>
+      <li>Validate structured output even with provider "JSON mode" guarantees.</li>
+      <li>Build a provider abstraction layer early.</li>
+    </ul>
+
+    <h2 id="cheat">33. Cheat sheet</h2>
+    <div class="callout">Timeout + retry-with-backoff + fallback provider + token/cost logging + structured-output validation = a production-grade LLM API integration. Treat it like any unreliable network dependency.</div>
+
+    <h2 id="further">34. Further topics to learn</h2>
+    <p><a href="../09-Structured-Output/">Structured Output</a> → <a href="../39-AI-Gateways/">AI Gateways</a> → <a href="../36-LLM-Observability/">LLM Observability</a></p>
+
+    <div class="prevnext">
+      <a href="../06-LLM-Providers/llm-providers-comparison.html">← LLM Providers</a>
+      <a href="../08-Prompt-Engineering/prompt-engineering-fundamentals.html">Next: Prompt Engineering →</a>
+    </div>
+  </main>
+</div>
+<script src="../assets/app.js"></script>
+</body>
+</html>

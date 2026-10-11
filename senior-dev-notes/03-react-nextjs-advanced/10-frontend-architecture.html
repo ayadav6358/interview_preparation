@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Frontend Architecture at Scale — React & Next.js Advanced — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">React &amp; Next.js Advanced</a><span class="sep">›</span>Frontend Architecture</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>Frontend Architecture: Folder Structure, Design Systems, Micro-Frontends</h1>
+      <p class="meta-line"><span>⏱ 3 hrs</span><span>📍 Chapter 10 of 11</span></p>
+      <p><strong>One-line summary:</strong> Architecture decisions at this level aren't about "feature folders
+      vs. type folders" — they're about where you draw team-ownership boundaries, and every technique here
+      (design systems, module federation, monorepos) is a different tool for making those boundaries cheap to
+      maintain as the org, not just the codebase, scales.</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>Tech Lead interviews increasingly probe organizational scaling, not just code patterns — "how would
+      you structure a frontend for 8 teams shipping independently" is a direct test of whether you've actually
+      lived through the pain of a growing frontend monolith. Candidates who only know single-app folder
+      conventions get stuck; candidates who can reason about Conway's Law, build-time vs. runtime composition,
+      and the real cost of micro-frontends (not just the benefit) stand out.</p>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>Read <a href="07-server-client-components.html">Server vs Client Components</a> and
+      <a href="08-rendering-strategies.html">Rendering Strategies</a> first — architecture decisions here
+      (especially micro-frontend composition) interact directly with where rendering happens. Related:
+      <a href="11-accessibility-seo.html">Accessibility and SEO</a> (a design system is where a11y gets
+      enforced systemically).</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="folder-structure">Folder structure: feature-based over type-based, with explicit boundaries</h3>
+      <p>Type-based structure (<code>/components</code>, <code>/hooks</code>, <code>/utils</code> at the top
+      level) scales badly past a handful of contributors — unrelated features end up interleaved in the same
+      directories, and there's no structural signal for what can safely change together. Feature-based (a.k.a.
+      "colocation" or "screaming architecture") structure groups everything a feature needs — components,
+      hooks, types, tests, even feature-local state — under one feature directory, with a small shared
+      <code>/shared</code> or <code>/ui</code> layer for genuinely cross-feature primitives. The real senior
+      insight isn't the folder names, though — it's enforcing the boundary with tooling (ESLint import
+      restrictions, dependency-cruiser, or a monorepo tool's project boundaries) so "feature A importing
+      feature B's internals directly" fails CI, not just code review discipline.</p>
+
+      <h3 id="design-systems">Design systems: the contract between design and every consuming team</h3>
+      <p>A design system is not "a shared component library" — that's the implementation. The actual thing
+      being built is a <em>contract</em>: a fixed vocabulary of design tokens (color, spacing, typography
+      scales), a constrained set of composable primitives, and documented usage rules, such that any team
+      building a feature produces visually and behaviorally consistent UI without needing a designer to review
+      every PR. The maturity ladder matters: (1) a shared component library with hardcoded styles, (2) tokens
+      extracted so theming/rebranding doesn't require touching component code, (3) tokens generated from a
+      single source of truth (often a design tool export) and consumed by both design and code, keeping
+      Figma and the codebase from drifting apart. Versioning a design system like a real package (semver,
+      changelog, deprecation windows) is what actually lets dozens of teams depend on it without a breaking
+      change becoming an org-wide fire drill.</p>
+
+      <h3 id="monorepo-vs-polyrepo">Monorepo vs. polyrepo, and what a monorepo tool actually buys you</h3>
+      <p>A monorepo (Turborepo, Nx) isn't primarily about "one git repo" — it's about getting a dependency
+      graph the tooling understands, so you get affected-only builds/tests (only rebuild/retest packages that
+      actually changed or depend on what changed), remote build caching shared across the team and CI, and
+      atomic cross-package commits (a shared library change and its consumers updated in the same PR, type-
+      checked together). A polyrepo (one repo per package/app) gives stronger team-autonomy boundaries and
+      independent deploy cadences by default, at the cost of needing a package registry workflow (publish,
+      bump, consumer updates as separate PRs) for any cross-repo change, which is slower and easier to let
+      drift out of sync (a shared component library with 6 different major versions in use across consumers
+      is the classic polyrepo failure mode).</p>
+
+      <h3 id="micro-frontends">Micro-frontends and Module Federation: runtime composition, real tradeoffs</h3>
+      <p>A micro-frontend architecture splits a single application into independently built and deployed
+      pieces, composed together either at build time (a monorepo importing packages, still one deploy) or at
+      <strong>runtime</strong> (separately deployed apps, stitched together in the browser or at the edge) —
+      it's the runtime case people usually mean by "micro-frontends." Webpack/Rspack <strong>Module
+      Federation</strong> is the dominant runtime-composition mechanism: each micro-frontend ("remote") exposes
+      specific modules via a federation manifest; a "host" app declares those remotes and loads their code
+      on-demand at runtime, with shared dependencies (React itself, a design system) deduplicated via a shared
+      scope so multiple remotes don't each ship their own copy. The real tradeoff is sharp: independent
+      deployability and team autonomy (team A ships without coordinating a release with team B) against
+      meaningfully harder debugging (a runtime version mismatch between a remote and host's shared React
+      version can produce bizarre, hard-to-reproduce bugs), duplicated/inconsistent UX unless the design system
+      is rigorously enforced across remotes, and real performance cost (runtime composition means the
+      browser fetches and initializes multiple independently-built bundles, often undermining the aggressive
+      code-splitting a single well-architected app would otherwise achieve).</p>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>Module Federation works by each remote app's build emitting a small runtime "container" entry (not
+      the whole app) alongside a manifest describing its exposed modules and their chunk locations. The host
+      app, at runtime, fetches that remote's container script, which registers the remote's module factory
+      functions into a shared federation runtime. When the host code calls <code>import('remoteApp/Widget')</code>,
+      the federation runtime resolves it against the already-loaded container, fetching that specific chunk
+      on demand (not the remote's entire bundle) and returning the live module. Shared dependencies work via
+      a negotiation step: each app declares what version of (say) React it has and whether it's willing to
+      use a different compatible version provided by another participant in the federation graph — at runtime,
+      the federation runtime picks a single satisfying version to actually load into the shared scope,
+      skipping redundant fetches of a dependency already present, which is also exactly where "it works in
+      isolation but breaks when composed with that other team's remote" version-mismatch bugs come from.</p>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+flowchart TD
+  A[Host app loads] --> B[Fetches remote container scripts for declared remotes]
+  B --> C[Remote containers register exposed modules + shared dep versions]
+  C --> D[Federation runtime negotiates shared dependency versions]
+  D --> E[Host code calls import of a remote module]
+  E --> F[Federation runtime fetches that specific chunk on demand]
+  F --> G[Module returned and rendered inside host's tree]
+      </div>
+      <div class="mermaid">
+flowchart TD
+  A[Design tokens defined once: color, spacing, type scale] --> B[Design system package: primitives built on tokens]
+  B --> C[Published with semver + changelog]
+  C --> D[Team A consumes via npm/monorepo package]
+  C --> E[Team B consumes via npm/monorepo package]
+  C --> F[Team C consumes via npm/monorepo package]
+  D --> G[Consistent UI across all teams without per-PR design review]
+  E --> G
+  F --> G
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-typescript">// Feature-based folder structure with an enforced boundary
+// /src/features/checkout/{components,hooks,api,types}.ts
+// /src/features/cart/{components,hooks,api,types}.ts
+// /src/shared/ui -- only genuinely cross-feature primitives live here
+
+// .eslintrc.js -- enforce the boundary: features can't reach into each other's internals
+module.exports = {
+  rules: {
+    "no-restricted-imports": ["error", {
+      patterns: [
+        {
+          group: ["@/features/*/components/*", "@/features/*/hooks/*"],
+          message: "Import from a feature's public index, not its internals. Cross-feature logic belongs in /shared.",
+        },
+      ],
+    }],
+  },
+};
+
+// /src/features/checkout/index.ts -- the feature's public contract
+export { CheckoutForm } from "./components/CheckoutForm";
+export { useCheckoutState } from "./hooks/useCheckoutState";
+// internals NOT re-exported stay genuinely private to the feature
+
+// Design tokens as the single source of truth, consumed by the component layer
+// tokens.ts
+export const tokens = {
+  color: { primaryBg: "#1d4ed8", primaryFg: "#ffffff", dangerBg: "#dc2626" },
+  space: { sm: "4px", md: "8px", lg: "16px" },
+} as const;
+
+// Button.tsx -- primitive built strictly on tokens, never a hardcoded hex value
+import { tokens } from "../tokens";
+
+export function Button({ variant = "primary", children }: { variant?: "primary" | "danger"; children: React.ReactNode }) {
+  const bg = variant === "danger" ? tokens.color.dangerBg : tokens.color.primaryBg;
+  return <button style={{ background: bg, color: tokens.color.primaryFg, padding: tokens.space.md }}>{children}</button>;
+}
+
+// webpack.config.js -- Module Federation: a remote exposing one widget, sharing React
+const { ModuleFederationPlugin } = require("webpack").container;
+
+module.exports = {
+  plugins: [
+    new ModuleFederationPlugin({
+      name: "productWidgets",
+      filename: "remoteEntry.js",
+      exposes: { "./RecommendationRail": "./src/RecommendationRail" },
+      shared: { react: { singleton: true, requiredVersion: "^19.0.0" }, "react-dom": { singleton: true } },
+    }),
+  ],
+};
+
+// host app -- consuming the remote at runtime
+const RecommendationRail = React.lazy(() => import("productWidgets/RecommendationRail"));</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4>
+      <p>A retailer split their site into micro-frontends per domain team (search, product, cart, checkout)
+      using Module Federation, expecting faster independent deploys. Six months in, every team had quietly
+      pinned a slightly different React and design-system version in their remote to avoid coordinating
+      upgrades, and the federation runtime's version negotiation started silently loading inconsistent
+      component versions depending on which remote initialized first in a given session — users saw visually
+      inconsistent buttons and, occasionally, hooks errors from a version-mismatched React instance slipping
+      through the shared-scope negotiation. The fix was organizational as much as technical: a mandated
+      shared-dependency version policy enforced by a CI check across all remotes (failing a remote's build if
+      its declared shared-dependency versions drifted from the sanctioned range), plus a weekly automated
+      upgrade train for the design system package that all remotes had to adopt within one sprint. The lesson
+      the team took away: Module Federation gives you the *capability* for independent deploys, but it doesn't
+      give you the governance to keep shared dependencies actually consistent — that has to be built and
+      enforced deliberately, or the architecture's main promised benefit erodes into user-visible bugs.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4>
+      <p>Adopting micro-frontends/Module Federation because it's architecturally interesting, not because an
+      actual organizational pain point (multiple teams genuinely blocked on each other's release cadence)
+      demands it. For a single team or a handful of engineers, the runtime-composition overhead (extra
+      network requests, harder debugging, shared-dependency negotiation complexity) is pure cost with no
+      corresponding benefit — a well-structured monorepo with build-time composition gets most of the
+      maintainability benefit without the runtime cost.</p></div>
+      <ul>
+        <li>Building a design system as "whatever components we happened to extract from the first app" instead of starting from tokens — leads to components with inconsistent, hardcoded values that can't be retheme'd without touching every component.</li>
+        <li>Not enforcing feature-boundary rules with tooling (ESLint/dependency-cruiser), relying purely on code review — boundary violations creep in over time as team composition and reviewer vigilance changes.</li>
+        <li>Treating a monorepo's shared packages as free to change without versioning discipline just because "it's all one repo" — a breaking change to a shared package used by 10 apps in the same monorepo can still break 9 of them simultaneously if nobody's tracking who depends on what.</li>
+        <li>Assuming Module Federation's shared-dependency deduplication "just works" without an explicit version-compatibility policy across remotes — silent version drift is the most common real-world Module Federation production incident.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>Feature-based folders + enforced boundaries</td><td>Multiple contributors/teams in one codebase, long-lived app</td><td>Small app, single contributor, short-lived prototype</td><td>Simple type-based structure</td></tr>
+        <tr><td>Monorepo (Turborepo/Nx)</td><td>Multiple related packages/apps sharing code with frequent cross-package changes</td><td>Teams need fully independent deploy cadence/tooling choices with no shared concerns</td><td>Polyrepo + published packages</td></tr>
+        <tr><td>Build-time composition (monorepo imports)</td><td>Most cases — simpler, faster, single deploy unit, better code-splitting</td><td>Teams are structurally blocked waiting on each other's release train</td><td>Runtime composition (Module Federation)</td></tr>
+        <tr><td>Module Federation / runtime micro-frontends</td><td>Genuinely independent team deploy cadences, org too large for a single release train</td><td>Small team, performance-critical app, or no real deploy-coordination pain yet</td><td>Monorepo with build-time composition</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic"><h4>Basic</h4>
+      <details class="qa"><summary>What's the difference between feature-based and type-based folder structure?</summary><div class="answer"><p>Type-based groups files by what they are (all components together, all hooks together); feature-based groups files by what feature they belong to, colocating a feature's components, hooks, and logic together.</p></div><div class="followup">Follow-up: Why does type-based structure tend to scale worse with more contributors?</div></details>
+      <details class="qa"><summary>What is a design token?</summary><div class="answer"><p>A named, reusable design value (a color, a spacing unit, a font size) defined once as the single source of truth, so components reference the token rather than hardcoding the raw value.</p></div><div class="followup">Follow-up: What does having tokens let you do that hardcoded values don't?</div></details>
+      <details class="qa"><summary>What's the core difference between a monorepo and a polyrepo?</summary><div class="answer"><p>A monorepo keeps multiple packages/apps in one repository with tooling that understands their dependency graph (affected-only builds, shared caching); a polyrepo keeps each package/app in its own repository, coordinated via a package registry.</p></div><div class="followup">Follow-up: What's a common failure mode of a polyrepo setup?</div></details>
+      <details class="qa"><summary>What does Module Federation let you do at a high level?</summary><div class="answer"><p>It lets independently built and deployed apps ("remotes") expose modules that another app (the "host") can load and render at runtime, without being built together or deployed as one unit.</p></div><div class="followup">Follow-up: Is this build-time or runtime composition?</div></details>
+      <details class="qa"><summary>Why would a team choose build-time composition over runtime micro-frontends?</summary><div class="answer"><p>Build-time composition is simpler, has better code-splitting/performance since everything is bundled together with full visibility, and avoids runtime version-negotiation complexity — it's the right default unless there's a genuine organizational need for independent deploy cadences.</p></div><div class="followup">Follow-up: What organizational signal would tell you it's time to consider runtime composition instead?</div></details>
+      <details class="qa"><summary>Why is a design system described as a "contract" rather than just a component library?</summary><div class="answer"><p>Because its value isn't the components themselves — it's the agreed-upon vocabulary and rules (tokens, usage guidelines, versioning) that let many teams produce consistent UI independently, without per-PR design review.</p></div><div class="followup">Follow-up: What happens to that contract if the design system isn't versioned like a real package?</div></details>
+      </div>
+      <div class="qa-level medium"><h4>Medium</h4>
+      <details class="qa"><summary>How do you actually enforce a feature-boundary rule, beyond just naming conventions?</summary><div class="answer"><p>With tooling that fails CI on violation — ESLint's `no-restricted-imports` (or a plugin like `eslint-plugin-boundaries`), dependency-cruiser rules, or a monorepo tool's (Nx) project boundary tags, all of which can detect "feature A importing feature B's internals directly" as a build-breaking lint error rather than relying on reviewers catching it in every PR.</p></div><div class="followup">Follow-up: What's the tradeoff of making these rules too strict too early in a young codebase?</div></details>
+      <details class="qa"><summary>Explain what "affected-only" builds in a monorepo tool (Turborepo/Nx) actually require to work correctly.</summary><div class="answer"><p>An accurate, tool-understood dependency graph between packages — the tool needs to know that package B imports package A, so a change to A can correctly mark both A and B (and anything depending on B) as affected, while leaving genuinely unrelated packages untouched. This requires explicit package boundaries (each package has its own package.json/project config) and consistent internal imports going through the package's declared entry point rather than deep relative paths that the tool can't trace.</p></div><div class="followup">Follow-up: What happens to affected-only build accuracy if packages import each other via relative file paths instead of package names?</div></details>
+      <details class="qa"><summary>Walk through how Module Federation's shared-dependency negotiation can lead to a runtime bug that's invisible in each remote's isolated testing.</summary><div class="answer"><p>Each remote is tested and works correctly in isolation against its own declared dependency version. At runtime, when composed with a host and other remotes, the federation runtime negotiates a single shared version to actually load for a given dependency (e.g., React) across all participants — if that negotiated version differs from what a specific remote assumed/tested against (e.g., a hooks internals change between minor versions), that remote can break in subtle ways only visible in the composed, multi-remote runtime context, never in its own isolated test/dev environment.</p></div><div class="followup">Follow-up: What testing strategy would catch this kind of issue before it reaches production?</div></details>
+      <details class="qa"><summary>Why might a team deliberately choose NOT to adopt a monorepo even though they have multiple related frontend packages?</summary><div class="answer"><p>If teams genuinely need independent tooling choices (different build systems, different CI pipelines, different release cadences with no desire for atomic cross-package commits), a monorepo's forced shared tooling and single-repo coordination can become friction rather than help — polyrepo plus a disciplined package-publishing workflow preserves that autonomy, at the cost of needing more deliberate version-compatibility management across repos.</p></div><div class="followup">Follow-up: What would make you reconsider and migrate to a monorepo later?</div></details>
+      </div>
+      <div class="qa-level advanced"><h4>Advanced</h4>
+      <details class="qa"><summary>Design a frontend architecture for an org with 6 product teams, a shared design system team, and a requirement that any team can deploy without coordinating with others. Justify your composition strategy (build-time vs runtime) and your boundary-enforcement approach.</summary><div class="answer"><p>The "deploy independently without coordination" requirement is the decisive signal for runtime composition (Module Federation or similar) over a monorepo with build-time composition, since build-time composition inherently ties all consumers to a shared release train for any shared-package change. Structure: each product team owns one or more remotes exposing their routes/widgets; a thin host app owns routing/shell and composes remotes at runtime; the design-system team publishes a versioned package consumed as a shared dependency across all remotes, with a CI-enforced version-compatibility policy (a gate failing any remote's build if its declared design-system/React version falls outside the sanctioned range) to prevent the version-drift failure mode. Boundary enforcement: each remote's exposed module surface is the only public contract (no team reaches into another remote's internals, which is structurally impossible anyway since remotes are separate builds/deploys) — the harder enforcement problem is the shared-dependency policy, which needs an explicit, actively maintained compatibility matrix rather than relying on Module Federation's negotiation to "just work."</p></div><div class="followup">Follow-up: How would you handle a shared design-system breaking change across 6 independently-deployed remotes without a coordinated release?</div></details>
+      <details class="qa"><summary>Critique: "Our design system has 100% component test coverage, so it's safe for any team to upgrade to the latest major version whenever." What's missing from this picture?</summary><div class="answer"><p>Component-level test coverage validates the design system's own internal correctness, but says nothing about how consuming teams actually use those components — a major version bump can change a prop's semantics, remove a deprecated variant, or alter default styling in a way that's "correct" per the design system's own tests but breaks a consumer's specific usage pattern that was never covered by the design system's own test suite (it can't test usages it doesn't know about). Real safety requires consumer-facing signals: a documented migration guide, a deprecation window where the old and new APIs coexist, and ideally automated usage-pattern scanning or a canary rollout across a subset of consuming teams before a hard cutover — coverage alone doesn't substitute for a rollout/communication strategy.</p></div><div class="followup">Follow-up: How would a deprecation window concretely work for a prop being renamed across a major version?</div></details>
+      <details class="qa"><summary>Explain Conway's Law's relevance to the micro-frontend decision, with a concrete failure mode of ignoring it.</summary><div class="answer"><p>Conway's Law observes that system architecture tends to mirror the communication structure of the organization that builds it — a frontend split into micro-frontends along lines that don't match actual team ownership (e.g., splitting by technical layer like "header remote" and "footer remote" rather than by team-owned domain like "search team" and "checkout team") forces exactly the cross-team coordination the architecture was meant to eliminate, since any meaningful feature now spans multiple remotes owned by different teams regardless of the split. The concrete failure mode: a team "owns" a remote on paper but every feature request requires touching 3 other teams' remotes too, so the promised independent-deploy benefit never materializes — the org still has to coordinate, just now across an added layer of runtime-composition complexity.</p></div><div class="followup">Follow-up: How would you re-draw micro-frontend boundaries if you discovered this misalignment after the fact?</div></details>
+      <details class="qa"><summary>A team proposes migrating a 200-component shared UI library to generate its components directly from Figma design tokens via an automated pipeline. What are the real risks of this approach, beyond "it sounds efficient"?</summary><div class="answer"><p>Design-tool exports are optimized for visual fidelity, not for the actual API ergonomics a codebase needs — a naive automated pipeline risks generating components whose props/variants map rigidly to Figma's internal variant structure rather than the semantically meaningful API consuming engineers actually want (e.g., Figma's "Button/Primary/Large/Hover" variant structure doesn't map cleanly to a React `<Button variant="primary" size="lg">` API without deliberate design). There's also a governance risk: if designers can push token changes that flow automatically into production code with no engineering review gate, a well-intentioned design tweak can become an uncontrolled breaking change across every consumer. The sustainable version of this pattern keeps tokens (colors, spacing, type scale — low-level primitives) on the automated pipeline, while component-level APIs stay hand-authored and deliberately designed, consuming those tokens rather than being fully auto-generated themselves.</p></div><div class="followup">Follow-up: Which specific layer of a design system (tokens vs. primitives vs. composed components) is safest to fully automate, and why?</div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment"><span class="level-tag">Beginner (30-60 min)</span><h4>Refactor a type-based folder structure into feature-based, with an enforced boundary</h4>
+      <p>Take a small app organized by type (`/components`, `/hooks`, `/utils`) and reorganize it into 2-3 feature folders with colocated components/hooks/types. Add an ESLint rule (or dependency-cruiser config) that fails if one feature imports another feature's non-exported internals directly.</p>
+      <p><strong>Acceptance criteria:</strong> Lint fails when you deliberately add a cross-feature internal import, and passes when going through each feature's public `index.ts` instead.</p>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>`eslint-plugin-boundaries` or a simple `no-restricted-imports` pattern targeting deep feature paths both work for this.</p></div></details>
+      <p><strong>Bonus:</strong> Add a `/shared` layer and move one genuinely cross-feature primitive there, documenting why it qualifies as shared.</p></div>
+
+      <div class="assignment"><span class="level-tag">Intermediate (2-4 hrs)</span><h4>Build a minimal token-based design system package with 3 primitives</h4>
+      <p>Create a small package exporting a `tokens.ts` (color/spacing/type scale) and 3 primitives (Button, Input, Card) built strictly on those tokens, with no hardcoded style values in the component code itself. Publish it to a local workspace package (in a simple monorepo setup) and consume it from two different "app" packages to confirm consistent styling.</p>
+      <ul><li>Change one token value and confirm it propagates visually to both consuming apps without touching component code.</li></ul>
+      <p><strong>Acceptance criteria:</strong> A single token change visibly re-themes all consumers; no component file contains a raw hex/pixel value.</p>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>CSS custom properties or a theming object passed via context both work — the important part is zero hardcoded values inside component implementation files.</p></div></details>
+      <p><strong>Bonus:</strong> Add a semver-style changelog and simulate a breaking change with a documented migration note.</p></div>
+
+      <div class="assignment"><span class="level-tag">Advanced (1-2 days)</span><h4>Set up a working Module Federation host + remote with a shared dependency</h4>
+      <p>Build two small apps: a "host" and one "remote" exposing a single widget component, using Webpack or Rspack Module Federation. Configure React as a shared singleton dependency. Load the remote's widget inside the host at runtime via `React.lazy`, and deliberately introduce a version mismatch (different React minor versions declared in host vs remote) to observe what actually happens at runtime.</p>
+      <ul><li>Document what error or behavior you actually see when the shared dependency versions conflict.</li></ul>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>Start from one of the official Module Federation example repos rather than configuring from scratch — the manifest/runtime wiring has enough moving parts that a working reference is worth the time saved.</p></div></details>
+      </div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet"><ul>
+        <li>Feature-based folder structure + CI-enforced boundaries (ESLint/dependency-cruiser) scale better than type-based + review discipline alone.</li>
+        <li>A design system is a contract (tokens + primitives + versioning rules), not just a component library — version it like a real package.</li>
+        <li>Monorepo tools (Turborepo/Nx) buy affected-only builds, shared remote caching, and atomic cross-package commits via a tool-understood dependency graph.</li>
+        <li>Build-time composition (monorepo imports) is the simpler default; runtime composition (Module Federation) is justified only by genuine independent-deploy organizational needs.</li>
+        <li>Module Federation's remote exposes a container + manifest; the host fetches it at runtime and loads specific chunks on demand via the federation runtime.</li>
+        <li>Shared-dependency version negotiation in Module Federation is the most common real-world failure mode — enforce a compatibility policy in CI, don't rely on it "just working."</li>
+        <li>Conway's Law: draw micro-frontend boundaries along real team-ownership lines, not technical layers, or coordination overhead just relocates instead of disappearing.</li>
+        <li>Token-level automation (design tool exports) is safer than fully auto-generating component-level APIs, which need deliberate design regardless of pipeline sophistication.</li>
+      </ul></div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://nextjs.org/docs/app/building-your-application/routing/colocation">Next.js — Project Organization and File Colocation</a></li>
+        <li><a href="https://turbo.build/repo/docs">Turborepo — Documentation</a></li>
+        <li><a href="https://webpack.js.org/concepts/module-federation/">webpack.js.org — Module Federation</a></li>
+        <li><a href="https://react.dev/learn/thinking-in-react">react.dev — Thinking in React</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="09-core-web-vitals.html"><span class="dir">← Previous</span>Core Web Vitals</a>
+        <a class="next" href="11-accessibility-seo.html"><span class="dir">Next →</span>Accessibility and SEO</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · React &amp; Next.js Advanced</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-jsx.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-typescript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-tsx.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "03-react-nextjs-advanced", chapterKey: "10-frontend-architecture" });</script>
+</body>
+</html>

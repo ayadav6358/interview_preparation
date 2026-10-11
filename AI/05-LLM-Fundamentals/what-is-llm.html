@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>What is an LLM</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <input class="searchbox" placeholder="Search topics..." />
+    <a href="../index.html">← Home</a>
+    <h3>05-LLM-Fundamentals</h3>
+    <a href="what-is-llm.html">What is an LLM</a>
+    <a href="tokens-and-context-window.html">Tokens & Context Window</a>
+    <a href="sampling-and-hallucination.html">Sampling & Hallucination</a>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumbs"><a href="../index.html">Home</a> / 05-LLM-Fundamentals / What is an LLM</div>
+      <button class="theme-toggle" onclick="toggleTheme()">🌓 Theme</button>
+    </div>
+    <h1>What is an LLM?</h1>
+    <span class="tag good">Stable</span><span class="tag">Last verified: 2026-10-06</span>
+
+    <div class="toc">
+      <b>On this page</b>
+      <a href="#what">1. What is this?</a>
+      <a href="#whyexist">2. Why does it exist?</a>
+      <a href="#whyimportant">3. Why is it important?</a>
+      <a href="#whereused">4. Where is it used?</a>
+      <a href="#prereq">5. Prerequisites</a>
+      <a href="#core">6. Core concepts</a>
+      <a href="#terms">7. Terminology</a>
+      <a href="#arch">8. Architecture</a>
+      <a href="#internal">9. How it works internally</a>
+      <a href="#steps">10. Step-by-step explanation</a>
+      <a href="#simple">11. Simple example</a>
+      <a href="#real">12. Real-world example</a>
+      <a href="#code">13. Code example</a>
+      <a href="#advanced">14. Advanced example</a>
+      <a href="#mistakes">15. Common mistakes</a>
+      <a href="#best">16. Best practices</a>
+      <a href="#production">17. Production considerations</a>
+      <a href="#security">18. Security considerations</a>
+      <a href="#performance">19. Performance considerations</a>
+      <a href="#cost">20. Cost considerations</a>
+      <a href="#debug">21. Debugging/troubleshooting</a>
+      <a href="#related">22. Related concepts</a>
+      <a href="#comparison">23. Comparison with alternatives</a>
+      <a href="#exercise">24. Mini practical exercise</a>
+      <a href="#project">25. Practical project</a>
+      <a href="#projectarch">26. Project architecture</a>
+      <a href="#interview-b">27. Interview questions — Beginner</a>
+      <a href="#interview-i">28. Interview questions — Intermediate</a>
+      <a href="#interview-a">29. Interview questions — Advanced</a>
+      <a href="#interview-s">30. Interview questions — Senior/Architect</a>
+      <a href="#interview-sc">31. Scenario-based questions</a>
+      <a href="#revision">32. Quick revision notes</a>
+      <a href="#cheat">33. Cheat sheet</a>
+      <a href="#further">34. Further topics to learn</a>
+    </div>
+
+    <h2 id="what">1. What is this?</h2>
+    <p>A <b>Large Language Model (LLM)</b> is a neural network — almost always a <a href="../04-Transformers/">Transformer</a> decoder — trained on massive amounts of text to predict the next token given everything before it. From this single objective, applied at huge scale (billions of parameters, trillions of training tokens), models develop broad emergent capabilities: writing, reasoning, coding, translation, summarization, and tool use.</p>
+
+    <h2 id="whyexist">2. Why does it exist?</h2>
+    <p>Hand-coding language understanding (classic rule-based NLP: grammars, regexes, decision trees over linguistic features) never scaled to the richness, ambiguity, and context-dependence of real human language. Statistical/neural approaches that learn patterns directly from huge text corpora turned out to generalize far better. LLMs are the current end-point of that trajectory: n-gram models → RNN/LSTM language models → Transformer-based LLMs, each step removing more hand-engineering and relying more on data + scale.</p>
+
+    <h2 id="whyimportant">3. Why is it important?</h2>
+    <p>LLMs are the first general-purpose language technology: one model, with no task-specific retraining, can draft emails, write code, answer questions, translate, summarize, and reason about novel problems via prompting alone. This generality is why LLMs sit at the center of the 2026 AI stack — RAG, agents, MCP, multimodal systems, and coding assistants are all built <i>on top of</i> an LLM's core next-token-prediction ability.</p>
+
+    <h2 id="whereused">4. Where is it used?</h2>
+    <ul>
+      <li>Conversational assistants (ChatGPT, Claude, Gemini)</li>
+      <li>Coding agents and IDE copilots (Claude Code, Copilot, Cursor)</li>
+      <li>RAG-based knowledge assistants and enterprise search</li>
+      <li>Autonomous/semi-autonomous agents (research, customer support, ops)</li>
+      <li>Content generation, summarization, translation, classification pipelines</li>
+      <li>Structured data extraction from unstructured documents</li>
+    </ul>
+
+    <h2 id="prereq">5. Prerequisites</h2>
+    <p>To get the most from this page, you should already understand: basic neural network concepts (parameters, training, inference — see <a href="../00-AI-Fundamentals/ai-lifecycle.html">AI Lifecycle</a>), and ideally have skimmed <a href="../04-Transformers/">Transformers</a> (tokenization, attention) since LLMs are built on that architecture.</p>
+
+    <h2 id="core">6. Core concepts</h2>
+    <ul>
+      <li><b>Autoregressive generation:</b> the model generates one token at a time, feeding each generated token back in as input for the next step.</li>
+      <li><b>Emergent capability:</b> abilities (e.g., arithmetic, chain-of-thought reasoning) that appear only past a certain scale, not present in smaller models trained the same way.</li>
+      <li><b>Alignment:</b> the process of shaping a raw pretrained model's behavior to be helpful, harmless, and honest.</li>
+      <li><b>Context-conditioned generation:</b> everything the model outputs is conditioned on the tokens currently in its context window — it has no persistent memory beyond that.</li>
+    </ul>
+
+    <h2 id="terms">7. Terminology</h2>
+    <table>
+      <tr><th>Term</th><th>Meaning</th></tr>
+      <tr><td>Token</td><td>A chunk of text (sub-word unit) the model actually processes — not quite a word, not quite a character.</td></tr>
+      <tr><td>Context window</td><td>The maximum number of tokens (input + output) the model can attend to in one request.</td></tr>
+      <tr><td>Parameters</td><td>Learned weights; model "size" (e.g. a dense model with tens of billions of parameters).</td></tr>
+      <tr><td>Pretraining</td><td>Initial large-scale next-token-prediction training on a broad corpus.</td></tr>
+      <tr><td>Instruction tuning (SFT)</td><td>Fine-tuning on (instruction, ideal response) pairs so the model follows instructions.</td></tr>
+      <tr><td>RLHF / DPO</td><td>Preference-based training that aligns the model toward human-preferred responses.</td></tr>
+      <tr><td>Temperature</td><td>Controls randomness of sampling — 0 = near-deterministic, higher = more diverse/creative.</td></tr>
+      <tr><td>Top-p / Top-k</td><td>Alternative sampling controls restricting the candidate pool before sampling.</td></tr>
+      <tr><td>Hallucination</td><td>Fluent, confident output that is factually wrong or unsupported.</td></tr>
+      <tr><td>Context engineering</td><td>Deliberately curating what goes into the context window to get reliable behavior.</td></tr>
+      <tr><td>Reasoning model</td><td>A model trained to spend extra inference-time compute on intermediate reasoning before answering.</td></tr>
+    </table>
+
+    <h2 id="arch">8. Architecture</h2>
+    <pre><code>Input text
+ → Tokenizer → token IDs
+ → Embedding layer (token ID → vector) + positional encoding
+ → N × [Multi-head self-attention → Feed-forward network] (Transformer decoder blocks)
+ → Final linear layer → probability distribution over vocabulary
+ → Sampling → next token
+ → (token appended, repeat)</code></pre>
+
+    <h2 id="internal">9. How it works internally</h2>
+    <p>Each transformer block lets every token "attend" to every previous token (causal/masked self-attention — a token cannot see future tokens), building a contextual representation. Stacking many such blocks lets the model build increasingly abstract representations (syntax → semantics → task-level reasoning patterns) purely from the next-token-prediction objective. A KV cache stores previously computed attention keys/values so each new token doesn't require recomputing attention over the whole sequence from scratch — critical for making autoregressive generation fast.</p>
+
+    <h2 id="steps">10. Step-by-step explanation (prompt → response)</h2>
+    <ol>
+      <li>User prompt is tokenized into token IDs.</li>
+      <li>Tokens are embedded and combined with positional information.</li>
+      <li>The sequence passes through all transformer layers, producing a probability distribution for the next token.</li>
+      <li>A token is sampled per temperature/top-p/top-k settings.</li>
+      <li>That token is appended to the sequence; steps 3–4 repeat (autoregressive loop).</li>
+      <li>Generation stops at an end-of-sequence token, a stop sequence, or the max-token limit.</li>
+      <li>The full response is returned (or streamed token-by-token) to the caller.</li>
+    </ol>
+
+    <h2 id="simple">11. Simple example</h2>
+    <p>Prompt: "The capital of France is" → the model assigns very high probability to the token "Paris" because that pattern was extremely common in training data, and samples it (especially at low temperature).</p>
+
+    <h2 id="real">12. Real-world example</h2>
+    <p>Claude Code (this assistant) is an LLM-based coding agent: your request is tokenized, sent through the model with system instructions and tool definitions in context, and the model generates either natural-language text or a structured tool call (e.g., "read this file") — all via the same next-token-prediction mechanism described above.</p>
+
+    <h2 id="code">13. Code example</h2>
+    <pre><code class="language-python">from anthropic import Anthropic
+
+client = Anthropic()
+response = client.messages.create(
+    model="claude-sonnet-5",
+    max_tokens=300,
+    temperature=0.3,
+    messages=[
+        {"role": "user", "content": "Explain what a context window is, in 2 sentences."}
+    ],
+)
+print(response.content[0].text)
+print("Tokens used:", response.usage.input_tokens, response.usage.output_tokens)
+</code></pre>
+    <pre><code class="language-typescript">import Anthropic from "@anthropic-ai/sdk";
+
+const client = new Anthropic();
+
+const response = await client.messages.create({
+  model: "claude-sonnet-5",
+  max_tokens: 300,
+  messages: [{ role: "user", content: "Explain context windows briefly." }],
+});
+
+console.log(response.content[0].text);
+</code></pre>
+
+    <h2 id="advanced">14. Advanced example</h2>
+    <p>Streaming + token accounting for a cost-aware production call:</p>
+    <pre><code class="language-python">with client.messages.stream(
+    model="claude-sonnet-5",
+    max_tokens=500,
+    messages=[{"role": "user", "content": "Write a haiku about distributed systems."}],
+) as stream:
+    for text in stream.text_stream:
+        print(text, end="", flush=True)
+    final = stream.get_final_message()
+    cost_estimate = final.usage.input_tokens * 0.000003 + final.usage.output_tokens * 0.000015
+    print(f"\nEstimated cost: ${cost_estimate:.6f}")
+</code></pre>
+
+    <h2 id="mistakes">15. Common mistakes</h2>
+    <ul>
+      <li>Treating LLM output as a database lookup ("it said X, so X must be true") instead of a probabilistic generation.</li>
+      <li>Assuming the model "remembers" past conversations outside the current context window.</li>
+      <li>Using high temperature for tasks needing determinism (extraction, classification, code).</li>
+      <li>Ignoring that every API call is stateless inference — no learning happens from your usage.</li>
+    </ul>
+
+    <h2 id="best">16. Best practices</h2>
+    <ul>
+      <li>Match temperature to task type (low for factual/structured, higher for creative).</li>
+      <li>Ground factual claims with retrieval (RAG) rather than relying on parametric memory.</li>
+      <li>Use system prompts for stable behavior; keep user prompts focused and specific.</li>
+      <li>Track token usage (input/output) per request for cost and performance visibility.</li>
+    </ul>
+
+    <h2 id="production">17. Production considerations</h2>
+    <p>Treat every LLM call like a network call to an unreliable, costly, rate-limited external service: implement retries with backoff, timeouts, graceful degradation (fallback model or cached response), and monitor latency/error rates per model/provider.</p>
+
+    <h2 id="security">18. Security considerations</h2>
+    <p>Untrusted text in context (user input, scraped pages, tool outputs) can carry prompt-injection attempts. Never give a model unrestricted tool/file/network access without permission boundaries. Avoid putting secrets in prompts that might be logged by a provider. See <a href="../38-AI-Security/">38-AI-Security</a>.</p>
+
+    <h2 id="performance">19. Performance considerations</h2>
+    <p>Latency scales with output token count (generation is sequential) far more than input size (input is processed in parallel). Streaming responses improves perceived latency. KV caching and prompt/context caching reduce repeated-computation costs for shared prefixes (e.g., a stable system prompt).</p>
+
+    <h2 id="cost">20. Cost considerations</h2>
+    <p>Cost = (input tokens × input price) + (output tokens × output price), summed per call. Larger/more capable models cost more per token — route simple tasks to smaller/faster models and reserve frontier models for complex reasoning (model routing). See <a href="../40-Cost-Optimization/">40-Cost-Optimization</a>.</p>
+
+    <h2 id="debug">21. Debugging/troubleshooting</h2>
+    <ul>
+      <li><b>Inconsistent outputs across calls:</b> check temperature/top-p settings; even at temperature 0, minor provider-side nondeterminism can occur.</li>
+      <li><b>Truncated output:</b> check `max_tokens` and stop sequences; the response may have hit the token cap mid-thought.</li>
+      <li><b>Unexpectedly expensive calls:</b> log `usage.input_tokens`/`usage.output_tokens` per call; often caused by unbounded conversation history or oversized retrieved context.</li>
+      <li><b>Model "forgets" earlier instructions:</b> likely a context-window/attention-dilution issue in a long conversation — summarize/compact history.</li>
+    </ul>
+
+    <h2 id="related">22. Related concepts</h2>
+    <p><a href="../04-Transformers/">Transformers</a> · <a href="tokens-and-context-window.html">Tokens & Context Window</a> · <a href="sampling-and-hallucination.html">Sampling & Hallucination</a> · <a href="../08-Prompt-Engineering/prompt-engineering-fundamentals.html">Prompt Engineering</a></p>
+
+    <h2 id="comparison">23. Comparison with alternatives</h2>
+    <table>
+      <tr><th>Approach</th><th>vs. LLM</th></tr>
+      <tr><td>Rule-based NLP</td><td>Deterministic and explainable but brittle; can't generalize to novel phrasing. LLMs generalize far better, at the cost of determinism/explainability.</td></tr>
+      <tr><td>Classic ML classifier</td><td>Cheaper, faster, more consistent for narrow, stable tasks; LLMs win on open-ended generation and zero-shot generalization.</td></tr>
+      <tr><td>Smaller fine-tuned model</td><td>Lower latency/cost for one specific task at scale; LLM APIs win on flexibility and avoiding a training pipeline.</td></tr>
+    </table>
+
+    <h2 id="exercise">24. Mini practical exercise</h2>
+    <p>Call the LLM API twice with the same prompt — once at temperature 0 and once at temperature 1 — and compare the outputs. Count tokens used in each case. Observe how output variability changes.</p>
+
+    <h2 id="project">25. Practical project</h2>
+    <p><b>Simple LLM Chat CLI:</b> build a terminal chat loop that maintains conversation history, sends it to the API each turn, prints streamed output, and displays running token/cost totals.</p>
+
+    <h2 id="projectarch">26. Project architecture</h2>
+    <pre><code>Terminal input
+ → Append to conversation history (list of messages)
+ → Send full history to LLM API (streaming)
+ → Print tokens as they arrive
+ → Append assistant response to history
+ → Track cumulative token usage/cost
+ → Loop</code></pre>
+
+    <h2 id="interview-b">27. Interview Questions — Beginner</h2>
+    <div class="qa"><b>Q1.</b> What is an LLM fundamentally trained to do?<br><b>A.</b> Predict the next token given preceding tokens.</div>
+    <div class="qa"><b>Q2.</b> What is a token?<br><b>A.</b> A sub-word unit of text produced by the tokenizer; not the same as a word or character.</div>
+    <div class="qa"><b>Q3.</b> What is the context window?<br><b>A.</b> The maximum number of tokens (input + output combined) a model can process in one request.</div>
+    <div class="qa"><b>Q4.</b> Does an LLM remember previous separate conversations?<br><b>A.</b> No, unless that history is explicitly re-sent in the context; the model itself is stateless between API calls.</div>
+    <div class="qa"><b>Q5.</b> What does temperature control?<br><b>A.</b> The randomness of next-token sampling; 0 is near-deterministic, higher values increase diversity.</div>
+    <div class="qa"><b>Q6.</b> What is a hallucination?<br><b>A.</b> Fluent but factually incorrect or unsupported output.</div>
+    <div class="qa"><b>Q7.</b> Is an LLM generative or discriminative?<br><b>A.</b> Generative — it models and samples from a distribution over possible text.</div>
+    <div class="qa"><b>Q8.</b> What architecture do modern LLMs use?<br><b>A.</b> The Transformer (typically a decoder-only variant).</div>
+    <div class="qa"><b>Q9.</b> What's the difference between pretraining and fine-tuning?<br><b>A.</b> Pretraining learns general language ability from huge raw text; fine-tuning further adapts the model on a smaller, task/behavior-specific dataset.</div>
+    <div class="qa"><b>Q10.</b> Why can't you just "tell the model to stop hallucinating"?<br><b>A.</b> Hallucination comes from generating plausible continuations without a built-in fact-checking mechanism; instruction wording alone can't add real-time verification.</div>
+
+    <h2 id="interview-i">28. Interview Questions — Intermediate</h2>
+    <div class="qa"><b>Q1.</b> Explain the difference between a base model and an instruction-tuned/chat model.<br><b>A.</b> A base model only continues text plausibly from pretraining; instruction tuning (SFT) and RLHF/DPO further adapt it to follow instructions and converse helpfully and safely.</div>
+    <div class="qa"><b>Q2.</b> Why does input context cost money even though the model isn't "generating" it?<br><b>A.</b> The model must process every input token through all layers (attention + feed-forward), consuming compute, so providers bill input tokens separately from output tokens.</div>
+    <div class="qa"><b>Q3.</b> What is a KV cache and why does it matter for performance?<br><b>A.</b> It caches previously computed attention keys/values so each new generated token doesn't require recomputing attention over the whole sequence, making autoregressive generation much faster.</div>
+    <div class="qa"><b>Q4.</b> What's the difference between top-p and top-k sampling?<br><b>A.</b> Top-k always samples from a fixed number of candidates; top-p (nucleus sampling) adapts the candidate pool size based on cumulative probability mass, so it naturally narrows when the model is confident and widens when uncertain.</div>
+    <div class="qa"><b>Q5.</b> Why is output generation slower than processing input of the same length?<br><b>A.</b> Input tokens are processed in parallel in one forward pass; output tokens are generated sequentially, one at a time, each depending on the previous one.</div>
+    <div class="qa"><b>Q6.</b> What causes "the model forgot my earlier instruction" in a long conversation?<br><b>A.</b> Context window limits and attention dilution across a long history — relevant instructions get diluted or pushed out as more content accumulates.</div>
+    <div class="qa"><b>Q7.</b> What is an emergent capability?<br><b>A.</b> A capability (e.g., multi-step arithmetic) that appears only once model scale crosses some threshold, absent in smaller models trained the same way.</div>
+    <div class="qa"><b>Q8.</b> How does streaming change the user-perceived latency of an LLM response?<br><b>A.</b> Streaming returns tokens as they're generated rather than waiting for the full response, so users see output start almost immediately even though total generation time is unchanged.</div>
+    <div class="qa"><b>Q9.</b> Why might the same prompt at temperature 0 occasionally still produce slightly different outputs?<br><b>A.</b> Provider-side implementation details (batching, floating-point non-associativity, hardware-level nondeterminism) can introduce tiny variations even at the lowest-randomness setting.</div>
+    <div class="qa"><b>Q10.</b> What's the practical difference between RAG and relying on the model's parametric knowledge?<br><b>A.</b> Parametric knowledge is frozen at training time and can be outdated/wrong; RAG injects fresh, verifiable, sourced information into the prompt at inference time.</div>
+    <div class="qa"><b>Q11.</b> Why do code and non-English text often use more tokens per character than English prose?<br><b>A.</b> The tokenizer's vocabulary is typically trained with a bias toward common English patterns, so less-common scripts/symbols split into more, smaller tokens.</div>
+    <div class="qa"><b>Q12.</b> What's the risk of setting max_tokens too low?<br><b>A.</b> The response can be truncated mid-thought or mid-structure (e.g., incomplete JSON), breaking downstream parsing.</div>
+    <div class="qa"><b>Q13.</b> Why is a reasoning model slower and more expensive than a standard model for the same question?<br><b>A.</b> It generates additional internal reasoning tokens before the final answer, increasing total output tokens and latency even though the user-visible answer may be the same length.</div>
+    <div class="qa"><b>Q14.</b> How would you reduce the cost of a chat application with long conversation histories?<br><b>A.</b> Summarize/compact older turns, cap history length, and use prompt/context caching for stable prefixes like the system prompt.</div>
+    <div class="qa"><b>Q15.</b> What does it mean that an LLM API call is "stateless"?<br><b>A.</b> The model has no memory of prior calls; all context (history, instructions) must be explicitly resent each time.</div>
+
+    <h2 id="interview-a">29. Interview Questions — Advanced</h2>
+    <div class="qa"><b>Q1.</b> Why can't you fully eliminate hallucination by lowering temperature to 0?<br><b>A.</b> Hallucination stems from the model's learned knowledge and lack of grounding, not primarily from sampling randomness — even the single most-probable continuation can be factually wrong if that's what the training distribution favored.</div>
+    <div class="qa"><b>Q2.</b> Explain why "lost in the middle" happens with very long contexts.<br><b>A.</b> Attention mechanisms don't weight all positions in a long context equally reliably; information placed in the middle of a huge context is statistically under-attended compared to content near the start or end, degrading retrieval/synthesis accuracy.</div>
+    <div class="qa"><b>Q3.</b> How does self-consistency sampling improve reliability, and what does it cost?<br><b>A.</b> By sampling multiple independent reasoning paths and taking the majority/most consistent final answer, it reduces the chance a single unlucky sampling path dominates — at the cost of multiplying latency and token spend by the number of samples.</div>
+    <div class="qa"><b>Q4.</b> Why do dense, decoder-only Transformers dominate modern LLMs over encoder-decoder or RNN-based architectures?<br><b>A.</b> Decoder-only architectures scale well with parallelizable training (unlike RNNs), unify pretraining and generation under one autoregressive objective, and have proven empirically to scale smoothly with data/compute (scaling laws), whereas encoder-decoder adds complexity mainly useful for specific seq2seq tasks like translation.</div>
+    <div class="qa"><b>Q5.</b> What's the architectural reason output tokens can't be generated in parallel the way input tokens are processed?<br><b>A.</b> Each output token's probability distribution depends on all previously generated tokens (causal/autoregressive dependency) — you cannot compute token N+1 without first sampling token N, enforcing a sequential loop, unlike the fully parallel forward pass over a fixed input.</div>
+    <div class="qa"><b>Q6.</b> How would you detect that a model's "confidence" (output probability) is not a reliable indicator of correctness?<br><b>A.</b> Compare token-level log-probabilities against factual correctness on a labeled eval set — models are frequently miscalibrated, especially after RLHF, often sounding equally confident whether correct or hallucinating, so you must validate against ground truth/retrieval, not the model's own probability.</div>
+    <div class="qa"><b>Q7.</b> Why might instruction tuning slightly degrade raw language-modeling capability compared to the base model?<br><b>A.</b> SFT/RLHF optimize for a narrower distribution (helpful, aligned responses) which can trade off some of the raw diversity/calibration of the broader pretraining distribution — sometimes called the "alignment tax."</div>
+    <div class="qa"><b>Q8.</b> What's the difference between model-level nondeterminism and application-level nondeterminism in an LLM pipeline?<br><b>A.</b> Model-level: sampling randomness, floating-point/batching effects inside the model itself. Application-level: nondeterminism introduced by your own pipeline — e.g., retrieval returning different documents due to index updates, or race conditions in concurrent tool calls — which can look like "the model is inconsistent" but isn't.</div>
+    <div class="qa"><b>Q9.</b> How do context-window limits interact with KV-cache memory usage in serving infrastructure?<br><b>A.</b> KV-cache size grows linearly with sequence length and batch size; longer context windows directly increase GPU memory pressure per concurrent request, which is why serving very long contexts at high concurrency requires techniques like paged attention or cache eviction.</div>
+    <div class="qa"><b>Q10.</b> Why is "more parameters" not always better for a given production use case?<br><b>A.</b> Larger models cost more and are slower per token; for narrow, well-defined tasks a smaller fine-tuned or well-prompted model can match quality at a fraction of the latency/cost — bigger models matter most for tasks needing broad generalization or complex reasoning.</div>
+    <div class="qa"><b>Q11.</b> What causes repetition loops in generated text, and how is it mitigated?<br><b>A.</b> Greedy/low-temperature decoding can get stuck favoring a locally high-probability repeated phrase; mitigations include repetition penalties, frequency penalties, and slightly higher temperature/top-p.</div>
+    <div class="qa"><b>Q12.</b> Why is evaluating "hallucination rate" harder than evaluating classification accuracy?<br><b>A.</b> Hallucination is open-ended (any claim could be wrong in many different ways, not a fixed label set), context-dependent (correctness may depend on retrieved sources), and often requires another model or human judge rather than exact-match scoring.</div>
+    <div class="qa"><b>Q13.</b> How does speculative decoding speed up LLM inference?<br><b>A.</b> A smaller/faster "draft" model proposes several candidate next tokens, which the larger target model verifies in parallel in a single forward pass, accepting the matching prefix — reducing the number of expensive sequential forward passes of the large model.</div>
+    <div class="qa"><b>Q14.</b> Why might two different providers' models disagree substantially on temperature=0 output for the same prompt?<br><b>A.</b> Different training data, alignment procedures, tokenizers, and even default sampling implementation details mean "deterministic" only means low-variance within that model, not convergence toward some shared ground truth across models.</div>
+    <div class="qa"><b>Q15.</b> What's the relationship between scaling laws and the decision to use a reasoning model vs a bigger non-reasoning model?<br><b>A.</b> Scaling laws show predictable quality gains from more parameters/data/compute at pretraining time; reasoning models instead trade additional inference-time compute (more generated reasoning tokens) for quality gains on complex tasks — a different lever (test-time compute) than raw model size, often more cost-effective for reasoning-heavy, lower-volume workloads.</div>
+
+    <h2 id="interview-s">30. Interview Questions — Senior/Architect</h2>
+    <div class="qa"><b>Q1.</b> How would you design model routing across multiple LLMs (cheap/fast vs expensive/reasoning) for a production chat product?<br><b>A.</b> Classify incoming requests by estimated complexity (heuristics, a cheap classifier, or the first few tokens of a fast model's attempt), route simple queries to a small/fast model, escalate to a reasoning/frontier model on low-confidence or explicitly complex tasks, and track cost/quality metrics per route to continuously tune the routing policy.</div>
+    <div class="qa"><b>Q2.</b> A client wants byte-identical reproducibility from an LLM-based pipeline for compliance reasons. How do you respond?<br><b>A.</b> Explain that true determinism isn't guaranteed even at temperature 0 due to provider-side implementation details; instead propose capturing full request/response pairs for audit logging, pinning model versions, and — if the use case truly needs determinism — moving the decision logic to deterministic code with the LLM used only for non-authoritative steps (e.g., drafting, not final decisions).</div>
+    <div class="qa"><b>Q3.</b> How would you architect fallback behavior when your primary LLM provider has an outage?<br><b>A.</b> Maintain a provider abstraction layer (see 07-LLM-APIs-and-SDKs) with a secondary provider/model configured as fallback, circuit-breaker logic to detect sustained failures, health checks, and graceful degradation (e.g., serve cached/previous answers or a reduced-capability mode) rather than hard failing user-facing requests.</div>
+    <div class="qa"><b>Q4.</b> Your team wants to fine-tune a model to "fix hallucinations." Is this the right lever, and what would you recommend instead?<br><b>A.</b> Fine-tuning can improve style/format/behavior consistency but doesn't give the model new verified facts or runtime fact-checking — it's the wrong lever for factual grounding. Recommend RAG for up-to-date/verifiable knowledge, and reserve fine-tuning for teaching behavior patterns (tone, output format, domain-specific reasoning style) rather than facts.</div>
+    <div class="qa"><b>Q5.</b> How do you estimate and budget for LLM inference cost at scale before launch?<br><b>A.</b> Profile typical request/response token counts across representative use cases, multiply by expected request volume and provider per-token pricing, add margin for context growth (conversation history, RAG chunks), and build in monitoring/alerting on per-request and aggregate spend from day one, with model-routing as the primary cost lever.</div>
+    <div class="qa"><b>Q6.</b> How would you design observability for an LLM-powered production system?<br><b>A.</b> Trace every request end-to-end (prompt, retrieved context, tool calls, final output, token usage, latency, cost) using something like LangSmith/Langfuse/OpenTelemetry, log at the span level per pipeline stage, and build dashboards/alerts on latency, error rate, token spend, and quality-proxy metrics (e.g., flagged hallucinations from an evaluator).</div>
+    <div class="qa"><b>Q7.</b> When would you advise against using an LLM at all for a given feature?<br><b>A.</b> When the task is a bounded, stable classification/regression problem better solved by classic ML (cheaper, faster, more auditable); when outputs must be strictly deterministic/byte-reproducible; when latency budgets are far below LLM inference times; or when the "intelligence" required is really just rule-based logic that doesn't need language understanding.</div>
+    <div class="qa"><b>Q8.</b> How do you handle multi-tenant isolation when multiple customers share the same LLM-backed service?<br><b>A.</b> Ensure no cross-tenant data leaks into context (strict per-tenant retrieval/data scoping), separate rate limits/quotas per tenant, avoid caching responses across tenant boundaries unless content is tenant-agnostic, and audit-log per-tenant usage for both security and billing.</div>
+    <div class="qa"><b>Q9.</b> How would you version and safely roll out a change to the underlying model (e.g., upgrading from one model version to a newer one)?<br><b>A.</b> Run the new model against your evaluation suite/golden dataset first, A/B test on a small traffic percentage while monitoring quality and cost metrics, keep the old model available as instant rollback, and communicate behavior-change risk (even same-family model upgrades can shift output style/format).</div>
+    <div class="qa"><b>Q10.</b> How do you reconcile "bigger context windows" marketing claims with actual production retrieval quality?<br><b>A.</b> Treat window size as a ceiling, not a target — validate empirically (via your own eval set) how retrieval/synthesis quality actually degrades as you add more context, and architect retrieval to maximize precision (fewer, more relevant chunks) rather than maximizing recall by stuffing the window.</div>
+
+    <h2 id="interview-sc">31. Scenario-Based Questions</h2>
+    <div class="qa"><b>Scenario 1.</b> Users report the chatbot "lies confidently" about company policy. How do you fix it?<br><b>A.</b> Add RAG grounding against the actual policy documents, require citations, instruct the model to say "I don't know" when the retrieved context doesn't cover the question, and add an evaluation suite specifically testing policy-question faithfulness.</div>
+    <div class="qa"><b>Scenario 2.</b> Your LLM costs tripled after adding conversation history to every request. What do you do?<br><b>A.</b> Audit token usage per request, implement history summarization/compaction after N turns, cap the number of retained turns, and consider prompt caching for the stable system prompt portion.</div>
+    <div class="qa"><b>Scenario 3.</b> A user pastes a webpage into the chat and the model starts following instructions embedded in that page instead of the user's request. What happened and how do you prevent it?<br><b>A.</b> Indirect prompt injection — untrusted content contained instructions the model treated as commands. Prevent by clearly delimiting/labeling untrusted content as data, instructing the model explicitly to never follow instructions found inside quoted/retrieved content, and restricting tool permissions available during such interactions.</div>
+    <div class="qa"><b>Scenario 4.</b> Response times spike under load even though the model provider reports normal latency. Where do you look?<br><b>A.</b> Check your own queuing/concurrency limits, rate-limit backoff/retry storms, context size growth under heavy sessions, and network/serialization overhead in your own service — "model latency" is often not the actual bottleneck.</div>
+    <div class="qa"><b>Scenario 5.</b> Leadership wants to swap your Claude integration for a cheaper model to cut costs, but quality dropped noticeably. How do you evaluate and communicate the trade-off?<br><b>A.</b> Run both models against your evaluation suite (golden dataset with scored outputs), quantify the quality delta in business terms (e.g., task success rate, escalation rate), and present a cost-vs-quality trade-off with a recommended middle path (e.g., model routing: cheap model for easy cases, original model for hard cases) rather than an all-or-nothing swap.</div>
+    <div class="qa"><b>Scenario 6.</b> A compliance team asks "can you guarantee the model never outputs X?" How do you respond?<br><b>A.</b> Explain that generative models can't offer hard guarantees on output content; propose defense-in-depth instead — strong system prompts, output guardrails/classifiers scanning generated text before it reaches the user, and human review for high-risk categories, with monitoring to catch and respond to failures.</div>
+    <div class="qa"><b>Scenario 7.</b> Your structured-output pipeline occasionally receives malformed JSON from the model. How do you make it robust?<br><b>A.</b> Use the provider's structured-output/JSON-schema mode where available, validate with a schema library (e.g., Pydantic/Zod) and retry with an error-correction prompt on failure, and never directly `eval`/parse untrusted model output without validation.</div>
+    <div class="qa"><b>Scenario 8.</b> Two near-identical requests return very different quality answers. How do you debug this?<br><b>A.</b> Diff the actual prompts/contexts sent (not just the user-facing question) — look for differences in retrieved context, conversation history length, or sampling parameters; log full requests/responses for exactly this kind of comparison.</div>
+    <div class="qa"><b>Scenario 9.</b> You need the model to never reveal its system prompt even if asked directly. How realistic is this, and what do you do?<br><b>A.</b> No prompt is 100% unextractable from a sufficiently motivated adversary; treat the system prompt as not fully secret, avoid putting true secrets (API keys, confidential logic) in it, add instructions declining to reveal it, and rely on application-level access controls for anything truly sensitive.</div>
+    <div class="qa"><b>Scenario 10.</b> After a model provider update, your eval scores silently dropped 8%. What's your process?<br><b>A.</b> This is why you pin model versions and run continuous eval monitoring — detect via automated eval-suite regression alerts, diff outputs on the same golden set before/after, and either roll back to the pinned version or adjust prompts/retrieval to recover quality before rolling the update out broadly.</div>
+
+    <h2 id="revision">32. Quick revision notes</h2>
+    <ul>
+      <li>LLM = Transformer decoder trained to predict next tokens.</li>
+      <li>Pretrain → instruction-tune (SFT) → align (RLHF/DPO) → optionally reasoning-train.</li>
+      <li>Every API call = stateless inference; no learning happens at call time.</li>
+      <li>Temperature/top-p/top-k control sampling randomness.</li>
+      <li>Hallucination is inherent to generation — mitigate via RAG/grounding, not prompting alone.</li>
+      <li>Input tokens process in parallel; output tokens generate sequentially (slower).</li>
+    </ul>
+
+    <h2 id="cheat">33. Cheat sheet</h2>
+    <div class="callout">LLM = transformer trained to predict next tokens → pretrained (raw completion) → instruction-tuned (follows instructions) → RLHF/DPO-aligned (helpful/safe) → optionally reasoning-trained. Every API call is pure inference: tokenize → embed → attend → sample → repeat. Cost = input tokens + output tokens, priced separately. Hallucination is structural, not a bug — ground with RAG.</div>
+
+    <h2 id="further">34. Further topics to learn</h2>
+    <p><a href="../04-Transformers/">Transformers internals</a> → <a href="tokens-and-context-window.html">Tokens & Context Window</a> → <a href="sampling-and-hallucination.html">Sampling & Hallucination</a> → <a href="../07-LLM-APIs-and-SDKs/">LLM APIs & SDKs</a> → <a href="../12-RAG/">RAG</a> → <a href="../28-LLM-Inference/">LLM Inference (vLLM, quantization, KV cache at scale)</a></p>
+
+    <div class="prevnext">
+      <a href="../00-AI-Fundamentals/generative-vs-discriminative.html">← Generative vs Discriminative AI</a>
+      <a href="tokens-and-context-window.html">Next: Tokens & Context Window →</a>
+    </div>
+  </main>
+</div>
+<script src="../assets/app.js"></script>
+</body>
+</html>

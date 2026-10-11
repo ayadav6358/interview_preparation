@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>A2A Fundamentals</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <input class="searchbox" placeholder="Search topics..." />
+    <a href="../index.html">← Home</a>
+    <h3>24-A2A</h3>
+    <a href="a2a-fundamentals.html">A2A Fundamentals</a>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumbs"><a href="../index.html">Home</a> / 24-A2A</div>
+      <button class="theme-toggle" onclick="toggleTheme()">🌓 Theme</button>
+    </div>
+    <h1>A2A (Agent-to-Agent Protocol) Fundamentals</h1>
+    <span class="tag warn">Emerging</span><span class="tag">Last verified: 2026-10-06 — verify current adoption/spec status against official docs</span>
+
+    <div class="toc">
+      <b>On this page</b>
+      <a href="#what">1. What is this?</a>
+      <a href="#whyexist">2. Why does it exist?</a>
+      <a href="#whyimportant">3. Why is it important?</a>
+      <a href="#whereused">4. Where is it used?</a>
+      <a href="#prereq">5. Prerequisites</a>
+      <a href="#core">6. Core concepts</a>
+      <a href="#terms">7. Terminology</a>
+      <a href="#arch">8. Architecture</a>
+      <a href="#internal">9. How it works internally</a>
+      <a href="#steps">10. Step-by-step: an A2A interaction</a>
+      <a href="#simple">11. Simple example</a>
+      <a href="#real">12. Real-world example</a>
+      <a href="#code">13. Code example</a>
+      <a href="#advanced">14. Advanced example</a>
+      <a href="#mistakes">15. Common mistakes</a>
+      <a href="#best">16. Best practices</a>
+      <a href="#production">17. Production considerations</a>
+      <a href="#security">18. Security considerations</a>
+      <a href="#performance">19. Performance considerations</a>
+      <a href="#cost">20. Cost considerations</a>
+      <a href="#debug">21. Debugging/troubleshooting</a>
+      <a href="#related">22. Related concepts</a>
+      <a href="#comparison">23. MCP vs A2A</a>
+      <a href="#exercise">24. Mini practical exercise</a>
+      <a href="#project">25. Practical project</a>
+      <a href="#projectarch">26. Project architecture</a>
+      <a href="#interview-b">27. Interview Questions — Beginner</a>
+      <a href="#interview-i">28. Interview Questions — Intermediate</a>
+      <a href="#interview-a">29. Interview Questions — Advanced</a>
+      <a href="#interview-s">30. Interview Questions — Senior/Architect</a>
+      <a href="#interview-sc">31. Scenario-Based Questions</a>
+      <a href="#revision">32. Quick revision notes</a>
+      <a href="#cheat">33. Cheat sheet</a>
+      <a href="#further">34. Further topics to learn</a>
+    </div>
+
+    <h2 id="what">1. What is this?</h2>
+    <p>A2A (Agent-to-Agent protocol) is a standard for independent AI agents — potentially built by different organizations on different frameworks — to discover each other's capabilities and collaborate on tasks, exchanging messages and task state across agent boundaries.</p>
+
+    <h2 id="whyexist">2. Why does it exist?</h2>
+    <p>MCP standardizes how an agent connects to tools/data; it doesn't standardize how two independent, autonomous agents (potentially from different vendors/organizations) discover each other and collaborate as peers. A2A exists to fill that specific gap — agent-to-agent interoperability across organizational and framework boundaries.</p>
+
+    <h2 id="whyimportant">3. Why is it important?</h2>
+    <p>As agentic systems proliferate across organizations, cross-organization/cross-vendor agent collaboration (e.g., your travel-booking agent talking to an airline's agent) is an emerging but important capability — understanding A2A positions you ahead of the curve. <span class="tag warn">Note: this is a newer, still-maturing area of the ecosystem compared to MCP — verify current adoption and spec maturity before treating it as a settled standard.</span></p>
+
+    <h2 id="whereused">4. Where is it used?</h2>
+    <p>Cross-organization agent collaboration scenarios, multi-vendor agent marketplaces, enterprise scenarios where internal and external/partner agents need to interoperate.</p>
+
+    <h2 id="prereq">5. Prerequisites</h2>
+    <p><a href="../22-MCP/mcp-fundamentals.html">MCP Fundamentals</a>, <a href="../21-Multi-Agent-Systems/multi-agent-systems.html">Multi-Agent Systems</a>.</p>
+
+    <h2 id="core">6. Core concepts</h2>
+    <ul>
+      <li><b>Agent Card:</b> a published description of an agent's capabilities, used for discovery by other agents.</li>
+      <li><b>Tasks:</b> units of work one agent requests another to perform.</li>
+      <li><b>Messages:</b> the communication units exchanged between agents during a task's lifecycle.</li>
+      <li><b>Remote agents:</b> agents operating outside your own system/organization, accessed via A2A.</li>
+      <li><b>Agent discovery:</b> the process of finding and learning another agent's capabilities before engaging it.</li>
+    </ul>
+
+    <h2 id="terms">7. Terminology</h2>
+    <table>
+      <tr><th>Term</th><th>Meaning</th></tr>
+      <tr><td>Agent Card</td><td>A machine-readable description of an agent's identity, capabilities, and how to interact with it.</td></tr>
+      <tr><td>Task</td><td>A unit of work delegated from one agent to another, with a defined lifecycle (submitted, working, completed, failed).</td></tr>
+      <tr><td>A2A Client</td><td>The agent initiating a request to another agent.</td></tr>
+      <tr><td>A2A Server</td><td>The agent receiving and processing requests, exposing its Agent Card for discovery.</td></tr>
+    </table>
+
+    <h2 id="arch">8. Architecture</h2>
+    <pre><code>Agent A (client)
+ → discovers Agent B's Agent Card (capabilities)
+ → sends a Task request to Agent B (A2A server)
+ → Agent B processes the task, exchanges Messages for clarification/progress
+ → Agent B returns the Task result
+ → Agent A incorporates the result into its own workflow</code></pre>
+
+    <h2 id="internal">9. How it works internally</h2>
+    <p>Conceptually, A2A formalizes agent collaboration the way MCP formalizes tool access: a published, discoverable capability description (Agent Card, analogous to MCP's discovery) plus a standardized task/message exchange protocol, letting agents built on entirely different internal frameworks interoperate through this shared external contract rather than needing matching internal implementations.</p>
+
+    <h2 id="steps">10. Step-by-step: an A2A interaction</h2>
+    <ol>
+      <li>Agent A discovers Agent B's Agent Card, learning its capabilities.</li>
+      <li>Agent A sends a Task request describing what it needs done.</li>
+      <li>Agent B begins working, potentially exchanging clarifying Messages with Agent A.</li>
+      <li>Agent B completes (or fails) the Task, returning a result.</li>
+      <li>Agent A incorporates the result, continuing its own process.</li>
+    </ol>
+
+    <h2 id="simple">11. Simple example</h2>
+    <p>A trip-planning agent (Agent A) discovers a hotel-booking agent (Agent B, operated by a different company) via its Agent Card, delegates a "book this hotel room" Task, and incorporates the confirmation into the user's overall itinerary.</p>
+
+    <h2 id="real">12. Real-world example</h2>
+    <p>An enterprise's internal procurement agent could, in an A2A-enabled ecosystem, directly negotiate and place an order with a supplier's publicly exposed ordering agent, without either organization needing custom point-to-point integration — this is the aspirational use case A2A targets, though real-world adoption at this level is still emerging as of 2026.</p>
+
+    <h2 id="code">13. Code example</h2>
+    <pre><code class="language-json">// Simplified illustrative Agent Card
+{
+  "name": "hotel-booking-agent",
+  "description": "Books hotel rooms given dates, location, and preferences.",
+  "capabilities": ["search_hotels", "book_room", "cancel_booking"],
+  "endpoint": "https://hotels.example.com/a2a"
+}
+</code></pre>
+    <pre><code class="language-python"># Illustrative A2A-style task request (conceptual, SDK specifics vary)
+task_request = {
+    "task_type": "book_room",
+    "params": {"city": "Tokyo", "check_in": "2026-11-01", "check_out": "2026-11-03"},
+}
+response = a2a_client.send_task("https://hotels.example.com/a2a", task_request)
+print(response.status, response.result)
+</code></pre>
+
+    <h2 id="advanced">14. Advanced example</h2>
+    <pre><code class="language-python"># A supervisor agent delegating sub-tasks to multiple remote A2A agents in parallel
+import asyncio
+
+async def delegate_all(trip_requirements):
+    results = await asyncio.gather(
+        a2a_client.send_task_async(flight_agent_url, {"task_type": "book_flight", **trip_requirements}),
+        a2a_client.send_task_async(hotel_agent_url, {"task_type": "book_room", **trip_requirements}),
+    )
+    return combine_itinerary(results)
+</code></pre>
+
+    <h2 id="mistakes">15. Common mistakes</h2>
+    <ul>
+      <li>Confusing A2A with MCP — A2A is agent-to-agent; MCP is model-to-tool/data.</li>
+      <li>Treating A2A as a mature, universally-adopted standard without verifying current ecosystem status.</li>
+      <li>Not handling task failure/timeout gracefully when a remote agent is slow or unresponsive.</li>
+      <li>Trusting a remote agent's output without the same validation rigor applied to any external, untrusted input.</li>
+    </ul>
+
+    <h2 id="best">16. Best practices</h2>
+    <ul>
+      <li>Treat every remote agent interaction as an external, untrusted integration — validate results before acting on them.</li>
+      <li>Implement timeouts and fallback behavior for unresponsive remote agents.</li>
+      <li>Clearly distinguish A2A (agent collaboration) from MCP (tool/data access) in your architecture.</li>
+      <li>Verify the current maturity/adoption level of A2A against official sources before committing significant production dependency on it.</li>
+    </ul>
+
+    <h2 id="production">17. Production considerations</h2>
+    <p>Cross-organization agent dependencies introduce external-vendor-style reliability risk — apply the same resilience patterns (timeouts, retries, fallback, circuit breakers) as any third-party API integration.</p>
+
+    <h2 id="security">18. Security considerations</h2>
+    <p>Delegating tasks to external agents means trusting their execution and results — apply strict output validation, and never grant a remote agent interaction implicit authority over sensitive internal actions without human review for high-stakes tasks.</p>
+
+    <h2 id="performance">19. Performance considerations</h2>
+    <p>Cross-organization A2A calls add network latency and reliability variance outside your control — design for asynchronous, parallelizable delegation where possible rather than blocking critical paths on external agent responses.</p>
+
+    <h2 id="cost">20. Cost considerations</h2>
+    <p>External agent services may have their own pricing models independent of LLM token costs — factor this into overall system cost analysis.</p>
+
+    <h2 id="debug">21. Debugging/troubleshooting</h2>
+    <ul>
+      <li><b>Remote agent task never completes:</b> implement and check timeout/status-polling logic; don't assume synchronous completion.</li>
+      <li><b>Unexpected task results:</b> validate the remote agent's Agent Card actually matches the capabilities you assumed when discovery occurred.</li>
+    </ul>
+
+    <h2 id="related">22. Related concepts</h2>
+    <p><a href="../22-MCP/mcp-fundamentals.html">MCP</a> · <a href="../21-Multi-Agent-Systems/multi-agent-systems.html">Multi-Agent Systems</a> · <a href="../43-AI-Protocols/">AI Protocols</a></p>
+
+    <h2 id="comparison">23. MCP vs A2A</h2>
+    <table>
+      <tr><th>Aspect</th><th>MCP</th><th>A2A</th></tr>
+      <tr><td>Connects</td><td>Model/host ↔ Tool/data</td><td>Agent ↔ Agent</td></tr>
+      <tr><td>Maturity (2026)</td><td>Widely adopted, production-ready</td><td>Emerging, still maturing adoption</td></tr>
+      <tr><td>Typical use</td><td>Giving an agent access to a database/API/file system</td><td>Two independent agents collaborating on a task</td></tr>
+      <tr><td>Analogy</td><td>"USB-C for AI tools"</td><td>Peer-to-peer agent collaboration protocol</td></tr>
+    </table>
+
+    <h2 id="exercise">24. Mini practical exercise</h2>
+    <p>Design (on paper) an Agent Card for a simple "calculator agent" exposing an `evaluate_expression` capability, specifying what fields it would need for discovery.</p>
+
+    <h2 id="project">25. Practical project</h2>
+    <p><b>Small A2A Example:</b> build two simple local agents (a "math agent" and a "coordinator agent") communicating via a simplified task-request/response pattern illustrating A2A's core concepts, without requiring full protocol compliance.</p>
+
+    <h2 id="projectarch">26. Project architecture</h2>
+    <pre><code>coordinator_agent.py → discovers math_agent's capabilities (Agent Card)
+ → sends Task {"operation": "calculate", "expression": "2+2*3"}
+ → math_agent.py processes and returns {"result": 8}
+ → coordinator incorporates result into its own response to the user</code></pre>
+
+    <h2 id="interview-b">27. Interview Questions — Beginner</h2>
+    <div class="qa"><b>Q1.</b> What is A2A?<br><b>A.</b> Agent-to-Agent protocol — a standard for independent AI agents to discover each other's capabilities and collaborate on tasks.</div>
+    <div class="qa"><b>Q2.</b> What's the key difference between A2A and MCP?<br><b>A.</b> MCP connects a model/host to tools and data; A2A connects one agent to another agent.</div>
+    <div class="qa"><b>Q3.</b> What is an Agent Card?<br><b>A.</b> A published, machine-readable description of an agent's capabilities, used for discovery by other agents.</div>
+    <div class="qa"><b>Q4.</b> What is a Task in A2A?<br><b>A.</b> A unit of work one agent delegates to another agent to perform.</div>
+    <div class="qa"><b>Q5.</b> Is A2A as mature/widely-adopted as MCP in 2026?<br><b>A.</b> No — A2A is comparatively more emerging; always verify current adoption status against official sources rather than assuming parity with MCP's maturity.</div>
+    <div class="qa"><b>Q6.</b> What role does Agent discovery play in A2A?<br><b>A.</b> It lets one agent learn another's capabilities before engaging it in a task, similar in spirit to MCP's discovery mechanism.</div>
+    <div class="qa"><b>Q7.</b> Should you trust a remote agent's task result without validation?<br><b>A.</b> No — treat it as external, untrusted input requiring validation, just like any other third-party integration.</div>
+    <div class="qa"><b>Q8.</b> Give an example scenario where A2A would be useful.<br><b>A.</b> A travel-planning agent delegating a hotel booking task to a separate, independently-operated hotel-booking agent.</div>
+    <div class="qa"><b>Q9.</b> What's the relationship between Messages and Tasks in A2A?<br><b>A.</b> Messages are exchanged during a Task's lifecycle (e.g., for clarification or progress updates) as the task is processed.</div>
+    <div class="qa"><b>Q10.</b> Why might cross-organization agent reliability be harder to guarantee than internal agent reliability?<br><b>A.</b> You don't control the remote agent's infrastructure, uptime, or implementation quality — it's an external dependency subject to the same risks as any third-party API.</div>
+
+    <h2 id="interview-i">28. Interview Questions — Intermediate</h2>
+    <div class="qa"><b>Q1.</b> Why would a company use A2A instead of just building a custom API integration with a partner's agent?<br><b>A.</b> A2A standardization would let the same integration pattern work across many different partners/agents without bespoke point-to-point API work for each one, assuming sufficient ecosystem adoption — the same N×M-to-N+M value proposition as MCP, but for agent-to-agent rather than agent-to-tool relationships.</div>
+    <div class="qa"><b>Q2.</b> How would you design error handling for a workflow that delegates a critical sub-task to an external A2A agent that might be unavailable?<br><b>A.</b> Implement timeouts, retries with backoff, and a defined fallback behavior (alternate agent, cached/default response, or human escalation) if the remote agent is unresponsive — treating it with the same resilience discipline as any external API dependency (see LLM APIs and SDKs).</div>
+    <div class="qa"><b>Q3.</b> Why is validating a remote agent's output especially important in A2A compared to validating output from your own internal agents?<br><b>A.</b> You have no visibility into or control over the remote agent's internal implementation, prompting, or potential failure modes — it's an external, less-trusted boundary requiring the same validation rigor as any third-party API response, arguably more so since the "agent" could itself be driven by an LLM subject to its own hallucination risks.</div>
+
+    <h2 id="interview-a">29. Interview Questions — Advanced</h2>
+    <div class="qa"><b>Q1.</b> What's a key architectural challenge in building trust/verification mechanisms for cross-organizational A2A interactions involving financial or legally-binding actions?<br><b>A.</b> Establishing authentication/authorization of the remote agent's identity and authority (is this genuinely the airline's official booking agent, and does it have authority to commit to a binding transaction), auditability of the full interaction for dispute resolution, and verification that the task's actual execution matches what was agreed — challenges substantially harder than typical API integration due to the autonomous, LLM-driven nature of the counterparty.</div>
+
+    <h2 id="interview-s">30. Interview Questions — Senior/Architect</h2>
+    <div class="qa"><b>Q1.</b> How would you advise a company considering building a production dependency on A2A-based cross-organization agent collaboration today?<br><b>A.</b> Recommend treating it as an emerging technology bet — validate the current maturity and adoption of the A2A spec and available tooling against official sources, start with low-stakes, easily-reversible use cases rather than mission-critical workflows, build in robust fallback to traditional API integration or human processes, and reassess as the ecosystem matures rather than committing broad production dependency prematurely.</div>
+
+    <h2 id="interview-sc">31. Scenario-Based Questions</h2>
+    <div class="qa"><b>Scenario 1.</b> Your company wants to integrate with a partner's "AI agent" for order placement. The partner says they support A2A. What do you verify before committing?<br><b>A.</b> Verify the actual A2A spec version/compliance, test discovery and task-request behavior directly, confirm authentication/authorization mechanisms, and build in fallback to a traditional API/manual process in case the integration proves unreliable — treating it as a new, less-proven integration pattern deserving extra validation.</div>
+
+    <h2 id="revision">32. Quick revision notes</h2>
+    <ul>
+      <li>A2A = agent-to-agent protocol; MCP = model-to-tool/data protocol. Different problems.</li>
+      <li>Core concepts: Agent Card (discovery), Tasks, Messages.</li>
+      <li>A2A is more emerging/less mature than MCP as of 2026 — verify before heavy production reliance.</li>
+      <li>Treat remote agents as untrusted external dependencies.</li>
+    </ul>
+
+    <h2 id="cheat">33. Cheat sheet</h2>
+    <div class="callout">A2A = Agent ↔ Agent (discovery via Agent Card, work via Tasks/Messages). MCP = Model ↔ Tool/Data. A2A is more emerging/less mature — verify current status. Treat remote agents as untrusted external dependencies.</div>
+
+    <h2 id="further">34. Further topics to learn</h2>
+    <p><a href="../43-AI-Protocols/">AI Protocols</a> → <a href="../21-Multi-Agent-Systems/multi-agent-systems.html">Multi-Agent Systems</a></p>
+
+    <div class="prevnext">
+      <a href="../23-MCP-Development/mcp-development-projects.html">← MCP Development</a>
+      <a href="../25-Multimodal-AI/multimodal-ai-fundamentals.html">Next: Multimodal AI →</a>
+    </div>
+  </main>
+</div>
+<script src="../assets/app.js"></script>
+</body>
+</html>

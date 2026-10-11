@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>JavaScript Fundamentals — Web Fundamentals — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">Web Fundamentals</a><span class="sep">›</span>JavaScript Fundamentals</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>JavaScript Fundamentals: Scope, Hoisting, Coercion, Functions, Arrays/Objects, ES6+</h1>
+      <p class="meta-line"><span>⏱ 2.5 hrs</span><span>📍 Chapter 2 of 6</span></p>
+      <p><strong>One-line summary:</strong> Hoisting, the temporal dead zone, coercion rules, and closures are the exact-mechanics questions that separate "writes JS daily" from "can explain why this specific line behaves the way it does" — this chapter is the precise version of what you already use by instinct.</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>You've written thousands of lines of JS. The gap at senior level isn't syntax — it's being able to explain <em>why</em> a specific snippet behaves the way it does when an interviewer hands you a 10-line trick question (closures in a loop, `this` inside a callback, `==` vs `===` edge cases). These exact-mechanics questions are cheap for interviewers to ask and brutally effective at exposing whether your mental model is precise or just "it usually works." This chapter is also the direct prerequisite for understanding React's rendering model (stale closures in `useEffect`, why state setters are async) and Node's event loop (<a href="../13-nodejs-fundamentals/index.html">Node.js Fundamentals</a>, <a href="../04-nodejs-advanced/index.html">Node.js Advanced</a>).</p>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p><a href="01-html-css-fundamentals.html">Chapter 1 (HTML/CSS)</a> for general context; no hard JS prerequisite. Feeds into <a href="03-dom-and-browser.html">Chapter 3 (DOM & Browser)</a> and is assumed knowledge for <a href="../12-react-fundamentals/index.html">React Fundamentals</a> and <a href="../03-react-nextjs-advanced/index.html">React/Next.js Advanced</a>.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="hoisting-tdz">Hoisting and the Temporal Dead Zone, precisely</h3>
+      <p><strong>`var`</strong> declarations are hoisted to the top of their function (or global) scope and initialized to `undefined` immediately — you can reference a `var` before its declaration line and get `undefined`, not an error. <strong>`function` declarations</strong> are fully hoisted, including their body — you can call a hoisted function before its textual definition. <strong>`let`/`const`</strong> are hoisted too (binding exists from the start of the scope) but NOT initialized — accessing them before their declaration line throws a `ReferenceError`, because they sit in the <strong>Temporal Dead Zone (TDZ)</strong> from the start of the block until the declaration executes. This is why `typeof x` before a `let x` declaration throws, while `typeof y` before a `var y` declaration safely returns `"undefined"` — a frequently-asked precise distinction.</p>
+      <p>Function expressions (`const f = function() {}`) are hoisted only as a `const`/`let`/`var` binding, not with their body — calling `f()` before that line throws (TDZ for `const`/`let`, or `TypeError: f is not a function` for `var`, since the binding exists as `undefined`).</p>
+
+      <h3 id="scope-closures">Scope chains and closures</h3>
+      <p>JS scoping is lexical: a function's scope is determined by where it's <em>written</em>, not where it's called. A closure is a function bundled with references to its surrounding lexical scope — critically, it captures <strong>variables by reference, not by value</strong>. The classic `var` loop bug: `for (var i = 0; i < 3; i++) { setTimeout(() => console.log(i), 0); }` logs `3, 3, 3` because all three closures share the single function-scoped `i`, which has finished the loop (value 3) by the time the callbacks run. Switching to `let` fixes it because `let` creates a <em>new binding per iteration</em> — each closure captures its own `i`. This single example tests hoisting, scope, and closures simultaneously, which is exactly why it's an interview staple.</p>
+
+      <h3 id="coercion">Type coercion: the actual rules, not "just use `===`"</h3>
+      <p>`==` performs type coercion before comparing; `===` never coerces. The precise coercion algorithm (Abstract Equality Comparison) matters: `null == undefined` is `true` (special-cased, they only equal each other and nothing else), but `null == 0` is `false` (null does NOT coerce to a number for `==`). `NaN === NaN` is `false` — `NaN` is the only value not equal to itself, which is why `Number.isNaN()` (precise) or `Object.is()` exists instead of relying on equality. `[] == false` is `true` (array → primitive via `toString()` → `""` → number `0`; `false` → number `0`; `0 == 0`). `"0" == false` is `true` for the same numeric-coercion reason. `[] == ![]` is `true` (`![]` is `false` since any object is truthy, then same path as above) — a classic "gotcha" trivia question, not something you'd ever write, but it tests whether you actually know the ToNumber/ToPrimitive algorithm versus memorizing "avoid `==`."</p>
+      <p>Falsy values (exactly 8, memorize them precisely): `false, 0, -0, 0n, "", null, undefined, NaN`. Everything else, including `[]`, `{}`, and `"0"` (the string), is truthy — a very common trap since empty array/object "feel" like they should be falsy.</p>
+
+      <h3 id="functions-this">Functions, `this` binding, and arrow functions</h3>
+      <p>`this` in a regular function is determined by <strong>how it's called</strong> (call-site binding), not where it's defined: implicit (`obj.method()` → `this` is `obj`), explicit (`.call`/`.apply`/`.bind`), `new` binding (new object), or default (`undefined` in strict mode, global object otherwise). Arrow functions have <strong>no own `this`</strong> — they lexically capture `this` from their enclosing scope at definition time, which is precisely why they fixed the old "`this` inside a callback is wrong" problem that used to require `.bind(this)` or `const self = this`.</p>
+      <p>Four ways to invoke that change `this`, ranked by precedence: `new` binding &gt; explicit binding (`call`/`apply`/`bind`) &gt; implicit binding (method call) &gt; default binding. `Function.prototype.bind` permanently locks `this` (and optionally partial arguments) and returns a new function — even a later `.call()` on the bound function cannot override the bound `this`.</p>
+
+      <h3 id="es6plus">ES6+ features that actually changed how senior devs write JS</h3>
+      <p><strong>Destructuring + defaults</strong>: `const { a, b = 5 } = obj;` — defaults only apply when the property is `undefined`, not for any other falsy value. <strong>Spread/rest</strong>: `{...obj}` does a shallow copy only — nested objects are still shared references, the classic "I thought I cloned it" bug. <strong>Optional chaining</strong> `?.` short-circuits to `undefined` the moment any link in the chain is nullish, without throwing. <strong>Nullish coalescing</strong> `??` only falls back on `null`/`undefined`, unlike `||` which falls back on any falsy value — `count ?? 0` correctly preserves a real `0`, while `count || 0` would incorrectly replace it. <strong>Promises/async-await</strong> are syntactic sugar over the microtask queue — `await` pauses the async function and yields to the event loop, but everything after it still runs as a microtask, which resolves before the next macrotask (setTimeout) even if scheduled earlier — a common "predict the console.log order" interview question.</p>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>Before executing any code, the JS engine does a <strong>creation phase</strong> per execution context: it scans the scope for `var`/`function` declarations (hoisted, `var` → `undefined`, functions → fully defined) and `let`/`const` declarations (hoisted but left in the TDZ, uninitialized). Only then does the <strong>execution phase</strong> run top to bottom. This two-phase model is exactly why hoisting works the way it does, and it's the same reason a function declaration can be called "before" it appears in the file — by the time any code executes, the whole function already exists in memory.</p>
+      <p>For the event loop: synchronous code runs first (the call stack), then all queued <strong>microtasks</strong> (Promise `.then`/`.catch`/`.finally`, `queueMicrotask`) drain completely before the engine picks up a single <strong>macrotask</strong> (`setTimeout`, `setInterval`, I/O callbacks). This is why `Promise.resolve().then(fn)` always logs before a `setTimeout(fn, 0)` scheduled earlier in the same tick — microtasks always fully drain between macrotasks, never interleaved partially.</p>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+flowchart TD
+    A["Enter execution context"] --> B["Creation phase"]
+    B --> C["var declarations hoisted,<br/>initialized to undefined"]
+    B --> D["function declarations hoisted,<br/>fully defined"]
+    B --> E["let/const hoisted,<br/>left in TDZ (uninitialized)"]
+    C --> F["Execution phase: run top to bottom"]
+    D --> F
+    E --> F
+    F --> G["Accessing let/const before<br/>its line → ReferenceError (TDZ)"]
+      </div>
+      <div class="mermaid">
+sequenceDiagram
+    participant Stack as Call Stack
+    participant Micro as Microtask Queue
+    participant Macro as Macrotask Queue (setTimeout)
+    Stack->>Stack: run sync code top to bottom
+    Stack->>Micro: Promise.then() queued
+    Stack->>Macro: setTimeout(fn, 0) queued
+    Stack->>Stack: call stack empties
+    loop Drain ALL microtasks first
+        Micro->>Stack: run each queued .then callback
+    end
+    Macro->>Stack: only now run one macrotask
+    Note over Micro,Macro: Microtasks always fully drain<br/>before the next macrotask runs
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-javascript">// BAD: classic var-in-loop closure bug
+for (var i = 0; i < 3; i++) {
+  setTimeout(() => console.log(i), 0);
+}
+// logs: 3, 3, 3 — all closures share the same function-scoped `i`
+
+// GOOD: let creates a fresh binding per iteration
+for (let i = 0; i < 3; i++) {
+  setTimeout(() => console.log(i), 0);
+}
+// logs: 0, 1, 2
+</code></pre>
+      <pre><code class="language-javascript">// Coercion precision — predict these without running them first
+console.log(null == undefined);   // true  (special-cased to equal only each other)
+console.log(null == 0);           // false (null does NOT coerce to a number for ==)
+console.log(NaN === NaN);         // false (NaN is never equal to itself)
+console.log(Number.isNaN(NaN));   // true  (precise check, no coercion)
+console.log([] == false);         // true  ([] -> "" -> 0; false -> 0; 0 == 0)
+console.log([1] == 1);            // true  ([1] -> "1" -> 1)
+
+// ?? vs || — the bug that costs you a real zero
+function getCount(count) { return count ?? 0; }  // preserves count === 0
+function getCountBuggy(count) { return count || 0; } // WRONG: replaces 0 with 0 anyway but
+// breaks for count = "" or count = false where you actually wanted to keep the falsy value
+console.log(getCount(0));        // 0 (correct, unchanged)
+console.log(getCountBuggy(0));   // 0 (looks the same here, bug shows up with "" or NaN inputs)
+</code></pre>
+      <pre><code class="language-javascript">// this binding precedence: new > explicit (call/apply/bind) > implicit > default
+function whoAmI() { console.log(this?.name ?? 'default/undefined'); }
+const obj = { name: 'obj', whoAmI };
+obj.whoAmI();                        // "obj"            (implicit)
+whoAmI.call({ name: 'explicit' });   // "explicit"       (explicit)
+const bound = whoAmI.bind({ name: 'bound' });
+bound.call({ name: 'tryOverride' }); // "bound"          (bind locks `this` permanently)
+
+// Arrow functions capture `this` lexically — no own `this`
+const timer = {
+  seconds: 0,
+  start() {
+    setInterval(() => { this.seconds++; }, 1000); // `this` = timer, captured lexically
+  }
+};
+</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4><p>A dashboard renders 500 rows, each with a "delete" button wired up in a loop using `var` inside an older codebase migrated from pre-ES6 JS. Every delete button ends up deleting the <em>last</em> row's ID because all closures share the single `var` loop variable — a bug that only manifests at scale (with 500 items, the probability a QA tester notices clicking row #3 deletes row #500 is high, but with 2 test rows it might go unnoticed). The fix is mechanical once you know the mechanism: switch `var` to `let` so each iteration gets its own binding, or explicitly capture the value in an IIFE/closure per iteration. This exact bug class — shared mutable loop variable captured by async callbacks — also shows up constantly in React (`useEffect` closures capturing stale state) and Node (async handlers in a `for` loop over `var`), making it one of the highest-value mental models in this entire chapter.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Assuming `{...obj}` or `[...arr]` deep-clones. Spread only shallow-copies the top level — nested objects/arrays are still shared by reference, so mutating `copy.nested.value` also mutates the original. Use `structuredClone(obj)` for a real deep clone when needed.</p></div>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Using `||` for default values when `0`, `""`, or `false` are valid, intentional values — `||` treats all falsy values as "missing," while `??` correctly treats only `null`/`undefined` as missing.</p></div>
+      <ul>
+        <li>Default to `const`, use `let` only when reassignment is truly needed, avoid `var` entirely in new code.</li>
+        <li>Memorize the 8 falsy values exactly — `[]` and `{}` are both truthy, a very common trap.</li>
+        <li>When in doubt about equality, use `===` and `Object.is`/`Number.isNaN` for the edge cases `===` doesn't cover (`NaN`, `-0` vs `0`).</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs: When to Use vs When NOT To</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>Arrow functions</td><td>Callbacks that need lexical `this`, short pure functions</td><td>Object methods needing dynamic `this`, generator functions</td><td>Regular `function` declarations/methods</td></tr>
+        <tr><td>`==`</td><td>Deliberate, well-understood coercion (rare, e.g. `x == null` to catch both null/undefined)</td><td>General equality checks</td><td>`===`, explicit `??`/nullish checks</td></tr>
+        <tr><td>`var`</td><td>Legacy codebase maintenance only</td><td>Any new code</td><td>`let`/`const`</td></tr>
+        <tr><td>Shallow spread clone</td><td>Flat objects/arrays, top-level immutable updates</td><td>Nested structures needing full independence</td><td>`structuredClone`, immutable libraries (Immer)</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic"><h4>Basic</h4>
+        <details class="qa"><summary>What's the difference between `let`, `const`, and `var` in terms of scope?</summary><div class="answer"><p>`var` is function-scoped (or global); `let`/`const` are block-scoped. `var` is hoisted and initialized to `undefined`; `let`/`const` are hoisted but left uninitialized in the TDZ until their declaration executes.</p></div></details>
+        <details class="qa"><summary>What is the Temporal Dead Zone?</summary><div class="answer"><p>The period between entering a scope and a `let`/`const` variable's declaration line executing, during which referencing that variable throws a ReferenceError rather than returning `undefined`.</p></div></details>
+        <details class="qa"><summary>List the 8 falsy values in JavaScript.</summary><div class="answer"><p>`false, 0, -0, 0n, "", null, undefined, NaN`. Everything else (including `[]` and `{}`) is truthy.</p></div></details>
+        <details class="qa"><summary>What's the difference between `==` and `===`?</summary><div class="answer"><p>`==` performs type coercion before comparing (Abstract Equality Comparison); `===` compares type and value with no coercion (Strict Equality Comparison).</p></div></details>
+        <details class="qa"><summary>Does a closure capture a variable's value or a reference to it?</summary><div class="answer"><p>A reference — the closure sees the variable's current value whenever it's accessed, not a frozen snapshot taken at closure-creation time.</p></div></details>
+        <details class="qa"><summary>What does `?.` (optional chaining) do differently from just accessing a property directly?</summary><div class="answer"><p>It short-circuits to `undefined` the moment any link in the chain is `null`/`undefined`, instead of throwing a TypeError trying to read a property off null/undefined.</p></div></details>
+        <details class="qa"><summary>What's the difference between `??` and `||`?</summary><div class="answer"><p>`??` falls back only when the left side is `null` or `undefined`. `||` falls back on any falsy value, incorrectly overriding intentional values like `0`, `""`, or `false`.</p></div></details>
+      </div>
+      <div class="qa-level medium"><h4>Medium</h4>
+        <details class="qa"><summary>Predict the console output order: a `setTimeout(fn, 0)`, a `Promise.resolve().then(fn2)`, and a synchronous `console.log`, all triggered in the same tick.</summary><div class="answer"><p>Synchronous log first, then the Promise's `.then` callback (microtask), then the setTimeout callback (macrotask) — microtasks always fully drain before the next macrotask runs, regardless of scheduling order.</p></div></details>
+        <details class="qa"><summary>Why does `for (var i...) { setTimeout(() => console.log(i)) }` log the final value for every iteration, and how does switching to `let` fix it?</summary><div class="answer"><p>`var` is function-scoped, so all iterations share one binding; by the time the timeouts fire, the loop has finished and `i` holds its final value. `let` creates a new binding scoped to each loop iteration, so each closure captures its own independent `i`.</p></div></details>
+        <details class="qa"><summary>Explain why `[] == false` evaluates to `true` using the actual coercion steps.</summary><div class="answer"><p>For `==` between an object and a boolean, the object is converted to a primitive first: `[].toString()` → `""`. Then `"" == false` coerces both to numbers: `Number("")` is `0`, `Number(false)` is `0`. `0 == 0` is `true`.</p></div></details>
+        <details class="qa"><summary>What's wrong with `const clone = {...original}` if `original` has nested objects?</summary><div class="answer"><p>Spread only copies top-level properties; any nested object/array value is copied by reference, so mutating `clone.nested.x` also mutates `original.nested.x`. Use `structuredClone()` or a deep-clone utility for full independence.</p></div></details>
+        <details class="qa"><summary>Why do arrow functions make bad object methods when you need dynamic `this`?</summary><div class="answer"><p>Arrow functions don't have their own `this` — they capture it lexically from the enclosing scope at definition time. As an object method, that's usually the outer scope (often the module or global), not the object itself, so `this.someProp` inside an arrow-function method won't refer to the object as expected.</p></div></details>
+        <details class="qa"><summary>What does `Function.prototype.bind` return, and why can't a later `.call()` override its `this`?</summary><div class="answer"><p>`bind` returns a brand-new function with `this` (and optionally leading arguments) permanently locked via an internal closure; calling `.call()`/`.apply()` on that bound function cannot change `this` because the bound function ignores the `this` it's invoked with and always substitutes the originally bound value.</p></div></details>
+      </div>
+      <div class="qa-level advanced"><h4>Advanced</h4>
+        <details class="qa"><summary>Explain the two-phase execution context model (creation + execution) and how it accounts for both hoisting and the TDZ in the same mechanism.</summary><div class="answer"><p>In the creation phase, the engine scans the scope and allocates memory for every `var`/`function`/`let`/`const` binding before any code runs: `var` gets `undefined`, function declarations get their full body, and `let`/`const` get an uninitialized marker (TDZ). Execution then proceeds top to bottom; accessing a `let`/`const` binding while it's still marked uninitialized throws, which is exactly the TDZ, while `var`'s pre-initialization to `undefined` is why it never throws, only returns an unhelpful `undefined`.</p></div></details>
+        <details class="qa"><summary>Why does `await` not block the thread, and what exactly happens to the rest of the async function after an `await`?</summary><div class="answer"><p>`await` suspends the async function and returns control to the event loop immediately; the remainder of the function is scheduled to resume as a microtask once the awaited promise settles. The thread is never blocked — other synchronous code and queued microtasks/macrotasks can run while the await is pending, which is precisely why async/await is sugar over Promises and the microtask queue, not a new concurrency primitive.</p></div></details>
+        <details class="qa"><summary>Design a memoization utility using closures that correctly handles both primitive and object arguments, and explain the WeakMap tradeoff.</summary><div class="answer"><p>For primitive args, a closure over a plain `Map` keyed by a serialized argument string works and allows long-lived caching. For object arguments, serializing can be expensive/incorrect for cyclic structures; using a `WeakMap` keyed by the object reference itself avoids serialization and, critically, allows the cached entry to be garbage-collected once the object argument itself is no longer referenced elsewhere — a plain Map would leak memory by keeping every object argument alive forever.</p></div></details>
+        <details class="qa"><summary>Why is `NaN === NaN` false, and what are the precise alternatives, including their difference from each other?</summary><div class="answer"><p>IEEE 754 defines NaN as unordered with respect to everything including itself, so both `==` and `===` return false for any NaN comparison. `Number.isNaN(x)` checks strictly without coercion (recommended). The global `isNaN(x)` coerces its argument first, so `isNaN("hello")` incorrectly returns true. `Object.is(NaN, NaN)` returns true because `Object.is` uses SameValue semantics, which (unlike `===`) treats NaN as equal to itself and also distinguishes `+0` from `-0`, which `===` does not.</p></div></details>
+        <details class="qa"><summary>A senior candidate says "I always use `===` so I never have coercion bugs." What's the gap in that claim?</summary><div class="answer"><p>`===` eliminates cross-type coercion bugs but doesn't eliminate coercion elsewhere in the language — template literals, `+` concatenation, array `.toString()` in `join`/implicit conversions, truthy/falsy checks in `if`, and `??` vs `||` semantics are all coercion-adjacent behaviors `===` has no effect on. "Always use `===`" is necessary but not sufficient for coercion safety.</p></div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment"><span class="level-tag">Beginner (30-60 min)</span><h4>Hoisting/TDZ prediction drill</h4><p>Write 10 short snippets mixing `var`, `let`, `const`, and function declarations/expressions, each accessing the binding before its declaration line in some way. Predict the exact output or error for each before running them.</p><ul><li>At least 3 snippets must involve `typeof` on an unhoisted-looking variable.</li><li>At least 2 snippets must involve a function expression vs a function declaration.</li></ul><p><strong>Acceptance criteria:</strong> All 10 predictions match actual runtime behavior, with a one-sentence mechanism explanation for each.</p><details class="qa"><summary>Hints</summary><div class="answer"><p>Remember: `var` → hoisted + `undefined`. `let`/`const` → hoisted but TDZ (ReferenceError). Function declarations → hoisted fully. Function expressions → only the variable binding is hoisted, not the function body.</p></div></details><p><strong>Bonus:</strong> Add one snippet demonstrating TDZ inside a `switch` statement's single block scope — a commonly-missed edge case.</p></div>
+      <div class="assignment"><span class="level-tag">Intermediate (2-4 hrs)</span><h4>Build a tiny Promise-based task queue from scratch</h4><p>Implement a `TaskQueue` class with an `add(fn)` method that queues async functions and runs at most `N` concurrently, resolving/rejecting each task's own promise appropriately, using only closures and native Promises (no libraries).</p><ul><li>Must correctly handle a task that throws/rejects without breaking the queue for subsequent tasks.</li><li>Must demonstrate understanding of microtask ordering in at least one test case with mixed `setTimeout` and Promise-based tasks.</li></ul><p><strong>Acceptance criteria:</strong> 10 tasks queued with concurrency limit 3 complete all successfully, with console output proving no more than 3 ever run simultaneously.</p><details class="qa"><summary>Hints</summary><div class="answer"><p>Keep an internal running counter and a pending array; when a task settles (via `.finally`), decrement the counter and pull the next pending task if under the concurrency limit.</p></div></details><p><strong>Bonus:</strong> Add a `pause()`/`resume()` method that stops pulling new tasks without cancelling in-flight ones.</p></div>
+      <div class="assignment"><span class="level-tag">Advanced (1-2 days)</span><h4>Write a from-scratch deep-equal and deep-clone utility, handling the real edge cases</h4><p>Implement `deepEqual(a, b)` and `deepClone(a)` without using `JSON.stringify`/`structuredClone`, correctly handling: circular references, `Map`/`Set`, `Date`, `NaN` equality, and `-0` vs `0` distinction per `Object.is` semantics.</p><ul><li>`deepEqual` must treat `NaN` as equal to `NaN` and `-0` as NOT equal to `0`, matching `Object.is` semantics, not `===`.</li><li>`deepClone` must correctly handle a circular reference without infinite recursion (e.g., using a `WeakMap` to track already-cloned objects).</li></ul><p><strong>Acceptance criteria:</strong> A test suite covering at least 10 cases including circular refs, Map/Set, Date, NaN, and -0 all passes.</p><details class="qa"><summary>Hints</summary><div class="answer"><p>Use a `WeakMap&lt;original, clone&gt;` passed through recursive calls to detect and reuse already-cloned objects for cycles. For equality, special-case `Object.is` for primitives before recursing into object/array/Map/Set comparison.</p></div></details><p><strong>Bonus:</strong> Benchmark your implementation against `structuredClone` for a large nested object and discuss the performance tradeoff of a hand-rolled vs native implementation.</p></div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet"><ul>
+        <li>`var` hoisted + initialized to `undefined`; `let`/`const` hoisted but TDZ (ReferenceError if accessed early); functions fully hoisted.</li>
+        <li>Closures capture variables by reference — the classic `var` loop bug happens because all iterations share one binding; `let` fixes it with per-iteration bindings.</li>
+        <li>8 falsy values: `false, 0, -0, 0n, "", null, undefined, NaN`. `[]`/`{}` are truthy.</li>
+        <li>`==` coerces types before comparing; `===` never coerces. `null == undefined` is true; `null == 0` is false.</li>
+        <li>`NaN === NaN` is false; use `Number.isNaN()` or `Object.is()` for precise checks.</li>
+        <li>`??` falls back only on null/undefined; `||` falls back on any falsy value — don't use `||` for numeric defaults.</li>
+        <li>Spread/`{...obj}` is a shallow copy only — nested structures still share references.</li>
+        <li>`this` binding precedence: `new` &gt; explicit (`call`/`apply`/`bind`) &gt; implicit (method call) &gt; default. Arrow functions have no own `this` (lexical capture).</li>
+        <li>Microtasks (Promises) fully drain before the next macrotask (`setTimeout`) runs — never partially interleaved.</li>
+      </ul></div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/let#temporal_dead_zone_tdz">MDN — let and the Temporal Dead Zone</a></li>
+        <li><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Closures">MDN — Closures</a></li>
+        <li><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Equality#using_the_equality_operators">MDN — Equality operators and coercion</a></li>
+        <li><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Using_promises">MDN — Using Promises / microtask queue</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="01-html-css-fundamentals.html"><span class="dir">← Previous</span>HTML & CSS Fundamentals</a>
+        <a class="next" href="03-dom-and-browser.html"><span class="dir">Next →</span>The DOM & Browser Environment</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · Web Fundamentals</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-javascript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "11-web-fundamentals", chapterKey: "02-javascript-fundamentals" });</script>
+</body>
+</html>

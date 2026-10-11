@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hooks Deep Dive — React & Next.js Advanced — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">React &amp; Next.js Advanced</a><span class="sep">›</span>Hooks Deep Dive</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>Hooks Deep Dive: Rules, Closures, Custom Hooks, useEffect Pitfalls</h1>
+      <p class="meta-line"><span>⏱ 2.5 hrs</span><span>📍 Chapter 2 of 11</span></p>
+      <p><strong>One-line summary:</strong> Hooks are not magic — they're a linked list stored on the fiber's
+      <code>memoizedState</code>, read in strict call-order every render, which is exactly why the "rules of
+      hooks" exist and exactly why stale-closure bugs happen.</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>Senior interviews rarely ask "what does useState do" — they ask "why can't hooks be conditional," "why
+      did this effect fire with a stale value," and "how would you build this custom hook correctly." Answering
+      those well requires knowing the actual storage model (a linked list indexed by call order), not just the
+      API surface.</p>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>Read <a href="01-react-internals.html">React Internals</a> first — hooks live inside the Fiber model
+      described there. Related: <a href="05-concurrent-react.html">Concurrent React</a>.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="hooks-linked-list">How hooks are actually stored: a linked list, not an array</h3>
+      <p>Each function component fiber has a <code>memoizedState</code> field that, for function components,
+      points to the <em>first</em> Hook object in a singly linked list — one node per hook call, in call order:</p>
+      <pre><code class="language-typescript">type Hook = {
+  memoizedState: any;        // e.g., current state value for useState, deps array for useEffect
+  baseState: any;
+  queue: UpdateQueue | null; // pending updates for useState/useReducer
+  next: Hook | null;          // next hook called in this render
+};</code></pre>
+      <p>On every render, React resets a cursor to the fiber's first hook and advances it one node per hook call
+      your component makes. This is <em>why</em> hooks must be called unconditionally in the same order every
+      render — if render N calls <code>useState</code>, <code>useEffect</code>, <code>useState</code> and render
+      N+1 calls <code>useState</code>, <code>useState</code> (skipping the effect because it was inside an
+      <code>if</code>), React reads the second <code>useState</code>'s state out of the hook node that actually
+      belongs to the old <code>useEffect</code> — silent data corruption, not just a warning.</p>
+
+      <h3 id="closures">Closures: every render captures its own props/state</h3>
+      <p>A function component is literally just a function — called fresh on every render. Any closure created
+      inside it (an event handler, an effect callback, a memoized callback) captures the variables <em>as they
+      were in that specific render's scope</em>. There's no "current state" that handlers automatically see —
+      each render's handler closes over that render's state, forever. This is the entire reason stale-closure
+      bugs exist and the entire reason the dependency array exists: it tells React which render's version of a
+      callback is still valid to keep around vs. needs replacing.</p>
+
+      <h3 id="useeffect-model">useEffect's actual contract</h3>
+      <p>Conceptually, <code>useEffect(fn, deps)</code> says: "after this render commits and paints, if any value
+      in <code>deps</code> changed since the last run (compared with <code>Object.is</code>, shallowly, per
+      element), run the cleanup from last time, then run <code>fn</code> again." No deps array = run after every
+      commit. Empty array = run once after the first commit (and once on cleanup, at unmount). This is layered on
+      the Fiber effect list: each hook with a pending effect contributes an entry, and after commit React
+      schedules a pass to run all pending passive effects asynchronously (not blocking paint), in the order they
+      were declared.</p>
+
+      <h3 id="custom-hooks">Custom hooks are just functions that call other hooks</h3>
+      <p>There's no separate runtime concept — "custom hook" is a naming convention (<code>useXxx</code>) plus
+      the rule that it must call hooks unconditionally. Each call site gets its <em>own</em> slice of the hook
+      linked list on the calling fiber; two components calling the same custom hook do not share state — each
+      gets independent hook nodes.</p>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p><code>useState</code> is implemented on top of <code>useReducer</code>'s machinery: calling the setter
+      doesn't mutate anything synchronously — it creates an <code>Update</code> object, appends it to the hook's
+      <code>queue</code>, and calls <code>scheduleUpdateOnFiber</code>. During the next render, React walks the
+      queue, applies updates in order (processing functional updaters like <code>c => c + 1</code> against the
+      previous result), and that becomes the new <code>memoizedState</code> for that hook node. Multiple
+      <code>setState</code> calls in the same event handler are batched: React doesn't re-render after each call,
+      it processes the whole queue once before the next render — which is also why reading the state variable
+      immediately after calling its setter, in the same function body, still shows the old value.</p>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+flowchart LR
+  A[Fiber.memoizedState] --> H1[Hook: useState count]
+  H1 --> H2[Hook: useEffect deps=count]
+  H2 --> H3[Hook: useRef]
+  H3 --> H4[Hook: useMemo deps=items]
+  H4 --> N[null]
+  style A fill:#444,color:#fff
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-jsx">// Classic stale closure bug
+function Timer() {
+  const [count, setCount] = useState(0);
+
+  useEffect(() => {
+    const id = setInterval(() => {
+      // BUG: this closure captured `count` as 0 from the FIRST render's
+      // effect run (deps=[] means this effect, and this closure, never
+      // re-runs), so it always logs/sets based on stale `count`.
+      setCount(count + 1);
+    }, 1000);
+    return () => clearInterval(id);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps -- the bug
+
+  return <p>{count}</p>;
+}
+
+// FIX 1: functional updater sidesteps the stale closure entirely
+function TimerFixed() {
+  const [count, setCount] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setCount(c => c + 1), 1000);
+    return () => clearInterval(id);
+  }, []);
+  return <p>{count}</p>;
+}
+
+// FIX 2 (when you need the latest value of something that isn't state
+// you're deriving from): a ref that always holds the latest value.
+function useLatest(value) {
+  const ref = useRef(value);
+  useEffect(() => { ref.current = value; }); // runs after every render
+  return ref;
+}
+
+// A correctly-built custom hook: data fetching with cancellation
+function useFetchJSON(url) {
+  const [state, setState] = useState({ data: null, error: null, loading: true });
+
+  useEffect(() => {
+    let cancelled = false;
+    setState(s => ({ ...s, loading: true }));
+
+    fetch(url)
+      .then(res => res.json())
+      .then(data => { if (!cancelled) setState({ data, error: null, loading: false }); })
+      .catch(error => { if (!cancelled) setState({ data: null, error, loading: false }); });
+
+    return () => { cancelled = true; }; // prevents setting state from a stale request
+  }, [url]);
+
+  return state;
+}</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4>
+      <p>A search-as-you-type feature fired a network request per keystroke and occasionally rendered results
+      for an older query after a newer one, because the fetch effect had no cancellation guard — the "last
+      request wins" assumption was broken under slow/jittery networks where request order ≠ response order.
+      Fixed with the cancellation-flag pattern shown above (and, longer term, migrated to React Query which
+      handles request deduplication/cancellation and race conditions out of the box — see
+      <a href="03-state-management.html">State Management</a>).</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4>
+      <p>Disabling <code>react-hooks/exhaustive-deps</code> instead of fixing the dependency is the single most
+      common source of stale-closure bugs in production codebases. If you find yourself wanting to omit a
+      dependency, the real fix is almost always a functional state updater, a ref for "latest value without
+      re-running the effect," or restructuring so the effect doesn't need that value at all.</p></div>
+      <ul>
+        <li>Calling hooks inside conditionals/loops/nested functions — breaks the call-order contract silently.</li>
+        <li>Forgetting cleanup in <code>useEffect</code> for subscriptions/timers/listeners — leaks across remounts.</li>
+        <li>Using an object/array literal as a `useEffect`/`useMemo` dependency — new reference every render defeats memoization; use primitives or a stable memoized reference.</li>
+        <li>Reaching for <code>useEffect</code> to derive state from props/state instead of just computing it during render — adds an unnecessary extra render.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>Derive value during render</td><td>Value is a pure function of existing props/state</td><td>Value requires an external side effect to compute (fetch, subscription)</td><td>useEffect</td></tr>
+        <tr><td>useEffect</td><td>Synchronizing with something outside React (DOM API, subscription, fetch)</td><td>Just computing a derived value</td><td>Plain computation, or useMemo if expensive</td></tr>
+        <tr><td>Ref for "latest value"</td><td>Need latest value inside a stable-identity callback without re-subscribing</td><td>The value should actually trigger a re-render</td><td>State + correct deps</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic"><h4>Basic</h4>
+      <details class="qa"><summary>Why can't hooks be called conditionally?</summary><div class="answer"><p>React tracks hook state as a linked list tied to call order, not by name. A conditional hook call changes how many hook nodes exist or which node corresponds to which call across renders, causing React to read/write the wrong hook's state.</p></div><div class="followup">Follow-up: What actually happens internally if you do this — not just "it's a lint error"?</div></details>
+      <details class="qa"><summary>What's the difference between useEffect and useLayoutEffect?</summary><div class="answer"><p>useLayoutEffect runs synchronously after DOM mutations but before the browser paints (blocking paint); useEffect runs asynchronously after paint. Use layout effect only when you must measure/mutate the DOM before the user sees it (e.g., avoiding visual flicker).</p></div><div class="followup">Follow-up: What's the perf cost of overusing useLayoutEffect?</div></details>
+      <details class="qa"><summary>What is a stale closure?</summary><div class="answer"><p>A function created during a specific render that captured that render's props/state values, which doesn't see later updates because it's never recreated — common in effects/callbacks with incomplete dependency arrays.</p></div><div class="followup">Follow-up: Give two different fixes for the same stale closure bug.</div></details>
+      <details class="qa"><summary>What does the dependency array actually do?</summary><div class="answer"><p>Tells React which values the effect/memo/callback closure depends on, so React can shallow-compare them render over render and decide whether to re-run the effect or recreate the memoized value/callback.</p></div><div class="followup">Follow-up: What happens with an object literal in the deps array?</div></details>
+      <details class="qa"><summary>What is a custom hook, mechanically?</summary><div class="answer"><p>Just a regular function that calls other hooks, following the naming convention `useXxx` so lint rules and React itself (dev-mode checks) can verify the rules of hooks are followed. Each call site gets its own independent hook state.</p></div><div class="followup">Follow-up: Do two components using the same custom hook share state?</div></details>
+      <details class="qa"><summary>Why does calling a state setter twice in the same handler only cause one re-render?</summary><div class="answer"><p>React batches updates within an event handler (and, since React 18, in most async contexts too) — it queues both updates and processes the whole queue before the next render, rather than re-rendering after each call.</p></div><div class="followup">Follow-up: Is this still true inside a raw setTimeout callback in React 18+?</div></details>
+      </div>
+      <div class="qa-level medium"><h4>Medium</h4>
+      <details class="qa"><summary>Explain exactly how useState's setter avoids reading stale state when given a function updater.</summary><div class="answer"><p>`setCount(c => c + 1)` enqueues an updater function rather than a value. When React processes the hook's update queue at render time, it applies updaters in order against the result of the previous one in the queue (not against whatever `count` was in the closure that called setCount), so even multiple queued updates compose correctly regardless of which render's closure called them.</p></div><div class="followup">Follow-up: Why doesn't `setCount(count + 1)` called twice in a row produce +2?</div></details>
+      <details class="qa"><summary>Why is "derive state in an effect" usually wrong, and what's the actual cost?</summary><div class="answer"><p>It introduces an extra render: render 1 commits with stale derived value, the effect runs after paint, calls setState, causing render 2. If the value can be computed from existing props/state, computing it inline during render (optionally memoized) avoids that double-render and the flash of stale UI.</p></div><div class="followup">Follow-up: When is deriving state in an effect actually correct?</div></details>
+      <details class="qa"><summary>How would you build a `useDebouncedValue` custom hook correctly, and what's the subtle bug novices introduce?</summary><div class="answer"><p>Store the raw value and a debounced copy in state; in an effect keyed on the raw value, set a timeout to update the debounced copy, and return a cleanup that clears the timeout so an in-flight timer doesn't fire after a newer value arrives. The common bug: forgetting the cleanup, so rapid updates schedule multiple timers that all eventually fire and "flicker" the debounced value backward.</p></div><div class="followup">Follow-up: How would you unit test the debounce timing without real timers?</div></details>
+      <details class="qa"><summary>What's the real difference between useMemo/useCallback as a correctness tool vs. a performance tool?</summary><div class="answer"><p>As a performance tool, they avoid recomputation/recreation across renders. As a correctness tool, they stabilize reference identity so dependent effects, memoized children, or other hooks' dependency arrays don't fire spuriously — e.g., a useCallback-wrapped function passed as a dependency to another effect. React does NOT guarantee memoized values survive forever (they can be discarded and recomputed, e.g., under memory pressure in future React versions), so code must stay correct even if the memoization never "hit."</p></div><div class="followup">Follow-up: Does React 19's compiler change how often you should write useMemo manually?</div></details>
+      <details class="qa"><summary>Why does an effect with `[]` deps still see fresh props on its *first* run but stale ones afterward?</summary><div class="answer"><p>The effect closure is created fresh every render, but with `[]` deps React only ever executes the one created during the very first render (where "first-run" props happened to be current); every later render creates a new closure that is simply discarded without being called, since the effect never re-runs.</p></div><div class="followup">Follow-up: How do you fix this without re-running the effect on every render?</div></details>
+      </div>
+      <div class="qa-level advanced"><h4>Advanced</h4>
+      <details class="qa"><summary>Design a `useEventCallback` hook that gives you a stable function identity that always calls the latest version of a handler, and explain exactly why naive approaches fail.</summary><div class="answer"><p>Store the latest handler in a ref (updated every render, e.g. via useInsertionEffect or a plain assignment during render guarded correctly), and return a `useCallback(() => {}, [])`-stable wrapper function that calls `ref.current(...)`. Naive `useCallback(handler, [handler])` churns identity whenever the inline handler prop changes (which is every render if it's an inline arrow), defeating the purpose; storing it directly in a ref without updating via an effect risks reading a value from a stale commit if updated at the wrong phase (e.g., during render, which is disallowed for mutating refs read elsewhere during the same render pass).</p></div><div class="followup">Follow-up: Why is useInsertionEffect specifically relevant here over a plain useEffect?</div></details>
+      <details class="qa"><summary>Two sibling components both call the same custom hook `useToggle()`. Explain, down to the fiber level, why their boolean states are independent.</summary><div class="answer"><p>Hook state lives in the calling fiber's own `memoizedState` linked list, one node per hook call *on that fiber*. Each sibling is a distinct fiber with its own independent hook linked list; calling the same JS function (`useToggle`) just runs the same `useState` call against whichever fiber is currently rendering (React tracks "current rendering fiber" in module-level state during render), so each call site's node lives entirely within its own fiber's list — nothing is shared by virtue of calling the same function.</p></div><div class="followup">Follow-up: What would it take to actually share state across two sibling calls to the same hook?</div></details>
+      <details class="qa"><summary>Explain precisely why batching state updates across a `setTimeout` callback works differently pre- and post-React 18, and what changed under the hood.</summary><div class="answer"><p>Pre-18, React only auto-batched updates inside events it controlled (synthetic event handlers) — updates inside timers/promises/native event listeners each triggered a separate synchronous render. React 18's `createRoot` enabled "automatic batching" by changing the scheduler to batch any updates that occur before the microtask/macrotask yields control back, regardless of trigger source, by wrapping the update-processing in the same `unstable_batchedUpdates`-style mechanism universally rather than only inside React's own event dispatch.</p></div><div class="followup">Follow-up: How can you opt out of batching for a specific update if you truly need synchronous re-render?</div></details>
+      <details class="qa"><summary>Why does mutating a ref's `.current` during render (rather than in an effect or event handler) break React's concurrent rendering guarantees?</summary><div class="answer"><p>Render-phase work is required to be pure and may be run multiple times for the same eventual commit (interrupted and restarted, or double-invoked under Strict Mode) without the component's author being able to tell. Mutating a ref during render means a discarded/replayed render still leaves behind a side effect, and under concurrent rendering, two in-progress renders (at different priorities) could even interleave and race on the same ref — refs are explicitly documented as safe to mutate only in effects/handlers/imperative code, not the render body itself.</p></div><div class="followup">Follow-up: Is reading (not writing) a ref during render safe?</div></details>
+      <details class="qa"><summary>What is the "temporal dead zone" problem React's exhaustive-deps lint rule cannot fully solve, and how do you handle it manually?</summary><div class="answer"><p>exhaustive-deps works on syntactic dependency extraction — it can't know that a value is logically stable (e.g., a setter from useState, or a value you've proven monotonically-memoized through external means) versus genuinely needing to be tracked, nor can it detect dependencies hidden behind indirection (e.g., a value read via a ref, or a module-level mutable singleton). Handling it manually means either exposing the true dependency explicitly (even if the lint rule would've been silent), or consciously documenting + justifying an eslint-disable with a comment explaining the invariant that makes omission safe (e.g., "setCount identity is guaranteed stable by React").</p></div><div class="followup">Follow-up: Give a concrete example where exhaustive-deps produces a false positive.</div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment"><span class="level-tag">Beginner (30-60 min)</span><h4>Reproduce and fix a stale closure</h4>
+      <p>Build the buggy <code>Timer</code> component from the code examples above, observe the bug (count never increments past 1), then fix it two different ways (functional updater, and a ref-based "latest value" approach).</p>
+      <ul><li>Document, in writing, why each fix works.</li></ul>
+      <p><strong>Acceptance criteria:</strong> Counter increments correctly every second with both fixes.</p>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>The bug is that the effect's closure was created once, on the first render, with `[]` deps.</p></div></details>
+      <p><strong>Bonus:</strong> Make the interval delay itself a prop and handle changing it without leaking the old interval.</p></div>
+
+      <div class="assignment"><span class="level-tag">Intermediate (2-4 hrs)</span><h4>Build `useFetchJSON` with cancellation and race-condition safety</h4>
+      <p>Build a search input that calls a (mock, debounced) API on every keystroke using a custom hook. Ensure results from an outdated/slower request never overwrite results from a newer one.</p>
+      <ul><li>Include loading and error states.</li><li>Add an AbortController-based cancellation, not just a boolean flag.</li></ul>
+      <p><strong>Acceptance criteria:</strong> Artificially delay responses out of order (mock slower first request) and prove the UI always ends up showing the latest query's results.</p>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>AbortController lets you actually cancel the in-flight fetch, not just ignore its result.</p></div></details>
+      <p><strong>Bonus:</strong> Add request deduplication for identical consecutive queries.</p></div>
+
+      <div class="assignment"><span class="level-tag">Advanced (1-2 days)</span><h4>Implement `useEventCallback` and prove its stability under React's Strict Mode double-invocation</h4>
+      <p>Build the stable-identity-latest-handler hook described in the advanced Q&amp;A above. Write a test harness that counts how many times the returned function's identity changes across renders where the underlying handler prop changes every render.</p>
+      <ul><li>Verify it still calls the *latest* handler logic even though its identity never changes.</li><li>Verify behavior holds under React 18 Strict Mode's intentional double-render in development.</li></ul>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>Consider why `useInsertionEffect` (runs before layout effects, even earlier than useLayoutEffect) might be the correct place to update the ref for this specific use case versus a plain useEffect.</p></div></details>
+      </div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet"><ul>
+        <li>Hooks live in a linked list on the fiber, indexed by call order — never call conditionally.</li>
+        <li>Every render = a fresh function call = a fresh closure capturing that render's values.</li>
+        <li>Dependency arrays tell React which captured values make a closure "stale" when they change.</li>
+        <li>Functional updaters (`setX(x => ...)`) sidestep stale closures for the updated value itself.</li>
+        <li>Refs for "latest value without re-running an effect"; state for "value that should trigger render."</li>
+        <li>useLayoutEffect blocks paint (sync); useEffect runs after paint (async).</li>
+        <li>Custom hooks share no state across call sites — each call gets independent hook nodes.</li>
+        <li>React 18 batches updates everywhere by default, not just inside synthetic events.</li>
+        <li>Deriving state in an effect costs an extra render — compute inline when possible.</li>
+      </ul></div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://react.dev/reference/react/useEffect">react.dev — useEffect reference</a></li>
+        <li><a href="https://react.dev/learn/removing-effect-dependencies">react.dev — Removing Effect Dependencies</a></li>
+        <li><a href="https://overreacted.io/a-complete-guide-to-useeffect/">Dan Abramov — A Complete Guide to useEffect</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="01-react-internals.html"><span class="dir">← Previous</span>React Internals</a>
+        <a class="next" href="03-state-management.html"><span class="dir">Next →</span>State Management</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · React &amp; Next.js Advanced</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-jsx.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-typescript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-tsx.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "03-react-nextjs-advanced", chapterKey: "02-hooks-deep-dive" });</script>
+</body>
+</html>

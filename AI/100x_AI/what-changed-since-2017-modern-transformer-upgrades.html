@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>What Changed Since 2017 — The Four Modern Transformer Upgrades</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <input class="searchbox" placeholder="Search topics..." />
+    <a href="../index.html">← Home</a>
+    <h3>100x_AI</h3>
+    <a href="ai-ml-orientation.html">AI & ML Course Orientation</a>
+    <a href="fasttracking-ai-what-is-ai-to-how-chatgpt-works.html">Fast-Tracking AI: What is AI → How ChatGPT Works</a>
+    <a href="neural-networks-from-scratch.html">Neural Networks from Scratch</a>
+    <a href="transformers-part-1-tokenization-embeddings-positional-encoding.html">Transformers Part 1: Text → Attention</a>
+    <a href="tensors-and-pytorch.html">Tensors, Matrices & PyTorch</a>
+    <a href="transformers-part-2-self-attention-qkv-multihead.html">Transformers Part 2: Self-Attention, Q/K/V & Multi-Head</a>
+    <a href="what-changed-since-2017-modern-transformer-upgrades.html">What Changed Since 2017: The Four Upgrades</a>
+    <a href="building-training-modern-llm-from-scratch.html">Building & Training a Modern LLM from Scratch</a>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumbs"><a href="../index.html">Home</a> / 100x_AI</div>
+      <button class="theme-toggle" onclick="toggleTheme()">🌓 Theme</button>
+    </div>
+    <h1>What Changed Since 2017 — The Four Upgrades That Turned the Classic Transformer Into a Modern LLM</h1>
+    <span class="tag good">Stable</span><span class="tag">Last verified: 2026-10-07</span>
+    <p class="callout">Source: "Building & Training a Modern LLM — What Changed Since 2017 — and Why" slides (Week 6). This is the "why" behind the four architectural upgrades implemented hands-on in <a href="building-training-modern-llm-from-scratch.html">Building & Training a Modern LLM from Scratch</a>: why the original 2017/2019 Transformer (GPT-2-style) was replaced, component by component, by RMSNorm, SwiGLU, RoPE, and GQA — the exact stack used by LLaMA, Mistral, Gemma, DeepSeek, and virtually every modern open-weight LLM.</p>
+
+    <div class="toc">
+      <b>On this page</b>
+      <a href="#what">1. What is this?</a>
+      <a href="#whyexist">2. Why does it exist?</a>
+      <a href="#whyimportant">3. Why is it important?</a>
+      <a href="#whereused">4. Where is it used?</a>
+      <a href="#prereq">5. Prerequisites</a>
+      <a href="#core">6. Core concepts</a>
+      <a href="#terms">7. Terminology</a>
+      <a href="#arch">8. Architecture</a>
+      <a href="#internal">9. How it works internally</a>
+      <a href="#steps">10. Step-by-step explanation</a>
+      <a href="#simple">11. Simple example</a>
+      <a href="#real">12. Real-world example</a>
+      <a href="#code">13. Code example</a>
+      <a href="#advanced">14. Advanced example</a>
+      <a href="#mistakes">15. Common mistakes</a>
+      <a href="#best">16. Best practices</a>
+      <a href="#production">17. Production considerations</a>
+      <a href="#security">18. Security considerations</a>
+      <a href="#performance">19. Performance considerations</a>
+      <a href="#cost">20. Cost considerations</a>
+      <a href="#debug">21. Debugging/troubleshooting</a>
+      <a href="#related">22. Related concepts</a>
+      <a href="#comparison">23. Comparison with alternatives</a>
+      <a href="#exercise">24. Mini practical exercise</a>
+      <a href="#project">25. Practical project</a>
+      <a href="#projectarch">26. Project architecture</a>
+      <a href="#interview-b">27. Interview Questions — Beginner</a>
+      <a href="#interview-i">28. Interview Questions — Intermediate</a>
+      <a href="#interview-a">29. Interview Questions — Advanced</a>
+      <a href="#interview-s">30. Interview Questions — Senior/Architect</a>
+      <a href="#interview-sc">31. Scenario-Based Questions</a>
+      <a href="#revision">32. Quick revision notes</a>
+      <a href="#cheat">33. Cheat sheet</a>
+      <a href="#further">34. Further topics to learn</a>
+    </div>
+
+    <h2 id="what">1. What is this?</h2>
+    <p>A side-by-side comparison of the "Classic Transformer" (2017's original architecture plus GPT-2's 2019 refinements) against the "Modern Transformer" (2023–2025, the architecture behind LLaMA, Mistral, Gemma, and DeepSeek), broken into exactly four component-level upgrades: <b>LayerNorm → RMSNorm</b> (normalization), <b>ReLU FFN → SwiGLU</b> (feed-forward activation), <b>Sinusoidal → RoPE</b> (position encoding), and <b>Multi-Head Attention (MHA) → Grouped Query Attention (GQA)</b> (attention). Each upgrade is motivated by a specific, concrete failure mode of its predecessor.</p>
+
+    <h2 id="whyexist">2. Why does it exist?</h2>
+    <p>The original 2017 Transformer ("Attention Is All You Need") and its 2019 GPT-2 refinement were optimized for correctness and conceptual clarity, not for training stability or inference efficiency at the scale modern LLMs operate at (tens to hundreds of billions of parameters, 100K+ token contexts, served to millions of concurrent users). This material exists to explain exactly which specific bottleneck each original component hit at scale, and which upgrade solved it — framing architecture evolution as a sequence of targeted fixes, not arbitrary changes.</p>
+
+    <h2 id="whyimportant">3. Why is it important?</h2>
+    <p>This four-row comparison table is essentially the "cheat sheet" interviewers use to test whether a candidate actually understands modern LLM architecture versus having only studied the original 2017 paper — "why did models move from LayerNorm to RMSNorm," "why RoPE instead of sinusoidal," and "what problem does GQA solve" are extremely common AI engineering interview questions, and all four have the same underlying shape of answer: a specific bottleneck, explained with numbers.</p>
+
+    <h2 id="whereused">4. Where is it used?</h2>
+    <ul>
+      <li>Virtually every modern open-weight LLM: LLaMA (Meta), Mistral, Gemma (Google), DeepSeek, Qwen, and others.</li>
+      <li>The from-scratch MiniLLM build in <a href="building-training-modern-llm-from-scratch.html">Building & Training a Modern LLM from Scratch</a>, which implements all four upgrades in code.</li>
+      <li>Production LLM serving infrastructure — GQA specifically is a direct response to the KV-cache memory bottleneck that governs how long a context a model can serve cost-effectively.</li>
+      <li>Any team fine-tuning, extending, or building a custom LLM architecture today — these four components are the current default starting point, not GPT-2's 2019 design.</li>
+    </ul>
+
+    <h2 id="prereq">5. Prerequisites</h2>
+    <p><a href="transformers-part-2-self-attention-qkv-multihead.html">Transformers Part 2</a> (self-attention, Q/K/V, KV cache) and <a href="transformers-part-1-tokenization-embeddings-positional-encoding.html">Transformers Part 1</a> (positional encoding fundamentals) — this material assumes you already understand the classic mechanisms being replaced.</p>
+
+    <h2 id="core">6. Core concepts</h2>
+    <table>
+      <tr><th>Component</th><th>Classic (2017–2019)</th><th>Modern (2023–2025)</th><th>Problem it solves</th></tr>
+      <tr><td>Normalization</td><td>LayerNorm (Post-Norm)</td><td>RMSNorm (Pre-Norm)</td><td>Mean-centering/bias wasn't earning its compute cost; post-norm destabilizes very deep (30+ layer) models.</td></tr>
+      <tr><td>Feed-forward activation</td><td>ReLU FFN</td><td>SwiGLU</td><td>ReLU's hard cutoff and single-path design is less expressive than a learned, gated information flow.</td></tr>
+      <tr><td>Position encoding</td><td>Sinusoidal (absolute)</td><td>RoPE (rotary, relative)</td><td>Absolute position ("I am token #47") doesn't naturally capture relative distance between tokens.</td></tr>
+      <tr><td>Attention</td><td>Multi-Head Attention (MHA)</td><td>Grouped Query Attention (GQA)</td><td>Standard MHA's KV cache grows too large to fit in GPU memory at long context lengths.</td></tr>
+    </table>
+
+    <h2 id="terms">7. Terminology</h2>
+    <table>
+      <tr><th>Term</th><th>Meaning</th></tr>
+      <tr><td>Post-Norm</td><td>Normalizing after a sublayer (attention/FFN) — the original Transformer's design.</td></tr>
+      <tr><td>Pre-Norm</td><td>Normalizing before a sublayer, so the residual connection carries the raw, un-normalized signal — the modern default, essential for stable training in 30+ layer models.</td></tr>
+      <tr><td>SiLU (Sigmoid Linear Unit)</td><td><code>SiLU(x) = x · σ(x)</code> — a smooth, non-monotonic activation function (also called Swish) used as SwiGLU's gating function.</td></tr>
+      <tr><td>Gating</td><td>Using a learned signal (computed from the input) to control how much of another signal passes through — SwiGLU's defining mechanism.</td></tr>
+      <tr><td>Absolute positional encoding</td><td>Encoding "this token is at position 47" directly — the original sinusoidal scheme's approach.</td></tr>
+      <tr><td>Relative positional encoding</td><td>Encoding the distance/relationship between two tokens rather than their absolute positions — what RoPE achieves via rotation.</td></tr>
+      <tr><td>KV cache</td><td>Stored Key/Value vectors from previous tokens during generation, reused to avoid recomputation (see <a href="transformers-part-2-self-attention-qkv-multihead.html">Transformers Part 2</a>).</td></tr>
+      <tr><td>Grouped Query Attention (GQA)</td><td>An attention variant where multiple Query heads share a smaller number of Key/Value heads, shrinking the KV cache.</td></tr>
+      <tr><td>Multi-Query Attention (MQA)</td><td>The extreme end of GQA — all Query heads share a single Key/Value head (maximum cache reduction, higher quality risk).</td></tr>
+    </table>
+
+    <h2 id="arch">8. Architecture</h2>
+    <pre><code>CLASSIC TRANSFORMER (2017-2019, ~GPT-2):
+  Token Embedding + Sinusoidal Position
+         ↓
+  [Multi-Head Attention → Add → LayerNorm]   (Post-Norm)
+         ↓
+  [FFN with ReLU → Add → LayerNorm]          (Post-Norm)
+         ↓  (repeat N times)
+
+MODERN TRANSFORMER (2023-2025, ~LLaMA/Mistral/Gemma/DeepSeek):
+  Token Embedding  (position injected via RoPE, inside attention)
+         ↓
+  [RMSNorm → Grouped Query Attention (+RoPE) → Add]   (Pre-Norm)
+         ↓
+  [RMSNorm → SwiGLU FFN → Add]                         (Pre-Norm)
+         ↓  (repeat N times, N often 30+)
+
+The KV cache memory wall (why GQA exists), 32-layer model, 8K tokens, MHA:
+  2 (K+V) × 32 heads × 8192 tokens × 128 head_dim × 2 bytes
+  ≈ 128 MB per layer × 32 layers ≈ 4 GB total cache
+  → 128K tokens would require ~64 GB — exceeds most single-GPU memory</code></pre>
+
+    <h2 id="internal">9. How it works internally</h2>
+    <p><b>RMSNorm</b> strips two components out of LayerNorm: mean subtraction (centering) and the learned bias/shift term. LayerNorm computes: mean → variance → normalize → scale → shift; RMSNorm computes only: root-mean-square → normalize → scale. Empirically, mean-centering "wasn't earning its keep" — RMSNorm's resulting distribution has a non-zero mean (unlike LayerNorm's zero-mean output) but stabilizes training just as well, with meaningfully fewer operations — a real speed/memory win that compounds across billions of parameters and many training steps. Separately, moving normalization from <i>after</i> each sublayer (Post-Norm, the original design) to <i>before</i> each sublayer (Pre-Norm, the modern default) is what actually makes training stable at 30+ layers: Pre-Norm keeps the residual connection carrying the raw, un-normalized signal end-to-end, giving gradients an unobstructed path through the network, whereas Post-Norm's gradients must pass through normalization at every layer, which becomes numerically fragile as depth increases.</p>
+    <p><b>SwiGLU</b> replaces a single-path ReLU feed-forward network with two parallel paths: one path computes a "gate" via the SiLU activation (<code>SiLU(x) = x · σ(x)</code>, a smooth, non-monotonic curve unlike ReLU's hard zero-cutoff), and the other path carries the raw signal; the two are multiplied together before a final down-projection. This learned gating lets the network dynamically control, per-dimension, how much information passes through — a strictly more expressive mechanism than ReLU's fixed, input-independent "pass or zero" rule.</p>
+    <p><b>RoPE</b> solves sinusoidal encoding's core limitation: sinusoidal encoding adds an absolute "I am token #47" signal to each embedding, which doesn't naturally tell the model how far apart two tokens are. RoPE instead <i>rotates</i> the Query and Key vectors by an angle proportional to position, for each pair of dimensions — like a clock's hands, where the angle between the hands at 3 and 5 o'clock equals the angle between the hands at 7 and 9 o'clock, because only the <i>gap</i> matters, not the absolute position. Mathematically, this means the Q·K dot product between two rotated vectors depends only on their relative distance, never their absolute positions — directly solving sinusoidal encoding's absolute-position limitation. Low-index dimension pairs rotate at high frequency (sensitive to nearby relationships), high-index pairs rotate slowly (sensitive to distant relationships), giving a multi-scale view of position across the embedding.</p>
+    <p><b>GQA</b> addresses a purely practical production bottleneck: during autoregressive generation, the KV cache (storing every previous token's Key and Value vectors to avoid recomputation — see <a href="transformers-part-2-self-attention-qkv-multihead.html">Transformers Part 2</a>) grows linearly with sequence length and the number of KV heads. For a 32-layer model with standard Multi-Head Attention, just 8K tokens of context already requires roughly 4 GB of cache memory — scaling to 128K tokens would require ~64 GB, exceeding most single-GPU memory before the model has produced a single output token. GQA's fix: instead of every Query head having its own dedicated Key/Value head (standard MHA), multiple Query heads share a smaller number of Key/Value heads — directly and proportionally shrinking the cache (a 4:1 Q:KV head ratio yields roughly 4× less KV cache memory), with empirically almost no loss in model quality, making it "the sweet spot" between full MHA (maximum quality, maximum cache cost) and Multi-Query Attention (minimum cache cost, higher quality risk).</p>
+
+    <h2 id="steps">10. Step-by-step explanation</h2>
+    <ol>
+      <li><b>Start from the Classic Transformer:</b> token embedding + sinusoidal position, Post-Norm LayerNorm, standard Multi-Head Attention, ReLU feed-forward — essentially GPT-2 (2019).</li>
+      <li><b>Identify normalization's bottleneck:</b> LayerNorm's mean-centering and bias term add compute cost without earning their keep; Post-Norm destabilizes training as depth grows past ~30 layers.</li>
+      <li><b>Apply the fix:</b> switch to RMSNorm (cheaper, equally stable) and move it to Pre-Norm position (residual carries the raw signal, stabilizing deep training).</li>
+      <li><b>Identify the feed-forward bottleneck:</b> ReLU's single-path, hard-cutoff design is less expressive than a gated alternative.</li>
+      <li><b>Apply the fix:</b> switch to SwiGLU — two parallel paths (a SiLU-gated path and a raw path), multiplied together, giving the network learned control over information flow.</li>
+      <li><b>Identify the positional-encoding bottleneck:</b> sinusoidal encoding is absolute ("I am token #47"), not natively relative, limiting how well the model generalizes relative-distance relationships.</li>
+      <li><b>Apply the fix:</b> switch to RoPE — rotate Q/K vectors by a position-dependent angle so their dot product encodes relative distance directly.</li>
+      <li><b>Identify the attention bottleneck:</b> standard MHA's KV cache scales linearly with sequence length and head count, hitting a GPU memory wall at long context lengths.</li>
+      <li><b>Apply the fix:</b> switch to GQA — share Key/Value heads across groups of Query heads, shrinking the cache (e.g., 4×) with minimal quality loss.</li>
+      <li><b>Arrive at the Modern Transformer:</b> RMSNorm (Pre-Norm) + SwiGLU + RoPE + GQA — the architecture behind LLaMA, Mistral, Gemma, DeepSeek, and virtually every current open-weight LLM.</li>
+    </ol>
+
+    <h2 id="simple">11. Simple example</h2>
+    <p>Comparing LayerNorm and RMSNorm on the same input distribution: LayerNorm's output always has exactly zero mean (by construction, since it explicitly subtracts the mean); RMSNorm's output has a non-zero mean (e.g., ~0.98 in the deck's measured example) because it never subtracts the mean in the first place — yet both normalization schemes stabilize training equally well in practice, demonstrating that mean-centering was adding cost without adding benefit.</p>
+
+    <h2 id="real">12. Real-world example</h2>
+    <p>The deck's concrete KV-cache calculation is the real-world motivation for GQA: a 32-layer model serving 8,192 tokens of context with standard Multi-Head Attention requires roughly 4 GB of KV cache memory just for that one request; scaling to a 128K-token context (well within what production LLMs like GPT-4 or Claude advertise) would require roughly 64 GB — this single number is why every major production LLM released since 2023 uses GQA or a similar KV-cache-reducing technique rather than standard MHA.</p>
+
+    <h2 id="code">13. Code example</h2>
+    <pre><code class="language-python">import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+class RMSNorm(nn.Module):
+    def __init__(self, dim, eps=1e-6):
+        super().__init__()
+        self.eps = eps
+        self.weight = nn.Parameter(torch.ones(dim))
+
+    def forward(self, x):
+        # Square, Mean, Root -- no mean subtraction, no bias
+        rms = torch.sqrt(x.pow(2).mean(-1, keepdim=True) + self.eps)
+        return (x / rms) * self.weight
+
+
+class SwiGLU(nn.Module):
+    def __init__(self, d_model, hidden_dim):
+        super().__init__()
+        self.w_gate = nn.Linear(d_model, hidden_dim)   # gate path
+        self.w_up   = nn.Linear(d_model, hidden_dim)   # raw signal path
+        self.w_down = nn.Linear(hidden_dim, d_model)
+
+    def forward(self, x):
+        gate = F.silu(self.w_gate(x))    # SiLU(x) = x * sigmoid(x)
+        up = self.w_up(x)
+        return self.w_down(gate * up)    # gated information flow
+</code></pre>
+
+    <h2 id="advanced">14. Advanced example</h2>
+    <p>A minimal KV-cache memory calculator, directly reproducing the deck's "Math (32-layer model)" slide — demonstrating why the memory wall is real and how GQA's head-sharing ratio directly scales down the result:</p>
+    <pre><code class="language-python">def kv_cache_bytes(n_layers, n_kv_heads, seq_len, head_dim, bytes_per_val=2):
+    # 2x for both Key and Value
+    return 2 * n_layers * n_kv_heads * seq_len * head_dim * bytes_per_val
+
+# Standard MHA: 32 heads all have their own K/V
+mha_bytes = kv_cache_bytes(n_layers=32, n_kv_heads=32, seq_len=8192, head_dim=128)
+print(f"MHA cache @ 8K tokens:  {mha_bytes / 1e9:.2f} GB")   # ~4.3 GB
+
+mha_128k = kv_cache_bytes(n_layers=32, n_kv_heads=32, seq_len=131072, head_dim=128)
+print(f"MHA cache @ 128K tokens: {mha_128k / 1e9:.2f} GB")   # ~68 GB -- exceeds most GPUs
+
+# GQA: 32 query heads share only 8 KV heads (4:1 ratio) -> 4x less cache
+gqa_128k = kv_cache_bytes(n_layers=32, n_kv_heads=8, seq_len=131072, head_dim=128)
+print(f"GQA cache @ 128K tokens: {gqa_128k / 1e9:.2f} GB")   # ~17 GB -- feasible
+</code></pre>
+
+    <h2 id="mistakes">15. Common mistakes</h2>
+    <ul>
+      <li>Assuming RMSNorm "removes normalization" — it removes mean-centering and the bias term specifically, but still normalizes (by root-mean-square) and still has a learned scale parameter.</li>
+      <li>Confusing Pre-Norm and Post-Norm as a minor implementation detail — the placement of normalization relative to the residual connection is what actually determines whether very deep models (30+ layers) train stably at all.</li>
+      <li>Thinking RoPE adds position information the same way sinusoidal encoding does (added to the embedding) — RoPE instead rotates Q/K vectors inside attention, a fundamentally different mechanism, not just a different formula for the same operation.</li>
+      <li>Treating GQA as a "free" optimization with zero trade-off — it does involve a real (if typically small) quality trade-off versus full MHA, which is why it's framed as "the sweet spot" rather than a strict improvement with no downside.</li>
+      <li>Forgetting that all four upgrades are typically used together in modern models — they're not independent alternative choices but a coordinated architecture, each addressing a different bottleneck.</li>
+    </ul>
+
+    <h2 id="best">16. Best practices</h2>
+    <ul>
+      <li>Default to the full modern stack (RMSNorm + Pre-Norm + SwiGLU + RoPE + GQA) for any new Transformer architecture built today — this is the current, battle-tested standard, not GPT-2's 2019 design.</li>
+      <li>When evaluating a new or unfamiliar LLM architecture, check this exact four-row table (normalization, activation, position encoding, attention variant) first — it's the fastest way to assess whether an architecture is using current best practices.</li>
+      <li>When reasoning about long-context serving costs, calculate the KV cache size explicitly (as in the advanced example) rather than assuming "the model handles it" — this number directly predicts memory feasibility.</li>
+      <li>Tie each architectural choice back to its specific motivating bottleneck when explaining or justifying a design — this is both good practice and the exact framing that interviewers expect.</li>
+    </ul>
+
+    <h2 id="production">17. Production considerations</h2>
+    <p>GQA is specifically a production-driven optimization — its entire justification is reducing the KV cache's GPU memory footprint during serving, directly increasing how many concurrent requests or how long a context a given GPU can serve. Pre-Norm's training stability benefit is also production-relevant: it's what allows the very deep models (30+ layers) that production-scale LLMs actually use to train reliably without exotic learning-rate warmup schedules.</p>
+
+    <h2 id="security">18. Security considerations</h2>
+    <p>Not directly covered in this architecture-comparison material; worth noting that RoPE's handling of position does have known implications for long-context extrapolation behavior and "needle in a haystack" retrieval reliability at context lengths beyond training — a correctness/reliability consideration relevant to any security-sensitive application relying on long-context retrieval accuracy.</p>
+
+    <h2 id="performance">19. Performance considerations</h2>
+    <p>Every one of the four upgrades is explicitly a performance optimization: RMSNorm reduces per-layer compute (fewer operations than LayerNorm); Pre-Norm enables stable training at depths where Post-Norm would require careful, slower-converging learning-rate schedules; RoPE's relative-position mechanism generalizes better to long contexts without needing additional training; GQA directly and proportionally reduces KV-cache memory bandwidth and footprint, the dominant bottleneck in long-context inference.</p>
+
+    <h2 id="cost">20. Cost considerations</h2>
+    <p>The deck's concrete numbers are a direct cost argument: a 128K-token context under standard MHA requiring ~64 GB of KV cache per request is not just a memory-capacity problem but a direct GPU-cost problem — fewer concurrent requests fit per GPU, directly raising the per-request serving cost; GQA's ~4× cache reduction directly translates into proportionally more concurrent long-context requests served per GPU, a direct, quantifiable cost saving at production scale.</p>
+
+    <h2 id="debug">21. Debugging/troubleshooting</h2>
+    <ul>
+      <li><b>Deep model (30+ layers) fails to train stably / loss diverges early:</b> check whether normalization is Pre-Norm or Post-Norm — Post-Norm is a common root cause of instability at this depth; switching to Pre-Norm is the standard fix.</li>
+      <li><b>Custom model runs out of GPU memory only at long context lengths:</b> calculate the KV cache size explicitly (layers × KV heads × seq_len × head_dim × 2) — if using standard MHA, this is very likely the cause, and switching to GQA is the standard fix.</li>
+      <li><b>Model trained with sinusoidal encoding performs poorly on sequences longer than training length:</b> expected — sinusoidal encoding's absolute-position nature doesn't generalize as gracefully as RoPE's relative-position mechanism to unseen lengths.</li>
+      <li><b>Unsure why a feed-forward network update "isn't learning" complex patterns:</b> consider whether it's using a single-path ReLU design versus a gated design (SwiGLU) — the gating mechanism gives meaningfully more expressive control over information flow per dimension.</li>
+    </ul>
+
+    <h2 id="related">22. Related concepts</h2>
+    <p><a href="transformers-part-1-tokenization-embeddings-positional-encoding.html">Transformers Part 1</a> · <a href="transformers-part-2-self-attention-qkv-multihead.html">Transformers Part 2</a> · <a href="building-training-modern-llm-from-scratch.html">Building & Training a Modern LLM from Scratch</a> (hands-on code implementation of all four upgrades) · <a href="../28-LLM-Inference/">LLM Inference</a></p>
+
+    <h2 id="comparison">23. Comparison with alternatives</h2>
+    <table>
+      <tr><th>Feature</th><th>Classic (2017–2019)</th><th>Modern (2023–2025)</th></tr>
+      <tr><td>Normalization</td><td>LayerNorm (Post-Norm)</td><td>RMSNorm (Pre-Norm)</td></tr>
+      <tr><td>Position encoding</td><td>Absolute sinusoidal</td><td>Rotary (RoPE)</td></tr>
+      <tr><td>Attention</td><td>Multi-Head (MHA)</td><td>Grouped-Query (GQA)</td></tr>
+      <tr><td>Feed-forward activation</td><td>ReLU</td><td>SwiGLU</td></tr>
+      <tr><td>Design focus</td><td>Correctness (does it work at all)</td><td>Stability & efficiency (does it work at billion-parameter, long-context scale)</td></tr>
+    </table>
+    <p>Within attention variants specifically: Multi-Head Attention (every Q head has its own K/V head — max quality, max cache cost) vs. Grouped Query Attention (Q heads share K/V heads in groups — "the sweet spot," ~4× less cache, minimal quality loss) vs. Multi-Query Attention (all Q heads share one K/V head — minimum cache cost, highest quality risk).</p>
+
+    <h2 id="exercise">24. Mini practical exercise</h2>
+    <p>Using the <code>kv_cache_bytes()</code> function from the advanced example, compute the KV cache size for a 40-layer model with 40 query heads, 128 head dimension, at a 32K-token context length, comparing standard MHA (40 KV heads) against GQA with an 8:1 ratio (5 KV heads) — verify the reduction is close to the expected 8× factor.</p>
+
+    <h2 id="project">25. Practical project</h2>
+    <p><b>Architecture Migration Audit:</b> take the simple MiniLLM architecture from <a href="building-training-modern-llm-from-scratch.html">Building & Training a Modern LLM from Scratch</a> and produce a short written audit (or a code diff) showing, for each of the four components, exactly what the "classic" (LayerNorm/Post-Norm/ReLU FFN/sinusoidal/MHA) version would have looked like, alongside the modern version actually implemented — reinforcing the specific bottleneck each swap addresses.</p>
+
+    <h2 id="projectarch">26. Project architecture</h2>
+    <pre><code>Audit deliverable structure:
+  for each component in [Normalization, Position Encoding, Attention, Feed-Forward]:
+    1. Classic implementation (code snippet)
+    2. Specific failure mode / bottleneck (one sentence, with a number where possible)
+    3. Modern implementation (code snippet)
+    4. Measured or cited improvement (e.g., KV cache GB reduction, training stability observation)
+  Final section: side-by-side "Classic vs Modern" table (as in this page's Core Concepts section)</code></pre>
+
+    <h2 id="interview-b">27. Interview Questions — Beginner</h2>
+    <div class="qa"><b>Q1.</b> Name the four components that changed between the classic (2017–2019) and modern (2023–2025) Transformer.<br><b>A.</b> Normalization (LayerNorm → RMSNorm), feed-forward activation (ReLU → SwiGLU), position encoding (Sinusoidal → RoPE), and attention (Multi-Head → Grouped Query Attention).</div>
+    <div class="qa"><b>Q2.</b> What two things does RMSNorm remove compared to LayerNorm?<br><b>A.</b> Mean subtraction (centering) and the bias/shift term — RMSNorm only computes root-mean-square, normalizes, and scales.</div>
+    <div class="qa"><b>Q3.</b> What's the difference between Pre-Norm and Post-Norm?<br><b>A.</b> Post-Norm normalizes after a sublayer (the original design); Pre-Norm normalizes before a sublayer, keeping the residual connection carrying the raw, un-normalized signal — essential for stable training in very deep (30+ layer) models.</div>
+    <div class="qa"><b>Q4.</b> What is SwiGLU, in one sentence?<br><b>A.</b> A gated feed-forward network with two parallel paths — one computing a SiLU-activated gate, the other carrying the raw signal — multiplied together, giving the model learned control over information flow.</div>
+    <div class="qa"><b>Q5.</b> Why does sinusoidal positional encoding struggle at scale?<br><b>A.</b> It encodes absolute position ("I am token #47") rather than relative relationships between tokens, and doesn't naturally capture how far apart two tokens are in the sequence.</div>
+    <div class="qa"><b>Q6.</b> What does RoPE do differently from sinusoidal encoding?<br><b>A.</b> Instead of adding a position signal to the embedding, RoPE rotates the Query and Key vectors by an angle based on position, so their dot product depends only on relative distance, not absolute position.</div>
+    <div class="qa"><b>Q7.</b> What problem does GQA solve?<br><b>A.</b> Standard Multi-Head Attention's KV cache grows too large to fit in GPU memory at long context lengths; GQA shares Key/Value pairs across groups of Query heads, directly shrinking the cache.</div>
+    <div class="qa"><b>Q8.</b> Roughly how much does GQA reduce KV cache memory, according to this material?<br><b>A.</b> About 4× less than standard Multi-Head Attention, with almost no drop in model quality.</div>
+    <div class="qa"><b>Q9.</b> Which models use this modern four-component stack?<br><b>A.</b> LLaMA, Mistral, Gemma, DeepSeek, and virtually every modern open-weight LLM.</div>
+    <div class="qa"><b>Q10.</b> What is SiLU, and where is it used?<br><b>A.</b> <code>SiLU(x) = x · σ(x)</code>, a smooth, non-monotonic activation function; it's used as the gating function inside SwiGLU.</div>
+
+    <h2 id="interview-i">28. Interview Questions — Intermediate</h2>
+    <div class="qa"><b>Q1.</b> Explain the "clock analogy" for RoPE and why it demonstrates relative-position encoding.<br><b>A.</b> Just as the angle between a clock's hands at 3 and 5 o'clock equals the angle between the hands at 7 and 9 o'clock (because only the 2-hour gap matters, not the absolute times), RoPE rotates Query and Key vectors by an amount proportional to their position, such that the angular difference (and therefore the dot product) between any two tokens' rotated vectors depends only on their relative distance — two tokens 2 positions apart anywhere in a long sequence produce the same relative rotational relationship, regardless of their absolute position in the sequence.</div>
+    <div class="qa"><b>Q2.</b> Walk through the KV cache memory calculation for a 32-layer model at 8K tokens, and explain why this number matters.<br><b>A.</b> <code>2 (for K and V) × 32 heads × 8192 tokens × 128 head_dim × 2 bytes ≈ 128 MB per layer</code>; across 32 layers, this totals roughly 4 GB — just for an 8K-token context. This matters because it's memory that must be held on the GPU for the entire duration of a single request's generation, on top of the model's own weights; scaling linearly to 128K tokens (a context length many production models now advertise) multiplies this to roughly 64 GB, which can exceed a single GPU's memory before generation even produces its first output token — directly explaining why GQA exists as a production necessity, not an optional optimization.</div>
+    <div class="qa"><b>Q3.</b> Why does Pre-Norm specifically enable stable training at 30+ layers where Post-Norm struggles?<br><b>A.</b> In Post-Norm, the residual stream itself passes through normalization at every layer, meaning the magnitude and scale of gradients flowing backward through many stacked normalization operations can become numerically unstable or vanish/explode as depth increases; in Pre-Norm, normalization is applied only to the input of each sublayer (attention/FFN), while the residual connection carries the raw, un-normalized signal straight through — this gives gradients a clean, unobstructed path end-to-end regardless of depth, which is specifically what makes very deep stacks trainable without careful, model-specific learning-rate warmup tuning.</div>
+    <div class="qa"><b>Q4.</b> What's the practical difference between GQA and Multi-Query Attention (MQA), and when might you choose one over the other?<br><b>A.</b> GQA shares Key/Value heads across <i>groups</i> of Query heads (e.g., 4 groups of 8 Query heads each sharing one KV head), interpolating between full MHA (every Q head has its own KV head, max quality/cost) and MQA (all Q heads share a single KV head, min cost/max quality risk); GQA is typically chosen as "the sweet spot" when a meaningful cache reduction is needed without the higher quality risk MQA can introduce, while MQA might be chosen when memory constraints are even more severe and the quality trade-off has been empirically validated as acceptable for the specific use case.</div>
+    <div class="qa"><b>Q5.</b> Why does SwiGLU's gating mechanism make it more expressive than a single-path ReLU FFN, concretely?<br><b>A.</b> A ReLU FFN applies one fixed, input-independent rule — pass values above zero, zero out values below — uniformly across the transformation; SwiGLU's gate path computes a learned, continuous, per-dimension "how much should this pass through" signal via SiLU, which is then multiplied element-wise against the raw "up" path — this lets the network learn, per input and per dimension, a much richer and more nuanced information-flow pattern than ReLU's single fixed cutoff rule can express, at a modest increase in parameters (three weight matrices instead of two).</div>
+
+    <h2 id="interview-a">29. Interview Questions — Advanced</h2>
+    <div class="qa"><b>Q1.</b> This material frames each of the four upgrades as solving one specific, numerically-grounded bottleneck. Critically assess: are these four upgrades truly independent, or do they interact? Give a concrete example of interaction.<br><b>A.</b> They are not fully independent — RoPE and GQA interact directly, since RoPE is applied to Query and Key vectors inside the attention computation, and GQA changes how many distinct Key/Value head sets exist; implementing RoPE correctly under GQA requires applying the rotation consistently to the shared Key heads such that all Query heads within a group still compute geometrically consistent relative-position relationships against that shared Key — an implementation detail that doesn't arise when either technique is considered in isolation. Similarly, Pre-Norm's stability benefit interacts with GQA and SwiGLU's parameter/gradient scale: the choice of Pre-Norm is partly what makes it safe to stack enough layers that the KV-cache memory bottleneck (addressed by GQA) becomes the dominant constraint in the first place — at shallower depths enabled by less stable Post-Norm training, the memory bottleneck would be less severe simply because fewer layers would be feasible. So while each upgrade has a clean, independent motivating story, their combined deployment in real models reflects real architectural interactions, not four unrelated drop-in replacements.</div>
+    <div class="qa"><b>Q2.</b> The deck states GQA achieves "almost no drop in model quality" versus full MHA. What would you want to see empirically before trusting this claim for a new model you're training from scratch, rather than accepting it as a given?<br><b>A.</b> I'd want to see: (1) a controlled ablation comparing full MHA against GQA at the same total parameter count and training compute budget, evaluated on the same held-out benchmark suite relevant to the target use case — quality claims validated on one model family/scale don't automatically transfer to a different architecture, dataset, or scale; (2) evaluation specifically on tasks sensitive to fine-grained per-head specialization (e.g., tasks requiring precise multi-hop reasoning or retrieval), since GQA's head-sharing could plausibly degrade exactly the kind of specialized per-head behavior discussed in multi-head attention material more than aggregate benchmark scores would reveal; (3) behavior specifically at long context lengths, since the whole motivation for GQA is long-context serving, so quality should be validated under the actual context lengths the model will be deployed at, not just short-context benchmarks. Treating "almost no quality drop" as empirically validated for your specific model/data/task combination, rather than a general law, is the appropriate level of skepticism before committing to GQA for a from-scratch training run.</div>
+
+    <h2 id="interview-s">30. Interview Questions — Senior/Architect</h2>
+    <div class="qa"><b>Q1.</b> You're advising a team deciding whether to build a new LLM architecture on the "classic" 2019 GPT-2 design (which their existing tooling/codebase supports) versus investing engineering time to adopt the modern 2024 stack (RMSNorm/Pre-Norm/SwiGLU/RoPE/GQA). How do you frame this decision?<br><b>A.</b> I'd frame it around which specific bottlenecks the team will actually hit given their target scale and use case, not treat "modern is strictly better" as self-evident: if the model will stay small (few layers, short context, limited serving scale), several of GPT-2's original choices may never become binding constraints, and the engineering cost of adopting all four upgrades may not be justified. But if the team's roadmap includes either (a) scaling past ~20-30 layers (where Pre-Norm's training-stability advantage becomes load-bearing, not optional) or (b) serving meaningfully long contexts (where GQA's KV-cache reduction becomes a hard GPU-memory requirement, not a nice-to-have), then adopting the modern stack from the start avoids a costly architecture migration later — retrofitting Pre-Norm or GQA onto an already-trained Post-Norm/MHA model requires either full retraining or a more involved conversion-plus-fine-tuning process, as is well documented for teams who've had to retrofit GQA onto existing MHA-trained checkpoints. My recommendation would default to the modern stack given it's now the well-established, low-risk default used by essentially every production team, reserving the "classic" design only for genuinely small-scale, short-context educational or prototyping contexts where the migration cost would never be paid regardless.</div>
+
+    <h2 id="interview-sc">31. Scenario-Based Questions</h2>
+    <div class="qa"><b>Scenario 1.</b> Your team's from-scratch 40-layer model training run is diverging unpredictably, and a teammate suspects the learning rate. Based on this material, what else would you check first?<br><b>A.</b> Check whether normalization is Pre-Norm or Post-Norm before tuning the learning rate — at 40 layers, Post-Norm is a well-documented source of training instability per this material's "essential for deep models with 30+ layers" framing; switching to Pre-Norm (RMSNorm or LayerNorm, either works, but Pre-Norm placement specifically) often resolves instability that looks superficially like a learning-rate problem but is actually architectural.</div>
+    <div class="qa"><b>Scenario 2.</b> A product team wants to extend your deployed LLM's supported context window from 8K to 128K tokens without retraining the model. Using this material's numbers, what's the first infrastructure question you'd raise?<br><b>A.</b> Whether the current serving infrastructure's GPU memory can actually hold the resulting KV cache — per the deck's math, an 8K-token MHA cache for a 32-layer model is already ~4 GB; scaling 16× to 128K tokens scales the cache roughly 16× to ~64 GB, which likely exceeds available GPU memory per request; if the underlying model uses standard MHA (not GQA), this is a hard infrastructure blocker, not a configuration tweak, and may require either GQA conversion (a non-trivial retrofit), quantizing the KV cache, or accepting a lower maximum context length than requested.</div>
+    <div class="qa"><b>Scenario 3.</b> A junior engineer proposes using ReLU instead of SwiGLU in a new model "to keep things simple," arguing the quality difference is probably negligible. How do you respond, drawing on this material?<br><b>A.</b> Acknowledge that ReLU is indeed simpler (one path, no gating, fewer parameters) and that this engineering-simplicity trade-off is legitimate to weigh — but note that SwiGLU is now the component virtually every modern production LLM (LLaMA, Mistral, Gemma, DeepSeek) has converged on, suggesting the quality/expressiveness gain has been judged worth the added complexity at scale across many independent teams; recommend validating with a small-scale ablation (train both versions at the team's actual target scale and compare on representative benchmarks) rather than assuming negligible difference, since the appropriate response to "is this upgrade worth it for us" is empirical validation at the relevant scale, not a priori assumption in either direction.</div>
+
+    <h2 id="revision">32. Quick revision notes</h2>
+    <ul>
+      <li>Four upgrades: LayerNorm→RMSNorm, ReLU FFN→SwiGLU, Sinusoidal→RoPE, MHA→GQA.</li>
+      <li>RMSNorm: drops mean-centering + bias; RMS-normalize + scale only; cheaper, equally stable.</li>
+      <li>Pre-Norm (not Post-Norm) is what makes 30+ layer models train stably — residual carries raw signal.</li>
+      <li>SwiGLU: gated FFN, SiLU(gate) × raw_path → down-project; more expressive than ReLU's hard cutoff.</li>
+      <li>RoPE: rotates Q/K by position-angle (clock analogy) → dot product encodes relative distance, not absolute position.</li>
+      <li>KV cache scales linearly with layers × KV heads × seq_len × head_dim — the long-context memory wall.</li>
+      <li>32-layer model @ 8K tokens MHA ≈ 4GB cache; @ 128K tokens ≈ 64GB — exceeds most GPUs.</li>
+      <li>GQA: Query heads share KV heads in groups → ~4× less cache, minimal quality loss — "the sweet spot" between MHA and MQA.</li>
+      <li>Modern stack used by: LLaMA, Mistral, Gemma, DeepSeek, virtually every open-weight LLM.</li>
+      <li>Classic focus = correctness; modern focus = stability & efficiency at scale.</li>
+    </ul>
+
+    <h2 id="cheat">33. Cheat sheet</h2>
+    <div class="callout">4 upgrades: Norm (LayerNorm→RMSNorm, Post→Pre), FFN (ReLU→SwiGLU gated), Position (Sinusoidal absolute→RoPE relative/rotation), Attention (MHA→GQA shared KV). Why: RMSNorm=cheaper+stable. Pre-Norm=trains deep nets. SwiGLU=learned gating&gt;hard cutoff. RoPE=relative distance via rotation, clock analogy. GQA=4× less KV cache, ~same quality, fixes long-context memory wall (8K≈4GB→128K≈64GB under MHA).</div>
+
+    <h2 id="further">34. Further topics to learn</h2>
+    <p><a href="building-training-modern-llm-from-scratch.html">Building & Training a Modern LLM from Scratch (full code implementation)</a> → <a href="../28-LLM-Inference/">LLM Inference</a> → Multi-Query Attention (MQA), Flash Attention, long-context extrapolation techniques (RoPE scaling/NTK-aware interpolation), Mixture-of-Experts (MoE) architectures.</p>
+
+    <div class="prevnext">
+      <a href="transformers-part-2-self-attention-qkv-multihead.html">← Transformers Part 2</a>
+      <a href="building-training-modern-llm-from-scratch.html">Next: Building & Training a Modern LLM from Scratch →</a>
+    </div>
+  </main>
+</div>
+<script src="../assets/app.js"></script>
+</body>
+</html>

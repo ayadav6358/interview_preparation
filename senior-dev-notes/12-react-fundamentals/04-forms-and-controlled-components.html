@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Forms &amp; Controlled Components — React Fundamentals — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">React Fundamentals</a><span class="sep">›</span>Forms &amp; Controlled Components</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>Forms &amp; Controlled Components: Validation and Multi-Step Flows</h1>
+      <p class="meta-line"><span>⏱ 2 hrs</span><span>📍 Chapter 4 of 6</span></p>
+      <p><strong>One-line summary:</strong> A controlled input's value lives in React state and the DOM element
+      is just a reflection of it (single source of truth); an uncontrolled input lets the DOM hold its own
+      value and React reads it on demand — knowing precisely when to use each, and how to validate and
+      multi-step a form without a library, is what this chapter builds.</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>Forms are where "data flow" theory meets real UX pain: focus loss, validation timing, async
+      submission states, and multi-step state that must survive back/forward navigation. Interviewers ask
+      about controlled vs. uncontrolled components specifically because it reveals whether you understand
+      <em>why</em> React inputs need a <code>value</code> AND an <code>onChange</code> together, not just that
+      they do. It's also directly the foundation for evaluating when a form library (React Hook Form, Formik)
+      earns its complexity cost versus plain <code>useState</code>.</p>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>Requires <a href="02-props-state-events.html">Props, State &amp; Events</a> and
+      <a href="03-hooks-basics.html">Hooks Basics</a>. Related: this chapter's multi-step pattern is reused
+      directly in the capstone's "add your own recipe" flow. See
+      <a href="../11-web-fundamentals/index.html">Web Fundamentals</a> for native HTML form/validation
+      attributes this chapter builds on top of.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="controlled-vs-uncontrolled">Controlled vs. uncontrolled: the precise distinction</h3>
+      <p>A <strong>controlled</strong> input has its <code>value</code> driven entirely by React state and an
+      <code>onChange</code> handler that updates that state on every keystroke — the DOM node never holds
+      "its own" value independent of React. An <strong>uncontrolled</strong> input lets the browser's native
+      DOM manage the value; React reads it only when needed, typically via a <code>ref</code> or
+      <code>FormData</code> on submit.</p>
+      <pre><code class="language-jsx">// Controlled: React state is the single source of truth, every keystroke
+// round-trips through React.
+function ControlledInput() {
+  const [value, setValue] = useState("");
+  return &lt;input value={value} onChange={e =&gt; setValue(e.target.value)} /&gt;;
+}
+
+// Uncontrolled: the DOM owns the value; React reads it on demand via ref.
+function UncontrolledInput() {
+  const inputRef = useRef(null);
+  function handleSubmit(e) {
+    e.preventDefault();
+    console.log(inputRef.current.value); // read only when needed
+  }
+  return (
+    &lt;form onSubmit={handleSubmit}&gt;
+      &lt;input ref={inputRef} defaultValue="" /&gt;
+      &lt;button type="submit"&gt;Submit&lt;/button&gt;
+    &lt;/form&gt;
+  );
+}</code></pre>
+      <p>Controlled gives you: validate/transform on every keystroke, conditionally disable submit in real
+      time, keep multiple fields in sync instantly. Uncontrolled gives you: less re-rendering on every
+      keystroke (relevant for very large forms), simpler integration with non-React widgets, and is what
+      native <code>&lt;form&gt;</code> submission + <code>FormData</code> expects by default.</p>
+
+      <h3 id="form-state-management">Managing form state: one object vs. one hook per field</h3>
+      <p>For forms beyond 2-3 fields, a single state object (<code>useState({ name: "", email: "" })</code>)
+      with one generic <code>handleChange</code> keyed by input <code>name</code> scales better than a separate
+      <code>useState</code> call per field — fewer hooks to keep in sync, and validation/reset logic operates
+      on one object instead of N variables.</p>
+      <pre><code class="language-jsx">function SignupForm() {
+  const [form, setForm] = useState({ name: "", email: "" });
+  const [errors, setErrors] = useState({});
+
+  function handleChange(e) {
+    const { name, value } = e.target;
+    setForm(prev =&gt; ({ ...prev, [name]: value })); // never mutate prev directly
+  }
+
+  return (
+    &lt;form&gt;
+      &lt;input name="name" value={form.name} onChange={handleChange} /&gt;
+      &lt;input name="email" value={form.email} onChange={handleChange} /&gt;
+    &lt;/form&gt;
+  );
+}</code></pre>
+
+      <h3 id="validation-patterns">Validation patterns: when to validate, and how to surface errors</h3>
+      <p>Three timing strategies, each with a real tradeoff:</p>
+      <ul>
+        <li><strong>On submit only</strong> — simplest, least noisy, but delays feedback until the user has
+        filled everything out.</li>
+        <li><strong>On blur</strong> — validates a field once the user leaves it, a good middle ground: doesn't
+        interrupt typing, but gives feedback before the user reaches submit.</li>
+        <li><strong>On change, but only after first interaction</strong> — the most responsive, but needs a
+        "touched" flag per field so you don't show "required" errors on a field the user hasn't reached yet.</li>
+      </ul>
+      <p>Regardless of timing, keep errors as derived data when possible (a pure function from
+      <code>form</code> → <code>errors</code>), not independently-managed state that can drift out of sync
+      with the actual field values.</p>
+
+      <h3 id="multi-step-forms">Multi-step forms: state that survives across steps</h3>
+      <p>The core requirement: all steps' data must live in one place that outlives any individual step
+      component mounting/unmounting (since each "step" is often a conditionally-rendered component, which
+      means it unmounts and loses its own local state when you navigate away). The standard fundamentals-level
+      pattern: lift the full form's data and current-step index to the top-level wizard component, and pass
+      each step its relevant slice plus an <code>onNext</code>/<code>onBack</code> callback.</p>
+      <pre><code class="language-jsx">function RecipeWizard() {
+  const [step, setStep] = useState(0);
+  const [data, setData] = useState({ basics: {}, ingredients: [], photo: null });
+
+  function updateStep(key, value) {
+    setData(prev =&gt; ({ ...prev, [key]: value }));
+  }
+
+  const steps = [
+    &lt;BasicsStep data={data.basics} onChange={v =&gt; updateStep("basics", v)} /&gt;,
+    &lt;IngredientsStep data={data.ingredients} onChange={v =&gt; updateStep("ingredients", v)} /&gt;,
+    &lt;ReviewStep data={data} /&gt;,
+  ];
+
+  return (
+    &lt;&gt;
+      {steps[step]}
+      &lt;button disabled={step === 0} onClick={() =&gt; setStep(s =&gt; s - 1)}&gt;Back&lt;/button&gt;
+      &lt;button onClick={() =&gt; setStep(s =&gt; Math.min(s + 1, steps.length - 1))}&gt;Next&lt;/button&gt;
+    &lt;/&gt;
+  );
+}</code></pre>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>For a controlled input, every keystroke runs this loop: native <code>input</code> event fires →
+      React's synthetic event system wraps it → your <code>onChange</code> handler calls <code>setForm</code>
+      → React re-renders with the new <code>form.name</code> → the <code>&lt;input value={form.name}&gt;</code>
+      JSX produces the same string you just set → React, finding the DOM node's current value already matches,
+      makes no visible change, but the round-trip is what lets validation/transformation (e.g., stripping
+      non-digit characters from a phone field) intercept and modify what actually lands in the input on every
+      keystroke — something a purely uncontrolled input cannot do without manually re-assigning
+      <code>input.value</code> imperatively.</p>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+flowchart TD
+  A[User types a character] --> B[Native input event fires]
+  B --> C[React onChange handler runs]
+  C --> D[setForm updates state with new value]
+  D --> E[Component re-renders]
+  E --> F["input value={form.field} reflects new state"]
+  F --> G[DOM input shows the -- possibly transformed -- value]
+      </div>
+      <div class="mermaid">
+graph TD
+  Wizard["RecipeWizard (owns step index + full form data)"]
+  Wizard -->|data.basics, onChange| BasicsStep
+  Wizard -->|data.ingredients, onChange| IngredientsStep
+  Wizard -->|full data, read-only| ReviewStep
+  BasicsStep -.->|onChange callback| Wizard
+  IngredientsStep -.->|onChange callback| Wizard
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-jsx">// BAD: errors stored as independent state, drifts out of sync when
+// form data changes without re-validating.
+function BadForm() {
+  const [email, setEmail] = useState("");
+  const [emailError, setEmailError] = useState("Required"); // stale after first valid input
+
+  function handleChange(e) {
+    setEmail(e.target.value); // forgot to re-validate here
+  }
+  // emailError never updates after the initial render
+}
+
+// GOOD: errors derived fresh from current form state, can never drift.
+function GoodForm() {
+  const [email, setEmail] = useState("");
+  const [touched, setTouched] = useState(false);
+
+  const emailError =
+    touched &amp;&amp; !email.includes("@") ? "Enter a valid email" : null;
+
+  return (
+    &lt;&gt;
+      &lt;input
+        value={email}
+        onChange={e =&gt; setEmail(e.target.value)}
+        onBlur={() =&gt; setTouched(true)}
+      /&gt;
+      {emailError &amp;&amp; &lt;p className="error"&gt;{emailError}&lt;/p&gt;}
+    &lt;/&gt;
+  );
+}</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4>
+      <p>A checkout form's credit-card field was controlled, and the validation function it called on every
+      keystroke made a formatted-string transformation (inserting spaces every 4 digits) PLUS a full regex
+      validation pass PLUS a Luhn-algorithm checksum — all synchronously inside the <code>onChange</code>
+      handler on every single keystroke, on a field other sibling fields in a large form also depended on for
+      conditional rendering. On low-end devices, typing a card number visibly lagged because every character
+      triggered a full form re-render plus expensive validation. The fix: decouple the expensive full
+      validation (checksum) to only run on blur/submit, keep only the lightweight formatting transformation
+      on every keystroke, and memoize sibling fields that didn't need to re-render on every card-number
+      change. This is the textbook case for why "validate on every keystroke" isn't automatically the right
+      default even though it's trivially easy to wire up with controlled inputs.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4>
+      <p>Switching an input between controlled and uncontrolled across renders (e.g., <code>value={someVar}</code>
+      where <code>someVar</code> is sometimes <code>undefined</code>) throws a React warning: "a component is
+      changing an uncontrolled input to be controlled (or vice-versa)." Always initialize controlled state to
+      a defined value (<code>""</code>, not <code>undefined</code>) so the input is controlled from the very
+      first render onward, consistently.</p></div>
+      <ul>
+        <li>Mixing controlled and uncontrolled on the same field — e.g. passing both <code>value</code> and
+        <code>defaultValue</code>, or a <code>value</code> without an <code>onChange</code> (which makes the
+        field read-only and logs a warning, since nothing updates the state the value is bound to).</li>
+        <li>Mutating the form-state object directly instead of spreading (<code>form.name = x; setForm(form)</code>)
+        — React's state update detection often relies on this pattern changing reference, and mutating in
+        place can also violate the "never mutate state directly" rule broadly covered in Chapter 2, leading
+        to renders silently not reflecting the latest value.</li>
+        <li>Resetting a multi-step wizard's later-step state when navigating back then forward again, because
+        the step components unmount/remount instead of the data living in the top-level wizard state — always
+        lift the data, not just the current step index.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>Controlled inputs</td><td>Need live validation/transformation/conditional UI per keystroke</td><td>Huge forms where keystroke re-renders cause real lag</td><td>Uncontrolled + ref, or a form library with optimized re-renders</td></tr>
+        <tr><td>Uncontrolled inputs + refs</td><td>Simple forms, non-React widget integration, performance-critical huge forms</td><td>Need real-time validation feedback as the user types</td><td>Controlled inputs</td></tr>
+        <tr><td>Hand-rolled form state (useState)</td><td>Small-to-medium forms, learning fundamentals, few fields</td><td>Large forms with complex cross-field validation/arrays</td><td>React Hook Form / Formik</td></tr>
+        <tr><td>Validate on every keystroke</td><td>Cheap validation (format checks, length)</td><td>Expensive validation (checksum, async server check)</td><td>Validate on blur/submit, debounce for async</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic"><h4>Basic</h4>
+      <details class="qa"><summary>What's the difference between a controlled and an uncontrolled input?</summary><div class="answer"><p>Controlled: value is driven by React state via a value prop + onChange handler, the DOM never holds an independent value. Uncontrolled: the DOM input manages its own value natively; React reads it on demand via a ref, typically on submit.</p></div><div class="followup">Follow-up: What warning does React give if you mix the two on one input?</div></details>
+      <details class="qa"><summary>Why does a controlled input need both `value` AND `onChange`?</summary><div class="answer"><p>`value` alone makes the input read-only (nothing updates the state it's bound to, so it never visually changes). `onChange` is what feeds keystrokes back into state, which then flows back into `value` -- without onChange, the loop is broken.</p></div><div class="followup">Follow-up: What happens if you pass `value` without `onChange` -- does React error or warn?</div></details>
+      <details class="qa"><summary>How do you read an uncontrolled input's current value in React?</summary><div class="answer"><p>Via a ref attached to the DOM node (`inputRef.current.value`), typically read inside a submit handler, or via `FormData` constructed from the form element.</p></div><div class="followup">Follow-up: Can you set an uncontrolled input's value programmatically after mount?</div></details>
+      <details class="qa"><summary>What's a reasonable default strategy for a single state object managing a multi-field form?</summary><div class="answer"><p>One `useState` object keyed by field name, with a single generic `handleChange` reading `e.target.name` and `e.target.value`, updating via spread (`{ ...prev, [name]: value }`) rather than per-field hooks.</p></div><div class="followup">Follow-up: When would per-field useState calls be preferable instead?</div></details>
+      </div>
+      <div class="qa-level medium"><h4>Medium</h4>
+      <details class="qa"><summary>Why should form validation errors usually be derived data rather than their own state?</summary><div class="answer"><p>If errors are stored as independent state, every code path that changes form data must remember to also recompute and re-set the error state, or the error display drifts out of sync with the actual current data (showing a stale error after the user fixed the field, or no error after they broke it). Deriving errors as a pure function of current form state + touched flags guarantees they can never be inconsistent with the data.</p></div><div class="followup">Follow-up: Is there a legitimate case for storing some error state independently (e.g. server-side validation errors)?</div></details>
+      <details class="qa"><summary>Why does a naive multi-step form implementation sometimes lose data when navigating back then forward?</summary><div class="answer"><p>If each step is a separate component that conditionally mounts/unmounts (rather than always being present but hidden, or having its data lifted), and that step keeps its OWN local state for its fields, unmounting destroys that state entirely. Navigating back to a previous step and forward again remounts the step component fresh, losing whatever was typed. The fix is lifting all step data to the parent wizard so it survives step components mounting/unmounting.</p></div><div class="followup">Follow-up: Is there a case where you'd WANT a step's data to reset on revisit?</div></details>
+      <details class="qa"><summary>When is an uncontrolled approach actually the better engineering choice, concretely?</summary><div class="answer"><p>Very large forms (dozens of fields) where re-rendering the whole form tree on every keystroke measurably hurts typing responsiveness, forms integrating third-party non-React widgets that manage their own DOM value, or simple one-off forms where you only need the final values on submit and no live validation/transformation/conditional UI depends on intermediate keystrokes.</p></div><div class="followup">Follow-up: How does React Hook Form get the "feel" of controlled validation without re-rendering on every keystroke?</div></details>
+      </div>
+      <div class="qa-level advanced"><h4>Advanced</h4>
+      <details class="qa"><summary>Why does React warn about a component "changing an uncontrolled input to controlled" and what's the actual risk being flagged?</summary><div class="answer"><p>If `value` is `undefined` on the first render, React treats the input as uncontrolled (the DOM manages it). If a later render supplies a defined `value`, React must now treat it as controlled -- but it can't retroactively know what the user already typed into the DOM-managed field, so switching modes mid-lifecycle risks silently discarding or conflicting with whatever the DOM currently holds versus what state says it should hold. The fix (always initialize to a defined value) avoids the mode-switch entirely rather than relying on React to reconcile two different ownership models for the same field.</p></div><div class="followup">Follow-up: Does the same warning/risk apply to checkboxes and selects, or is it specific to text inputs?</div></details>
+      <details class="qa"><summary>How would you design cross-field validation (e.g., "confirm password must match password") without creating a stale-derived-data bug?</summary><div class="answer"><p>Compute the cross-field error as a derived value from BOTH fields' current state on every render (e.g., `const confirmError = touched.confirm &amp;&amp; confirm !== password ? "..." : null`), never store it as its own state slot that would need separate invalidation whenever EITHER field changes. The key insight: any validation that depends on N fields must be recomputed whenever any of those N fields' current values are read, which derived-on-render guarantees and independently-stored error state does not.</p></div><div class="followup">Follow-up: How does this scale to a field whose validity depends on an async server check (e.g., username availability)?</div></details>
+      <details class="qa"><summary>What's the actual re-render cost difference between a controlled form with one state object vs. one `useState` per field, and when does it matter?</summary><div class="answer"><p>Both cause the same component (and by default its subtree) to re-render on every keystroke in either design -- the difference is implementation ergonomics, not fundamentally different re-render scope, UNLESS individual fields are extracted into separately memoized child components each holding their OWN `useState`, in which case per-field state can avoid re-rendering sibling fields on an unrelated field's keystroke. The single-object-at-the-top design re-renders the whole form on every keystroke regardless of field count; this only matters once the form is large/complex enough that profiling shows it as a real bottleneck.</p></div><div class="followup">Follow-up: How would you restructure a large controlled form to minimize re-render scope per keystroke?</div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment"><span class="level-tag">Beginner (30-60 min)</span><h4>Convert an uncontrolled form to controlled, with live validation</h4>
+      <p>Given a provided simple uncontrolled signup form (name/email/password, read via refs on submit),
+      convert all three fields to controlled, and add live "touched + derived error" validation: required
+      name, valid-email-shape check, and minimum password length.</p>
+      <p><strong>Acceptance criteria:</strong> Errors appear only after a field is blurred at least once, and
+      disappear immediately once the field becomes valid (no stale error state).</p>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>A single `touched` object (keyed by field name, like `form` itself) scales the same way the form-state object does.</p></div></details>
+      <p><strong>Bonus:</strong> Disable the submit button until all fields are valid, computed as derived data from the error object.</p></div>
+
+      <div class="assignment"><span class="level-tag">Intermediate (2-4 hrs)</span><h4>Build a 3-step wizard with back/forward data persistence</h4>
+      <p>Build a 3-step "job application" wizard (personal info → experience → review &amp; submit) with data
+      lifted to the top-level wizard component. Add per-step validation that blocks "Next" until the current
+      step's required fields are valid, and a review step showing all collected data with an "edit" link back
+      to the relevant step.</p>
+      <p><strong>Acceptance criteria:</strong> Filling step 1, moving to step 2, then back to step 1 shows
+      your original step-1 data unchanged, and the review step accurately reflects everything entered.</p>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>Keep `step` as just an index into an array/lookup of step components — don't store step-specific data separately from the index.</p></div></details>
+      <p><strong>Bonus:</strong> Persist in-progress wizard data to sessionStorage so a refresh doesn't lose it.</p></div>
+
+      <div class="assignment"><span class="level-tag">Advanced (1-2 days)</span><h4>Build the capstone's multi-step "add your own recipe" form</h4>
+      <p>Build the capstone's required multi-step add-recipe flow (basics → ingredients → review) with full
+      field-level validation, a working back/next flow that preserves all entered data, and a final submit
+      that adds the recipe into the app's in-memory/localStorage recipe list.</p>
+      <ul><li>No full solution provided — this directly extends the ongoing capstone project.</li></ul>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>The "ingredients" step likely needs a dynamic list (add/remove ingredient rows) — treat each row's fields as an array of objects in state, keyed by a stable client-generated ID, not array index.</p></div></details>
+      </div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet"><ul>
+        <li>Controlled = React state is the single source of truth; <code>value</code> + <code>onChange</code> together.</li>
+        <li>Uncontrolled = DOM owns the value; read via <code>ref</code> on demand.</li>
+        <li>Never mix controlled/uncontrolled on one field — always initialize controlled state to a defined value.</li>
+        <li>One state object + generic handler scales better than per-field hooks for medium/large forms.</li>
+        <li>Derive validation errors from current form state (+ touched flags) — never store them independently.</li>
+        <li>Validate cheap checks on every keystroke; defer expensive checks to blur/submit.</li>
+        <li>Multi-step forms: lift ALL step data (not just the step index) to the top-level wizard component.</li>
+        <li>Expensive per-keystroke logic (checksum, heavy regex) on a controlled field can visibly lag — profile before assuming it's fine.</li>
+        <li>Know when to reach for React Hook Form/Formik: complex cross-field validation, large forms, array fields.</li>
+      </ul></div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://react.dev/reference/react-dom/components/input">react.dev — input (controlled components)</a></li>
+        <li><a href="https://react.dev/learn/sharing-state-between-components">react.dev — Sharing State Between Components</a></li>
+        <li><a href="https://react.dev/reference/react-dom/components#form-components">react.dev — Form Components reference</a></li>
+        <li><a href="https://react.dev/learn/manipulating-the-dom-with-refs">react.dev — Manipulating the DOM with Refs</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="03-hooks-basics.html"><span class="dir">← Previous</span>Hooks Basics (useState/useEffect)</a>
+        <a class="next" href="05-routing-react-router.html"><span class="dir">Next →</span>Routing with React Router</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · React Fundamentals</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-jsx.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-typescript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-tsx.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "12-react-fundamentals", chapterKey: "04-forms-and-controlled-components" });</script>
+</body>
+</html>

@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LLD: SOLID &amp; Design Patterns — System Design — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">System Design</a><span class="sep">›</span>LLD: SOLID &amp; Design Patterns</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>LLD: SOLID &amp; Design Patterns</h1>
+      <p class="meta-line"><span>⏱ 3 hrs</span><span>📍 Chapter 12 of 14</span></p>
+      <p><strong>One-line summary:</strong> SOLID and the classic design patterns aren't academic UML trivia — they're the concrete vocabulary for making code changeable without rewriting it, and a senior interview's LLD round is specifically testing whether you reach for the right one instead of over-engineering every class into a pattern.</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>HLD interviews test whether you can draw boxes and arrows at the system level. LLD interviews (increasingly common at Staff/Senior-Tech-Lead loops — "design a parking lot," "design a rate limiter class," "design an elevator system") test whether you can actually write the classes, and whether those classes survive the inevitable "now add feature X" curveball without a rewrite. The honest failure mode at the 10-year-experience level isn't ignorance of patterns — it's reflexively applying a pattern (Factory for everything, Singleton everywhere, Observer where a simple callback would do) without understanding the specific rigidity it removes and the complexity it adds. This chapter grounds every principle and pattern in a real before/after refactor so you can explain the <em>why</em>, not just name the pattern.</p>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>No hard prerequisite chapters, though <a href="09-microservices.html">Chapter 9: Microservices</a> and <a href="13-hld-case-studies.html">Chapter 13: HLD Case Studies</a> are where you'll apply these patterns at a system level rather than a class level.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="srp">S — Single Responsibility Principle</h3>
+      <p>A class should have one reason to change. The test isn't "does it do one thing" literally — it's "if the business rule for X changes, does this class change for a reason unrelated to X?"</p>
+      <pre><code class="language-typescript">// BEFORE: Invoice does pricing, persistence, AND formatting — three reasons to change
+class Invoice {
+  calculateTotal(items: { price: number; qty: number }[]): number {
+    return items.reduce((sum, i) => sum + i.price * i.qty, 0);
+  }
+  saveToDatabase(invoice: object): void { /* SQL INSERT logic here */ }
+  printAsPdf(invoice: object): Buffer { /* PDF rendering logic here */ }
+}
+// If the PDF library changes, or the DB schema changes, or the tax rule changes,
+// the SAME class changes — merge conflicts and regression risk pile up together.
+
+// AFTER: each concern is its own class, each with one reason to change
+class InvoicePricing {
+  calculateTotal(items: { price: number; qty: number }[]): number {
+    return items.reduce((sum, i) => sum + i.price * i.qty, 0);
+  }
+}
+class InvoiceRepository {
+  save(invoice: object): void { /* SQL INSERT logic here */ }
+}
+class InvoicePdfRenderer {
+  render(invoice: object): Buffer { /* PDF rendering logic here */ }
+}
+</code></pre>
+
+      <h3 id="ocp">O — Open/Closed Principle</h3>
+      <p>A class should be open for extension but closed for modification — adding new behavior shouldn't require editing existing, already-tested code.</p>
+      <pre><code class="language-typescript">// BEFORE: every new discount type means editing this function and re-testing all branches
+function calculateDiscount(type: string, amount: number): number {
+  if (type === "student") return amount * 0.9;
+  if (type === "senior") return amount * 0.85;
+  if (type === "employee") return amount * 0.8;
+  // adding "military" discount means editing this function again
+  return amount;
+}
+
+// AFTER: new discount types are added by writing a new class, zero edits to existing code
+interface DiscountStrategy { apply(amount: number): number; }
+class StudentDiscount implements DiscountStrategy { apply(a: number) { return a * 0.9; } }
+class SeniorDiscount implements DiscountStrategy { apply(a: number) { return a * 0.85; } }
+class MilitaryDiscount implements DiscountStrategy { apply(a: number) { return a * 0.75; } } // new, no existing code touched
+
+function calculateDiscount(strategy: DiscountStrategy, amount: number): number {
+  return strategy.apply(amount);
+}
+</code></pre>
+
+      <h3 id="lsp">L — Liskov Substitution Principle</h3>
+      <p>A subtype must be usable anywhere its base type is expected, without breaking caller expectations.</p>
+      <pre><code class="language-typescript">// BEFORE: Square "is-a" Rectangle in math, but violates LSP in code
+class Rectangle {
+  constructor(public width: number, public height: number) {}
+  setWidth(w: number) { this.width = w; }
+  setHeight(h: number) { this.height = h; }
+  area() { return this.width * this.height; }
+}
+class Square extends Rectangle {
+  setWidth(w: number) { this.width = w; this.height = w; } // surprising side effect
+  setHeight(h: number) { this.width = h; this.height = h; }
+}
+// Caller code that assumes setWidth doesn't change height silently breaks for Square:
+function resizeKeepingHeightConstant(r: Rectangle) {
+  const originalHeight = r.height;
+  r.setWidth(100);
+  console.assert(r.height === originalHeight); // FAILS for Square — LSP violated
+}
+
+// AFTER: don't force an inheritance relationship that doesn't hold behaviorally —
+// model both as independent Shape implementations instead
+interface Shape { area(): number; }
+class RectangleShape implements Shape {
+  constructor(private width: number, private height: number) {}
+  area() { return this.width * this.height; }
+}
+class SquareShape implements Shape {
+  constructor(private side: number) {}
+  area() { return this.side * this.side; }
+}
+</code></pre>
+
+      <h3 id="isp">I — Interface Segregation Principle</h3>
+      <p>Don't force a class to implement methods it doesn't need — split fat interfaces into focused ones.</p>
+      <pre><code class="language-typescript">// BEFORE: every Worker must implement eat(), even a RobotWorker that doesn't eat
+interface Worker { work(): void; eat(): void; }
+class RobotWorker implements Worker {
+  work() { /* ... */ }
+  eat() { throw new Error("robots don't eat"); } // forced, nonsensical implementation
+}
+
+// AFTER: segregate into focused interfaces, implement only what applies
+interface Workable { work(): void; }
+interface Eatable { eat(): void; }
+class RobotWorker implements Workable { work() { /* ... */ } }
+class HumanWorker implements Workable, Eatable {
+  work() { /* ... */ }
+  eat() { /* ... */ }
+}
+</code></pre>
+
+      <h3 id="dip">D — Dependency Inversion Principle</h3>
+      <p>High-level modules shouldn't depend on low-level modules directly — both should depend on an abstraction. This is what makes code testable without hitting a real database/network.</p>
+      <pre><code class="language-typescript">// BEFORE: OrderService is hard-wired to a concrete MySQL class — can't swap or mock it
+class MySqlOrderRepository {
+  save(order: object): void { /* raw SQL */ }
+}
+class OrderService {
+  private repo = new MySqlOrderRepository(); // hard dependency, can't test without a real DB
+  placeOrder(order: object) { this.repo.save(order); }
+}
+
+// AFTER: OrderService depends on an interface; concrete implementation is injected
+interface OrderRepository { save(order: object): void; }
+class MySqlOrderRepository implements OrderRepository {
+  save(order: object): void { /* raw SQL */ }
+}
+class InMemoryOrderRepository implements OrderRepository {
+  private store: object[] = [];
+  save(order: object): void { this.store.push(order); } // trivially used in unit tests
+}
+class OrderService {
+  constructor(private repo: OrderRepository) {} // dependency injected, not constructed internally
+  placeOrder(order: object) { this.repo.save(order); }
+}
+</code></pre>
+
+      <h3 id="oop-principles">OOP principles: encapsulation, polymorphism, composition over inheritance</h3>
+      <p><strong>Encapsulation</strong> isn't just "use private fields" — it's hiding the <em>invariant</em> a class protects. A <code>BankAccount</code> class that exposes a public <code>balance: number</code> field lets any caller set a negative balance; exposing only <code>deposit()</code>/<code>withdraw()</code> methods that enforce "balance never goes negative" is what encapsulation is actually for.</p>
+      <p><strong>Polymorphism</strong> lets calling code treat different concrete types uniformly through a shared interface — this is the mechanism that makes Open/Closed and Strategy possible; without it you're back to if/else chains on a type tag.</p>
+      <p><strong>Composition over inheritance:</strong> inheritance couples a subclass to its parent's implementation details forever — change the parent, and every subclass risks breaking (the "fragile base class" problem), and deep hierarchies become hard to reason about (which of 5 ancestor classes defines this method?). Composition — building behavior by holding references to other objects rather than extending them — is more flexible: you can swap a composed dependency at runtime, and a class composed of 3 small collaborators is easier to test than one requiring a full inheritance chain to instantiate. The rule of thumb senior engineers use: prefer composition by default; reach for inheritance only when there's a genuine stable "is-a" relationship with shared, rarely-changing behavior (and even then, many teams forbid inheritance beyond one level).</p>
+
+      <h3 id="creational">Creational patterns: Factory, Builder, Singleton</h3>
+      <p><strong>Factory</strong> centralizes object creation logic so callers don't need to know which concrete class to instantiate — useful when creation involves branching logic or when you want to depend on an interface, not a constructor.</p>
+      <pre><code class="language-typescript">interface NotificationChannel { send(msg: string): void; }
+class EmailChannel implements NotificationChannel { send(msg: string) { /* ... */ } }
+class SmsChannel implements NotificationChannel { send(msg: string) { /* ... */ } }
+class PushChannel implements NotificationChannel { send(msg: string) { /* ... */ } }
+
+class NotificationChannelFactory {
+  static create(type: "email" | "sms" | "push"): NotificationChannel {
+    switch (type) {
+      case "email": return new EmailChannel();
+      case "sms": return new SmsChannel();
+      case "push": return new PushChannel();
+    }
+  }
+}
+// Caller never imports EmailChannel/SmsChannel/PushChannel directly — just the interface + factory.
+</code></pre>
+      <p><strong>Builder</strong> separates the construction of a complex object (many optional parameters) from its representation — avoids constructors with 10 positional parameters or an explosion of overloaded constructors.</p>
+      <pre><code class="language-typescript">class HttpRequestBuilder {
+  private method = "GET";
+  private headers: Record&lt;string, string&gt; = {};
+  private body?: string;
+  setMethod(m: string) { this.method = m; return this; }
+  setHeader(k: string, v: string) { this.headers[k] = v; return this; }
+  setBody(b: string) { this.body = b; return this; }
+  build() { return { method: this.method, headers: this.headers, body: this.body }; }
+}
+const req = new HttpRequestBuilder().setMethod("POST").setHeader("Content-Type", "application/json").setBody('{"x":1}').build();
+</code></pre>
+      <p><strong>Singleton</strong> guarantees exactly one instance of a class, globally accessible. It's the most misused pattern in the list — in Node.js, module-level state is <em>already</em> a de-facto singleton (a module is only evaluated once and cached by <code>require</code>/ES module resolution), so a formal Singleton class adds boilerplate without adding anything Node doesn't already give you for free. Worse, a true global singleton makes unit testing painful (shared mutable state leaks between tests unless carefully reset) and becomes a hidden dependency that's hard to substitute for a mock — exactly what Dependency Inversion warns against. In most modern Node/TypeScript codebases, prefer a single instance created once at the application's composition root and passed via dependency injection, over a class with a static <code>getInstance()</code>.</p>
+
+      <h3 id="structural">Structural patterns: Adapter, Decorator, Facade</h3>
+      <p><strong>Adapter</strong> converts one interface into another your code expects — classic use: wrapping a third-party SDK with an incompatible interface so the rest of your code depends on your own interface, not the vendor's.</p>
+      <pre><code class="language-typescript">// Third-party SDK has an awkward callback-based interface you don't control
+class LegacyPaymentSdk {
+  chargeCallback(amount: number, cb: (err: Error | null, txnId?: string) => void) { /* ... */ }
+}
+// Adapter exposes the Promise-based interface your codebase standardizes on
+interface PaymentGateway { charge(amount: number): Promise&lt;string&gt;; }
+class LegacyPaymentAdapter implements PaymentGateway {
+  constructor(private sdk: LegacyPaymentSdk) {}
+  charge(amount: number): Promise&lt;string&gt; {
+    return new Promise((resolve, reject) => {
+      this.sdk.chargeCallback(amount, (err, txnId) => (err ? reject(err) : resolve(txnId!)));
+    });
+  }
+}
+</code></pre>
+      <p><strong>Decorator</strong> adds behavior to an object dynamically without altering its class — composable, unlike subclassing every combination.</p>
+      <pre><code class="language-typescript">interface DataSource { read(): string; }
+class FileDataSource implements DataSource { read() { return "raw file contents"; } }
+class EncryptedDataSource implements DataSource {
+  constructor(private wrapped: DataSource) {}
+  read() { return `decrypt(${this.wrapped.read()})`; }
+}
+class CompressedDataSource implements DataSource {
+  constructor(private wrapped: DataSource) {}
+  read() { return `decompress(${this.wrapped.read()})`; }
+}
+// Stack decorators freely — no subclass explosion for every combination of encrypted/compressed
+const source = new CompressedDataSource(new EncryptedDataSource(new FileDataSource()));
+</code></pre>
+      <p><strong>Facade</strong> provides a simple unified interface over a complex set of subsystems — hides orchestration complexity from callers.</p>
+      <pre><code class="language-typescript">class InventoryService { reserve(sku: string) { /* ... */ } }
+class PaymentService { charge(amount: number) { /* ... */ } }
+class ShippingService { schedule(sku: string) { /* ... */ } }
+class CheckoutFacade {
+  constructor(private inv = new InventoryService(), private pay = new PaymentService(), private ship = new ShippingService()) {}
+  checkout(sku: string, amount: number) {
+    this.inv.reserve(sku);
+    this.pay.charge(amount);
+    this.ship.schedule(sku);
+  }
+}
+// Caller just does: new CheckoutFacade().checkout("SKU123", 49.99) — doesn't orchestrate 3 services itself.
+</code></pre>
+
+      <h3 id="behavioral">Behavioral patterns: Strategy, Observer, Command</h3>
+      <p><strong>Strategy</strong> (shown fully above in Open/Closed) lets you swap an algorithm at runtime by injecting an interchangeable implementation of a shared interface — this is the pattern interviewers most often want to see you reach for instead of if/else chains on a type tag.</p>
+      <p><strong>Observer</strong> lets subscribers react to events from a subject without the subject knowing concrete subscriber details — decouples producers from consumers.</p>
+      <pre><code class="language-typescript">interface Observer { onOrderPlaced(orderId: string): void; }
+class EmailNotifier implements Observer { onOrderPlaced(id: string) { /* send email */ } }
+class InventoryUpdater implements Observer { onOrderPlaced(id: string) { /* decrement stock */ } }
+
+class OrderSubject {
+  private observers: Observer[] = [];
+  subscribe(o: Observer) { this.observers.push(o); }
+  placeOrder(orderId: string) {
+    // business logic...
+    this.observers.forEach((o) => o.onOrderPlaced(orderId)); // subject doesn't know/care who's listening
+  }
+}
+const subject = new OrderSubject();
+subject.subscribe(new EmailNotifier());
+subject.subscribe(new InventoryUpdater()); // adding a new reaction = zero changes to OrderSubject
+</code></pre>
+      <p><strong>Command</strong> encapsulates a request as an object, enabling queuing, logging, undo, and decoupling the invoker from the receiver.</p>
+      <pre><code class="language-typescript">interface Command { execute(): void; undo(): void; }
+class AddItemCommand implements Command {
+  constructor(private cart: string[], private item: string) {}
+  execute() { this.cart.push(this.item); }
+  undo() { this.cart.splice(this.cart.indexOf(this.item), 1); }
+}
+class CommandHistory {
+  private history: Command[] = [];
+  run(cmd: Command) { cmd.execute(); this.history.push(cmd); }
+  undoLast() { this.history.pop()?.undo(); }
+}
+// Enables a generic undo stack without CommandHistory knowing anything about carts or items specifically.
+</code></pre>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>Under the hood, most of these patterns are just disciplined applications of two mechanisms TypeScript/JavaScript already gives you: interfaces (structural typing — any object shape that satisfies an interface works, no explicit "implements" required at runtime) and closures/higher-order functions (which often let you skip a formal class entirely — Strategy and Command are frequently just plain functions passed as arguments in idiomatic TypeScript, and Observer is often just an event emitter). The patterns matter as a <em>shared vocabulary</em> for discussing design intent with other engineers and interviewers, not as literal class hierarchies you must always write out in full UML form.</p>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+classDiagram
+    class DiscountStrategy {
+        &lt;&lt;interface&gt;&gt;
+        +apply(amount: number) number
+    }
+    class StudentDiscount {
+        +apply(amount: number) number
+    }
+    class SeniorDiscount {
+        +apply(amount: number) number
+    }
+    class MilitaryDiscount {
+        +apply(amount: number) number
+    }
+    class PricingContext {
+        -strategy: DiscountStrategy
+        +calculateDiscount(amount: number) number
+    }
+    DiscountStrategy &lt;|.. StudentDiscount
+    DiscountStrategy &lt;|.. SeniorDiscount
+    DiscountStrategy &lt;|.. MilitaryDiscount
+    PricingContext --&gt; DiscountStrategy : uses
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <p>Full worked examples are embedded inline throughout Core Concepts above, matching each principle/pattern to a concrete before/after refactor — see SRP, OCP, LSP, ISP, DIP, Factory, Builder, Adapter, Decorator, Facade, Observer, and Command.</p>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4><p>A payments platform's checkout flow started as a single <code>processOrder()</code> function with nested if/else for payment method (card, wallet, bank transfer), discount type, and shipping provider — three independent axes of variation tangled into one function. Every new payment method required editing the same function, and a bug fix for "wallet" payments once broke "card" payments because they shared a branch of conditional logic that nobody noticed was aliased. The refactor applied Strategy for payment method (each method becomes a class implementing <code>PaymentStrategy</code>), Strategy again for discount calculation, and a Facade (<code>CheckoutFacade</code>) to orchestrate inventory/payment/shipping without the caller needing to know the internal sequencing. Net effect: adding a new payment provider (a real event — this team added "Buy Now Pay Later" nine months later) touched exactly one new file and zero existing files, and the team's incident rate from checkout changes dropped because changes were now isolated by construction rather than by code review discipline alone.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Reaching for Singleton as the default way to share state/config in a Node service. Node already caches modules, so a plain exported const or a value constructed once at your app's composition root and passed via DI gives you the same "one instance" guarantee without the testability and hidden-coupling costs of a formal Singleton class with <code>getInstance()</code>.</p></div>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Applying Observer (or a full event-emitter architecture) for a simple one-to-one callback relationship where a plain function parameter would do. Patterns add indirection that's worth it when you genuinely have multiple decoupled consumers reacting to one producer — not by default for every callback.</p></div>
+      <ul>
+        <li>Before reaching for a pattern, name the specific kind of future change it protects against — if you can't name one, you probably don't need it yet.</li>
+        <li>Prefer composition over inheritance by default; inheritance should model a genuinely stable "is-a" relationship, not just code reuse convenience.</li>
+        <li>In TypeScript, many "patterns" collapse into plain functions/closures — don't force a class hierarchy where a higher-order function is simpler and equally correct.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs: When to Use vs When NOT To</h2>
+      <table>
+        <tr><th>Pattern</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>Factory</td><td>Creation logic branches or depends on config/runtime input</td><td>There's only ever one concrete type</td><td>Direct constructor call</td></tr>
+        <tr><td>Builder</td><td>Object has many optional parameters/complex construction steps</td><td>Object has 2-3 simple required fields</td><td>Plain constructor or object literal</td></tr>
+        <tr><td>Singleton</td><td>Truly need one process-wide instance with controlled access</td><td>Node's module caching or DI container already gives you this</td><td>DI container / composition root</td></tr>
+        <tr><td>Decorator</td><td>Need to stack optional behaviors combinatorially</td><td>Only one fixed variant ever needed</td><td>Plain subclass or conditional logic</td></tr>
+        <tr><td>Observer</td><td>Multiple decoupled consumers must react to one event</td><td>Single, tightly-coupled one-to-one callback</td><td>Direct function call/callback parameter</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic"><h4>Basic</h4>
+        <details class="qa"><summary>What does the Single Responsibility Principle actually mean, beyond "a class does one thing"?</summary><div class="answer"><p>A class should have one reason to change — i.e., it should be coupled to exactly one axis of business/technical change, so that unrelated requirement changes don't force edits to the same class.</p></div></details>
+        <details class="qa"><summary>Give an example of an Open/Closed Principle violation and how to fix it.</summary><div class="answer"><p>An if/else or switch statement on a type that must be edited every time a new type is added violates OCP. Fix: extract each branch into a class implementing a shared interface (Strategy pattern), so new types are added via new classes, not edits to existing code.</p></div></details>
+        <details class="qa"><summary>What is the Liskov Substitution Principle in one sentence?</summary><div class="answer"><p>Any subtype must be substitutable for its base type without changing the correctness of code that uses the base type.</p></div></details>
+        <details class="qa"><summary>What's the difference between Factory and Builder patterns?</summary><div class="answer"><p>Factory decides which concrete class to instantiate (often based on a type/config input) and returns it fully built. Builder incrementally constructs a single complex object step by step, useful when there are many optional parameters.</p></div></details>
+        <details class="qa"><summary>Why is Singleton often considered an anti-pattern in Node.js specifically?</summary><div class="answer"><p>Node's module system already caches modules, giving you a de-facto singleton for free; a formal Singleton class adds boilerplate, makes unit testing harder (shared global mutable state), and hides a dependency that should be explicit/injectable.</p></div></details>
+        <details class="qa"><summary>What problem does the Adapter pattern solve?</summary><div class="answer"><p>It converts an incompatible interface (often from a third-party library) into the interface your code expects, isolating the rest of your codebase from the vendor's specific API shape.</p></div></details>
+        <details class="qa"><summary>What's composition over inheritance, and why is it generally preferred?</summary><div class="answer"><p>Building behavior by holding references to collaborator objects rather than extending a base class. Preferred because it avoids the fragile base class problem, allows runtime flexibility (swap a collaborator), and keeps classes easier to test in isolation.</p></div></details>
+      </div>
+      <div class="qa-level medium"><h4>Medium</h4>
+        <details class="qa"><summary>Walk through refactoring a class with 5 nested if/else branches on a "type" field using the Strategy pattern. What changes and what stays the same?</summary><div class="answer"><p>Each branch becomes a class implementing a shared interface (e.g., DiscountStrategy). The calling code changes from switching on type to simply calling strategy.apply(...), with the concrete strategy selected once (often via a small factory) rather than re-checked every call. What stays the same: the actual business logic inside each branch moves verbatim into its own class's method.</p></div></details>
+        <details class="qa"><summary>Explain why Decorator is preferable to subclassing when you need combinations of optional behaviors.</summary><div class="answer"><p>Subclassing every combination of N optional behaviors requires up to 2^N subclasses (EncryptedCompressedFileSource, CompressedFileSource, etc.). Decorator wraps objects at runtime, so any combination is achieved by composing decorators in different orders without creating a new class per combination.</p></div></details>
+        <details class="qa"><summary>How does Dependency Inversion make unit testing easier, concretely?</summary><div class="answer"><p>By depending on an interface rather than a concrete class, a test can inject an in-memory or mock implementation instead of a real database/network client, making tests fast and deterministic without needing real infrastructure.</p></div></details>
+        <details class="qa"><summary>When would you choose Observer over a simple array of callback functions?</summary><div class="answer"><p>They're nearly equivalent in plain JS/TS — Observer as a formal pattern adds value mainly when you need named subscribe/unsubscribe lifecycle management, multiple distinct event types, or you're modeling it for a team that benefits from the shared vocabulary; otherwise an array of callbacks or a lightweight EventEmitter is simpler and just as correct.</p></div></details>
+        <details class="qa"><summary>Give a real scenario where applying LSP incorrectly (via inheritance) causes a subtle bug, and how composition avoids it.</summary><div class="answer"><p>The Square-extends-Rectangle example: overriding setWidth to also change height breaks caller code that assumes setWidth leaves height untouched. Composition avoids it by not claiming an "is-a" relationship that doesn't hold behaviorally — model both as independent implementations of a Shape interface instead.</p></div></details>
+        <details class="qa"><summary>How would you apply the Command pattern to implement undo/redo in a design tool, and what's the storage cost tradeoff?</summary><div class="answer"><p>Each user action becomes a Command object with execute()/undo(); a history stack records executed commands, and undo pops and calls undo(). The tradeoff is storage/memory: storing full command objects (and their state needed to undo) for a long history can be costly, so production systems often cap history length or periodically snapshot state instead of keeping an unbounded command log.</p></div></details>
+      </div>
+      <div class="qa-level advanced"><h4>Advanced</h4>
+        <details class="qa"><summary>Design a plugin system for a code editor (like VS Code extensions) using a combination of at least 3 of the patterns covered. Justify each choice.</summary><div class="answer"><p>Strategy for interchangeable language-support behavior (linting, formatting) behind a common interface; Observer/event-emitter for the editor core to notify plugins of lifecycle events (file opened, saved) without knowing which plugins are listening; Facade to expose a simplified Editor API surface to plugin authors instead of the entire internal editor engine; Adapter if third-party language servers expose an incompatible protocol that needs normalizing to the plugin API. Justify each by naming the specific extensibility axis it protects: new languages (Strategy), new event reactions (Observer), stable plugin API despite internal refactors (Facade), vendor protocol differences (Adapter).</p></div></details>
+        <details class="qa"><summary>Critique: "We should apply SOLID to every class in our codebase, always." What's wrong with this as an absolute rule?</summary><div class="answer"><p>SOLID principles trade flexibility for indirection/complexity cost — applying them everywhere, including to code that genuinely has one stable shape and will never need to vary, adds unnecessary abstraction layers that make the code harder to read for no future benefit. Senior judgment is applying them where change is actually anticipated (based on product/business signals), not as a blanket rule; over-applying OCP in particular leads to premature abstraction ("speculative generality").</p></div></details>
+        <details class="qa"><summary>How would you detect, via code review, that a team has over-applied the Factory pattern to the point of harming readability?</summary><div class="answer"><p>Signs include: factories that only ever produce one concrete type (no actual branching need), multiple layers of factories-producing-factories with no corresponding variation point, and the need to jump through 3+ files to find what concrete class actually gets instantiated for a given input — when tracing "what code actually runs" requires more hops than the problem's real complexity justifies, the abstraction has outpaced the need.</p></div></details>
+        <details class="qa"><summary>Explain the relationship between the Strategy pattern and Dependency Inversion — are they the same thing?</summary><div class="answer"><p>They're related but distinct: DIP is a principle about depending on abstractions rather than concrete implementations; Strategy is a specific pattern that applies DIP to the specific case of interchangeable algorithms/behaviors selected at runtime. Strategy is one concrete realization of DIP, but DIP also applies to things that aren't "algorithms" per se — e.g., swapping a database implementation, which is more of a Repository pattern realization of the same underlying principle.</p></div></details>
+        <details class="qa"><summary>A legacy codebase has a 2,000-line class violating SRP across 6 different concerns. You have one sprint, not a full rewrite. What's your incremental refactor strategy?</summary><div class="answer"><p>Extract one concern at a time (starting with the one that changes most frequently, per git history, since that's where the pain is concentrated), keep the original class as a thin facade delegating to the newly extracted classes so external callers don't break, add tests around the extracted class before further extraction, and repeat — this is the "strangler fig" approach applied at the class level, avoiding a risky big-bang rewrite while still making measurable progress each sprint.</p></div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment"><span class="level-tag">Beginner (30-60 min)</span><h4>Refactor a type-switch into Strategy</h4><p>Take a function that computes shipping cost based on a string "method" parameter (e.g., "standard", "express", "overnight") with an if/else chain, and refactor it into the Strategy pattern with a factory to select the right strategy.</p><ul><li>Show the before and after code.</li><li>Add one new shipping method ("drone") and show that it required zero edits to existing classes.</li></ul><p><strong>Acceptance criteria:</strong> Working before/after TypeScript code, with the new method added touching only new files.</p><details class="qa"><summary>Hints</summary><div class="answer"><p>Follow the DiscountStrategy example in this chapter's Core Concepts almost verbatim, substituting shipping cost calculation.</p></div></details><p><strong>Bonus:</strong> Add a factory that picks the strategy based on order weight and destination, not just a string flag.</p></div>
+      <div class="assignment"><span class="level-tag">Intermediate (2-4 hrs)</span><h4>Build a notification system with Decorator and Observer</h4><p>Build a small TypeScript notification system where a base Notifier (e.g., EmailNotifier) can be wrapped with Decorators (e.g., add retry-on-failure, add logging) and where multiple Observers can subscribe to "notification sent" / "notification failed" events.</p><ul><li>Demonstrate stacking at least 2 decorators in different orders and show the behavior differs based on order.</li><li>Demonstrate adding a new Observer without modifying the Notifier classes.</li></ul><p><strong>Acceptance criteria:</strong> Working code with a short written explanation of why decorator order matters for your specific decorators.</p><details class="qa"><summary>Hints</summary><div class="answer"><p>A logging decorator wrapping a retry decorator logs once per actual attempt; a retry decorator wrapping a logging decorator logs once per retry cycle regardless of internal attempts — this difference is the point of the exercise.</p></div></details><p><strong>Bonus:</strong> Make the Observer list itself support priority ordering (some observers must run before others).</p></div>
+      <div class="assignment"><span class="level-tag">Advanced (1-2 days)</span><h4>Design a parking lot system (classic LLD interview question)</h4><p>Design classes for a multi-level parking lot supporting multiple vehicle types (motorcycle, car, bus) with different spot size requirements, a pricing strategy that varies by vehicle type and duration, and a spot-assignment algorithm that can be swapped (nearest-available vs least-fragmentation).</p><ul><li>Identify which SOLID principles your design satisfies and name the specific pattern used for spot assignment and pricing.</li><li>Design for the "add electric vehicle charging spots with premium pricing" extension without a full rewrite — show what would and wouldn't need to change.</li></ul><p><strong>Acceptance criteria:</strong> Class diagram (or class skeletons) plus a written explanation mapping each design decision to the SOLID principle or pattern it satisfies.</p><details class="qa"><summary>Hints</summary><div class="answer"><p>Use Strategy for both pricing and spot-assignment algorithm (interchangeable), and model vehicle types as a small type hierarchy or discriminated union rather than string flags. EV charging spots are a natural fit for Decorator (a ParkingSpot decorated with charging capability) or a separate SpotFeature composition rather than a new spot subclass per combination.</p></div></details><p><strong>Bonus (hints only, no full solution expected):</strong> How would your design change if spots needed to be reserved in advance with a hold/expiry, introducing a time-based state machine per spot?</p></div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet"><ul>
+        <li>SRP: one reason to change. OCP: extend via new code, don't edit existing. LSP: subtypes must honor base type's contract. ISP: split fat interfaces. DIP: depend on abstractions, inject concrete implementations.</li>
+        <li>Composition over inheritance by default — inheritance only for genuinely stable, rarely-changing "is-a" relationships.</li>
+        <li>Factory: centralizes which concrete class to create. Builder: step-by-step construction of complex objects.</li>
+        <li>Singleton is often unnecessary in Node — module caching already gives you one instance; prefer DI over getInstance().</li>
+        <li>Adapter: wraps an incompatible interface. Facade: simplifies a complex subsystem's interface. Decorator: stacks optional behavior without subclass explosion.</li>
+        <li>Strategy: swap algorithms at runtime via a shared interface — the most interview-relevant behavioral pattern.</li>
+        <li>Observer: decouples event producers from consumers; Command: encapsulates a request as an object enabling undo/queueing.</li>
+        <li>Before applying any pattern, name the specific future change it protects against — if you can't, you likely don't need it yet.</li>
+      </ul></div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://refactoring.guru/design-patterns">Refactoring.Guru — Design Patterns</a></li>
+        <li><a href="https://en.wikipedia.org/wiki/SOLID">SOLID principles overview</a></li>
+        <li><a href="https://martinfowler.com/bliki/InversionOfControl.html">Inversion of Control (Martin Fowler)</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="11-resilience.html"><span class="dir">← Previous</span>Resilience Patterns</a>
+        <a class="next" href="13-hld-case-studies.html"><span class="dir">Next →</span>HLD Case Studies</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · System Design</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-typescript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-sql.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-yaml.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "01-system-design", chapterKey: "12-lld-design-patterns" });</script>
+</body>
+</html>

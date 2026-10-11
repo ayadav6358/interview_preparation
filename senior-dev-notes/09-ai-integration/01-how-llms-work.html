@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>How LLMs Work — AI Integration — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">AI Integration</a><span class="sep">›</span>How LLMs Work</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>How LLMs Work (Practical View for Developers)</h1>
+      <p class="meta-line"><span>⏱ ~2.5 hrs</span><span>📍 Chapter 1 of 7</span></p>
+      <p><strong>One-line summary:</strong> An LLM is a next-token predictor trained on huge text corpora; everything
+      you build on top of it — chat, RAG, agents, tool calling — is really just clever ways of constructing the
+      input text so that "predict the next token well" produces useful behavior.</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>You don't need to train a model to be dangerous in an AI-feature interview — you need to not be fooled
+      by the chat-bubble UI into thinking the model "understands" or "remembers" things the way a database does.
+      Senior-level AI questions are rarely about math; they're about whether you know <em>why</em> an LLM
+      hallucinates a fact, why it forgets something you said 40 messages ago, why longer prompts cost more and
+      respond slower, and why two calls with the same prompt can give different answers. Every one of those
+      questions has a precise, mechanical answer rooted in how tokenization, context windows, and autoregressive
+      generation actually work — and being able to give that answer, instead of "it's AI, it's a black box," is
+      exactly the signal that separates someone who has shipped LLM features from someone who has only called
+      an API once.</p>
+      <div class="box why"><h4>Why</h4><p>Nearly every "weird AI bug" a team hits in production — truncated
+      context, inconsistent outputs, runaway cost, injected instructions working — traces back to one of: token
+      limits, sampling randomness, or the model treating all input text (yours, the user's, a retrieved
+      document's) as equally authoritative unless you structure it otherwise. Understanding generation mechanics
+      is what lets you debug and prevent these instead of guessing.</p></div>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>None specific to ML — basic familiarity with arrays/vectors and probability (what a probability
+      distribution is) is enough. Related: <a href="02-llm-apis.html">Using LLM APIs</a>,
+      <a href="03-embeddings-vector-db.html">Embeddings & Vector Databases</a>.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="tokens">Tokens, not words or characters</h3>
+      <p>An LLM never sees "words." Text is first split by a <strong>tokenizer</strong> into subword chunks
+      called tokens, using an algorithm like Byte-Pair Encoding (BPE) or a variant of it. BPE starts from
+      individual bytes/characters and iteratively merges the most frequent adjacent pair into a new token, built
+      up over the training corpus, until it has a fixed vocabulary (commonly 50k–200k entries). The result:
+      common words ("the", "is") are a single token, rare words ("tokenization" itself) get split into a few
+      pieces ("token", "ization"), and anything unseen (random strings, most non-English scripts, emoji) gets
+      split down toward individual bytes, costing far more tokens per visible character.</p>
+      <p>This is why: a sentence with lots of rare jargon or non-English text costs more tokens (and money) than
+      the same idea in plain English; a model can "spell" a word character by character only with effort because
+      the word is normally one indivisible token to it; and token counts, not character counts, are what every
+      context window and billing limit is measured in.</p>
+
+      <h3 id="context-window">The context window</h3>
+      <p>A model has a fixed maximum number of tokens it can attend to in one request — the <strong>context
+      window</strong> (e.g. 200k tokens for Claude Sonnet/Opus class models, up to 1M+ for some Gemini models as
+      of 2025). This window covers <em>everything</em>: system prompt, conversation history, retrieved documents,
+      tool definitions, and the output being generated. There is no separate "memory" — a model that appears to
+      "remember" your name from 10 turns ago is simply re-reading the entire conversation transcript you (or your
+      chat framework) re-sent as part of this request's input tokens. Nothing persists between API calls unless
+      you explicitly resend it, or the provider offers a separate, bolted-on memory/caching feature.</p>
+      <p>Practical consequence: long conversations get <em>expensive</em> (you resend the whole history every
+      turn) and eventually hit the window limit, at which point something has to be truncated, summarized, or
+      dropped — and if you don't design that truncation deliberately, the model silently loses early context.</p>
+
+      <h3 id="autoregressive">Autoregressive generation: one token at a time</h3>
+      <p>Generation is <strong>autoregressive</strong>: the model takes the current sequence of tokens, computes
+      a probability distribution over its entire vocabulary for "what token comes next," samples (or picks) one
+      token, appends it to the sequence, and repeats — feeding its own previous output back in as input for the
+      next step. This is why streaming works the way it does (each token really is produced one at a time, in
+      sequence) and why generation gets linearly slower as output gets longer: token N+1 cannot be computed until
+      token N exists, because it's part of the input to produce N+1.</p>
+
+      <h3 id="attention">Attention, practically: how the model decides what matters</h3>
+      <p>Internally, a transformer processes the sequence of token embeddings through many stacked layers, each
+      containing a <strong>self-attention</strong> block. Attention's job: for each token position, decide how
+      much to "pull in" information from every other token position, and combine them into an updated
+      representation. Mechanically, each token's embedding is projected into three vectors — <strong>Query
+      (Q)</strong>, <strong>Key (K)</strong>, and <strong>Value (V)</strong>. The attention score between token
+      <em>i</em> and token <em>j</em> is the dot product of Q<sub>i</sub> and K<sub>j</sub> (scaled and passed
+      through softmax to become a weight between 0 and 1, summing to 1 across all <em>j</em>); the output for
+      token <em>i</em> is the weighted sum of all V<sub>j</sub> using those weights. Intuitively: Q is "what am I
+      looking for," K is "what do I offer," and a high Q·K match means "this other token is relevant to me, pull
+      in its Value." This happens in parallel across many "heads" (multi-head attention), each able to specialize
+      in a different kind of relationship (e.g. one head tracks subject-verb agreement, another tracks which
+      pronoun refers to which noun), and is stacked across dozens of layers so relationships can compose (a late
+      layer can combine what earlier layers already resolved).</p>
+      <p>Causal (decoder-only) models used for chat apply a <strong>mask</strong> so a token can only attend to
+      itself and earlier tokens, never future ones — consistent with generating left-to-right. This is also why
+      prompt structure matters: content placed earlier in the context can only be "looked back at" by later
+      content, not the reverse, and attention has a real, measurable bias toward the beginning and end of a long
+      context over the middle (the "lost in the middle" effect, directly relevant to RAG — see
+      <a href="04-rag.html">RAG</a>).</p>
+
+      <h3 id="sampling">Sampling, temperature, and why output varies</h3>
+      <p>The final layer produces <strong>logits</strong> — a raw score per vocabulary token — turned into
+      probabilities via softmax. If you always picked the single highest-probability token
+      (<strong>greedy decoding</strong>), output would be fully deterministic but often bland and repetitive.
+      Real APIs sample from the distribution, shaped by parameters you control:</p>
+      <ul>
+        <li><strong>temperature</strong> — divides logits before softmax; low (→0) sharpens the distribution
+        toward the top choice (more deterministic, more repetitive); high (→1+) flattens it (more diverse, more
+        likely to go off the rails).</li>
+        <li><strong>top_p (nucleus sampling)</strong> — restricts sampling to the smallest set of tokens whose
+        cumulative probability exceeds <code>p</code>, cutting off the unlikely long tail regardless of how many
+        tokens that takes.</li>
+        <li><strong>top_k</strong> — restricts sampling to the <code>k</code> highest-probability tokens outright.</li>
+      </ul>
+      <p>Even at temperature 0, outputs can differ slightly run-to-run on frontier APIs due to floating-point
+      non-determinism from batched GPU execution — a real, frequently-asked-about fact: "deterministic" settings
+      are "mostly deterministic," not bitwise reproducible.</p>
+
+      <h3 id="training-phases">Why a model answers in a "helpful assistant" voice</h3>
+      <p>Base pretraining (next-token prediction over internet-scale text) alone produces a model that
+      <em>continues</em> text plausibly — not one that reliably follows instructions or refuses harmful requests.
+      Production chat models go through further stages: <strong>supervised fine-tuning (SFT)</strong> on curated
+      instruction/response pairs, and preference-based alignment (RLHF or newer variants like DPO/Constitutional
+      AI) that use human or AI-generated preference judgments to push the model toward responses people rate as
+      more helpful/honest/harmless. This is why a raw base model and a "chat" model behave so differently from
+      the same architecture, and why system prompts work at all — the model has been specifically trained to
+      treat a designated "system" role as higher-priority instructions.</p>
+
+      <h3 id="hallucination">Hallucination: the honest mechanical explanation</h3>
+      <p>A model has no built-in fact database and no notion of "I don't know this." It is always doing the same
+      thing: producing the statistically most plausible continuation given its training and the current context.
+      When it has strong training signal (a fact repeated often, in many sources), the plausible continuation is
+      usually correct. When it doesn't — an obscure API, a recent event after its training cutoff, a very
+      specific number — the plausible continuation is still generated, confidently, because "plausible-sounding
+      text" is the only thing the mechanism ever produces. This is why grounding the model in retrieved, verified
+      text (RAG) and asking it to cite sources is an architectural fix, not a prompting trick — you are changing
+      what information is actually in context, not hoping the model "tries harder" to be truthful.</p>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>End-to-end path for a single request, in order:</p>
+      <ol>
+        <li><strong>Tokenization</strong> — input text (system prompt + history + user message) is converted to
+        token IDs via the model's tokenizer.</li>
+        <li><strong>Embedding</strong> — each token ID is looked up in an embedding table, producing a vector;
+        a positional signal is added/blended in (so the model knows token order, since attention alone is
+        order-agnostic).</li>
+        <li><strong>Transformer stack</strong> — the sequence of vectors passes through N stacked blocks, each
+        doing self-attention (mixing information across positions) followed by a position-wise feed-forward
+        network (transforming each position's representation independently), with residual connections and
+        normalization around each.</li>
+        <li><strong>Prefill</strong> — for the input portion, this entire stack runs once over all input tokens
+        in parallel (this is why prompt processing is comparatively fast and heavily parallelizable on GPU —
+        it's a one-shot matrix computation over the whole prompt).</li>
+        <li><strong>Unembedding / logits</strong> — the final layer's output vector for the last position is
+        projected back to vocabulary size, producing one logit per possible next token.</li>
+        <li><strong>Sampling</strong> — temperature/top_p/top_k shape the distribution; a token is chosen.</li>
+        <li><strong>Decode loop</strong> — that token is appended, and the model computes <em>one more
+        position's worth</em> of attention/FFN (reusing cached K/V vectors from all previous positions — the
+        <strong>KV cache</strong> — rather than recomputing the whole sequence) to produce the logits for the
+        next token. This is why decode (output generation) is comparatively slow and serial per token, while
+        prefill (reading the prompt) is fast and parallel — a critical distinction for reasoning about latency
+        in <a href="02-llm-apis.html">streaming API design</a>.</li>
+        <li><strong>Stop condition</strong> — generation ends when a stop token/sequence is produced, a
+        max-tokens limit is hit, or (for tool-calling models) the model emits a structured tool-call block
+        instead of continuing free text.</li>
+      </ol>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+flowchart LR
+  A[Raw text] --> B[Tokenizer: BPE]
+  B --> C[Token IDs]
+  C --> D[Embedding + positional info]
+  D --> E[Transformer blocks x N self-attention + FFN]
+  E --> F[Logits over vocabulary]
+  F --> G[Sampling: temperature / top_p]
+  G --> H[Next token]
+  H -->|append, repeat| C
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <p>You'll never implement attention yourself in a product job, but seeing the tokenizer and sampling
+      parameters directly removes the mystery. Example: inspecting token counts and watching how sampling
+      parameters change output determinism.</p>
+      <pre><code class="language-typescript">// Rough token-count estimate without calling an API — useful for client-side cost guards.
+// Real tokenizers (tiktoken for GPT, Claude's own) are more precise; this approximation
+// (~4 chars per token for English) is good enough for a UI budget warning.
+function estimateTokens(text: string): number {
+  return Math.ceil(text.length / 4);
+}
+
+// Calling an LLM API with sampling controls — note how temperature 0 is "mostly" deterministic,
+// not guaranteed bit-for-bit identical across calls (GPU batching non-determinism).
+import Anthropic from "@anthropic-ai/sdk";
+const client = new Anthropic();
+
+async function askDeterministic(question: string) {
+  const resp = await client.messages.create({
+    model: "claude-sonnet-4-5",
+    max_tokens: 500,
+    temperature: 0,          // sharpest distribution: favors the single most likely token
+    messages: [{ role: "user", content: question }],
+  });
+  return resp.content;
+}
+
+async function askCreative(question: string) {
+  const resp = await client.messages.create({
+    model: "claude-sonnet-4-5",
+    max_tokens: 500,
+    temperature: 0.9,        // flatter distribution: more diverse, more likely to drift off-topic
+    messages: [{ role: "user", content: question }],
+  });
+  return resp.content;
+}
+
+// BAD: resending an ever-growing, unbounded conversation history every turn.
+// This silently approaches the context window limit and gets linearly more expensive per turn.
+function badBuildHistory(allMessages: { role: string; content: string }[]) {
+  return allMessages; // every single message, forever
+}
+
+// GOOD: cap history explicitly and summarize what falls off, so cost/latency stay bounded
+// and you control what gets dropped instead of hitting a hard API error mid-conversation.
+function goodBuildHistory(
+  allMessages: { role: string; content: string }[],
+  runningSummary: string,
+  maxRecentTurns = 10
+) {
+  const recent = allMessages.slice(-maxRecentTurns);
+  const summaryMsg = runningSummary
+    ? [{ role: "system", content: `Summary of earlier conversation: ${runningSummary}` }]
+    : [];
+  return [...summaryMsg, ...recent];
+}
+</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4><p>A support-chatbot team ships a feature where the bot "remembers"
+      the whole conversation. In week one it works fine. By week three, power users with 200+ message threads
+      start getting truncated/garbled answers and the per-request cost for those users is 10x the median. The
+      cause: the team was resending the full transcript every turn with no cap, so cost grew linearly with
+      conversation length and eventually some threads exceeded the context window, silently dropping the
+      earliest (often most important — the original problem statement) messages via the SDK's own truncation
+      behavior. The fix was exactly the "GOOD" pattern above: a rolling window of recent turns plus a maintained
+      summary of everything older, recomputed incrementally, with a hard token budget enforced before each call
+      so cost and latency are predictable regardless of conversation length.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Treating "the model said X confidently" as evidence X is true.
+      Confidence of phrasing and correctness are generated by completely separate mechanisms — fluency is the
+      model's core competence; factual accuracy is a side effect that only holds when the training data strongly
+      and consistently supported the answer. Never ship an LLM answer as fact without either grounding it in
+      retrieved/verified data or clearly labeling it as unverified.</p></div>
+      <ul>
+        <li>Don't assume more context is always better — past a point, relevant information gets diluted and the
+        "lost in the middle" effect can make a model miss something that's literally in the prompt.</li>
+        <li>Token costs are asymmetric: output tokens typically cost several times more than input tokens on
+        most providers — a feature that generates long answers is far more expensive than one that reads long
+        input.</li>
+        <li>Temperature 0 does not mean "safe to cache the result forever" — it reduces but does not eliminate
+        variance, and model versions change over time (silently, on "latest" aliases) which changes output too.</li>
+        <li>Don't conflate "bigger context window" with "better recall at every position in it" — a 200k window
+        doesn't mean the model uses all 200k tokens equally well.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>temperature 0 / greedy decoding</td><td>Structured output, classification, code generation, anything needing reproducibility</td><td>Creative writing, brainstorming, varied phrasing wanted</td><td>temperature 0.3–0.7 with top_p</td></tr>
+        <tr><td>Resend full history every turn</td><td>Short-lived, low-turn-count conversations</td><td>Long-running sessions, high QPS, cost-sensitive products</td><td>Rolling window + running summary</td></tr>
+        <tr><td>Bigger context window to "just fit everything"</td><td>Truly need broad context (e.g. whole codebase for one query)</td><td>Most RAG/chat cases — better retrieval beats more tokens</td><td>Retrieval + re-ranking to keep context focused</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+
+      <div class="qa-level basic">
+        <h4>Basic</h4>
+        <details class="qa"><summary>What is a token, and why doesn't the model operate on words or characters directly?</summary><div class="answer"><p>A token is a subword unit produced by a tokenizer (typically BPE): frequent words are single tokens, rare words split into pieces, and unseen text degrades toward individual bytes. This gives a fixed, manageable vocabulary size while still representing any possible input text, at the cost of tokens per word being variable and unintuitive (especially for non-English text or jargon).</p></div><div class="followup">Follow-up: why would a prompt full of random IDs or hashes cost noticeably more tokens than the same length of plain English?</div></details>
+        <details class="qa"><summary>What is a context window, and what counts against it?</summary><div class="answer"><p>The maximum number of tokens a model can process in one request, covering system prompt, conversation history, retrieved documents, tool schemas, and the generated output combined. There's no separate memory — anything the model appears to "remember" is just text being resent inside this window.</p></div><div class="followup">Follow-up: what happens when a conversation's accumulated history exceeds the window?</div></details>
+        <details class="qa"><summary>What does "autoregressive" mean in the context of LLM generation?</summary><div class="answer"><p>The model generates one token at a time, each new token conditioned on all previous tokens (including ones it just generated itself), feeding its own output back in as input for the next step. It cannot generate token N+1 before token N exists.</p></div><div class="followup">Follow-up: why does this make output generation slower, token-by-token, than processing the input prompt?</div></details>
+        <details class="qa"><summary>What does the temperature parameter actually do?</summary><div class="answer"><p>It rescales the logits before the softmax that turns them into probabilities. Lower temperature sharpens the distribution toward the highest-probability token (more deterministic/repetitive); higher temperature flattens it (more diverse, higher chance of an unlikely, possibly wrong, token).</p></div><div class="followup">Follow-up: does temperature 0 guarantee the exact same output every time you run the same prompt?</div></details>
+        <details class="qa"><summary>Why does an LLM "hallucinate" facts instead of saying "I don't know"?</summary><div class="answer"><p>The model only ever does one thing: produce the statistically most plausible next token given its training and context. It has no built-in fact-checking step or confidence gate — fluent, plausible-sounding text is generated the same way whether the underlying claim is well-supported by training data or not.</p></div><div class="followup">Follow-up: what's the architectural (not prompting) fix for reducing hallucination on factual questions?</div></details>
+        <details class="qa"><summary>What's the difference between a base (pretrained) model and a chat/instruction-tuned model?</summary><div class="answer"><p>A base model only continues text plausibly from pretraining on raw text. A chat model goes through further supervised fine-tuning on instruction/response pairs plus preference-based alignment (RLHF/DPO-style), which is what makes it reliably follow instructions, adopt an assistant persona, and respect a system prompt's priority.</p></div><div class="followup">Follow-up: why does this explain why system prompts are more effective at steering behavior than just asking nicely in the user message?</div></details>
+        <details class="qa"><summary>Why are output tokens usually priced higher than input tokens on LLM APIs?</summary><div class="answer"><p>Generating output is inherently serial (one token at a time, each requiring a forward pass) while processing input (prefill) is parallelized over the whole prompt at once — output generation is the more compute-expensive, latency-sensitive part per token, and pricing generally reflects that.</p></div><div class="followup">Follow-up: what design choice in a chat feature would you make differently knowing this?</div></details>
+      </div>
+
+      <div class="qa-level medium">
+        <h4>Medium</h4>
+        <details class="qa"><summary>Explain self-attention mechanically — what are Q, K, and V and how do they interact?</summary><div class="answer"><p>Each token's embedding is projected into a Query, Key, and Value vector. The attention weight between token i and j is softmax(Q_i · K_j / sqrt(d)) across all j; the updated representation for token i is the weighted sum of all V_j using those weights. Q represents "what this position is looking for," K represents "what each position offers," and a high dot product means high relevance, so that position's Value gets pulled in more strongly.</p></div><div class="followup">Follow-up: why is attention computed with multiple heads in parallel rather than one big attention computation?</div></details>
+        <details class="qa"><summary>What is the KV cache, and why does it matter for latency and memory in production LLM serving?</summary><div class="answer"><p>During decoding, each new token only needs to attend to all previous tokens' Key/Value vectors — which don't change — so a correctly implemented decoder caches them instead of recomputing the full sequence's attention on every new token. This makes decode roughly linear in new tokens generated rather than quadratic, but the cache itself grows with sequence length and consumes significant GPU memory, which is a real constraint on how many concurrent long-context requests a server can serve.</p></div><div class="followup">Follow-up: why does this make very long conversations or very long system prompts expensive to serve even before considering token pricing?</div></details>
+        <details class="qa"><summary>What is the "lost in the middle" effect and why does it happen?</summary><div class="answer"><p>Empirically, models are measurably better at using information placed near the start or end of a long context than information buried in the middle, even though attention in principle lets any token attend to any other. It's attributed to training data distribution and positional/attention biases that favor the edges of a sequence. Practical implication: in RAG, the most relevant retrieved chunk should usually be placed last (closest to the question) or structured prominently, not buried in the middle of ten other chunks.</p></div><div class="followup">Follow-up: how would you validate whether this is actually hurting your RAG pipeline's answer quality?</div></details>
+        <details class="qa"><summary>Why can the same prompt at temperature 0 still produce slightly different outputs across calls on a hosted API?</summary><div class="answer"><p>Hosted inference batches many requests together on GPUs, and floating-point operations are not strictly associative — the exact numerical result of a matmul can vary slightly depending on batch composition and execution order, even with greedy decoding. Temperature 0 removes sampling randomness but not this low-level numerical non-determinism. Model aliases like "latest" can also silently point to a different underlying checkpoint over time.</p></div><div class="followup">Follow-up: if you need true reproducibility for an eval harness, what would you pin or control?</div></details>
+        <details class="qa"><summary>Why does prefill scale differently with hardware than decode, and what does that mean for a system that mixes short and long prompts?</summary><div class="answer"><p>Prefill processes the whole input in one parallel pass across GPU cores — it's compute-bound and scales well with batching and parallel hardware. Decode is memory-bandwidth-bound and inherently serial per token per request, so throwing more GPUs at it helps much less per-request; it mainly helps by serving more concurrent requests. A product with very long prompts but short answers (e.g. document Q&A) has a very different latency/cost profile than one with short prompts and long answers (e.g. long-form generation).</p></div><div class="followup">Follow-up: which of your product's endpoints would benefit most from prompt caching, and why?</div></details>
+        <details class="qa"><summary>How would you explain, to a skeptical PM, why "just make the prompt longer and more detailed" doesn't reliably fix a quality problem?</summary><div class="answer"><p>Longer prompts increase cost and latency, dilute attention over more tokens (worsening lost-in-the-middle for the genuinely important instructions), and if the added detail is redundant or contradictory, can actively confuse the model about which instruction takes priority. Quality problems rooted in missing facts need retrieval/grounding, not more prompt text; quality problems rooted in ambiguous instructions need sharper, shorter prompts, not longer ones.</p></div><div class="followup">Follow-up: what's one concrete way to test whether a prompt change actually helped, rather than just feeling like it should?</div></details>
+        <details class="qa"><summary>What role does positional encoding play, and why does attention need it at all?</summary><div class="answer"><p>Raw self-attention is permutation-invariant — without positional information, "the cat sat on the mat" and "mat the on sat cat the" would produce identical attention patterns, since attention only sees a set of Q/K/V vectors, not an inherent order. Positional encodings (absolute, or more commonly in modern models relative schemes like RoPE) inject order information into the vectors so the model can distinguish sequence position and relative distance between tokens.</p></div><div class="followup">Follow-up: why do some positional encoding schemes generalize better to longer sequences than others — why does this matter for context-window extension?</div></details>
+      </div>
+
+      <div class="qa-level advanced">
+        <h4>Advanced</h4>
+        <details class="qa"><summary>Design a token-budget enforcement system for a multi-turn chat product serving millions of users with wildly varying conversation lengths. What do you measure and cap?</summary><div class="answer"><p>Key points: track input tokens (system + history + retrieved context) and output tokens (max_tokens cap) separately since they're priced and latency-impact differently; enforce a hard per-request token ceiling before calling the API (truncate/summarize history proactively rather than reacting to an API error); maintain a rolling summary of dropped history so truncation doesn't silently lose critical early context; set per-user or per-conversation budgets/alerts since a small fraction of power users often drive a disproportionate share of cost; log actual token usage per request (most APIs return this) to catch prompts that balloon unexpectedly (e.g. a bug that duplicates history).</p></div><div class="followup">Follow-up: how would you detect, in production, that your truncation strategy is degrading answer quality rather than just saving cost?</div></details>
+        <details class="qa"><summary>A teammate claims "since attention lets every token see every other token, context position shouldn't matter." Where's the flaw, and how would you prove them wrong empirically?</summary><div class="answer"><p>The flaw: attention's theoretical capacity to connect any two positions doesn't mean it does so with equal fidelity in practice — training data distribution (documents tend to put key info at the start/end), learned attention patterns, and interactions with positional encoding all introduce real, measurable positional bias. To prove it: construct a needle-in-a-haystack test — insert the same fact at varying depths (0%, 25%, 50%, 75%, 100%) through a long filler context of fixed length, ask a question that requires the fact, and measure accuracy by position. This is a standard, publishable benchmark methodology for exactly this reason.</p></div><div class="followup">Follow-up: how would this experiment's results change your RAG chunk-ordering strategy?</div></details>
+        <details class="qa"><summary>Explain why multi-head attention is used instead of a single, larger attention computation with the same total parameter count.</summary><div class="answer"><p>Splitting into multiple smaller heads lets the model learn several distinct, specialized attention patterns in parallel (e.g. one head tracking syntactic dependencies, another tracking coreference, another tracking long-range topical relevance) within the same layer, rather than being forced to find one attention pattern that averages/compromises across all these needs. Empirically this gives richer representational capacity for the same parameter budget — a single head collapses these distinct relational signals into one weighted average, losing the ability to represent "this token is relevant for reason A AND unrelated for reason B" simultaneously.</p></div><div class="followup">Follow-up: how does this relate to why some heads can be pruned post-training with minimal quality loss, and what does that imply about head redundancy?</div></details>
+        <details class="qa"><summary>Why is inference latency for a single long request often dominated by decode rather than prefill, and how does this change your system design for a chat product versus a summarization product?</summary><div class="answer"><p>Prefill is a single parallel pass over the whole prompt (compute-bound, fast per token). Decode is serial, one token per forward pass, memory-bandwidth-bound by repeatedly reading the growing KV cache — so a response of 1000 output tokens takes roughly 1000x the "per-step" latency regardless of how long the input was. A chat product (short prompts, short-to-medium answers) is comparatively cheap and fast; a long-form generation product (long documents, long outputs) is decode-dominated and benefits far more from techniques like speculative decoding, response length limits, or switching to a smaller/faster model for the bulk of the generation.</p></div><div class="followup">Follow-up: what is speculative decoding, at a high level, and why does it help specifically with the decode bottleneck?</div></details>
+        <details class="qa"><summary>How would you design an automated eval to detect that a provider has silently changed the model behind a "latest" alias in a way that degraded your product?</summary><div class="answer"><p>Maintain a fixed, versioned eval set (golden input/expected-behavior pairs covering your product's critical paths — factual grounding, tool-call correctness, tone, refusal behavior) and run it on a schedule against whatever model alias production actually points to, diffing scores against a stored baseline; alert on score drops beyond a threshold. Separately, log the model version string returned by the API on every real request (most providers return the resolved model ID, not just the alias) so you can correlate quality incidents with an actual version change after the fact, even if you didn't initiate it.</p></div><div class="followup">Follow-up: why might you deliberately pin to an exact model version in production despite missing out on "free" improvements from a moving alias?</div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment">
+        <span class="level-tag">Beginner (30-60 min)</span>
+        <h4>Token counting and cost estimator</h4>
+        <p>Write a small Node/TypeScript script that takes a block of text and a model's pricing (input $/1M
+        tokens, output $/1M tokens), estimates the token count, and prints the estimated cost of sending it as a
+        prompt plus a hypothetical 500-token response.</p>
+        <ul>
+          <li>Use a real tokenizer library (e.g. <code>tiktoken</code> or <code>@anthropic-ai/tokenizer</code>)
+          rather than a character-count approximation.</li>
+          <li>Support at least two different models/pricing tiers via a config object.</li>
+          <li>Print input tokens, output token estimate, and total estimated cost separately.</li>
+        </ul>
+        <p><strong>Acceptance criteria:</strong> running the script on a known string gives a token count within
+        a few tokens of what the provider's own playground/console reports for the same text.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>Most tokenizer libraries expose an <code>encode(text)</code> function returning an array of token IDs —
+        the array length is your token count. Keep pricing as a simple lookup table keyed by model name.</p></div></details>
+        <p><strong>Bonus:</strong> add a warning when estimated input tokens exceed 50% of the model's context window.</p>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Intermediate (2-4 hrs)</span>
+        <h4>Sliding-window chat history manager with summarization</h4>
+        <p>Build a small TypeScript module that manages chat history for a conversation: keeps the last N turns
+        verbatim, and once older messages fall off the window, asks the LLM to fold them into a running summary
+        instead of discarding them outright.</p>
+        <ul>
+          <li>Expose <code>addMessage(role, content)</code> and <code>buildContextForNextCall()</code>.</li>
+          <li>When total estimated tokens exceed a configurable budget, summarize the oldest chunk of messages
+          (via one extra LLM call) into/merged with the existing running summary, then drop those raw messages.</li>
+          <li>The context sent to the model should always be: summary (if any) + recent verbatim turns, under
+          the token budget.</li>
+        </ul>
+        <p><strong>Acceptance criteria:</strong> simulate a 50-turn conversation with a small token budget and
+        verify the module never exceeds the budget, and that a fact mentioned early (then summarized) is still
+        recoverable from the summary text later in the conversation.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>Keep the summarization prompt tight and explicit: "Here is the current summary and a block of older
+        messages. Produce an updated summary that preserves all facts, names, decisions, and open questions,
+        in under 150 words." Test it in isolation before wiring it into the sliding window.</p></div></details>
+        <p><strong>Bonus:</strong> add a metric that logs how many raw messages vs. summarized tokens are in each
+        constructed context, over the life of the conversation.</p>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Advanced (1-2 days)</span>
+        <h4>Needle-in-a-haystack positional recall benchmark</h4>
+        <p>Build a small evaluation harness that empirically measures "lost in the middle" behavior for a model
+        of your choice, producing a chart of recall accuracy vs. the depth (percentile position) at which a
+        fact was inserted into a long context.</p>
+        <ul>
+          <li>Generate filler text of a fixed large size (e.g. ~50k tokens) — unrelated factual/narrative text
+          works well (concatenate public domain text).</li>
+          <li>Insert a unique, synthetic "needle" fact (e.g. "The secret code for the blue door is 7f3k9.") at
+          multiple depths: 0%, 10%, 25%, 50%, 75%, 90%, 100%.</li>
+          <li>For each depth, ask the model a question that can only be answered from the needle, and score
+          whether the answer is correct, across several repeated runs per depth to reduce sampling noise.</li>
+          <li>Plot or tabulate accuracy by depth.</li>
+        </ul>
+        <p><strong>Acceptance criteria:</strong> a clear, reproducible table/chart showing accuracy by position,
+        with enough repetitions per depth to distinguish a real effect from sampling noise; a short written
+        conclusion on whether/where this model shows the effect.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>Keep the question format identical across depths so the only variable is needle position. Watch out
+        for the model "cheating" by guessing from stylistic cues in your filler text — use genuinely unrelated
+        filler, and make the needle fact unguessable without finding it.</p></div></details>
+        <p><strong>Bonus:</strong> repeat the experiment with the needle fact explicitly repeated twice at
+        different depths, and see whether redundancy recovers accuracy — directly relevant to how you'd design
+        RAG chunk ordering in practice.</p>
+      </div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet">
+        <ul>
+          <li>Tokens = subword units from BPE-style tokenization; not words, not characters — rare/non-English text costs more tokens.</li>
+          <li>Context window = everything (system + history + retrieved docs + tools + output); no persistent memory between calls.</li>
+          <li>Generation is autoregressive: one token at a time, each conditioned on everything before it, including its own prior output.</li>
+          <li>Attention = Q·K similarity determines how much of each other token's V gets mixed in; multi-head lets several relationship types coexist.</li>
+          <li>Prefill (reading the prompt) is parallel and fast; decode (generating output) is serial and comparatively slow — this drives pricing and latency asymmetry.</li>
+          <li>Temperature/top_p/top_k shape sampling randomness; temperature 0 ≈ deterministic but not bitwise guaranteed on hosted APIs.</li>
+          <li>SFT + RLHF/DPO on top of base pretraining is what produces "helpful assistant" behavior and system-prompt obedience.</li>
+          <li>Hallucination is not a bug to patch with better wording — it's the mechanism working as designed without grounding; fix with retrieval, not prompting alone.</li>
+          <li>"Lost in the middle": content near the start/end of a long context is used more reliably than content buried in the middle.</li>
+        </ul>
+      </div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://arxiv.org/abs/1706.03762">"Attention Is All You Need" (original transformer paper)</a></li>
+        <li><a href="https://docs.anthropic.com/en/docs/build-with-claude/token-counting">Anthropic: Token counting</a></li>
+        <li><a href="https://arxiv.org/abs/2307.03172">"Lost in the Middle: How Language Models Use Long Contexts"</a></li>
+        <li><a href="https://platform.openai.com/docs/guides/text-generation">OpenAI: Text generation guide</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="index.html"><span class="dir">← Previous</span>Topic Overview</a>
+        <a class="next" href="02-llm-apis.html"><span class="dir">Next →</span>Using LLM APIs</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · AI Integration</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-typescript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "09-ai-integration", chapterKey: "01-how-llms-work" });</script>
+</body>
+</html>

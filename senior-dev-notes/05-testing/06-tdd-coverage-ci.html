@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TDD, Coverage, CI — Testing — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">Testing</a><span class="sep">›</span>TDD, Coverage, CI</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>TDD, Coverage, Testing in CI</h1>
+      <p class="meta-line"><span>⏱ 3 hrs</span><span>📍 Chapter 6 of 6</span></p>
+      <p><strong>One-line summary:</strong> TDD, coverage metrics, and CI pipeline design are the three disciplines
+      that turn "we have tests" into "we trust our tests" — and a senior engineer needs to know not just how to
+      apply each one, but exactly how each one can be gamed or misread, and how to design around that.</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>Most engineers can write a passing test. Fewer can explain why a red-green-refactor cycle produces
+      fundamentally different code than "write the implementation, then write tests to match it." Fewer still can
+      look at a dashboard showing "87% coverage" and correctly say whether that number means anything, or design a
+      CI pipeline that stays fast and trustworthy as a codebase and team scale into the hundreds of PRs per week.
+      These are exactly the judgment calls a Tech Lead is expected to own: deciding whether TDD is worth mandating
+      for a given team, setting (and defending) a coverage policy that doesn't become security theater, and owning
+      the CI pipeline's design so it gates real risk instead of just burning compute and developer patience. In an
+      interview, being able to go a level deeper than "we use Jest and run it in GitHub Actions" — into mutation
+      testing's limitations, flaky test quarantine policy, or why branch coverage of 100% still misses bugs — is a
+      strong, fast signal of real production experience.</p>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>Read <a href="01-testing-strategy.html">Testing Strategy</a> first for the pyramid and test-type
+      vocabulary this chapter builds on. Related: <a href="02-unit-testing-mocking.html">Unit Testing &amp;
+      Mocking</a> for the test-writing mechanics TDD cycles through, and
+      <a href="05-e2e-playwright.html">E2E Testing with Playwright</a> for how the top of the pyramid fits into
+      the CI pipeline discussed here.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="tdd-cycle">The real red-green-refactor cycle — not "write tests first"</h3>
+      <p>TDD is frequently reduced to "write the test before the code," which misses what actually makes it
+      valuable. The discipline is a tight, disciplined loop with three distinct phases, each with a specific job:</p>
+      <ul>
+        <li><strong>Red:</strong> write the smallest possible failing test that describes one new increment of
+        behavior — and actually run it to confirm it fails, and fails for the <em>right reason</em> (a missing
+        implementation, not a typo in the test itself). Skipping this confirmation is the single most common way
+        people "do TDD" while accidentally writing a test that can never fail.</li>
+        <li><strong>Green:</strong> write the minimum code to pass that one test — not the most elegant, general,
+        or complete solution you can imagine, just enough to turn the test green. This constraint is deliberate: it
+        stops you from speculatively building abstractions the tests haven't yet demanded, a discipline often
+        called YAGNI-by-construction.</li>
+        <li><strong>Refactor:</strong> with the safety net of a passing test suite, now improve the internal
+        structure — rename, extract, deduplicate, simplify — without changing behavior, re-running tests after
+        every small change to stay in a continuously-green state throughout.</li>
+      </ul>
+      <p>The compounding effect across many cycles is what matters: because every line of production code was
+      written to satisfy a test that existed first, the resulting codebase has near-complete test coverage as a
+      byproduct, not as a retrofitted goal — and because the design only grew exactly as far as a test demanded, it
+      tends to end up with fewer speculative abstractions and more naturally testable (loosely coupled, dependency-
+      injectable) interfaces, since untestable code simply can't pass through Red.</p>
+
+      <h3 id="tdd-kata">Worked kata: FizzBuzz via strict TDD, cycle by cycle</h3>
+      <p>A kata is a small, well-known problem used specifically to drill the TDD cycle itself, not to produce
+      interesting production code. Walking through one cycle-by-cycle is the fastest way to see the discipline's
+      actual shape:</p>
+      <ul>
+        <li><strong>Cycle 1 — Red:</strong> <code>test('returns "1" for 1', () =&gt; expect(fizzbuzz(1)).toBe('1'))</code>.
+        Run it — fails, because <code>fizzbuzz</code> doesn't exist yet. Correct failure.</li>
+        <li><strong>Cycle 1 — Green:</strong> <code>function fizzbuzz(n) { return '1'; }</code> — yes, this is a
+        deliberately absurd hard-coded stub. It is the minimum code that passes, and that's the point.</li>
+        <li><strong>Cycle 2 — Red:</strong> <code>test('returns "2" for 2', ...)</code> — fails against the
+        hard-coded stub.</li>
+        <li><strong>Cycle 2 — Green:</strong> <code>return String(n);</code> — now forced to generalize, because
+        the hard-coded stub can no longer satisfy two tests at once. This is the mechanism: generalization is
+        <em>pulled out of you by triangulation</em> between multiple examples, not designed up front.</li>
+        <li><strong>Cycle 3 — Red/Green:</strong> test for <code>fizzbuzz(3) === 'Fizz'</code> forces
+        <code>n % 3 === 0 ? 'Fizz' : String(n)</code>.</li>
+        <li><strong>Cycle 4 — Red/Green:</strong> test for <code>fizzbuzz(5) === 'Buzz'</code> forces the
+        <code>n % 5</code> branch.</li>
+        <li><strong>Cycle 5 — Red/Green:</strong> test for <code>fizzbuzz(15) === 'FizzBuzz'</code> forces
+        checking the combined case — and critically, forces you to realize the 15 case must be checked
+        <em>before</em> the individual 3 and 5 checks, or order-of-conditions becomes a real bug the test cycle
+        just caught.</li>
+        <li><strong>Refactor pass:</strong> only now, with 5 passing tests as a safety net, extract the duplicated
+        modulo-and-string-return pattern into something cleaner if desired — e.g., building the string from an
+        ordered list of [divisor, word] rules — re-running all 5 tests after the change to confirm nothing broke.</li>
+      </ul>
+      <p>Notice what never happened: no test for an input that wasn't yet a requirement, no premature abstraction
+      (a "divisor-rule engine") before two concrete cases demanded generalization, and the final design emerged
+      from the accumulated constraints rather than being architected up front.</p>
+
+      <h3 id="coverage-types">Coverage metric types — what each one actually proves</h3>
+      <p>"Coverage" is not one number; conflating the types is a common and costly interview mistake:</p>
+      <ul>
+        <li><strong>Line coverage</strong> — percentage of executable lines run at least once by the suite. The
+        weakest and most gameable metric: a line can execute without any assertion checking its output was
+        correct.</li>
+        <li><strong>Branch coverage</strong> — percentage of each conditional's branches (both the true and false
+        path of every <code>if</code>, each case of a <code>switch</code>) that were taken. Catches the common
+        line-coverage blind spot of an <code>if</code> whose body runs but whose <code>else</code> never does —
+        but still says nothing about assertion quality.</li>
+        <li><strong>Function/statement coverage</strong> — variants on the same theme at different granularity;
+        same fundamental limitation as line coverage.</li>
+        <li><strong>Mutation coverage (mutation testing)</strong> — a fundamentally different and much stronger
+        signal. A mutation testing tool (Stryker for JS/TS, PIT for Java) automatically introduces small deliberate
+        bugs ("mutants") into your production code — flipping a <code>&gt;</code> to <code>&gt;=</code>, negating a
+        boolean, changing a <code>+</code> to <code>-</code> — and re-runs your suite against each mutant. A
+        mutant that still passes the full suite is a <strong>surviving mutant</strong>: concrete proof that your
+        tests would not catch that exact class of real bug, even though line/branch coverage may read 100% on that
+        code. Mutation score (percentage of mutants killed) is a far harder metric to game than line/branch
+        coverage, precisely because it measures assertion strength, not just execution reach — but it is
+        computationally expensive (every mutant re-runs the relevant suite), so it's typically run on a subset of
+        critical modules or in a slower nightly/weekly job rather than on every PR.</li>
+      </ul>
+
+      <h3 id="coverage-gaming">How coverage gets gamed — and why 100% is not the goal</h3>
+      <p>Coverage numbers are an easy target for Goodhart's law: once a team is measured on "80% line coverage,"
+      engineers under time pressure will hit the number without improving test quality. Common gaming patterns:
+      writing a test that calls a function and asserts nothing meaningful (<code>expect(result).toBeDefined()</code>
+      on everything), writing one test that happens to traverse many lines without checking the specific business
+      outcomes at each branch, or excluding "hard to test" files from the coverage calculation entirely via config
+      rather than actually testing them. The deeper problem is structural: line and branch coverage measure
+      <em>reach</em>, not <em>correctness verification</em> — a test suite can have 100% branch coverage and still
+      miss an off-by-one error, a wrong error message, or a subtly incorrect calculated value, because every branch
+      executed but no assertion checked the specific thing that was wrong. This is exactly what mutation testing
+      is designed to expose, and exactly why a senior engineer should treat a coverage percentage as a floor that
+      flags completely untested code, not a ceiling or proxy for test quality.</p>
+
+      <h3 id="ci-pipeline-design">CI test pipeline design — parallelization, caching, and gating</h3>
+      <p>At scale, a CI pipeline's job is to answer "is this PR safe to merge" as fast, cheaply, and reliably as
+      possible, which pulls against each other in specific ways a senior engineer should be able to balance:</p>
+      <ul>
+        <li><strong>Parallelization / sharding:</strong> split the test suite across N parallel workers/runners
+        (Jest's <code>--shard</code>, Playwright's built-in sharding) so wall-clock time scales down roughly with
+        worker count rather than suite size — critical once a suite grows past a few minutes, since serial
+        execution eventually makes every PR's feedback loop too slow to be useful.</li>
+        <li><strong>Dependency/build caching:</strong> cache <code>node_modules</code> (keyed on the lockfile
+        hash) and build outputs across runs so each CI run doesn't re-download/re-compile everything from scratch —
+        often the single biggest lever on pipeline wall-clock time, bigger than test parallelization itself for
+        many JS/TS projects.</li>
+        <li><strong>Test result caching / selective re-running:</strong> tools like Nx, Turborepo, or Bazel can
+        skip re-running tests for packages whose inputs haven't changed since the last green run on that exact
+        input hash — valuable in a monorepo where a single PR usually touches a small fraction of packages.</li>
+        <li><strong>Fail-fast ordering:</strong> run cheap, fast checks (lint, typecheck, unit tests) before
+        expensive ones (integration, E2E) so a PR with a trivial type error fails in 30 seconds instead of waiting
+        10 minutes for an E2E shard to get around to failing on the same root cause.</li>
+        <li><strong>Required-checks gating:</strong> branch protection rules mark specific CI jobs as required
+        before merge is allowed — the critical design decision is exactly which jobs are required. Everything
+        required must be deterministic and fast enough not to become a merge bottleneck; anything flaky or slow
+        that still provides real signal belongs in a non-blocking job whose failures are tracked and triaged, not
+        one that blocks every PR on an unrelated flake.</li>
+        <li><strong>Flaky test quarantine:</strong> a test that fails intermittently without a code change is
+        actively harmful to a team's trust in CI — the standard remedy is an automated or manual quarantine
+        process: tag the test, move it out of the required/blocking job into a separate tracked, non-blocking job,
+        and open a ticket to fix or delete it, rather than letting it either block merges randomly or get "fixed"
+        with a retry that just hides the problem (see the E2E chapter's trace-based diagnosis approach). A
+        quarantined test must have an expiry/review mechanism — an un-triaged quarantine list that only ever grows
+        is a slow-motion loss of coverage.</li>
+      </ul>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>A production-grade CI test pipeline is really a dependency graph of jobs, not a single linear script.
+      On every push, the CI system first resolves what changed (often via a monorepo tool's affected-package
+      detection) and restores caches for dependencies and any previously-computed task outputs keyed by a hash of
+      their inputs. Fast static checks run first and gate everything downstream. The test execution stage then
+      fans out: unit/component suites are sharded across several parallel runners, each shard's results (and, on
+      failure, artifacts like traces/screenshots/coverage data) are uploaded, and a final aggregation step merges
+      per-shard coverage reports into one number and collects pass/fail across all shards before the required-check
+      status is reported back to the PR. Mutation testing, being expensive, typically runs as a separate, slower,
+      non-blocking scheduled job rather than inline per-PR — its signal (surviving mutants on critical modules) is
+      reviewed on a cadence, not gated per merge. The whole system's throughput is bounded by whichever stage is
+      both slow and non-parallelizable — in most real pipelines, that's either a cold dependency install (fixed by
+      caching) or a handful of long-running E2E tests that don't shard well (fixed by keeping that layer small, per
+      the pyramid principle from the Testing Strategy chapter).</p>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+flowchart LR
+  R[Red: write failing test] --> G[Green: minimum code to pass]
+  G --> F[Refactor: improve structure, tests stay green]
+  F -->|next increment of behavior| R
+  style R fill:#5a2a2a
+  style G fill:#2a5a2a
+  style F fill:#2a2a5a
+      </div>
+      <div class="mermaid">
+flowchart TD
+  PR[PR pushed] --> Cache[Restore deps + task-output cache]
+  Cache --> Fast[Lint + typecheck + unit tests]
+  Fast -->|fail| Block[Required check fails fast]
+  Fast -->|pass| Shard1[Shard 1: integration tests]
+  Fast --> Shard2[Shard 2: integration tests]
+  Fast --> Shard3[Shard N: integration tests]
+  Shard1 --> Agg[Aggregate results + coverage]
+  Shard2 --> Agg
+  Shard3 --> Agg
+  Agg -->|pass| E2E[Small critical-journey E2E suite]
+  E2E --> Gate[Required-checks gate]
+  Gate -->|all green| Merge[Merge allowed]
+  Quarantine[Flaky-tagged tests] -.non-blocking job.-> Triage[Tracked separately, not gating]
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-typescript">// FizzBuzz — final state after all 5 TDD cycles (see kata walkthrough above)
+// Every line here exists because a specific test demanded it, in this order:
+// fizzbuzz(1)->'1', fizzbuzz(2)->'2', fizzbuzz(3)->'Fizz', fizzbuzz(5)->'Buzz', fizzbuzz(15)->'FizzBuzz'
+
+function fizzbuzz(n: number): string {
+  if (n % 15 === 0) return 'FizzBuzz'; // must be checked before 3 and 5 individually
+  if (n % 3 === 0) return 'Fizz';
+  if (n % 5 === 0) return 'Buzz';
+  return String(n);
+}
+
+describe('fizzbuzz', () => {
+  test('returns the number as a string when not divisible by 3 or 5', () => {
+    expect(fizzbuzz(1)).toBe('1');
+    expect(fizzbuzz(2)).toBe('2');
+  });
+  test('returns "Fizz" for multiples of 3', () => {
+    expect(fizzbuzz(3)).toBe('Fizz');
+  });
+  test('returns "Buzz" for multiples of 5', () => {
+    expect(fizzbuzz(5)).toBe('Buzz');
+  });
+  test('returns "FizzBuzz" for multiples of 15', () => {
+    expect(fizzbuzz(15)).toBe('FizzBuzz');
+  });
+});
+
+// BAD: a test that inflates line/branch coverage without verifying correctness —
+// this is exactly the "coverage gaming" pattern mutation testing exposes.
+// test('fizzbuzz works', () => {
+//   expect(fizzbuzz(15)).toBeDefined(); // passes even if fizzbuzz(15) returns the WRONG string
+// });
+
+// GOOD: a mutation-resistant assertion — asserts the exact expected value,
+// so a mutant that flips `% 15` to `% 5` or swaps the return strings gets killed.
+// expect(fizzbuzz(15)).toBe('FizzBuzz');</code></pre>
+      <pre><code class="language-typescript">// stryker.conf.json (mutation testing config) — conceptually, run as TS via stryker-cli
+// Run on critical modules only, in a scheduled job, NOT inline per-PR (too slow to gate merges).
+export default {
+  mutate: ['src/billing/**/*.ts', 'src/auth/**/*.ts'], // critical modules only, not the whole repo
+  testRunner: 'jest',
+  reporters: ['html', 'clear-text', 'progress'],
+  thresholds: { high: 80, low: 60, break: 50 }, // build fails only below `break` — a floor, not a target
+  // A surviving mutant here means: some billing/auth edge case has a branch that
+  // executes under the suite, but no assertion actually checks its output's correctness.
+};</code></pre>
+      <pre><code class="language-yaml"># .github/workflows/ci.yml — tiered, cached, sharded, fail-fast pipeline
+name: CI
+on: [pull_request]
+
+jobs:
+  fast-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      # Cache node_modules keyed on the lockfile hash — usually the biggest single time saver
+      - uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: node-modules-${{ hashFiles('package-lock.json') }}
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run test:unit -- --coverage
+      - uses: actions/upload-artifact@v4
+        with: { name: coverage, path: coverage/ }
+
+  integration-tests:
+    needs: fast-checks   # fail-fast: don't burn runners if lint/typecheck/unit already failed
+    runs-on: ubuntu-latest
+    strategy:
+      matrix: { shard: [1, 2, 3, 4] }   # parallelization across 4 shards
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: node-modules-${{ hashFiles('package-lock.json') }}
+      - run: npm ci
+      - run: npm run test:integration -- --shard=${{ matrix.shard }}/4
+
+  e2e-critical-journeys:
+    needs: integration-tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: npx playwright install --with-deps
+      - run: npm run test:e2e -- --grep-invert @quarantined   # quarantined tests excluded from the gate
+
+  flaky-quarantine:
+    needs: fast-checks
+    runs-on: ubuntu-latest
+    continue-on-error: true   # non-blocking: tracked, never required
+    steps:
+      - run: npm run test:e2e -- --grep @quarantined
+
+# Branch protection (configured in repo settings, not this file) marks fast-checks,
+# integration-tests, and e2e-critical-journeys as required — flaky-quarantine deliberately is not.</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4><p>A fintech's engineering leadership mandated "90% line coverage on
+      all new code" as a quality gate after a production incident, enforced by failing the PR check if coverage
+      dropped below threshold. Within two quarters, coverage dashboards showed healthy 90%+ numbers across the
+      org, yet production incidents from logic bugs in covered code hadn't meaningfully decreased. An audit
+      (prompted by a senior engineer who'd seen this pattern before) ran Stryker mutation testing against the
+      highest-incident-rate module — the billing calculation service, which reported 94% line coverage — and found
+      a 38% mutation score: most of its tests called the pricing function and asserted only
+      `expect(result).toBeDefined()` or checked an unrelated field, satisfying the line-coverage requirement
+      without verifying the actual computed price was correct. The fix wasn't more tests — it was deleting the
+      line-coverage gate as the primary metric and replacing it with two things: a mutation-testing job (scheduled
+      nightly, non-blocking, with a dashboard trend reviewed weekly) scoped to the handful of modules with real
+      financial/safety impact, and a lightweight PR-review checklist item asking "does this test's assertion
+      actually verify the specific thing that could go wrong" for new code in those modules. Line coverage was kept
+      only as a floor (flagging genuinely untested files) at a much lower, non-gating threshold. Six months later,
+      the billing module's mutation score was above 85% and its incident rate had actually dropped — the metric
+      change, not a raw increase in test count, was what correlated with the quality improvement.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Treating a coverage percentage as a target to hit rather than a
+      floor that flags obviously untested code is the single most common and costly misunderstanding of this
+      whole area. A team that optimizes for the number will get the number, via assertion-free tests, excluded
+      files, or tests that exercise code without checking outcomes — and will not get better bug detection, which
+      was presumably the actual goal. Every coverage policy should be paired with spot-checks of assertion quality
+      (manual review, or periodic mutation testing) or the number will quietly decouple from what it was meant to
+      proxy for.</p></div>
+      <div class="box gotcha"><h4>Gotcha</h4><p>"We require 100% test-level retries to pass before merge" and
+      similar blanket retry policies, carried over from the E2E layer, quietly erode CI trust across the whole
+      pipeline if applied without quarantine discipline — a flaky unit or integration test that "passes on retry"
+      still fails some nonzero fraction of the time, and without a tracked quarantine/triage process, that fraction
+      only grows as more flaky tests accumulate, until engineers routinely re-run red CI without reading why,
+      which is the exact failure mode a required-checks gate exists to prevent.</p></div>
+      <ul>
+        <li><strong>Mistake:</strong> running mutation testing on every PR instead of a scheduled job on critical
+        modules — it's computationally expensive enough (re-running the suite per mutant) that gating every PR on
+        it turns a 5-minute CI run into a 45-minute one for marginal added signal on low-risk code.</li>
+        <li><strong>Mistake:</strong> doing "TDD" by writing the whole implementation first and then retrofitting
+        tests that happen to pass against it — this produces tests that confirm what the code does, not tests that
+        specify what it should do, and silently skips the Red step's main value: catching a test that can't
+        actually fail.</li>
+        <li><strong>Mistake:</strong> sharding tests naively by file-count instead of by historical run time —
+        this leaves one shard with a handful of slow integration tests taking 8 minutes while three others finish
+        in 90 seconds, so the pipeline's wall-clock time is still bottlenecked on the slowest shard. Most modern
+        test runners support time-based/historical balancing specifically to avoid this.</li>
+        <li><strong>Best practice:</strong> make the required-checks list a deliberate, reviewed decision, not an
+        accumulation of "whatever CI jobs exist" — every required job should be fast, deterministic, and have an
+        owner responsible for its health; anything that doesn't meet that bar becomes a tracked non-blocking job
+        instead.</li>
+        <li><strong>Best practice:</strong> give quarantined tests an expiry or a recurring review cadence (e.g., a
+        weekly bot comment listing tests quarantined &gt;30 days) — an unreviewed quarantine list is coverage loss
+        that nobody notices until the next incident.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>Strict TDD (red-green-refactor)</td><td>Non-trivial business logic with clear, enumerable cases; long-lived code that will be maintained and refactored repeatedly</td><td>Deep exploratory/throwaway prototyping where requirements are still being discovered through the code itself</td><td>Test-after, written immediately following a short implementation spike</td></tr>
+        <tr><td>Line/branch coverage as a gate</td><td>A cheap floor to flag completely untested files/branches</td><td>As a proxy for test quality or a target to "hit" — easily gamed, doesn't verify assertion correctness</td><td>Mutation testing for true assertion-strength signal</td></tr>
+        <tr><td>Mutation testing on every PR</td><td>Never, in most codebases — too slow for inline gating</td><td>N/A</td><td>Scheduled job on critical/high-risk modules only, reviewed on a cadence</td></tr>
+        <tr><td>Blanket CI retries for flaky tests</td><td>Never as a default policy</td><td>Any time it's used to avoid investigating a real race or external dependency issue</td><td>Quarantine with tracked triage; fix the root cause (see E2E chapter)</td></tr>
+        <tr><td>Required-checks gating on every CI job</td><td>Fast, deterministic jobs with a clear owner</td><td>Slow or occasionally-flaky jobs that would block merges on noise</td><td>Non-blocking tracked job with a dashboard/alert on trend</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic">
+        <h4>Basic</h4>
+        <details class="qa"><summary>What are the three phases of the TDD cycle, and what is each one actually for?</summary><div class="answer"><p>Red: write a failing test for one small new increment of behavior, and confirm it fails for the right reason. Green: write the minimum code to pass that test, resisting the urge to over-build. Refactor: with tests as a safety net, improve the code's internal structure without changing behavior, re-running tests continuously.</p></div><div class="followup">Follow-up: what goes wrong if you skip confirming the test actually fails during Red?</div></details>
+        <details class="qa"><summary>What's the difference between line coverage and branch coverage?</summary><div class="answer"><p>Line coverage measures the percentage of executable lines run at least once. Branch coverage measures whether each conditional's branches (both true and false paths) were taken — it catches cases like an `if` whose body ran but whose `else` never did, which line coverage would miss.</p></div><div class="followup">Follow-up: can you have 100% branch coverage and still have a bug? How?</div></details>
+        <details class="qa"><summary>What is mutation testing, in one sentence?</summary><div class="answer"><p>A technique that automatically introduces small deliberate bugs ("mutants") into production code and re-runs your test suite against each one — a mutant that still passes is a "surviving mutant," proving your tests wouldn't catch that class of real bug.</p></div><div class="followup">Follow-up: why is mutation testing usually run on a schedule rather than on every PR?</div></details>
+        <details class="qa"><summary>Why might a codebase have 95% line coverage and still ship frequent logic bugs?</summary><div class="answer"><p>Line coverage only measures that code executed, not that any assertion verified its output was correct — tests can run through a line (even every branch of it) while asserting on the wrong thing, or nothing meaningful at all, leaving real bugs undetected despite a high coverage number.</p></div><div class="followup">Follow-up: what metric would expose this gap that line coverage can't?</div></details>
+        <details class="qa"><summary>What does "parallelization" or "sharding" mean in a CI test pipeline?</summary><div class="answer"><p>Splitting a test suite across multiple CI workers/runners that execute concurrently, so wall-clock pipeline time scales down with worker count rather than growing linearly with suite size.</p></div><div class="followup">Follow-up: what commonly bottlenecks the benefit of sharding even with many workers?</div></details>
+        <details class="qa"><summary>What is a "flaky test," and why is it a problem beyond just the one test?</summary><div class="answer"><p>A test that intermittently fails without any related code change. Beyond wasting time on that one test, it erodes trust in CI generally — engineers start re-running red pipelines reflexively instead of reading why, which can let a real failure slip through unnoticed among the "probably just flaky" noise.</p></div><div class="followup">Follow-up: what's the difference between fixing a flaky test and quarantining it?</div></details>
+        <details class="qa"><summary>What's a "required check" in a CI/branch-protection setup?</summary><div class="answer"><p>A specific CI job marked in branch protection rules as mandatory to pass before a PR can be merged — the design decision of which jobs are required determines what actually gates merges versus what's just informational.</p></div><div class="followup">Follow-up: what properties should a job have before it's made required?</div></details>
+      </div>
+      <div class="qa-level medium">
+        <h4>Medium</h4>
+        <details class="qa"><summary>Walk through why strict TDD on a FizzBuzz-style problem tends to produce the correct conditional ordering (checking the combined case before individual cases) without the author "designing" that ordering up front.</summary><div class="answer"><p>Each new test triangulates against the existing implementation: after `fizzbuzz(3)` and `fizzbuzz(5)` force individual modulo checks, writing a test for `fizzbuzz(15)` will fail against an implementation that checks `% 3` first (since it returns 'Fizz', not 'FizzBuzz') — the Red phase surfaces exactly this ordering bug as a failing test, and Green forces reordering the checks (combined case first) to make it pass. The design falls out of the accumulated test constraints rather than being anticipated.</p></div><div class="followup">Follow-up: what would happen if you wrote the fizzbuzz(15) test first, before the individual cases?</div></details>
+        <details class="qa"><summary>A team reports 90% line coverage but a mutation testing run on the same code shows a 40% mutation score. Explain the gap and what it implies about their tests.</summary><div class="answer"><p>The gap means most of their code executes under test (high line coverage) but most introduced mutants still pass the suite — meaning the tests' assertions are too weak or absent to detect specific changes in behavior (wrong comparison operators, flipped booleans, off-by-one changes) even on code that technically "ran." It implies many tests exercise code paths without verifying the specific correctness of what happened on them — a strong signal of coverage gaming or just weak assertions, not a suite that would actually catch real regressions.</p></div><div class="followup">Follow-up: would you mandate mutation testing org-wide in response, or something more targeted — why?</div></details>
+        <details class="qa"><summary>Design a fail-fast ordering for a CI pipeline with lint, typecheck, unit tests, integration tests, and E2E tests. Justify the order.</summary><div class="answer"><p>Order by (speed × likelihood of catching the same root cause early): lint and typecheck first (seconds, catch an entire class of errors before any test even runs), then unit tests (fast, broad logic coverage), then integration tests (slower, fewer, verify cross-component wiring), then E2E last (slowest, smallest suite, verifies true end-to-end critical journeys). Each stage only runs if the previous one passed, so a trivial type error fails in seconds instead of after a 10-minute E2E shard gets around to failing on the same underlying cause.</p></div><div class="followup">Follow-up: would you ever want integration and E2E to run in parallel instead of strictly sequentially — when?</div></details>
+        <details class="qa"><summary>Why should a flaky test be quarantined with an expiry/review mechanism rather than just moved to a non-blocking job indefinitely?</summary><div class="answer"><p>An indefinitely non-blocking job with no review cadence becomes a silent coverage sink — tests pile up there, nobody looks at the dashboard, and the team gradually loses real test coverage without any specific decision ever being made to accept that loss. A review cadence (e.g., a weekly report of tests quarantined &gt;30 days) forces an explicit triage decision — fix, delete, or re-justify the quarantine — on each one instead of letting quarantine become a permanent, invisible dumping ground.</p></div><div class="followup">Follow-up: who should own triaging the quarantine list in a mid-sized engineering org?</div></details>
+        <details class="qa"><summary>Explain why doing TDD strictly (never writing more production code than the current failing test demands) tends to produce more testable, loosely-coupled designs as a side effect.</summary><div class="answer"><p>Code that's hard to test (tightly coupled to a global, a singleton, a concrete hard-to-construct dependency) is, by the same token, hard to drive through a fast Red-Green cycle — the friction of writing the test surfaces the coupling problem immediately, before the code exists, rather than after it's already been built and depended on elsewhere. This creates continuous pressure toward dependency injection and small, focused units, not because anyone designed for testability as a separate goal, but because untestable code simply resists passing through the cycle at all.</p></div><div class="followup">Follow-up: can TDD still produce a badly-designed system — what's a failure mode where it does?</div></details>
+        <details class="qa"><summary>How would you decide which modules in a large codebase deserve mutation testing coverage, given it's too slow to run everywhere?</summary><div class="answer"><p>Prioritize by (blast radius of a bug × historical incident rate × how business-critical the logic is) — billing/pricing calculations, auth/authorization checks, and data-integrity-critical transforms are typical candidates, versus low-risk UI formatting or logging code where a surviving mutant's real-world cost is low. Run it as a scheduled job on that prioritized subset, track mutation score trend over time per module, and expand the scope only as compute budget and team bandwidth to act on findings allow.</p></div><div class="followup">Follow-up: how would you present a newly-discovered low mutation score on a critical module to a team that's proud of its "90% coverage"?</div></details>
+      </div>
+      <div class="qa-level advanced">
+        <h4>Advanced</h4>
+        <details class="qa"><summary>You're asked to roll out a company-wide coverage policy for a 200-engineer organization. Design one that avoids the gaming failure mode described in the production scenario.</summary><div class="answer"><p>Set line/branch coverage as a low, non-gaming floor (e.g., flag anything under 50-60% as a review flag, not a hard block) to catch genuinely untested code without incentivizing assertion-free tests to hit a high target. Separately, identify a tier of critical modules (by incident history and business impact) and apply mutation testing to that tier only, as a scheduled job with a tracked trend dashboard reviewed by each team monthly, not a per-PR gate. Pair both with a lightweight PR-review norm (a checklist prompt, not an automated gate) asking whether new tests on critical-path code actually assert the specific thing that matters. Explicitly communicate that the coverage percentage is a floor, not a target, to prevent the org from re-converging on gaming behavior under delivery pressure — and track incident rate per module over time as the actual outcome metric, not the coverage number itself.</p></div><div class="followup">Follow-up: how would you measure whether this policy is actually working, a year in?</div></details>
+        <details class="qa"><summary>Design the CI pipeline topology (job graph, caching strategy, required checks) for a monorepo with 40 packages, where a typical PR touches 2-3 packages.</summary><div class="answer"><p>Use an affected-package detection tool (Nx/Turborepo) to compute which packages changed and their dependents, and only run lint/typecheck/test for that affected set rather than the whole monorepo — this is the single biggest lever at this scale, since a 2-3-package PR shouldn't pay for 40 packages' worth of CI. Layer a remote build/task-output cache keyed by content hash on top, so even re-runs of the same affected set across different branches/PRs reuse previous results when inputs haven't changed. Shard whatever test execution remains necessary across parallel runners, balanced by historical run time rather than file count. Required checks should cover only the fast, deterministic, affected-scoped jobs; a slow full-repo nightly job (covering cross-package integration risk the affected-detection might miss) runs separately and non-blocking, with its own alerting if it goes red.</p></div><div class="followup">Follow-up: what's the risk of relying purely on affected-package detection, and how would you mitigate it?</div></details>
+        <details class="qa"><summary>A team claims "we do TDD" but your review of their git history shows production code and test code committed together in single commits, tests clearly written to match existing implementation behavior. How would you verify whether real TDD discipline is happening, and does it matter if it isn't?</summary><div class="answer"><p>Git history granularity is a weak signal either way — disciplined TDD can still be squash-committed as one commit, and separate commits don't prove tests were written first. Better signals: ask the engineer to live-code a small feature TDD-style and observe whether they can actually run a test and watch it fail for the right reason before writing implementation; review whether their test suites tend to have redundant/defensive tests covering cases that were never a real requirement (a tell of test-first thinking) versus suites that suspiciously exactly match the implementation's exact branches with no extra edge-case coverage (a tell of test-after). Whether it matters depends on the goal: if the actual objective is well-tested, low-coupling code with good coverage, and the team reliably achieves that via disciplined test-after instead, the TDD label itself is less important than the outcome — TDD is a means, and a team achieving the same design and coverage outcomes through a different discipline hasn't actually failed the goal.</p></div><div class="followup">Follow-up: are there specific classes of bugs where you'd argue TDD provides a benefit that disciplined test-after structurally cannot?</div></details>
+        <details class="qa"><summary>Your mutation testing job reports a declining mutation score trend over several months on a module with stable, even improving, line coverage. Diagnose the likely cause and your response.</summary><div class="answer"><p>Stable/improving line coverage with declining mutation score implies new tests are being added that execute new code paths (sustaining or growing line coverage) but with assertions weaker than the existing baseline — a common cause is delivery pressure pushing engineers toward coverage-satisfying but low-rigor tests (smoke-test-style assertions) for new features, while the module's surface area and complexity grow faster than assertion quality keeps pace. Respond by reviewing a sample of recently-added tests in that module directly (not just the aggregate metric) to confirm the hypothesis, then address it at the review-process level — a specific review prompt for that module's PRs, or pairing junior engineers writing in that module with someone experienced in mutation-resistant assertion style — rather than purely adding a stricter automated gate, since the root cause is a skill/process gap, not something a threshold alone fixes.</p></div><div class="followup">Follow-up: would you consider this module a candidate for a TDD mandate specifically, versus the rest of the codebase — why?</div></details>
+        <details class="qa"><summary>How would you redesign a required-checks policy for a team that has accumulated 15 required CI checks over two years, several of which are known to be occasionally flaky, causing frequent "just re-run it" merges?</summary><div class="answer"><p>Audit each of the 15 for: historical flake rate (pull CI run history, not anecdote), what unique risk it actually catches versus overlapping with another required check, and its typical run time. Checks with a real, non-overlapping risk signal and low flake rate stay required. Checks with meaningful flake rate get root-caused first (often fixable, per the E2E chapter's trace-based approach) — if genuinely not fixable short-term, move to a tracked non-blocking job with an owner and a re-evaluation date, not silently dropped. Checks that substantially overlap another required check's risk coverage get merged or removed outright, since redundant required checks only add latency and flake-surface without adding safety. The end state should be fewer, faster, higher-signal required checks plus a visible (not hidden) tracked list of what's deliberately non-blocking and why — reversing the "accumulate checks forever" default that produced the problem.</p></div><div class="followup">Follow-up: how would you prevent this same accumulation problem from recurring over the next two years?</div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment">
+        <span class="level-tag">Beginner (30-60 min)</span>
+        <h4>Drill the TDD cycle on a small kata</h4>
+        <p>Pick a small, well-specified problem (FizzBuzz, a string-reversal with Unicode edge cases, or a simple
+        Roman-numeral converter) and implement it using strict red-green-refactor, writing down each cycle.</p>
+        <ul>
+          <li>For every cycle, write the failing test, run it and confirm the failure message, then write only the
+          minimum code to pass.</li>
+          <li>Do at least one deliberate refactor pass after 4-5 cycles, re-running all tests after each change.</li>
+          <li>Keep a short log of each Red/Green/Refactor step as you go.</li>
+        </ul>
+        <p><strong>Acceptance criteria:</strong> a cycle-by-cycle log showing the final design wasn't anticipated
+        up front but emerged from triangulation between tests.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>If you catch yourself writing code that no current test requires, stop — that's the "Green phase discipline" being violated; write the test that would demand it first.</p></div></details>
+        <p><strong>Bonus:</strong> have a colleague review your log and identify any point where you skipped
+        confirming a genuine Red before moving to Green.</p>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Intermediate (2-4 hrs)</span>
+        <h4>Measure the coverage-vs-mutation-score gap on real code</h4>
+        <p>Take an existing small-to-medium module in a personal or work project (ideally one with some business
+        logic, not just UI glue). Run line/branch coverage, then run a mutation testing tool (Stryker for JS/TS,
+        PIT for Java, mutmut for Python) against it.</p>
+        <ul>
+          <li>Record both numbers.</li>
+          <li>Pick 3 surviving mutants and manually verify each represents a real gap — i.e., confirm by hand that
+          introducing that exact bug would not be caught by any existing test.</li>
+          <li>Write one new test per surviving mutant specifically designed to kill it, and confirm it does.</li>
+        </ul>
+        <p><strong>Acceptance criteria:</strong> documented before/after mutation score; a short writeup explaining
+        why line coverage didn't catch what the surviving mutants revealed.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>Modules with many conditionals and arithmetic (pricing, validation, date logic) tend to produce the most illustrative surviving mutants quickly.</p></div></details>
+        <p><strong>Bonus:</strong> propose a mutation-score threshold and scope (which modules) you'd actually
+        recommend gating on for this codebase, with justification.</p>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Advanced (1-2 days)</span>
+        <h4>Design and build a tiered CI pipeline with quarantine and caching</h4>
+        <p>Take a small-to-medium project (yours, or one you build for this exercise) with a CI config on GitHub
+        Actions (or equivalent) and build a complete tiered pipeline.</p>
+        <ul>
+          <li>Implement fail-fast ordering: lint/typecheck/unit before integration before E2E.</li>
+          <li>Add dependency caching keyed on the lockfile hash and measure the before/after pipeline time.</li>
+          <li>Shard at least one test stage across 2+ parallel jobs, balanced by historical run time if your
+          runner supports it.</li>
+          <li>Deliberately introduce one flaky test, then implement a quarantine mechanism: a tag, a separate
+          non-blocking job, and a written policy for when it gets revisited.</li>
+          <li>Document exactly which jobs are required-checks and justify each one in writing.</li>
+        </ul>
+        <p><strong>Acceptance criteria:</strong> pipeline runs green on a clean checkout; measured time improvement
+        from caching/sharding is documented; the quarantine mechanism correctly keeps the flaky test out of the
+        merge-blocking path while still reporting its results somewhere visible.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>GitHub Actions' `needs:` field and a `matrix` strategy cover fail-fast ordering and sharding respectively without needing a third-party tool; `continue-on-error: true` on a job is the simplest non-blocking quarantine mechanism to start with.</p></div></details>
+        <p><strong>Bonus:</strong> add a scheduled (non-blocking) mutation-testing job on one critical module and
+        report its mutation score alongside the regular coverage number, discussing what each one tells you that
+        the other doesn't.</p>
+      </div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet"><ul>
+        <li>TDD cycle: Red (failing test, confirm it fails for the right reason) → Green (minimum code to pass) → Refactor (improve structure, tests stay green).</li>
+        <li>Design emerges via triangulation between accumulated tests, not upfront architecture — untestable code structurally resists the cycle, pushing toward loose coupling as a side effect.</li>
+        <li>Line coverage = lines executed; branch coverage = both paths of every conditional taken — neither verifies assertion correctness, only reach.</li>
+        <li>Mutation testing introduces deliberate bugs ("mutants") and checks if your suite catches them — a surviving mutant proves a real detection gap that line/branch coverage can't see.</li>
+        <li>Coverage percentage is a floor to flag untested code, never a target — optimizing for the number produces gamed, assertion-free tests (Goodhart's law in action).</li>
+        <li>Mutation testing is expensive — run it scheduled, non-blocking, scoped to critical/high-risk modules, not inline on every PR.</li>
+        <li>CI pipeline speed levers, roughly in order of impact: dependency/build caching, fail-fast ordering (cheap checks first), then test parallelization/sharding.</li>
+        <li>Flaky tests get quarantined (tagged, moved to a non-blocking tracked job) with an expiry/review cadence — never left as a silent, ever-growing dumping ground, and never "fixed" with a blanket retry.</li>
+        <li>Required-checks should be fast, deterministic, owned, and deliberately chosen — not an accumulation of every CI job that happens to exist.</li>
+      </ul></div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://martinfowler.com/bliki/TestDrivenDevelopment.html">Martin Fowler — Test Driven Development</a></li>
+        <li><a href="https://stryker-mutator.io/docs/">Stryker Mutator — Mutation Testing Docs</a></li>
+        <li><a href="https://docs.github.com/en/actions/using-workflows/caching-dependencies-to-speed-up-workflows">GitHub Actions — Caching Dependencies</a></li>
+        <li><a href="https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches">GitHub — About Protected Branches (Required Checks)</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="05-e2e-playwright.html"><span class="dir">← Previous</span>E2E Testing with Playwright</a>
+        <a class="next" href="../06-cloud-aws-docker-k8s/index.html"><span class="dir">Next →</span>Cloud, AWS, Docker & K8s</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · Testing</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-typescript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-yaml.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "05-testing", chapterKey: "06-tdd-coverage-ci" });</script>
+</body>
+</html>

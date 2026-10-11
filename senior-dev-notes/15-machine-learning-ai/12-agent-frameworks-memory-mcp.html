@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agent Frameworks, Memory & MCP — Machine Learning & AI — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">Machine Learning & AI</a><span class="sep">›</span>Agent Frameworks, Memory & MCP</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>Agent Frameworks, Memory & MCP</h1>
+      <p class="meta-line"><span>⏱ ~3 hrs</span><span>📍 Chapter 12 of 14</span></p>
+      <p><strong>One-line summary:</strong> Agent frameworks differ mainly in how much control flow they take away
+      from you (graph-based orchestration vs. simple loops vs. a thin SDK), agent memory is just "which parts of
+      the context window do you persist, summarize, or retrieve, and from where" — and MCP is the thing that
+      stops every team from writing a bespoke integration for every tool-times-model combination.</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>By the time you reach this chapter you already know (from <a href="11-ai-agents-from-first-principles.html">chapter
+      11</a>) that an "agent" is nothing more than an LLM call wrapped in a loop with tools and a stopping
+      condition. The frameworks built on top of that loop are where most teams waste months — either
+      over-adopting a heavyweight graph orchestration framework for a problem that's really just three sequential
+      tool calls, or under-investing in memory architecture and shipping an agent that forgets what it was doing
+      the moment the conversation gets long. Interviewers ask about this precisely because "should we use
+      LangGraph or just write the loop ourselves" and "how do you give an agent persistent memory without blowing
+      the context budget" are real decisions senior engineers make weekly in 2025-26 AI teams. MCP sits
+      underneath all of this as the plumbing standard — not knowing what it actually standardizes (and why it
+      exists) is an immediate signal that your agent experience is shallow.</p>
+      <div class="box why"><h4>Why</h4><p>Every agent framework is solving the same underlying problem — "how do I
+      manage state, control flow, and tool access around a model that only ever does next-token prediction" — with
+      different opinions about how much of that should be implicit (a framework's graph engine) versus explicit
+      (your own code). The "right" framework is a tradeoff between flexibility and the amount of machinery you
+      don't have to build yourself, not a popularity contest.</p></div>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>Requires <a href="11-ai-agents-from-first-principles.html">AI Agents from First Principles</a> and
+      <a href="10-context-engineering.html">Context Engineering</a>. Helpful: <a href="09-vector-databases-and-rag.html">Vector
+      Databases & RAG</a> (for memory retrieval) and <a href="08-llm-observability-tracing.html">LLM Observability
+      & Tracing</a> (for debugging multi-step agent runs). Leads into <a href="13-finetuning-and-rl.html">Fine-tuning
+      & RL</a>.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="framework-approaches">Three shapes of agent framework</h3>
+      <p>Strip away branding and nearly every agent framework in 2025-26 is one of three underlying shapes:</p>
+      <ul>
+        <li><strong>Graph/state-machine orchestration</strong> (LangGraph-style) — you define the agent as an
+        explicit directed graph of nodes (each node is a function: call a model, call a tool, branch on a
+        condition) and edges (including conditional edges and cycles). State is a typed object threaded through
+        every node. This buys you: explicit, inspectable control flow; easy branching/looping/parallel
+        sub-graphs; built-in checkpointing (persist state at any node, resume later, "time travel" to an earlier
+        state). The cost: more upfront structure than many agents need, and a learning curve around the graph
+        abstraction itself.</li>
+        <li><strong>Simple loop-based frameworks</strong> — a `while` loop: call the model with the current
+        message history and tool definitions, if it returns a tool call execute it and append the result, repeat
+        until it returns a final answer or a stop condition fires. No graph, no nodes — just messages in, tool
+        results appended, loop again. This is what chapter 11's from-scratch agent already is. Frameworks in this
+        category add conveniences (tool-calling boilerplate, retry/error handling, streaming) without taking away
+        your ability to see and modify the loop itself.</li>
+        <li><strong>Thin SDK style</strong> (Anthropic Agent SDK style) — the framework gives you the primitives
+        (a model client with native tool-use, a way to register tools, a way to manage a conversation/session) but
+        deliberately does <em>not</em> impose a graph or an opinionated loop structure on top. You write the
+        orchestration logic yourself using building blocks the SDK hands you — closest in spirit to "a really good
+        standard library for building agents" rather than "a framework that owns your control flow."</li>
+      </ul>
+      <p>The real decision isn't "which framework is best" — it's "how much of my control flow do I want a
+      framework to own." A graph framework is worth its complexity once you have genuine branching/parallel/cyclic
+      workflows (e.g. a multi-agent pipeline with conditional routing and human-in-the-loop checkpoints). A simple
+      loop is usually sufficient — and much easier to debug — for a single agent calling tools until done. A thin
+      SDK is the right call when you need maximum control and are willing to write more of the orchestration
+      yourself, often because your workflow doesn't map cleanly onto anyone else's graph abstraction.</p>
+
+      <h3 id="memory-architectures">Memory architectures: short-term vs. long-term</h3>
+      <p>"Agent memory" is an overloaded term; it collapses into two genuinely different problems:</p>
+      <ul>
+        <li><strong>Short-term / working memory</strong> — the current conversation's message history, which
+        lives directly in the context window. The problem it creates is purely a budget one: long-running agent
+        sessions accumulate tool-call results, intermediate reasoning, and turns until they exceed the context
+        window or degrade quality via lost-in-the-middle. Mitigations: sliding-window truncation (drop oldest
+        turns), periodic summarization (collapse older turns into a compact summary, keep recent turns verbatim),
+        or explicit "scratchpad" compaction where an agent is instructed to periodically condense its own state.</li>
+        <li><strong>Long-term / persistent memory</strong> — information that should survive past the current
+        session: user preferences, facts learned in a previous conversation, prior decisions. This cannot live in
+        the context window by default (it's not there until something puts it there), so it needs an external
+        store plus a retrieval mechanism to pull relevant memories back into context when needed.</li>
+      </ul>
+
+      <h3 id="memory-storage">Vector-backed vs. structured long-term memory</h3>
+      <p>Two dominant patterns for the long-term store, often combined:</p>
+      <ul>
+        <li><strong>Vector-store-backed memory</strong> — each memory (a fact, an episode, a summarized
+        interaction) is embedded and stored in a vector DB, exactly like RAG document chunks (see <a
+        href="09-vector-databases-and-rag.html">chapter 9</a>). At the start of a new turn/session, the current
+        query or context is embedded and used to retrieve the top-k most relevant past memories, which are
+        injected into the prompt. This is good for fuzzy, semantic recall ("has this user ever mentioned a
+        deadline preference") and scales to large memory stores, but inherits every RAG failure mode: retrieval
+        miss, noise, no guarantee of exhaustive recall.</li>
+        <li><strong>Structured memory</strong> — memory stored as explicit key-value facts or a small schema
+        (e.g. a `user_profile` JSON object: `{timezone, preferred_language, past_purchases}`), updated via
+        explicit writes (the agent, or a separate extraction step, decides "this is worth remembering" and writes
+        a structured field) rather than dumping raw text into a vector store. This is good for information you
+        need reliably and exhaustively (not "probably retrieved if semantically similar") — things like account
+        settings or hard constraints — but requires upfront schema design and doesn't generalize to arbitrary
+        unstructured facts the way embeddings do.</li>
+      </ul>
+      <p>Production agent memory systems typically run both: structured memory for a small set of
+      must-always-be-present facts, vector memory for open-ended "might be relevant" recall, with an explicit
+      write step (often an LLM call itself: "did anything in this conversation deserve to be remembered, and in
+      which store") deciding what gets persisted at all — most of a conversation should <em>not</em> become a
+      permanent memory.</p>
+
+      <h3 id="mcp">The Model Context Protocol (MCP)</h3>
+      <p>Before MCP, every team that wanted an LLM to use an external tool (a database, a SaaS API, a file system)
+      wrote a bespoke integration: custom tool-definition JSON, custom request/response glue code, specific to
+      that one model's tool-calling format. Multiply N tools by M different model providers/clients and you get
+      N×M bespoke integrations — the exact problem USB solved for hardware peripherals and ODBC/JDBC solved for
+      databases: a standard interface so tool builders and model/client builders don't each need bespoke
+      knowledge of the other side.</p>
+      <p>MCP standardizes three things: (1) how a <strong>tool/resource provider</strong> (an "MCP server")
+      describes what it offers — tools (callable functions with typed schemas), resources (readable data, like
+      files or query results), and prompts (reusable prompt templates); (2) how a <strong>client</strong> (an
+      agent host — an IDE, a chat app, your own agent code) discovers and invokes those capabilities over a
+      standard JSON-RPC-based wire protocol; (3) the session/transport layer connecting them (stdio for local
+      processes, HTTP/SSE for remote servers). The result: write one MCP server for "our internal ticketing
+      system" and every MCP-compatible agent host can use it immediately, with no per-host integration code —
+      the N×M problem collapses to N + M.</p>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>An MCP interaction, mechanically, end to end:</p>
+      <ol>
+        <li><strong>Connection & initialization</strong>: the client (agent host) establishes a transport
+        connection to the server (spawns a local stdio subprocess, or opens an HTTP/SSE connection to a remote
+        server) and sends an `initialize` request declaring protocol version and client capabilities; the server
+        responds with its own capabilities (which tools/resources/prompts it offers).</li>
+        <li><strong>Discovery</strong>: the client calls `tools/list` (and `resources/list`, `prompts/list`) to
+        get the server's full catalog — each tool described with a name, description, and a JSON Schema for its
+        input parameters, exactly analogous to a model's native tool-use schema.</li>
+        <li><strong>Exposure to the model</strong>: the client translates the MCP tool catalog into whatever
+        tool-definition format the underlying LLM's API expects (e.g. Anthropic's `tools` parameter) and includes
+        it in the model call — this is the layer that makes MCP model-agnostic: the server never needs to know
+        which model is on the other end.</li>
+        <li><strong>Invocation</strong>: when the model emits a tool-call matching an MCP tool, the client sends
+        a `tools/call` request to the MCP server with the tool name and arguments; the server executes (hits a
+        real database, calls a real API, reads a real file) and returns a structured result (text, or a richer
+        content type like an image or an embedded resource).</li>
+        <li><strong>Result round-trip</strong>: the client appends the tool result to the conversation and loops
+        back into the model exactly as in the chapter 11 agent loop — MCP governs only the tool-discovery and
+        tool-execution plumbing, not the agent's reasoning loop itself.</li>
+      </ol>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+flowchart TB
+  subgraph Before["Before MCP: N x M bespoke integrations"]
+    T1[Tool A] -.-> M1[Model/Host 1]
+    T1 -.-> M2[Model/Host 2]
+    T2[Tool B] -.-> M1
+    T2 -.-> M2
+    T3[Tool C] -.-> M1
+    T3 -.-> M2
+  end
+      </div>
+      <div class="mermaid">
+sequenceDiagram
+  participant Host as Agent Host (Client)
+  participant LLM as Model
+  participant MCP as MCP Server
+  Host->>MCP: initialize
+  MCP->>Host: capabilities
+  Host->>MCP: tools/list
+  MCP->>Host: tool catalog (JSON Schema)
+  Host->>LLM: call model with translated tool defs
+  LLM->>Host: tool_call(name, args)
+  Host->>MCP: tools/call(name, args)
+  MCP->>Host: result
+  Host->>LLM: append result, continue loop
+  LLM->>Host: final answer
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-python"># A minimal MCP server exposing one tool, using the official Python SDK pattern.
+# This is what "write once, every MCP client can use it" looks like in practice.
+from mcp.server.fastmcp import FastMCP
+
+mcp = FastMCP("ticketing-tools")
+
+@mcp.tool()
+def get_ticket(ticket_id: str) -> dict:
+    """Fetch a support ticket by ID, including status and last update."""
+    # In production: real DB/API call. Kept trivial here for illustration.
+    return {"id": ticket_id, "status": "open", "last_update": "2026-09-30"}
+
+@mcp.tool()
+def create_ticket(title: str, description: str, priority: str = "normal") -> dict:
+    """Create a new support ticket and return its generated ID."""
+    new_id = "TCK-10432"  # pretend write
+    return {"id": new_id, "title": title, "priority": priority}
+
+if __name__ == "__main__":
+    mcp.run(transport="stdio")  # any MCP-compatible host can now use both tools
+
+
+# --- Structured + vector long-term memory, combined write-time decision ---
+import json
+
+class AgentMemory:
+    def __init__(self, vector_store, llm_client):
+        self.vector_store = vector_store      # semantic recall store
+        self.structured = {}                  # must-always-be-present facts
+        self.llm = llm_client
+
+    def maybe_persist(self, conversation_turn: str, user_id: str):
+        """Ask a cheap model call to classify what (if anything) is worth
+        remembering, and route it to the right store. Most turns persist nothing."""
+        decision = self.llm.classify_memory_worthiness(conversation_turn)
+        if decision.kind == "structured_fact":
+            # e.g. {"timezone": "IST"} -- exact, must always be present
+            self.structured.setdefault(user_id, {}).update(decision.fields)
+        elif decision.kind == "episodic":
+            # fuzzy, semantically-searchable recall
+            self.vector_store.upsert(
+                text=decision.summary,
+                metadata={"user_id": user_id, "ts": decision.timestamp},
+            )
+        # else: nothing worth persisting -- the common case
+
+    def recall(self, query: str, user_id: str, k: int = 5) -> str:
+        structured = self.structured.get(user_id, {})
+        episodic = self.vector_store.search(query, filter={"user_id": user_id}, top_k=k)
+        return f"Known facts: {json.dumps(structured)}\nRelevant past context: {episodic}"
+
+
+# BAD: dumping the entire raw conversation history into a vector store every turn.
+# Floods recall with noise, inflates storage, and makes "what does the agent actually
+# know about this user" unanswerable without re-reading hundreds of raw snippets.
+def bad_persist_everything(vector_store, full_transcript, user_id):
+    vector_store.upsert(text=full_transcript, metadata={"user_id": user_id})
+</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4><p>A team builds a customer-support agent that integrates 6 internal
+      tools (ticketing, billing, user lookup, refund processing, knowledge base, escalation) directly against
+      their chat product's own tool-calling API. Six months later, leadership wants the same tools usable from
+      an internal Slack bot and a separate ops dashboard agent — meaning two more bespoke integrations against
+      the same six tools, each with its own auth handling and schema translation bugs. The team migrates the six
+      tools to MCP servers (one server per internal system, each exposing its existing tools unchanged) and both
+      new surfaces become MCP clients — zero additional tool-integration code, only host-side wiring. The real
+      payoff shows up a year later when a 7th tool (a fraud-detection lookup) is added once, as one more MCP
+      server, and is immediately available to all three existing hosts plus a brand-new agent nobody had planned
+      for yet.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Reaching for a graph-orchestration framework (LangGraph-style) on
+      day one for an agent that's really just "call tools in a loop until done." The graph abstraction adds real
+      value once you have genuine branching, parallel sub-agents, or need checkpoint/resume — but for a single
+      linear agent it adds a learning curve and an extra layer of indirection between you and the actual message
+      history, which is often exactly what you need to see clearly while debugging.</p></div>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Treating vector-backed memory as exhaustive recall. "The agent
+      should remember the user said X three weeks ago" is a reasonable expectation for structured memory
+      (explicit, guaranteed) but an unreliable one for vector memory (probabilistic retrieval, subject to the
+      exact same miss/noise failure modes as RAG). Teams that rely solely on embedding similarity for
+      must-not-forget facts will intermittently "forget" them the moment phrasing drifts enough to drop below
+      the retrieval threshold.</p></div>
+      <ul>
+        <li>Persist memory selectively (an explicit write decision), not by default — most conversation turns
+        contain nothing worth remembering long-term, and persisting everything degrades retrieval quality.</li>
+        <li>An MCP server should never assume which model is calling it — keep tool descriptions and schemas
+        self-contained and model-agnostic, since the same server may serve Claude, GPT, or a local model.</li>
+        <li>Budget short-term memory (summarize/truncate) proactively on long-running agent sessions rather than
+        discovering the context-window ceiling in production when a session finally fails.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>Graph orchestration framework</td><td>Genuine branching/parallel/cyclic multi-agent workflows, need checkpoint/resume</td><td>Single linear agent loop</td><td>Simple loop-based framework or hand-rolled loop</td></tr>
+        <tr><td>Simple loop framework</td><td>One agent, sequential tool use, need easy debuggability</td><td>Complex conditional multi-agent pipelines</td><td>Graph orchestration</td></tr>
+        <tr><td>Vector-backed memory</td><td>Fuzzy semantic recall over large, open-ended memory</td><td>Facts that must always be reliably present</td><td>Structured key-value memory</td></tr>
+        <tr><td>Bespoke per-host tool integration</td><td>One-off, single-host prototype</td><td>Tools used by 2+ hosts/clients, or likely to grow</td><td>MCP server</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+
+      <div class="qa-level basic">
+        <h4>Basic</h4>
+        <details class="qa"><summary>What are the three broad "shapes" of agent framework, and what's the core axis they differ on?</summary><div class="answer"><p>Graph/state-machine orchestration, simple loop-based frameworks, and thin SDKs. The core axis is how much control flow the framework takes away from you versus leaves in your own code — a graph framework owns the most, a thin SDK the least.</p></div><div class="followup">Follow-up: which shape is closest to the from-scratch agent loop built in the previous chapter?</div></details>
+        <details class="qa"><summary>What's the difference between short-term and long-term agent memory?</summary><div class="answer"><p>Short-term/working memory is the current conversation's message history living directly in the context window, limited by context budget. Long-term/persistent memory is information meant to survive past the current session, which requires an external store plus a retrieval mechanism since it isn't automatically in context.</p></div><div class="followup">Follow-up: name one mitigation for short-term memory running out of context budget.</div></details>
+        <details class="qa"><summary>What problem does MCP solve, in one sentence?</summary><div class="answer"><p>It standardizes how tools/data sources describe and expose themselves and how agent hosts discover and invoke them, collapsing the N tools times M models/clients bespoke-integration problem down to N + M.</p></div><div class="followup">Follow-up: name the three kinds of capability an MCP server can expose.</div></details>
+        <details class="qa"><summary>What are the two dominant patterns for long-term memory storage?</summary><div class="answer"><p>Vector-store-backed memory (embed and semantically retrieve past facts/episodes, like RAG) and structured memory (explicit key-value facts in a defined schema, written and read exactly, not retrieved by similarity).</p></div><div class="followup">Follow-up: which pattern would you use for "the user's timezone" versus "something the user mentioned once in passing"?</div></details>
+        <details class="qa"><summary>In the MCP protocol flow, what's the purpose of the `tools/list` call?</summary><div class="answer"><p>It lets the client discover the server's full tool catalog — names, descriptions, and JSON Schema input definitions — before translating that catalog into whatever tool-definition format the underlying model's API expects.</p></div><div class="followup">Follow-up: why does the MCP server not need to know which specific LLM is on the other end of the connection?</div></details>
+        <details class="qa"><summary>Why would a team choose a simple loop-based framework over a graph orchestration framework for a basic single-agent tool-use workflow?</summary><div class="answer"><p>A simple loop is easier to read, debug, and reason about for linear tool-calling workflows — the graph abstraction's value (explicit branching, cycles, checkpoint/resume) isn't needed when there's no real branching, so adopting it just adds an extra layer of indirection with no payoff.</p></div><div class="followup">Follow-up: at what point does that calculus flip in favor of a graph framework?</div></details>
+      </div>
+
+      <div class="qa-level medium">
+        <h4>Medium</h4>
+        <details class="qa"><summary>Explain mechanically what happens between a model emitting a tool-call and an MCP server returning a result.</summary><div class="answer"><p>The client (agent host) receives the model's tool-call (name + arguments) and translates it into an MCP `tools/call` request sent to the appropriate MCP server over the established transport (stdio or HTTP/SSE). The server executes the real action (DB query, API call, file read) and returns a structured result back to the client, which appends it to the conversation and loops back into the model — MCP governs the discovery/invocation plumbing between client and server; the agent's own reasoning loop (chapter 11) is unchanged by MCP's presence.</p></div><div class="followup">Follow-up: at what point in this flow does model-agnosticism actually happen?</div></details>
+        <details class="qa"><summary>Why can't you rely solely on vector-backed memory for information an agent must never forget?</summary><div class="answer"><p>Vector memory retrieval is probabilistic and similarity-based — it inherits RAG's exact failure modes (retrieval miss if phrasing drifts too far from how the fact was originally stored, noise from unrelated-but-similar memories). A fact the system is relying on being present 100% of the time needs a guaranteed-present mechanism: structured, explicitly-keyed storage read deterministically, not a "probably comes back if semantically close enough" lookup.</p></div><div class="followup">Follow-up: how would you decide, for a new piece of information an agent learns, which store it belongs in?</div></details>
+        <details class="qa"><summary>Why does checkpointing matter more for graph-based agent frameworks than for simple loop-based ones?</summary><div class="answer"><p>A graph framework's explicit, typed state object threaded through named nodes gives you a natural unit to serialize and resume from — "resume from node X with this state." A simple loop's state is often just a flat message list, which can technically be checkpointed too, but graph frameworks build this in as a first-class feature because their structured state representation makes partial-resume, branching-resume, and "time travel" debugging tractable in a way an undifferentiated message list doesn't as cleanly support.</p></div><div class="followup">Follow-up: what's a concrete scenario where resuming from a mid-graph checkpoint (rather than restarting the whole run) matters in production?</div></details>
+        <details class="qa"><summary>What's the risk of writing every conversation turn into long-term memory by default, even when using a good vector store?</summary><div class="answer"><p>It floods the memory store with low-signal content, which dilutes retrieval quality (more candidates to search through, more near-duplicate or irrelevant memories competing for top-k slots) and makes the system's effective "what does it actually know" unauditable without reading through a huge volume of raw snippets. An explicit write-time relevance decision keeps the memory store a curated signal rather than a transcript dump.</p></div><div class="followup">Follow-up: who or what should make that write-time decision — the main agent itself, or a separate classification step? What are the tradeoffs?</div></details>
+        <details class="qa"><summary>How does MCP's transport choice (stdio vs. HTTP/SSE) map to different deployment scenarios?</summary><div class="answer"><p>stdio is used when the MCP server runs as a local subprocess alongside the client (e.g. a tool that reads local files or runs local commands) — the client spawns it directly and communicates over its stdin/stdout. HTTP/SSE is used for remote servers (a shared internal tool server, a SaaS-hosted MCP endpoint) that multiple clients across machines need to reach over a network, supporting the same discovery/invocation protocol over a network-appropriate transport.</p></div><div class="followup">Follow-up: what security considerations change when moving from a local stdio server to a remote HTTP one?</div></details>
+      </div>
+
+      <div class="qa-level advanced">
+        <h4>Advanced</h4>
+        <details class="qa"><summary>Design the memory architecture for a long-running personal-assistant agent that needs to recall both exact facts (user's preferred meeting times) and fuzzy context (general tone/preferences from past conversations), while keeping cost and latency bounded as memory grows over months.</summary><div class="answer"><p>Split into structured memory for exact, bounded-size facts (meeting time preferences, hard constraints) read deterministically on every session with negligible cost, and vector-backed episodic memory for fuzzy context, retrieved only the top-k most relevant items per query rather than growing unboundedly in the prompt. Add a write-time classification step (cheap, fast model call) that decides per-turn whether anything is worth persisting and to which store, keeping the vector store's growth proportional to genuinely novel information rather than raw conversation volume. Periodically run a consolidation/summarization pass over episodic memory (collapsing many old similar entries into fewer summary entries) to bound both storage growth and retrieval latency as months of history accumulate, analogous to garbage collection for memory that's still occasionally useful but no longer needs full-fidelity storage.</p></div><div class="followup">Follow-up: how would you test that consolidation isn't silently discarding information that later turns out to matter?</div></details>
+        <details class="qa"><summary>A team wants to expose 10 internal tools to 4 different internal agent products. Walk through why MCP is the right call here versus bespoke integrations, and what the migration actually involves.</summary><div class="answer"><p>Without MCP this is 10×4 = 40 potential bespoke integration paths (each product's tool-calling format against each tool's API), with auth, schema translation, and error handling duplicated and drifting independently across all 40. With MCP, each of the 10 tools becomes one MCP server (unchanged underlying logic, just wrapped with MCP's tool/resource exposure), and each of the 4 products becomes one MCP client implementation — reducing bespoke work to roughly 10 + 4 = 14 integration points, with any new 11th tool or 5th product adding only 1 more unit of work instead of 4 or 10. Migration mechanically involves: wrapping each tool's existing logic in an MCP server (`tools/list`-discoverable, `tools/call`-invokable), standing up transport (stdio for same-host, HTTP/SSE for shared/remote), and updating each product to be a generic MCP client rather than hardcoding tool-specific logic.</p></div><div class="followup">Follow-up: what doesn't MCP solve here — i.e. what integration work remains even after the migration?</div></details>
+        <details class="qa"><summary>When would you justify building a custom graph-orchestration layer in-house rather than adopting an existing framework like LangGraph, for a senior team with real engineering capacity?</summary><div class="answer"><p>Justified when your control-flow needs are genuinely specific enough that an existing framework's abstraction fights you more than it helps — e.g. a workflow with domain-specific scheduling/priority semantics across sub-agents that doesn't map cleanly onto a generic node/edge graph, or hard requirements (specific checkpoint storage backend, specific observability integration, specific latency characteristics) that an off-the-shelf framework doesn't support without heavy forking. Not justified merely because "we want full control" in the abstract — that's a maintenance burden (reinventing checkpointing, state management, error handling) without a corresponding need the existing framework actually fails to meet. The honest test: can you point to a concrete scenario the existing framework's graph model cannot express, versus "we'd just prefer to own it"?</p></div><div class="followup">Follow-up: what's a middle path between "adopt wholesale" and "build from scratch" that captures most of the benefit of each?</div></details>
+        <details class="qa"><summary>How would you debug an agent whose long-term memory retrieval is returning technically-relevant-looking but ultimately unhelpful memories, degrading answer quality over time as the memory store grows?</summary><div class="answer"><p>First separate it into the same retrieval-vs-generation decomposition used for RAG (chapter 9): is the memory store actually surfacing the right memories at all (measure recall against a labeled set of "this query should retrieve that memory" pairs), or is retrieval fine but the agent is using retrieved memories poorly in generation? If it's a retrieval problem, suspect memory store growth diluting relevance — stale, redundant, or overly granular memories crowding out signal — and investigate whether a consolidation/summarization pass or stricter write-time filtering (only persisting genuinely novel, high-value facts) would reduce noise. If retrieval is accurate but generation quality still degrades, check whether the agent is being handed too many memories per turn (its own lost-in-the-middle problem) rather than the most load-bearing few.</p></div><div class="followup">Follow-up: how would you build a regression test that catches this kind of memory-quality degradation before it reaches users, analogous to a RAG eval harness?</div></details>
+        <details class="qa"><summary>What are the security implications of an agent host connecting to a third-party MCP server it doesn't control, and how would you mitigate them?</summary><div class="answer"><p>A third-party MCP server is effectively untrusted code/infrastructure the agent will call with real arguments and receive real results from — a malicious or compromised server could return crafted results designed to manipulate the agent's downstream reasoning (prompt-injection-via-tool-result), exfiltrate data passed as tool arguments, or simply misbehave. Mitigations: treat MCP tool results as untrusted input requiring the same scrutiny as any other external data the model consumes (don't blindly trust/execute follow-on instructions embedded in a tool result), scope what arguments/credentials are ever sent to third-party servers (least privilege, scoped tokens rather than broad API keys), and prefer vetted/first-party servers for anything touching sensitive data, treating unvetted third-party MCP servers similarly to an unvetted npm package in a supply chain.</p></div><div class="followup">Follow-up: how is this risk similar to, and different from, the prompt-injection risk already present in RAG-retrieved documents?</div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment">
+        <span class="level-tag">Beginner (30-60 min)</span>
+        <h4>Loop vs. graph, on paper</h4>
+        <p>Take an agent workflow you've designed or used (even a hypothetical one — e.g. "research a topic, draft
+        a summary, have a second pass fact-check it, revise if issues found") and sketch it twice: once as a
+        simple linear loop (pseudocode), once as an explicit graph with nodes and conditional edges.</p>
+        <ul>
+          <li>Identify at least one point in the workflow where the graph version's explicit branching/cycling
+          genuinely simplifies something the loop version has to handle awkwardly with if/else and flags.</li>
+        </ul>
+        <p><strong>Acceptance criteria:</strong> both sketches written out, plus a short written judgment on which
+        you'd actually ship for this specific workflow and why.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>The fact-check-and-revise loop is a good place to look — it's a cycle with a conditional exit, which is exactly where graph frameworks are designed to shine.</p></div></details>
+        <p><strong>Bonus:</strong> add a human-in-the-loop checkpoint to the graph version and describe what state would need to be persisted to support resuming after a human approves.</p>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Intermediate (2-4 hrs)</span>
+        <h4>Build a minimal MCP server and connect a client to it</h4>
+        <p>Using the official MCP SDK (Python or TypeScript), build an MCP server exposing 2-3 real tools (not
+        toy stubs — e.g. read a local file, query a small local SQLite DB, call a public API). Connect it to an
+        MCP-compatible client/host and run a real multi-step interaction through it.</p>
+        <ul>
+          <li>Demonstrate the `tools/list` discovery step and show the translated tool schema the client builds
+          for the underlying model.</li>
+          <li>Run at least one interaction where the model chains two of your tools (output of one informs the
+          call to the next).</li>
+        </ul>
+        <p><strong>Acceptance criteria:</strong> working server + client session transcript showing discovery,
+        at least one multi-tool chain, and the raw `tools/call` request/response pairs.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>Start from the official MCP SDK's quickstart example server and modify its tools rather than writing the protocol handling yourself — the protocol plumbing is the part not worth reinventing for this exercise.</p></div></details>
+        <p><strong>Bonus:</strong> add a resource (not just a tool) to your server and show the client reading it.</p>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Advanced (1-2 days)</span>
+        <h4>Hybrid memory system with write-time filtering</h4>
+        <p>Build an agent with a hybrid memory system: structured memory for a small fixed schema of
+        must-always-be-present facts, vector-backed memory for open-ended episodic recall, and an explicit
+        write-time classification step deciding what gets persisted where (or discarded) after each turn.</p>
+        <ul>
+          <li>Run a 20+ turn synthetic conversation covering a mix of trivial small talk, exact facts worth
+          remembering, and fuzzy preferences.</li>
+          <li>Measure: what fraction of turns got persisted at all, and to which store.</li>
+          <li>Build 10 recall queries and check whether structured facts come back deterministically (100%) and
+          whether episodic recall's precision/recall is measurably reasonable (reuse your RAG eval approach from
+          chapter 9).</li>
+        </ul>
+        <p><strong>Acceptance criteria:</strong> working hybrid memory system, persistence-rate report, and a
+        recall eval table comparing structured vs. episodic accuracy.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>Keep the write-time classifier's prompt strict (ask for a JSON decision: discard / structured-field / episodic-summary) so you can measure persistence rate programmatically instead of eyeballing transcripts.</p></div></details>
+        <p><strong>Bonus:</strong> add a consolidation pass that runs after the 20 turns and collapses near-duplicate episodic memories, then re-run your recall eval and report whether precision improved.</p>
+      </div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet">
+        <ul>
+          <li>Three framework shapes: graph orchestration (explicit control flow, checkpointing), simple loop (easiest to debug), thin SDK (max control, most DIY).</li>
+          <li>Pick graph frameworks for real branching/cycles/parallel sub-agents; a simple loop is usually enough otherwise.</li>
+          <li>Short-term memory = context window budget problem (truncate/summarize); long-term memory = needs an external store + retrieval.</li>
+          <li>Vector memory = fuzzy, probabilistic, scalable recall. Structured memory = exact, guaranteed, must be schema-designed.</li>
+          <li>Persist memory selectively via an explicit write-time decision — most turns deserve to be forgotten.</li>
+          <li>MCP standardizes tool/resource/prompt exposure + discovery + invocation, collapsing N tools × M models into N + M.</li>
+          <li>MCP flow: initialize → tools/list (discovery) → model call with translated schema → tools/call (invocation) → result appended, loop continues.</li>
+          <li>MCP servers are model-agnostic by design — never bake assumptions about which LLM is calling into the server.</li>
+          <li>Treat third-party MCP tool results as untrusted input — same prompt-injection discipline as RAG-retrieved documents.</li>
+        </ul>
+      </div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://modelcontextprotocol.io/">Model Context Protocol — official specification & docs</a></li>
+        <li><a href="https://docs.anthropic.com/en/docs/agents-and-tools/mcp">Anthropic: MCP overview and connecting tools</a></li>
+        <li><a href="https://langchain-ai.github.io/langgraph/">LangGraph documentation</a></li>
+        <li><a href="https://docs.anthropic.com/en/docs/agents-and-tools/claude-agent-sdk/overview">Claude Agent SDK overview</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="11-ai-agents-from-first-principles.html"><span class="dir">← Previous</span>AI Agents from First Principles</a>
+        <a class="next" href="13-finetuning-and-rl.html"><span class="dir">Next →</span>Fine-tuning & RL</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · Machine Learning & AI</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "15-machine-learning-ai", chapterKey: "12-agent-frameworks-memory-mcp" });</script>
+</body>
+</html>

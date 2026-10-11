@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>npm &amp; Package Management — Node.js Fundamentals — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">Node.js Fundamentals</a><span class="sep">›</span>npm &amp; Package Management</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>npm &amp; Package Management</h1>
+      <p class="meta-line"><span>⏱ 1.5 hrs</span><span>📍 Chapter 2 of 6</span></p>
+      <p><strong>One-line summary:</strong> package.json and package-lock.json together are a contract — one
+      states your intent (version ranges), the other pins exactly what was actually installed — and conflating
+      <code>npm install</code> with <code>npm ci</code>, or misreading a semver range, is a common source of
+      "works locally, breaks in CI" and dependency-drift incidents at scale.</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>You use npm daily, but can you explain why a CI pipeline should run <code>npm ci</code> and never
+      <code>npm install</code>? Can you explain, precisely, what <code>^4.2.1</code> actually permits and forbids?
+      Senior engineers get asked these not as trivia but because dependency management mistakes cause real
+      production incidents — supply-chain risk, silent breaking changes from an under-constrained semver range,
+      and non-reproducible builds across environments. This chapter is the "say it correctly under pressure"
+      refresher for a system you use every day but rarely have to explain out loud.</p>
+      <div class="box why"><h4>Why</h4><p>A lockfile isn't a formality — it's what makes "it worked in CI last
+      Tuesday" reproducible on Thursday. Without it (or by routinely regenerating it carelessly), two developers'
+      <code>npm install</code> runs at different times can silently resolve different transitive dependency
+      versions within the same semver ranges, producing bugs that only reproduce on one machine.</p></div>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>Basic command-line comfort; familiarity with running <code>npm install</code> day to day. Related in this
+      topic: <a href="01-nodejs-basics-runtime-modules.html">Node.js Basics: Runtime &amp; Modules</a> (package.json's
+      <code>"type"</code> field), <a href="05-express-basics-routing-middleware.html">Express Basics</a> (installing
+      and versioning a real framework dependency). Related elsewhere:
+      <a href="../06-cloud-aws-docker-k8s/07-advanced-cicd.html">Advanced CI/CD</a> for how lockfiles interact with
+      CI caching, and <a href="../11-web-fundamentals/05-git-and-version-control.html">Git &amp; Version Control</a>
+      for why the lockfile must always be committed.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="package-json">package.json: the declared contract</h3>
+      <p>package.json declares your project's identity (name, version), its runtime requirements
+      (<code>"engines"</code>), its module type (<code>"type"</code>), its entry points (<code>"main"</code>,
+      <code>"exports"</code>), its scripts, and crucially two separate dependency lists:
+      <code>"dependencies"</code> (needed at runtime, installed in production) and <code>"devDependencies"</code>
+      (needed only for development/build/test — linters, test runners, bundlers, type definitions). The
+      distinction matters operationally: <code>npm install --omit=dev</code> (or <code>NODE_ENV=production npm
+      install</code> historically) skips devDependencies, keeping production images smaller and reducing
+      supply-chain surface area in what actually ships.</p>
+
+      <h3 id="semver">Semantic versioning and npm's range syntax</h3>
+      <p>Semver is <code>MAJOR.MINOR.PATCH</code>: major = breaking changes, minor = backward-compatible new
+      features, patch = backward-compatible bug fixes — by convention and promise, not enforced by the runtime.
+      npm's default range operator, <strong>caret</strong> <code>^4.2.1</code>, allows updates that don't change
+      the leftmost non-zero digit — so <code>^4.2.1</code> permits <code>4.2.2</code> through anything
+      <code>&lt;5.0.0</code>, but <code>^0.4.2</code> only permits up to <code>&lt;0.5.0</code> (zero-major
+      packages are treated as unstable, so minor bumps there are allowed to break things per convention).
+      <strong>Tilde</strong> <code>~4.2.1</code> is narrower: only patch updates, <code>&gt;=4.2.1 &lt;4.3.0</code>.
+      Exact pins (<code>4.2.1</code>, no prefix) allow nothing. In practice: <code>^</code> is the npm default and
+      fine for most dependencies; pin exactly for things where any drift is unacceptable (rare), and rely on the
+      lockfile — not the range — for actual reproducibility.</p>
+
+      <h3 id="lockfile-ci-vs-install">package-lock.json, and npm install vs npm ci</h3>
+      <p>package-lock.json records the <em>exact</em> resolved version (and integrity hash) of every package in
+      the full dependency tree — direct and transitive — as actually installed. <code>npm install</code> reads
+      package.json, resolves ranges (consulting the lockfile as a strong hint but is allowed to update it if
+      ranges allow a newer version or the file is missing/inconsistent), and may modify
+      <code>package-lock.json</code>. <code>npm ci</code> ("clean install") does the opposite: it requires an
+      existing, valid lockfile, installs <em>exactly</em> what it specifies with no range resolution or updating,
+      deletes <code>node_modules</code> first for a guaranteed-clean install, and fails outright if
+      package.json and package-lock.json are out of sync. This is why every production CI pipeline should use
+      <code>npm ci</code>, never <code>npm install</code> — it's faster (no resolution step) and, more importantly,
+      byte-for-byte reproducible.</p>
+
+      <h3 id="scripts-npx">npm scripts and npx</h3>
+      <p>The <code>"scripts"</code> object in package.json defines named shell commands run via <code>npm run
+      &lt;name&gt;</code> (with <code>start</code> and <code>test</code> getting a shorthand: <code>npm start</code>,
+      <code>npm test</code>). Scripts automatically get <code>node_modules/.bin</code> prepended to PATH, which is
+      why you can write <code>"lint": "eslint ."</code> without a global eslint install. npm also supports
+      lifecycle hooks (<code>pre</code>/<code>post</code> prefixes, e.g. <code>pretest</code> runs automatically
+      before <code>test</code>). <code>npx &lt;pkg&gt;</code> runs a package's binary without a permanent global
+      install — it checks local <code>node_modules/.bin</code> first, then offers to download-and-run the package
+      temporarily if not found locally, which is how most "run this scaffolding tool once" workflows
+      (<code>npx create-vite@latest</code>) work.</p>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>Modern npm (v7+) installs a largely <strong>flat</strong> <code>node_modules</code> structure: dependencies
+      are hoisted to the top level whenever version ranges allow it, and only nested under a package's own
+      <code>node_modules</code> when a true version conflict requires it (two dependents need incompatible major
+      versions of the same package). This flattening is what makes Node's directory-walking
+      <code>require()</code> resolution (Chapter 1) actually fast and mostly conflict-free in practice — but it's
+      also why "phantom dependency" bugs happen: a package you never declared can still be
+      <code>require</code>-able if it happens to get hoisted to the top level as someone else's transitive
+      dependency, until a lockfile/tree change moves it deeper and your undeclared import suddenly breaks.</p>
+      <p>Integrity verification: every lockfile entry includes a SHA-512 integrity hash (subresource-integrity
+      style) of the exact tarball npm fetched. On every install, npm verifies the downloaded package against this
+      hash — this is a real supply-chain security control, not just a consistency check, since it means even if a
+      registry mirror or a compromised package version is served, a hash mismatch against your committed lockfile
+      is caught rather than silently installed.</p>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+flowchart TD
+  A[package.json<br/>declares version RANGES] --> B{Install command?}
+  B -- "npm install" --> C[Resolve ranges, MAY update lockfile,<br/>reuse existing node_modules where possible]
+  B -- "npm ci" --> D[Require exact matching lockfile,<br/>wipe node_modules, install EXACT pinned versions]
+  C --> E[package-lock.json<br/>records exact resolved tree]
+  D --> E
+      </div>
+      <div class="mermaid">
+flowchart LR
+  A["^4.2.1"] -->|allows| B["4.2.2, 4.9.0, 4.99.99"]
+  A -->|forbids| C["5.0.0 and above"]
+  D["~4.2.1"] -->|allows| E["4.2.2, 4.2.99"]
+  D -->|forbids| F["4.3.0 and above"]
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-json">{
+  "name": "bookmarks-api",
+  "version": "1.0.0",
+  "type": "module",
+  "engines": { "node": ">=22.0.0" },
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "test": "node --test",
+    "lint": "eslint .",
+    "pretest": "npm run lint"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  },
+  "devDependencies": {
+    "eslint": "^9.9.0"
+  }
+}
+</code></pre>
+      <pre><code class="language-bash"># BAD in CI: resolves ranges fresh, may drift from what was tested, slower
+npm install
+
+# GOOD in CI: exact, reproducible, fails fast if package.json/lockfile disagree
+npm ci
+
+# BAD: installing devDependencies in a production image bloats it and widens attack surface
+npm install   # includes devDependencies by default
+
+# GOOD: production image install
+npm ci --omit=dev
+
+# npx: run a one-off tool without a permanent global install
+npx create-vite@latest my-app
+npx cowsay "hi"   # downloads+runs temporarily if not installed locally
+
+# Check what a semver range actually allows before trusting it
+npm info express versions --json | tail -20
+npm outdated          # see current vs wanted (range-satisfying) vs latest
+npm audit              # check installed tree for known vulnerabilities
+</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4><p>A team's CI pipeline used <code>npm install</code> (not
+      <code>npm ci</code>) for years without incident, until a transitive dependency published a minor version
+      with a subtle behavioral change inside its allowed <code>^</code> range. The build that ran Monday morning
+      silently resolved a newer transitive version than Friday's build (same package.json, same
+      package-lock.json committed in the repo — but <code>npm install</code> doesn't strictly enforce the
+      lockfile, it treats it as a strong hint and can still update it in edge cases, e.g. if local node_modules
+      state was already inconsistent from a previous partial install). A test that was flaky on Monday only, then
+      passed again Tuesday, cost two engineers half a day chasing a phantom "flaky test." Switching every CI
+      pipeline and Docker build step to <code>npm ci</code> eliminated the entire class of problem: the lockfile
+      became the single source of truth with zero exceptions, and any package.json/lockfile mismatch now fails
+      the build immediately and loudly instead of silently drifting.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Using <code>npm install</code> in CI/Docker build steps "because
+      that's the command everyone knows." It can mutate the lockfile, is slower (full resolution pass), and
+      breaks the entire point of committing a lockfile. Always <code>npm ci</code> in CI and production builds.</p></div>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Not committing <code>package-lock.json</code> to version control
+      (or worse, gitignoring it "to avoid merge conflicts"). This throws away reproducibility entirely — every
+      fresh install can resolve different transitive versions. Lockfile merge conflicts are a solved, routine
+      problem (regenerate via `npm install` after resolving the package.json conflict) — not a reason to drop it.</p></div>
+      <ul>
+        <li>Don't put build/test-only tools in <code>dependencies</code> — they bloat production installs and signal unclear intent to reviewers.</li>
+        <li>Pin exact versions only when you have a specific, documented reason (e.g. a known-broken newer release) — over-pinning everything defeats the purpose of semver and creates update toil.</li>
+        <li>Run <code>npm audit</code> (or a dedicated SCA tool) regularly, not just once — new CVEs get disclosed against already-installed versions constantly.</li>
+        <li>Watch for "phantom dependencies" — importing a package you never declared in package.json just because it happens to be hoisted; it can silently disappear on the next install.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>Caret range (^) — npm default</td><td>Most dependencies, trusting semver discipline from maintainers</td><td>A dependency has a history of breaking minor/patch semver promises</td><td>Tilde (~) or exact pin</td></tr>
+        <tr><td>Exact version pin</td><td>Known-sensitive dependency, reproducibility is critical and you update deliberately</td><td>Applied blanket across all dependencies — creates manual update burden</td><td>Caret range + lockfile + Renovate/Dependabot automation</td></tr>
+        <tr><td>npm ci in CI/CD</td><td>Always, for any build/test/deploy pipeline step</td><td>Never — there's no good reason to prefer npm install here</td><td>—</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic"><h4>Basic</h4>
+      <details class="qa"><summary>What's the difference between dependencies and devDependencies?</summary><div class="answer"><p>dependencies are required at runtime in production; devDependencies are only needed for development, building, linting, or testing and are typically excluded from production installs.</p></div><div class="followup">Follow-up: what flag excludes devDependencies during install?</div></details>
+      <details class="qa"><summary>What does the caret (^) mean in a version range like ^2.5.0?</summary><div class="answer"><p>It allows any version that doesn't change the leftmost non-zero version digit — so ^2.5.0 allows up to but not including 3.0.0. It permits minor and patch updates but not major (breaking) ones.</p></div><div class="followup">Follow-up: what does ^0.5.0 allow, and why is it narrower than ^2.5.0's equivalent range width?</div></details>
+      <details class="qa"><summary>What is package-lock.json for?</summary><div class="answer"><p>It records the exact resolved version (and integrity hash) of every package in the full dependency tree, direct and transitive, so installs are reproducible across machines and time rather than re-resolving semver ranges fresh each time.</p></div><div class="followup">Follow-up: should it be committed to git? Why?</div></details>
+      <details class="qa"><summary>What's the difference between npm install and npm ci?</summary><div class="answer"><p>npm install resolves version ranges and may update the lockfile and reuse existing node_modules; npm ci requires an existing valid lockfile, installs exactly what it specifies with no resolution, wipes node_modules first, and fails if package.json/lockfile are inconsistent.</p></div><div class="followup">Follow-up: which one should a CI pipeline use, and why?</div></details>
+      <details class="qa"><summary>What does npx do?</summary><div class="answer"><p>It runs a package's executable, checking local node_modules/.bin first and otherwise downloading and running it temporarily without a permanent global install — useful for one-off scaffolding/CLI tools.</p></div><div class="followup">Follow-up: how does npx decide whether to use a local vs freshly-downloaded version of a tool?</div></details>
+      <details class="qa"><summary>What are npm lifecycle scripts like pretest?</summary><div class="answer"><p>Scripts prefixed pre/post that npm runs automatically immediately before/after the matching named script — e.g. pretest runs automatically right before npm test.</p></div><div class="followup">Follow-up: name a good use case for a postinstall script, and one risk associated with them.</div></details>
+      </div>
+      <div class="qa-level medium"><h4>Medium</h4>
+      <details class="qa"><summary>Why should CI pipelines always use npm ci instead of npm install?</summary><div class="answer"><p>npm ci guarantees byte-for-byte reproducibility by strictly installing what the lockfile specifies and failing loudly on any inconsistency, whereas npm install can resolve fresh versions within allowed ranges and silently update the lockfile — introducing non-determinism across builds/machines/time that's exactly what you don't want in a pipeline meant to validate a specific, reviewed set of dependencies.</p></div><div class="followup">Follow-up: what specific error will npm ci throw if package.json and package-lock.json disagree, and why is that a feature?</div></details>
+      <details class="qa"><summary>What is a "phantom dependency" and how does flat node_modules hoisting cause it?</summary><div class="answer"><p>When npm hoists a transitive dependency to the top level of node_modules (because no version conflict forces nesting), it becomes require()-able from your own code even though you never declared it in package.json. This works until the dependency tree shifts (an unrelated package update changes hoisting) and that phantom import suddenly throws MODULE_NOT_FOUND in production.</p></div><div class="followup">Follow-up: what tool/practice would catch this before it ships?</div></details>
+      <details class="qa"><summary>Explain the integrity hash stored in package-lock.json and what security property it actually provides.</summary><div class="answer"><p>Each lockfile entry stores a cryptographic hash (SHA-512) of the exact package tarball resolved at lock time. On every subsequent install, npm verifies the downloaded tarball's hash matches, so a compromised registry mirror, a tampered CDN response, or a maliciously republished version under the same version number is detected and rejected rather than silently installed — this is a real supply-chain integrity control.</p></div><div class="followup">Follow-up: does this protect you if the original package version itself (hash and all) was malicious from the start? Why or why not?</div></details>
+      <details class="qa"><summary>Your team debates pinning every dependency to an exact version vs using npm's default caret ranges. Argue both sides.</summary><div class="answer"><p>Exact pins maximize reproducibility and eliminate "surprise" transitive updates entirely, at the cost of manual update toil and slower security-patch adoption (you must explicitly bump every pin). Caret ranges plus a committed lockfile already give you reproducibility for any given lock state while still allowing automated tooling (Dependabot/Renovate) to propose patch/minor bumps routinely — generally the better default for most teams, reserving exact pins for specific known-risky dependencies.</p></div><div class="followup">Follow-up: does the lockfile alone make caret ranges "just as reproducible" as exact pins for a given commit? What's the actual difference then?</div></details>
+      <details class="qa"><summary>A dependency bump that should have been a patch release introduced a breaking change. How does your dependency strategy limit the blast radius?</summary><div class="answer"><p>The committed lockfile means your current build isn't affected until something deliberately runs npm install/npm update or a fresh lockfile is generated — so the immediate blast radius is zero for existing deployments. The real exposure is the next deliberate dependency update; mitigate with automated dependency update PRs that run your full test suite before merge, and pin/rollback that specific package immediately if the bad version is already merged.</p></div><div class="followup">Follow-up: how would npm ci's strictness have either helped or not helped catch this specific scenario?</div></details>
+      <details class="qa"><summary>Why does npm's "engines" field in package.json not actually enforce a Node version by default?</summary><div class="answer"><p>"engines" is advisory by default — npm will print a warning (not an error) if the running Node version doesn't satisfy it, unless engine-strict mode is enabled (via .npmrc's engine-strict=true or equivalent CI flag), in which case it becomes a hard install failure.</p></div><div class="followup">Follow-up: why might a team deliberately choose NOT to enable engine-strict mode despite it seeming safer?</div></details>
+      </div>
+      <div class="qa-level advanced"><h4>Advanced</h4>
+      <details class="qa"><summary>Design a dependency-update policy for a team shipping a production Node service, balancing security patching speed against stability risk.</summary><div class="answer"><p>Automate patch/minor update PRs (Dependabot/Renovate) on a schedule, gated by full CI (tests, lint, type-check) before merge, with automatic grouping of low-risk patch bumps and separate review for minor bumps of critical dependencies (web framework, auth libraries). Pin major version bumps to manual, deliberate upgrade work with a dedicated changelog review. Run npm audit (or a dedicated SCA scanner) on every CI run and fail the build on new high/critical severity findings with no available non-breaking fix forcing an urgent manual pin/patch. Separately track "known accepted risk" exceptions with expiry dates rather than silently ignoring audit warnings forever.</p></div><div class="followup">Follow-up: how would this policy change for a dependency with a history of shipping breaking changes inside patch releases?</div></details>
+      <details class="qa"><summary>Explain exactly how npm's flat node_modules hoisting algorithm decides when to nest vs hoist a dependency, with an example of forced nesting.</summary><div class="answer"><p>npm attempts to install every package at the shallowest possible level (ideally the top-level node_modules) as long as doing so doesn't create a version conflict with another dependent's requirement for that same package. If package A needs lodash@^4 and package B needs lodash@^3, both can't be satisfied by one hoisted copy — so npm hoists one (typically the more common/first-resolved range) to the top level and nests the other inside the dependent package's own node_modules, giving that dependent its own private copy its require() resolution walk will find first.</p></div><div class="followup">Follow-up: how does this affect bundle size if both versions end up shipped to a browser bundle built from this tree, versus a pure Node backend context?</div></details>
+      <details class="qa"><summary>How would you detect and prevent a dual-package hazard or phantom-dependency class of bug via CI tooling, proactively rather than reactively?</summary><div class="answer"><p>For phantom dependencies: a lint rule (eslint-plugin-import or similar) that fails on importing any package not explicitly declared in package.json closes this gap at review time. For dual-package hazards in a library you maintain: a dedicated integration test that imports your package via both require() and import() in the same process and asserts shared singleton state is actually shared (or explicitly documents it isn't) catches this before a consumer discovers it in production.</p></div><div class="followup">Follow-up: why can't npm itself detect a dual-package hazard automatically at install time?</div></details>
+      <details class="qa"><summary>Walk through the full chain of what happens, step by step, when a popular npm package is compromised (a supply-chain attack via a maintainer account takeover) that publishes a new version under an existing range your lockfile hasn't picked up yet. What actually protects you, and what doesn't?</summary><div class="answer"><p>If your lockfile already pins the previous (clean) version and your CI exclusively uses npm ci, you are not exposed until someone deliberately regenerates the lockfile (npm install/update) and that regeneration pulls the compromised version within your declared range — at which point the integrity hash check doesn't help (the hash in the new lockfile entry will correctly match the compromised tarball, since it's generated at resolution time, not validated against some external trusted source). Real protection requires either a private registry proxy with a vetting/quarantine delay, automated dependency update PRs that run security scanning before merge, or monitoring compromise-disclosure feeds (GitHub Security Advisories, npm's own advisories) to react fast if you've already picked up a bad version.</p></div><div class="followup">Follow-up: does `npm audit` protect against this scenario at the moment the compromised version is first published, before any CVE/advisory exists for it?</div></details>
+      <details class="qa"><summary>Why might a monorepo using npm workspaces handle semver ranges and hoisting differently than a single-package repo, and what new failure modes does that introduce?</summary><div class="answer"><p>Workspaces hoist shared dependencies to the monorepo root node_modules when ranges across packages are compatible, meaning two workspace packages can end up sharing one physical copy of a dependency even though each declares its own range — this is efficient but means a version bump made for one package's needs can silently affect what's resolved for a sibling package if their ranges overlap loosely. The new failure mode: a workspace package passes its own tests (against the hoisted shared version) but would fail if ever installed standalone outside the monorepo with its own range resolved independently, a gap that's easy to miss without an explicit "can this package install standalone" CI check.</p></div><div class="followup">Follow-up: how would you structure CI to catch a workspace package's hidden reliance on a sibling-hoisted dependency version?</div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment"><span class="level-tag">Beginner (30-60 min)</span>
+      <h4>Semver range exploration</h4>
+      <p>Create a fresh package.json, add 3 dependencies with different range operators (^, ~, exact), run
+      `npm install`, then inspect package-lock.json to find the exact resolved versions. Manually edit one range
+      to be intentionally too narrow to be satisfiable and observe npm's error.</p>
+      <ul><li>Must show the exact resolved version for each of the 3 range types.</li><li>Must capture and explain the unsatisfiable-range error.</li></ul>
+      <p><strong>Acceptance criteria:</strong> Written explanation correctly states what each range operator permits, backed by the actual resolved versions observed.</p>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>Use `npm info &lt;pkg&gt; versions` to see the full version list and pick ranges that clearly differ in what they'd resolve to.</p></div></details>
+      <p><strong>Bonus:</strong> Run `npm outdated` and explain the difference between its "current," "wanted," and "latest" columns.</p>
+      </div>
+      <div class="assignment"><span class="level-tag">Intermediate (2-4 hrs)</span>
+      <h4>npm install vs npm ci reproducibility demo</h4>
+      <p>Set up a small project with a dependency, commit the lockfile, then simulate drift: manually bump an
+      allowed-range transitive dependency's installed version in node_modules without touching package.json, and
+      compare what `npm install` does vs `npm ci` in that exact state. Document the observed difference precisely.</p>
+      <ul><li>Must show npm ci rejecting or correcting the drifted state while npm install may accept it.</li><li>Must include exact commands and before/after lockfile diffs.</li></ul>
+      <p><strong>Acceptance criteria:</strong> Demonstrates, with real command output, why CI pipelines must use npm ci.</p>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>You can simulate drift by directly editing a nested package's version field in node_modules/&lt;pkg&gt;/package.json without touching the lockfile, then running each install command fresh.</p></div></details>
+      <p><strong>Bonus:</strong> Add a deliberate package.json/package-lock.json mismatch and confirm npm ci's exact failure message.</p>
+      </div>
+      <div class="assignment"><span class="level-tag">Advanced (1-2 days)</span>
+      <h4>Build a minimal automated dependency-update pipeline</h4>
+      <p>Set up a small repo with GitHub Actions (or equivalent CI) that: runs `npm ci` and the test suite on every
+      PR, runs `npm audit` and fails the build on high/critical findings, and (bonus) integrates Dependabot or
+      Renovate to open automated update PRs. Document your policy for what gets merged automatically vs requires
+      manual review.</p>
+      <ul><li>CI must fail on a deliberately introduced vulnerable dependency version.</li><li>Must document the automatic-merge vs manual-review policy explicitly.</li></ul>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>You can intentionally install an old, known-vulnerable version of a small package (check npm's advisory database for a real example) to prove the audit step actually catches it.</p></div></details>
+      <p><strong>Bonus:</strong> Add a "lockfile must be committed and in sync" check that fails CI if `npm ci` would change anything (diff node_modules state or re-run resolution and diff the lockfile).</p>
+      </div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet"><ul>
+        <li>dependencies = runtime-required; devDependencies = build/test/lint-only, excluded via `--omit=dev` in production installs.</li>
+        <li>^4.2.1 allows up to &lt;5.0.0 (minor+patch); ~4.2.1 allows up to &lt;4.3.0 (patch only); exact version allows nothing else.</li>
+        <li>^0.x.y ranges are narrower (treat 0-major as unstable per semver convention) — only patch-level changes allowed.</li>
+        <li>package-lock.json pins exact resolved versions + integrity hashes for the full tree, direct and transitive.</li>
+        <li>npm install: resolves ranges fresh, may update lockfile. npm ci: strict, exact, reproducible, wipes node_modules, fails on mismatch — always use in CI/production.</li>
+        <li>npm scripts auto-prepend node_modules/.bin to PATH; pre/post prefixes are lifecycle hooks run automatically.</li>
+        <li>npx runs a binary without a permanent global install, checking local node_modules/.bin first.</li>
+        <li>Flat node_modules hoisting can create "phantom dependencies" — importable packages you never declared.</li>
+        <li>Lockfile integrity hashes protect against tampered/mismatched tarballs, not against a package that was malicious from first publish.</li>
+        <li>Always commit package-lock.json; never gitignore it.</li>
+      </ul></div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://docs.npmjs.com/cli/v10/configuring-npm/package-json">npm docs: package.json</a></li>
+        <li><a href="https://docs.npmjs.com/cli/v10/commands/npm-ci">npm docs: npm ci</a></li>
+        <li><a href="https://docs.npmjs.com/cli/v10/using-npm/semver">npm docs: semantic versioning (semver ranges)</a></li>
+        <li><a href="https://docs.npmjs.com/cli/v10/commands/npm-audit">npm docs: npm audit</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="01-nodejs-basics-runtime-modules.html"><span class="dir">← Previous</span>Node.js Basics: Runtime &amp; Modules</a>
+        <a class="next" href="03-fs-path-os-core-modules.html"><span class="dir">Next →</span>Core Modules: fs, path, os</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · Node.js Fundamentals</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-json.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "13-nodejs-fundamentals", chapterKey: "02-npm-and-package-management" });</script>
+</body>
+</html>

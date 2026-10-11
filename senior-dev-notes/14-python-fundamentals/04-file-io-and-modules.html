@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>File I/O &amp; Modules — Python Fundamentals — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">Python Fundamentals</a><span class="sep">›</span>File I/O &amp; Modules</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>File I/O &amp; Modules</h1>
+      <p class="meta-line"><span>⏱ ~1.5 hrs</span><span>📍 Chapter 4 of 6</span></p>
+      <p><strong>One-line summary:</strong> Python file I/O is synchronous and blocking by default (no
+      <code>fs.readFile</code>-style callbacks or promises baked in), context managers (<code>with</code>)
+      replace manual try/finally cleanup, and modules resolve via the filesystem and <code>sys.path</code>
+      instead of a bundler graph.</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>Every real Python script or service touches files or config at some point, and <code>with</code>
+      is the single most "why does Python do it this way" construct a JS developer encounters early — there
+      is genuinely no direct JS equivalent, because JS doesn't have a deterministic, synchronous
+      "guaranteed cleanup on scope exit" primitive for arbitrary resources the way Python's context manager
+      protocol provides. Understanding *why* context managers exist (not just the <code>with</code> syntax)
+      is what separates "copies the pattern" from "understands resource management in Python."</p>
+      <div class="box why"><h4>Why</h4><p>JS relies on garbage collection and, for truly scoped cleanup, either
+      manual try/finally or newer explicit resource management (<code>using</code>, Stage 3 as of
+      2025). Python chose a different, older answer: any object can define <code>__enter__</code>/<code>__exit__</code>
+      and the <code>with</code> statement <em>guarantees</em> <code>__exit__</code> runs even if an exception
+      is thrown inside the block — this is why it's the idiomatic way to handle files, locks, DB connections,
+      and any other resource that must be released deterministically.</p></div>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>Requires <a href="01-python-syntax-and-basics.html">Python Syntax &amp; Basics</a> and
+      <a href="02-control-flow-and-functions.html">Control Flow &amp; Functions</a>. Continues into
+      <a href="05-error-handling-and-debugging.html">Error Handling &amp; Debugging</a> (exceptions and
+      context managers interact constantly). See <a href="../08-python-intermediate/index.html">Python
+      Intermediate</a> for packaging, virtual environments, and async file I/O patterns.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="opening-files">Opening, reading, and writing files</h3>
+      <p>Python's <code>open()</code> is synchronous and blocks the calling thread until the OS call
+      returns — there is no non-blocking-by-default behavior the way <code>fs.readFile</code>'s callback
+      API implies in Node. If you want non-blocking file I/O in Python, you opt in explicitly (e.g.
+      <code>asyncio</code> + <code>aiofiles</code>, or a thread pool) — it is never automatic.</p>
+      <pre><code class="language-python">
+# Reading an entire file
+with open("notes.txt", "r", encoding="utf-8") as f:
+    content = f.read()           # blocks until the whole file is read into memory
+
+# Reading line by line (memory-efficient for large files)
+with open("notes.txt", "r", encoding="utf-8") as f:
+    for line in f:                 # file objects are iterable -- one line at a time
+        print(line.strip())
+
+# Writing (overwrites the file if it exists)
+with open("output.txt", "w", encoding="utf-8") as f:
+    f.write("Hello, file!\n")
+
+# Appending
+with open("output.txt", "a", encoding="utf-8") as f:
+    f.write("Another line\n")
+
+# JS/Node equivalent (callback or promise-based, never implicitly synchronous):
+# const fs = require('fs');
+# const content = fs.readFileSync('notes.txt', 'utf-8');       // sync version exists but is rarely default
+# fs.readFile('notes.txt', 'utf-8', (err, data) => { ... });    // async is the Node convention
+</code></pre>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Always pass <code>encoding="utf-8"</code> explicitly. Without
+      it, Python uses a platform-dependent default encoding (often UTF-8 on Linux/macOS but historically
+      different on Windows), which means code that "works on your machine" can silently misbehave or raise
+      <code>UnicodeDecodeError</code> on a teammate's machine or in CI.</p></div>
+
+      <h3 id="context-managers">Context managers (<code>with</code>) — why they exist</h3>
+      <p>Without <code>with</code>, you'd need manual try/finally to guarantee a file handle closes even if
+      an error occurs mid-read:</p>
+      <pre><code class="language-python">
+# What `with` replaces -- manual, error-prone resource cleanup
+f = open("notes.txt", "r", encoding="utf-8")
+try:
+    content = f.read()
+finally:
+    f.close()        # MUST remember this, or the file handle leaks
+
+# `with` does exactly this automatically:
+with open("notes.txt", "r", encoding="utf-8") as f:
+    content = f.read()
+# f.close() is called automatically here, even if read() raised an exception
+
+# Any object can be a context manager by implementing __enter__/__exit__
+class Timer:
+    def __enter__(self):
+        import time
+        self.start = time.perf_counter()
+        return self
+    def __exit__(self, exc_type, exc_value, traceback):
+        import time
+        print(f"Elapsed: {time.perf_counter() - self.start:.4f}s")
+        return False   # False = don't suppress exceptions; True would swallow them
+
+with Timer():
+    sum(range(10_000_000))   # timer prints elapsed time when this block exits, success or error
+</code></pre>
+      <p>There's no clean JS equivalent for the general pattern — the closest conceptual cousins are
+      try/finally (manual, every time) or the newer <code>using</code> declaration (TC39 Stage 3 as of
+      2025, requiring <code>Symbol.dispose</code>), which is new enough that most JS code you'll see still
+      doesn't use it. Python's context manager protocol has been standard since Python 2.5 (2006) and is
+      used pervasively — files, locks, DB transactions, mocking in tests, temporary directories, all use it.</p>
+
+      <h3 id="modules">Creating and importing your own modules</h3>
+      <p>Any <code>.py</code> file is a module. A directory with an <code>__init__.py</code> (or, since
+      Python 3.3+, even without one via "namespace packages") is a package. Imports resolve against
+      <code>sys.path</code> and the filesystem — there's no bundler resolving a dependency graph at build
+      time the way webpack/Vite does.</p>
+      <pre><code class="language-python">
+# ---- math_utils.py ----
+def add(a, b):
+    return a + b
+
+PI = 3.14159
+
+# ---- main.py, in the same directory ----
+import math_utils
+print(math_utils.add(2, 3))     # 5
+print(math_utils.PI)
+
+from math_utils import add       # named import, like `import { add } from './mathUtils'`
+print(add(4, 5))                  # 9
+
+import math_utils as mu           # aliased import, like `import * as mu from './mathUtils'`
+print(mu.add(1, 1))
+
+# JS/Node equivalent (ESM):
+# import * as mathUtils from './mathUtils.js';
+# import { add } from './mathUtils.js';
+# import { add as addFn } from './mathUtils.js';
+</code></pre>
+      <p>The standard library at a glance — these are the modules you'll reach for constantly without
+      installing anything: <code>os</code>/<code>pathlib</code> (filesystem paths), <code>json</code>
+      (parsing/serializing), <code>csv</code>, <code>datetime</code>, <code>collections</code>
+      (<code>Counter</code>, <code>defaultdict</code>, <code>namedtuple</code>), <code>itertools</code>,
+      <code>re</code> (regex, same engine family concepts as JS regex but different syntax corners),
+      <code>argparse</code> (CLI argument parsing), <code>logging</code>, and <code>subprocess</code> (spawning
+      processes, similar role to Node's <code>child_process</code>).</p>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>The <code>with</code> statement is syntax sugar over a fixed protocol: Python calls
+      <code>__enter__()</code> on the context manager object, binds its return value to the <code>as</code>
+      target if present, runs the block, and <em>guarantees</em> <code>__exit__(exc_type, exc_value, traceback)</code>
+      is called on the way out — whether the block completed normally or raised. If <code>__exit__</code>
+      returns a truthy value, the exception (if any) is suppressed; otherwise it propagates after
+      <code>__exit__</code> runs. For imports, Python maintains <code>sys.modules</code> as a cache keyed by
+      module name — the first <code>import foo</code> finds the file via <code>sys.path</code>, compiles it,
+      executes the module body top-to-bottom exactly once, and caches the resulting module object; every
+      subsequent <code>import foo</code> anywhere in the process just returns the cached object without
+      re-executing the file. This is conceptually similar to CommonJS's <code>require.cache</code>, though
+      ESM's module graph resolution and live bindings work somewhat differently.</p>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+sequenceDiagram
+  participant Code
+  participant with as with statement
+  participant CM as Context Manager
+  Code->>with: with open(...) as f:
+  with->>CM: __enter__()
+  CM-->>with: returns file object (bound to f)
+  with->>Code: run block body
+  alt block raises exception
+    Code--xwith: exception propagates
+    with->>CM: __exit__(exc_type, exc_value, tb)
+    CM-->>with: False (don't suppress)
+    with--xCode: exception re-raised after cleanup
+  else block completes normally
+    with->>CM: __exit__(None, None, None)
+    CM-->>with: cleanup done
+  end
+      </div>
+      <div class="mermaid">
+flowchart LR
+  A["import math_utils"] --> B{"'math_utils' in\nsys.modules?"}
+  B -->|Yes, cached| C["Return cached module object"]
+  B -->|No| D["Search sys.path"]
+  D --> E["Find math_utils.py"]
+  E --> F["Compile to bytecode\n(.pyc cache check)"]
+  F --> G["Execute module body once"]
+  G --> H["Store in sys.modules"]
+  H --> C
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-python">
+# ---- BAD: manual open/close, easy to forget cleanup on an error path ----
+def read_config_bad(path):
+    f = open(path, "r", encoding="utf-8")
+    data = f.read()        # if this raises, f.close() below never runs -- file handle leaks
+    f.close()
+    return data
+
+# ---- GOOD: with guarantees cleanup regardless of how the block exits ----
+def read_config_good(path):
+    with open(path, "r", encoding="utf-8") as f:
+        return f.read()
+
+# ---- Reading/writing JSON, the most common "config/data file" format ----
+import json
+from pathlib import Path
+
+def load_settings(path: str) -> dict:
+    p = Path(path)
+    if not p.exists():
+        return {}                     # sensible default instead of crashing
+    with p.open("r", encoding="utf-8") as f:
+        return json.load(f)
+
+def save_settings(path: str, settings: dict) -> None:
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(settings, f, indent=2)
+
+# ---- pathlib over manual string path building (idiomatic since 3.4+) ----
+data_dir = Path("data") / "exports"      # `/` is overloaded as a path-join operator
+data_dir.mkdir(parents=True, exist_ok=True)   # like `mkdir -p`
+for file in data_dir.glob("*.json"):       # like fs.readdirSync + a glob filter
+    print(file.name)
+</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4><p>A batch ETL script processing thousands of daily report
+      files was intermittently leaving file descriptors open under load, eventually hitting the OS's open-file
+      limit and crashing mid-run. The root cause: a code path used manual <code>open()</code>/<code>close()</code>
+      with the close call placed after a block that could raise (a malformed CSV row), so any parse error
+      skipped the close entirely. Migrating every file-handling path to <code>with</code> blocks fixed the
+      leak permanently — not by adding more error handling, but by making cleanup structurally guaranteed
+      regardless of what exception path was taken. This is the single most common real-world payoff of
+      context managers: they eliminate an entire category of "forgot to clean up on the error path" bugs.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Opening a file without <code>with</code> "because it's just a
+      quick script." Resource leaks compound in long-running processes (servers, workers) even if a one-off
+      script "gets away with it" because the process exits soon after. Make <code>with</code> the default
+      reflex, not an exception.</p></div>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Forgetting <code>encoding="utf-8"</code> on <code>open()</code>
+      calls, relying on the platform default. This is one of the most common "works on my machine, fails in
+      CI/production" bugs for teams with mixed OS development environments.</p></div>
+      <ul>
+        <li>Prefer <code>pathlib.Path</code> over manual string concatenation (<code>dir + "/" + filename</code>) for building file paths — it's cross-platform correct and more readable.</li>
+        <li>Check for circular imports early — Python allows them in some cases but the behavior (a partially-initialized module) is genuinely confusing; restructure to avoid them rather than debug around them.</li>
+        <li>Use <code>json.load(f)</code>/<code>json.dump(f, obj)</code> directly on the file object rather than reading to a string and calling <code>json.loads()</code> separately — it's both more idiomatic and slightly more memory-efficient for large files.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td><code>with open(...)</code></td><td>Always, for any file/resource with a clear open/close lifecycle</td><td>Essentially never — this is the default</td><td>Manual try/finally only for truly unusual cleanup logic</td></tr>
+        <tr><td>Reading whole file with <code>.read()</code></td><td>Small-to-medium files that fit comfortably in memory</td><td>Very large files (GB-scale logs)</td><td>Line-by-line iteration or chunked reads</td></tr>
+        <tr><td><code>json</code> module</td><td>Structured config/data interchange, nested objects</td><td>Tabular data with many flat rows</td><td><code>csv</code> module, or <code>pandas</code> for heavier analysis</td></tr>
+        <tr><td><code>pathlib</code></td><td>Any new code touching filesystem paths</td><td>Extremely legacy code already using <code>os.path</code> consistently</td><td><code>os.path</code> (older, string-based, still works)</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic">
+        <h4>Basic</h4>
+        <details class="qa"><summary>What does the <code>with</code> statement guarantee?</summary><div class="answer"><p>
+        That the context manager's <code>__exit__</code> method runs when the block ends, whether it
+        completed normally or raised an exception — guaranteeing cleanup (like closing a file) happens
+        exactly once, reliably.</p></div><div class="followup">Follow-up: what two special methods must an object implement to be used in a with statement?</div></details>
+        <details class="qa"><summary>Is Python's default file reading synchronous or asynchronous?</summary><div class="answer"><p>
+        Synchronous and blocking — <code>open()</code> and its read/write methods block the calling thread
+        until the OS call returns, unlike Node's convention of async-by-default for I/O.</p></div><div class="followup">Follow-up: how would you make file I/O non-blocking in Python if you needed to?</div></details>
+        <details class="qa"><summary>What's the Python equivalent of a JS <code>import</code> statement?</summary><div class="answer"><p>
+        <code>import module_name</code>, <code>from module_name import thing</code>, or
+        <code>import module_name as alias</code> — resolved via <code>sys.path</code> and cached in
+        <code>sys.modules</code>, not a bundler graph.</p></div><div class="followup">Follow-up: what makes a directory a Python "package" rather than just a folder of scripts?</div></details>
+        <details class="qa"><summary>Why should you pass <code>encoding="utf-8"</code> explicitly to <code>open()</code>?</summary><div class="answer"><p>
+        Without it, Python uses a platform-dependent default encoding, which can differ between your machine,
+        a teammate's, and CI — causing inconsistent behavior or <code>UnicodeDecodeError</code> in some
+        environments but not others.</p></div><div class="followup">Follow-up: what's the default encoding behavior specifically on Windows versus Linux/macOS?</div></details>
+        <details class="qa"><summary>What module would you use to read and write JSON files in Python?</summary><div class="answer"><p>
+        The standard library <code>json</code> module — <code>json.load()</code>/<code>json.dump()</code>
+        work directly with file objects, and <code>json.loads()</code>/<code>json.dumps()</code> work with
+        strings.</p></div><div class="followup">Follow-up: what Python types does json.dump() fail to serialize by default, and how would you handle them?</div></details>
+        <details class="qa"><summary>What happens if you open the same file twice with mode "w"?</summary><div class="answer"><p>
+        Each "w" open truncates the file immediately upon opening — the second open wipes out anything
+        written by the first, which is a common source of "my data disappeared" bugs when a file is opened
+        in write mode more than once in a flow.</p></div><div class="followup">Follow-up: what mode would you use to append without truncating?</div></details>
+      </div>
+      <div class="qa-level medium">
+        <h4>Medium</h4>
+        <details class="qa"><summary>Why doesn't JavaScript have a direct equivalent to Python's context manager protocol?</summary><div class="answer"><p>
+        JS has historically relied on garbage collection plus manual try/finally for deterministic cleanup;
+        there was no standardized "any object can declare enter/exit cleanup behavior enforced by the
+        language" mechanism until the <code>using</code> declaration (TC39 Stage 3, requiring
+        <code>Symbol.dispose</code>) which is new and not yet idiomatic in most existing JS code, unlike
+        Python's <code>with</code>, standard since 2006.</p></div><div class="followup">Follow-up: once `using` is widely adopted, how closely would it match Python's with/context manager semantics?</div></details>
+        <details class="qa"><summary>Explain what <code>__exit__</code>'s return value controls, and why returning True is dangerous if misused.</summary><div class="answer"><p>
+        If <code>__exit__</code> returns a truthy value, any exception raised inside the <code>with</code>
+        block is suppressed — it does not propagate further. This is intentional for some use cases (e.g.
+        a context manager designed to swallow a specific known exception type), but returning True
+        unconditionally silently hides real bugs, since any exception — expected or not — disappears without
+        a trace.</p></div><div class="followup">Follow-up: how would you write __exit__ to suppress only one specific exception type and let others propagate?</div></details>
+        <details class="qa"><summary>Walk through exactly what happens the second time a module is imported in the same process.</summary><div class="answer"><p>
+        Python checks <code>sys.modules</code> first; since the module name is already a key there from the
+        first import, it returns the cached module object directly without re-reading, re-compiling, or
+        re-executing the file's top-level code at all.</p></div><div class="followup">Follow-up: what's a practical consequence of this for module-level code that has side effects, like opening a DB connection at import time?</div></details>
+        <details class="qa"><summary>What's the risk of reading an entire large log file with <code>.read()</code> instead of iterating line by line?</summary><div class="answer"><p>
+        <code>.read()</code> loads the entire file content into memory as one string before you can process
+        anything — for a multi-gigabyte file this can exhaust available memory or cause severe slowdowns from
+        swapping. Iterating the file object directly (<code>for line in f:</code>) reads lazily, one line at
+        a time, with roughly constant memory regardless of file size.</p></div><div class="followup">Follow-up: how would this change if you needed random access to specific lines rather than sequential processing?</div></details>
+        <details class="qa"><summary>How would you implement your own context manager without writing a class, using the standard library?</summary><div class="answer"><p>
+        <code>contextlib.contextmanager</code> — a decorator that turns a generator function into a context
+        manager: code before <code>yield</code> is <code>__enter__</code>, the yielded value is the
+        <code>as</code> target, and code after <code>yield</code> (in a try/finally) is <code>__exit__</code>.
+        This is often more concise than writing a full class with <code>__enter__</code>/<code>__exit__</code>.</p></div><div class="followup">Follow-up: how do you handle exceptions raised inside the with block when using @contextmanager — where do you catch them?</div></details>
+      </div>
+      <div class="qa-level advanced">
+        <h4>Advanced</h4>
+        <details class="qa"><summary>Design a context manager that must manage two resources (e.g. a DB connection and a file) and roll back/clean up correctly even if acquiring the second resource fails after the first succeeded.</summary><div class="answer"><p>
+        The safest pattern nests two separate <code>with</code> statements (or uses
+        <code>contextlib.ExitStack</code> for a dynamic number of resources) rather than acquiring both
+        inside one custom <code>__enter__</code> — if acquisition of the second resource fails partway
+        through a single combined <code>__enter__</code>, you're responsible for manually unwinding the
+        first resource's acquisition yourself, which is exactly the bug class <code>with</code> normally
+        prevents. Composing standard context managers (nested or via ExitStack) gets this correctness for
+        free.</p></div><div class="followup">Follow-up: how does contextlib.ExitStack help when the number of resources isn't known until runtime?</div></details>
+        <details class="qa"><summary>Explain the actual mechanics of a circular import in Python and why the failure mode is different from a CommonJS circular require.</summary><div class="answer"><p>
+        When module A imports module B, which imports module A back, Python finds A already present in
+        <code>sys.modules</code> (inserted before A's body finished executing) and returns that
+        partially-initialized module object — any names A hadn't defined yet by the point of the circular
+        import simply don't exist on it yet, causing an <code>AttributeError</code> or <code>ImportError</code>
+        depending on the exact import style used. CommonJS's <code>require</code> has very similar
+        "partially-initialized module" behavior; ESM's circular imports behave somewhat better due to live
+        bindings and hoisted declarations, which is a meaningful difference if you're comparing to modern JS
+        specifically rather than CommonJS.</p></div><div class="followup">Follow-up: what refactor reliably eliminates a circular import rather than working around it with lazy imports?</div></details>
+        <details class="qa"><summary>You need to process a 50GB file that doesn't fit in memory, transforming each line and writing to a new file. Design the I/O approach and explain the memory profile.</summary><div class="answer"><p>
+        Open the input file in read mode and the output file in write mode simultaneously (two nested
+        <code>with</code> statements), and iterate the input file object directly line by line, transforming
+        and writing each line immediately rather than collecting results in a list first. Memory usage stays
+        roughly O(1) relative to file size — only one line (plus any small buffers) is ever resident at once —
+        versus the O(n) blow-up of reading the whole file, transforming a full list, then writing it all out.</p></div><div class="followup">Follow-up: how would buffering (the `buffering` argument to open()) affect throughput here, and when would you tune it?</div></details>
+        <details class="qa"><summary>Compare Python's module caching (sys.modules) to ESM's module graph in terms of what guarantees each gives about "the module body runs exactly once."</summary><div class="answer"><p>
+        Both guarantee single execution of a module's top-level code per unique module identity within a
+        process/realm — Python keys this by module name/path in <code>sys.modules</code>; ESM keys it by
+        resolved module specifier in the module graph, with live binding semantics (exported names are
+        references that update if reassigned in the exporting module) that Python's import doesn't replicate
+        — Python imports bind a name to whatever value existed in the module's namespace dict at import time,
+        not a live reference to subsequent reassignments in the general case for `from x import y` style imports.</p></div><div class="followup">Follow-up: demonstrate a case where `from module import value` in Python does NOT see a later reassignment of `value` in the source module, and how you'd restructure to see it.</div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment">
+        <span class="level-tag">Beginner (30-60 min)</span>
+        <h4>Config file reader with safe defaults</h4>
+        <p>Write a function that reads a JSON config file using <code>with</code> and <code>pathlib</code>,
+        returning a hardcoded default dict if the file doesn't exist, without ever crashing on a missing
+        file.</p>
+        <ul><li>Must use <code>with open(...)</code>, never manual open/close.</li>
+        <li>Must use <code>pathlib.Path</code>, not string concatenation, for the path.</li></ul>
+        <p><strong>Acceptance criteria:</strong> Running against both an existing and a nonexistent config path produces correct output with no unhandled exceptions.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>Check <code>Path.exists()</code> before opening, rather than relying on catching an exception for the missing-file case — both work, but the explicit check is clearer for this exercise.</p></div></details>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Intermediate (2-4 hrs)</span>
+        <h4>Split a project into modules and demonstrate the import cache</h4>
+        <p>Build a tiny multi-module project (3+ files: a utils module, a models module, a main script)
+        where the utils module prints a message at import time (module-level side effect). Import the utils
+        module from two different other modules in the project and demonstrate — with printed proof — that
+        the import-time message only prints once across the whole run, regardless of how many places import
+        it.</p>
+        <ul><li>At least one module-level constant and one function per module.</li>
+        <li>A written explanation (3-5 sentences) of why the side-effect message only fires once.</li></ul>
+        <p><strong>Acceptance criteria:</strong> Running the main script shows the side-effect message exactly once in the output, even though the module is imported from multiple places.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>Put a plain <code>print("utils loaded")</code> at the top level of the utils module (not inside a function) to make the import-time execution visible.</p></div></details>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Advanced (1-2 days)</span>
+        <h4>Build a custom context manager for a "scratch directory"</h4>
+        <p>Write a class-based context manager <code>ScratchDir</code> that creates a temporary directory on
+        <code>__enter__</code>, yields its path, and recursively deletes it on <code>__exit__</code> —
+        regardless of whether the block succeeded or raised. Then rewrite the same behavior using
+        <code>@contextlib.contextmanager</code> and compare the two implementations.</p>
+        <ul><li>Must correctly clean up even when the code inside the with block raises an exception.</li>
+        <li>Must not suppress exceptions raised inside the block (verify this explicitly in a test).</li>
+        <li>Include pytest tests verifying the directory exists during the block and is gone afterward, both on success and on a forced exception.</li></ul>
+        <p><strong>Acceptance criteria:</strong> Both implementations pass the same test suite, and the directory is reliably cleaned up in all tested scenarios. No full solution here — this is meant to build real intuition about the protocol, not follow a recipe.</p>
+      </div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet"><ul>
+        <li>Python file I/O is synchronous/blocking by default — opt in explicitly for async or threaded I/O.</li>
+        <li>Always use <code>with open(...)</code> — guarantees cleanup via <code>__exit__</code> even on exceptions.</li>
+        <li>Always pass <code>encoding="utf-8"</code> explicitly — platform defaults differ and cause "works on my machine" bugs.</li>
+        <li>Any object implementing <code>__enter__</code>/<code>__exit__</code> can be used with <code>with</code>; <code>@contextlib.contextmanager</code> gives a generator-based shortcut.</li>
+        <li>Prefer <code>pathlib.Path</code> over manual string path concatenation.</li>
+        <li><code>json.load</code>/<code>json.dump</code> work directly on file objects — no need to round-trip through a string.</li>
+        <li>Imports resolve via <code>sys.path</code> and cache in <code>sys.modules</code> — a module's body runs exactly once per process.</li>
+        <li>Mode "w" truncates immediately on open — use "a" to append without destroying existing content.</li>
+        <li>Iterate large files line by line instead of <code>.read()</code>-ing the whole thing into memory.</li>
+      </ul></div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://docs.python.org/3/tutorial/inputoutput.html#reading-and-writing-files">Python docs: Reading and Writing Files</a></li>
+        <li><a href="https://docs.python.org/3/reference/datamodel.html#context-managers">Python docs: Context Manager data model</a></li>
+        <li><a href="https://docs.python.org/3/library/contextlib.html#contextlib.contextmanager">Python docs: contextlib.contextmanager</a></li>
+        <li><a href="https://docs.python.org/3/tutorial/modules.html">Python docs: Modules tutorial</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="03-data-types-and-collections.html"><span class="dir">← Previous</span>Data Types &amp; Collections</a>
+        <a class="next" href="05-error-handling-and-debugging.html"><span class="dir">Next →</span>Error Handling &amp; Debugging</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · Python Fundamentals</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "14-python-fundamentals", chapterKey: "04-file-io-and-modules" });</script>
+</body>
+</html>

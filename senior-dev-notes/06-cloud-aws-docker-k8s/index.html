@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cloud, AWS, Docker &amp; K8s — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span>Cloud, AWS, Docker &amp; K8s</div>
+      <div class="topbar-actions"><button id="theme-toggle" class="icon-btn">🌙</button></div>
+    </div>
+    <div class="content">
+      <h1>Cloud, AWS, Docker &amp; K8s</h1>
+      <p class="meta-line"><span>📚 7 chapters</span><span>⏱ ~18–21 hrs total</span></p>
+      <p>The infrastructure layer senior engineers are expected to own end-to-end: packaging an app correctly
+      with Docker, running it locally with Compose, orchestrating it in production with Kubernetes, knowing
+      the core AWS primitives well enough to design a VPC and reason about IAM, picking serverless where it
+      actually wins, provisioning everything as code with Terraform, and shipping changes with CI/CD patterns
+      that fail safely. Staff/Lead interviews probe the internals here — layer caching, the K8s control loop,
+      IAM policy evaluation, Terraform state — not just tool familiarity.</p>
+
+      <h2 id="outcomes">Learning Outcomes</h2>
+      <ul>
+        <li>Explain Docker's union filesystem, layer caching, and multi-stage builds well enough to cut image
+        size and build time by 10x on a real pipeline.</li>
+        <li>Design a local dev environment with Docker Compose that mirrors prod topology (networks, volumes,
+        healthchecks, dependency ordering).</li>
+        <li>Reason about Kubernetes as a reconciling control-loop system: pods, Deployments, Services, Ingress,
+        ConfigMaps/Secrets, and what the scheduler and controllers actually do.</li>
+        <li>Design a VPC, pick the right IAM policy shape, and know when to reach for EC2 vs S3 vs RDS vs managed
+        services.</li>
+        <li>Decide serverless vs containers with real cost/latency/ops tradeoffs, not dogma.</li>
+        <li>Provision infrastructure with Terraform and understand state, locking, drift, and plan/apply internals.</li>
+        <li>Run blue-green and canary rollouts with real traffic-shifting mechanics, automated rollback, and
+        feature flags as a decoupling layer from deploys.</li>
+      </ul>
+
+      <h2 id="chapters">Chapters</h2>
+      <table>
+        <tr><th>#</th><th>Chapter</th><th>Time</th></tr>
+        <tr><td>01</td><td><a href="01-docker-deep-dive.html">Docker Deep Dive: images, layers, multi-stage builds, best practices</a></td><td>3 hrs</td></tr>
+        <tr><td>02</td><td><a href="02-docker-compose.html">Docker Compose for local environments</a></td><td>2 hrs</td></tr>
+        <tr><td>03</td><td><a href="03-kubernetes-core.html">Kubernetes Core: pods, deployments, services, ingress, config, secrets</a></td><td>4 hrs</td></tr>
+        <tr><td>04</td><td><a href="04-aws-core.html">AWS Core: IAM, VPC, EC2, S3, RDS</a></td><td>3 hrs</td></tr>
+        <tr><td>05</td><td><a href="05-serverless.html">Serverless: Lambda, API Gateway, when to go serverless</a></td><td>2.5 hrs</td></tr>
+        <tr><td>06</td><td><a href="06-infrastructure-as-code.html">Infrastructure as Code: Terraform basics and internals</a></td><td>2.5 hrs</td></tr>
+        <tr><td>07</td><td><a href="07-advanced-cicd.html">Advanced CI/CD: blue-green, canary, rollbacks, feature flags</a></td><td>2.5 hrs</td></tr>
+      </table>
+
+      <div class="capstone">
+        <h3>🏆 Capstone Project: Containerize, Orchestrate &amp; Ship a Multi-Service App</h3>
+        <p><strong>Problem statement:</strong> Take a realistic multi-service app — a Node.js API, a React
+        frontend, Postgres, and Redis — and productionize it: multi-stage Dockerfiles, local orchestration with
+        Docker Compose, Kubernetes manifests for a real cluster, a Terraform module for the AWS resources it
+        would need in production, and a CI/CD pipeline that ships with a canary-style rollout and automatic
+        rollback.</p>
+        <p><strong>Required features:</strong></p>
+        <ul>
+          <li>Multi-stage Dockerfiles for the API and frontend: build stage with full toolchain, final stage
+          on a minimal base image, non-root user, layer order optimized for cache hits.</li>
+          <li>Docker Compose file wiring API + frontend + Postgres + Redis with healthchecks, a dedicated
+          bridge network, named volumes for Postgres data, and env files per service.</li>
+          <li>Kubernetes manifests: Deployment + Service for API and frontend, Ingress routing paths to each,
+          ConfigMap for non-secret config, Secret for DB credentials, readiness/liveness probes, resource
+          requests/limits, and an HPA on the API Deployment.</li>
+          <li>A Terraform module provisioning the production AWS footprint: a VPC with public/private subnets,
+          an RDS Postgres instance in the private subnet, an S3 bucket for static frontend assets, and IAM
+          roles scoped to least privilege for whatever needs to talk to them.</li>
+          <li>A CI/CD pipeline (GitHub Actions or equivalent) that builds images, pushes to a registry, applies
+          Terraform with a plan-then-apply gate, and rolls out to Kubernetes using a canary step (10% → 50% →
+          100% traffic) with an automated rollback trigger on error-rate threshold.</li>
+        </ul>
+        <p><strong>Tech stack suggestion:</strong> Node.js (Fastify/Express) API, React (Vite) frontend,
+        Postgres 16, Redis 7, Docker, Docker Compose, Kubernetes (kind or EKS), Terraform (AWS provider),
+        GitHub Actions, Argo Rollouts or a manual canary script for traffic shifting.</p>
+        <p><strong>Milestones:</strong></p>
+        <ol>
+          <li>Write multi-stage Dockerfiles for both services; measure and document image size and build-time
+          before/after multi-stage + cache optimization.</li>
+          <li>Bring the full stack up locally with Docker Compose, including healthcheck-gated startup order.</li>
+          <li>Write and apply the Kubernetes manifests against a local cluster (kind/minikube); verify rolling
+          updates and probe behavior under a forced crash.</li>
+          <li>Write the Terraform module; run plan, apply, then deliberately cause drift and run plan again to
+          see it detected.</li>
+          <li>Wire the CI/CD pipeline end-to-end, including the canary stage and a rollback drill where you
+          inject a bad deploy and watch it auto-rollback.</li>
+          <li>Write a one-page runbook: how to deploy, how to roll back, how to read the canary metrics.</li>
+        </ol>
+        <p><strong>Evaluation checklist:</strong></p>
+        <ul>
+          <li>☐ Can explain exactly which Docker layers get cache-busted by a given file change.</li>
+          <li>☐ Can trace a request from Ingress → Service → Pod and explain what each hop does.</li>
+          <li>☐ IAM roles in the Terraform module follow least privilege — can justify every permission.</li>
+          <li>☐ Terraform state is stored remotely with locking; a concurrent apply is safely rejected.</li>
+          <li>☐ The canary rollback actually triggers automatically on a bad deploy, not just in theory.</li>
+          <li>☐ Can defend at least 2 alternative designs rejected (e.g., ECS vs EKS, Lambda vs containers).</li>
+        </ul>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · Cloud, AWS, Docker &amp; K8s</footer>
+  </main>
+</div>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "06-cloud-aws-docker-k8s" });</script>
+</body>
+</html>

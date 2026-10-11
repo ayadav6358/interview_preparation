@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Accessibility and SEO for Seniors — React & Next.js Advanced — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">React &amp; Next.js Advanced</a><span class="sep">›</span>Accessibility and SEO</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>Accessibility and SEO for Senior Developers</h1>
+      <p class="meta-line"><span>⏱ 2.5 hrs</span><span>📍 Chapter 11 of 11</span></p>
+      <p><strong>One-line summary:</strong> Accessibility and SEO aren't a checklist bolted on at the end —
+      both are consequences of the same underlying discipline (correct semantic structure, real focus/DOM
+      management, and letting crawlers/assistive tech see the content a sighted mouse user sees), and the
+      App Router's rendering model directly determines how hard or easy that discipline is to achieve.</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>Accessibility is increasingly a legal compliance requirement (ADA/WCAG lawsuits against inaccessible
+      sites are common and expensive), and SEO is a direct revenue lever for most consumer products — both are
+      exactly the kind of cross-cutting concern a senior engineer is expected to design for structurally,
+      rather than patch in late. Interviewers use this topic to test whether a candidate understands the
+      actual mechanics (what the accessibility tree is, how a crawler renders JS, what structured data
+      actually does) versus reciting "add alt text and meta tags."</p>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>Read <a href="08-rendering-strategies.html">Rendering Strategies</a> first — SEO crawlability and
+      initial accessible content both depend heavily on what's server-rendered versus client-fetched. Related:
+      <a href="09-core-web-vitals.html">Core Web Vitals</a> (Core Web Vitals are themselves a Search ranking
+      factor, directly tying performance to SEO).</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="accessibility-tree">The accessibility tree: what assistive tech actually consumes</h3>
+      <p>Screen readers and other assistive technology don't read your JSX or even your rendered HTML directly
+      — the browser constructs a parallel <strong>accessibility tree</strong> from the DOM, computing each
+      node's role, name, state, and value from a combination of semantic HTML elements, ARIA attributes, and
+      computed properties (visibility, focusability). A <code>&lt;div onClick=&#123;...&#125;&gt;</code> styled to
+      look like a button has no accessible role, name, or keyboard operability unless you explicitly add
+      <code>role="button"</code>, <code>tabIndex={0}</code>, and a keydown handler for Enter/Space — versus a
+      real <code>&lt;button&gt;</code>, which gets all of that for free from the browser's built-in HTML
+      semantics. This is the core senior-level insight: accessibility bugs are usually "using the wrong
+      element and reconstructing its behavior by hand, incompletely" rather than "forgetting an aria-label."</p>
+
+      <h3 id="focus-management">Focus management in a client-routed SPA</h3>
+      <p>Traditional full-page navigation automatically resets focus to the document body and announces the
+      new page's title to screen reader users; client-side route transitions (even in the App Router) don't
+      do this automatically unless you build it. A senior-level SPA/App Router build needs to explicitly
+      manage focus on route change — moving focus to a logical landmark (often an <code>h1</code> or a
+      dedicated "route announcer" live region) so keyboard and screen reader users aren't left with focus
+      stranded on a now-removed element, and don't silently miss that a navigation happened at all. The same
+      applies to modal dialogs and drawers: opening one must trap focus within it and move focus to its first
+      focusable element, and closing it must return focus to whatever triggered it — getting this wrong is
+      one of the most common real-world a11y failures in React apps built from scratch rather than from an
+      accessible component primitive library (Radix, React Aria).</p>
+
+      <h3 id="seo-crawling">How crawlers actually render your JS, and why rendering strategy matters</h3>
+      <p>Googlebot runs a headless Chromium-based renderer and does execute client-side JavaScript, but
+      rendering is deferred to a second wave (the "render queue") after initial crawling/indexing of raw HTML
+      — meaning content that only appears after client-side data fetching can be indexed significantly later
+      than server-rendered content, and some crawlers (social media link-preview bots, many non-Google search
+      engines) don't execute JS at all, relying purely on the initial HTML response. This is exactly why
+      rendering strategy (Ch. 8) is an SEO decision, not just a performance one: SSG/ISR/SSR/PPR's static
+      shell all deliver real content in the initial HTML response, directly crawlable with no render-queue
+      delay, while a CSR page's initial HTML is a near-empty shell that depends entirely on the crawler
+      successfully executing JS and waiting for data — a real risk for time-sensitive content (a freshly
+      published article) and a guaranteed failure for non-JS-executing crawlers like most social share
+      previews.</p>
+
+      <h3 id="structured-data-metadata">Metadata and structured data: Next.js's Metadata API and JSON-LD</h3>
+      <p>Next.js's App Router Metadata API (a <code>metadata</code> export or <code>generateMetadata</code>
+      function per route) generates the actual <code>&lt;head&gt;</code> tags (title, description, Open Graph,
+      Twitter Card) server-side, so they're present in the initial HTML response rather than injected
+      client-side after hydration — critical since most crawlers and all link-preview bots read
+      <code>&lt;head&gt;</code> tags from the raw response. Structured data (JSON-LD, via a
+      <code>&lt;script type="application/ld+json"&gt;</code> block) goes further: it explicitly tells
+      search engines the semantic type of your content (Article, Product, FAQPage, Recipe) using schema.org
+      vocabulary, which is what unlocks rich search results (star ratings, price, FAQ accordions directly in
+      search results) rather than just a plain blue link — this isn't optional polish for e-commerce/content
+      sites at scale, it's a measurable click-through-rate lever.</p>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>The browser builds the accessibility tree by walking the DOM and, for each node, computing an
+      accessible <em>role</em> (from the element's tag or an explicit <code>role</code> attribute), an
+      accessible <em>name</em> (via a defined precedence: <code>aria-labelledby</code>, then
+      <code>aria-label</code>, then associated <code>&lt;label&gt;</code>, then visible text content), and
+      <em>state</em> (checked, expanded, disabled — from native attributes or <code>aria-*</code> state
+      attributes). Assistive tech (screen readers, switch devices) queries this tree via platform accessibility
+      APIs, never the raw DOM — this is why a visually-hidden-but-DOM-present element can still be
+      announced (it has an accessible node) while a `display: none` element is excluded entirely (removed from
+      both the render tree and the accessibility tree). On the SEO side, when Googlebot's renderer does process
+      a page, it executes JS and waits for a largely idle main thread (similar to a load-event heuristic)
+      before snapshotting the resulting DOM for indexing — any content that only appears after a delayed
+      client-side fetch triggered by scroll or a long-running request can be missed entirely if it doesn't
+      resolve within that rendering budget.</p>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+flowchart TD
+  A[DOM node] --> B[Compute role: tag or explicit role attribute]
+  A --> C[Compute name: aria-labelledby, aria-label, label, text content]
+  A --> D[Compute state: native attrs or aria-* state]
+  B --> E[Accessibility tree node]
+  C --> E
+  D --> E
+  E --> F[Queried by screen reader / assistive tech via platform API]
+      </div>
+      <div class="mermaid">
+flowchart TD
+  A[Crawler requests page] --> B{Content in initial HTML response?}
+  B -->|Yes: SSG/ISR/SSR/PPR shell| C[Indexed immediately, no render-queue wait]
+  B -->|No: CSR, client-fetched| D[Queued for JS rendering pass]
+  D --> E[Renderer executes JS, waits for near-idle]
+  E --> F[Snapshots resulting DOM]
+  F --> G[Indexed, but delayed vs. server-rendered content]
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-tsx">// BAD: a div masquerading as a button -- no role, name, or keyboard operability
+function BadToggle({ onToggle }: { onToggle: () => void }) {
+  return <div className="toggle-btn" onClick={onToggle}>Toggle</div>;
+}
+
+// GOOD: a real button -- role, name, keyboard operability all free from the browser
+function GoodToggle({ onToggle, pressed }: { onToggle: () => void; pressed: boolean }) {
+  return (
+    <button type="button" aria-pressed={pressed} onClick={onToggle}>
+      Toggle
+    </button>
+  );
+}
+
+// Route-change focus management for an App Router client layout
+"use client";
+import { usePathname } from "next/navigation";
+import { useEffect, useRef } from "react";
+
+export function RouteAnnouncer() {
+  const pathname = usePathname();
+  const liveRegionRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    // move focus to the main heading on every route change
+    const heading = document.querySelector("h1");
+    heading?.setAttribute("tabindex", "-1");
+    heading?.focus();
+    // announce the change to screen reader users via a live region
+    if (liveRegionRef.current) {
+      liveRegionRef.current.textContent = `Navigated to ${document.title}`;
+    }
+  }, [pathname]);
+
+  return <div aria-live="polite" className="sr-only" ref={liveRegionRef} />;
+}
+
+// app/products/[id]/page.tsx -- server-rendered metadata + JSON-LD structured data
+import type { Metadata } from "next";
+
+export async function generateMetadata({ params }: { params: { id: string } }): Promise<Metadata> {
+  const product = await getProduct(params.id);
+  return {
+    title: `${product.name} — Buy Online`,
+    description: product.shortDescription,
+    openGraph: { images: [product.imageUrl] },
+  };
+}
+
+export default async function ProductPage({ params }: { params: { id: string } }) {
+  const product = await getProduct(params.id);
+  const jsonLd = {
+    "@context": "https://schema.org",
+    "@type": "Product",
+    name: product.name,
+    image: product.imageUrl,
+    offers: { "@type": "Offer", price: product.price, priceCurrency: "USD" },
+  };
+
+  return (
+    <>
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+      />
+      <ProductDetails product={product} />
+    </>
+  );
+}</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4>
+      <p>A SaaS marketing site migrated its blog from a CSR React app to a CMS-backed CSR page that fetched
+      article content client-side after mount, expecting equivalent SEO since "Google renders JS now." Within
+      a month, organic traffic to new articles dropped significantly — Search Console showed many new articles
+      indexed days later than before, and some never indexed at all because the client-side fetch occasionally
+      failed to resolve within Googlebot's rendering budget during the render-queue pass, especially for
+      articles fetched from a CMS API under load. Additionally, social share previews (Slack, Twitter/X,
+      Facebook) showed blank/generic cards for every article, since those bots don't execute JS and found no
+      Open Graph tags in the raw HTML. The fix was switching the blog route to ISR with server-rendered
+      metadata via `generateMetadata`, putting both the article content and its OG tags directly in the
+      initial HTML response — indexing latency returned to near-immediate, and social previews started
+      rendering correctly the same day the fix shipped.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4>
+      <p>Adding <code>aria-label</code> or other ARIA attributes to "fix" an accessibility audit warning
+      without addressing the underlying structural problem — e.g., adding `role="button"` to a `&lt;div&gt;`
+      without also adding `tabIndex`, a keydown handler for Enter/Space, and `aria-pressed`/`aria-disabled`
+      state management. This passes a shallow automated audit (axe/Lighthouse) that only checks for the
+      presence of certain attributes, while the element remains genuinely unusable via keyboard — automated
+      a11y tooling catches maybe 30-40% of real issues; manual keyboard-only and screen-reader testing is
+      not optional for anything genuinely interactive.</p></div>
+      <ul>
+        <li>Using heading levels (`h1`-`h6`) for visual sizing rather than document structure — skipping from `h2` to `h4` because it "looks right" breaks the document outline screen reader users rely on to navigate by heading.</li>
+        <li>Building a custom modal/dialog without focus trapping or focus restoration on close, instead of using an accessible primitive library (Radix UI, React Aria, headless UI) that's already solved this correctly.</li>
+        <li>Relying on `next/dynamic` with `ssr: false` for SEO-relevant content "because it's faster to ship," not realizing this guarantees the content is entirely absent from the initial HTML response that most crawlers and all non-JS bots see.</li>
+        <li>Shipping a visually-only loading spinner with no accessible announcement — a screen reader user gets no indication that content is loading or has finished loading unless an `aria-live` region or `aria-busy` state communicates it.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>Semantic HTML element (button, nav, header)</td><td>Always the default for its matching interaction/structure</td><td>Never — there's essentially no case where a semantic element is the wrong choice over a div reimplementation</td><td>ARIA role + manual behavior only as a last resort when no semantic element fits</td></tr>
+        <tr><td>Accessible primitive library (Radix/React Aria)</td><td>Custom interactive widgets (modal, combobox, menu) needing correct focus/keyboard handling</td><td>Simple cases fully covered by native HTML elements</td><td>Hand-rolled implementation (high risk of incomplete a11y)</td></tr>
+        <tr><td>Server-rendered metadata/content (SSG/ISR/SSR/PPR shell)</td><td>Any SEO-relevant or link-preview-relevant route</td><td>Purely authenticated, non-indexable internal tools</td><td>CSR acceptable only when no crawler/share-preview need exists</td></tr>
+        <tr><td>JSON-LD structured data</td><td>Content matching a schema.org type with rich-result support (Product, Article, FAQ, Recipe)</td><td>Content with no matching schema.org type, or where rich results aren't desired</td><td>Plain metadata tags only</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic"><h4>Basic</h4>
+      <details class="qa"><summary>What is the accessibility tree, and what consumes it?</summary><div class="answer"><p>A tree the browser builds from the DOM, computing each node's role/name/state; screen readers and other assistive technology query this tree via platform accessibility APIs, not the raw DOM or your source code.</p></div><div class="followup">Follow-up: Does a `display: none` element appear in the accessibility tree?</div></details>
+      <details class="qa"><summary>Why is `&lt;button onClick={...}&gt;` generally better than `&lt;div onClick={...}&gt;` for the same interaction?</summary><div class="answer"><p>A real button gets correct accessible role, name (from its text), and keyboard operability (Enter/Space activation, natural tab order) built into the browser for free; a div requires manually reimplementing all of that with ARIA attributes and keyboard handlers, and it's easy to do incompletely.</p></div><div class="followup">Follow-up: What specific attributes/handlers would you need to add to a div to make it behave like a real button?</div></details>
+      <details class="qa"><summary>Does Googlebot execute JavaScript?</summary><div class="answer"><p>Yes, via a headless Chromium-based renderer, but rendering happens in a deferred second wave (the render queue) after initial HTML crawling, so JS-dependent content can be indexed later than server-rendered content.</p></div><div class="followup">Follow-up: Do all crawlers/bots execute JavaScript the same way?</div></details>
+      <details class="qa"><summary>What does Next.js's Metadata API actually solve?</summary><div class="answer"><p>It generates `&lt;head&gt;` tags (title, description, Open Graph, etc.) server-side so they're present in the initial HTML response, rather than injected client-side after hydration where most crawlers and all non-JS link-preview bots would miss them.</p></div><div class="followup">Follow-up: Why do social media link-preview bots specifically depend on this?</div></details>
+      <details class="qa"><summary>What is JSON-LD structured data used for?</summary><div class="answer"><p>Explicitly telling search engines the semantic type of your content (Article, Product, FAQPage, etc.) using schema.org vocabulary, which can unlock rich search results like star ratings or price directly in search listings.</p></div><div class="followup">Follow-up: What HTML element and attribute is JSON-LD typically embedded in?</div></details>
+      <details class="qa"><summary>Why does automated accessibility tooling (axe, Lighthouse) catch only a fraction of real a11y issues?</summary><div class="answer"><p>It can check for the presence/absence of certain attributes and patterns programmatically, but it can't verify actual usability — whether keyboard navigation genuinely works end-to-end, whether focus order makes sense, or whether a screen reader's actual spoken output is coherent — which require manual testing.</p></div><div class="followup">Follow-up: What's one specific thing manual keyboard testing would catch that an automated audit wouldn't?</div></details>
+      </div>
+      <div class="qa-level medium"><h4>Medium</h4>
+      <details class="qa"><summary>Explain the accessible name computation precedence, and why it matters for a form input.</summary><div class="answer"><p>The browser computes an accessible name by checking, in order: `aria-labelledby` (points to another element's text), then `aria-label` (an explicit string), then an associated `&lt;label&gt;` element, then visible text content as a fallback. For a form input, if none of these resolve to anything meaningful (e.g., a placeholder alone, which isn't part of this precedence chain), a screen reader announces the input with no usable name at all — placeholder text is not a substitute for a real accessible name.</p></div><div class="followup">Follow-up: Why is relying solely on placeholder text for a form field's label considered an accessibility failure?</div></details>
+      <details class="qa"><summary>Why does client-side route transition focus management matter even in a mostly server-rendered Next.js app?</summary><div class="answer"><p>Even with server-rendered content, Next.js's client-side router (Link navigation) doesn't trigger a full page load, so the browser's automatic focus-reset-to-body and screen reader page-change announcement (both tied to a real navigation event) don't happen automatically — without explicit handling, a keyboard/screen reader user's focus stays on a now-stale or removed element after what looks, visually, like a full page change.</p></div><div class="followup">Follow-up: What's a common pattern for implementing this focus management in an App Router layout?</div></details>
+      <details class="qa"><summary>Why would using `next/dynamic` with `ssr: false` for a product description component hurt SEO specifically, even though the user still sees the content eventually?</summary><div class="answer"><p>`ssr: false` guarantees that component's output is entirely absent from the server-rendered initial HTML — it only ever appears after client-side JS execution and hydration. Crawlers/bots that don't execute JS (most link-preview bots, many non-Google search engines) never see this content at all, and even Googlebot's JS-executing renderer defers processing it to the render queue, delaying indexing versus content present in the initial response.</p></div><div class="followup">Follow-up: Is there a legitimate reason to use `ssr: false` on a component, given this cost?</div></details>
+      <details class="qa"><summary>What's the practical difference between hiding content with `display: none` versus visually-hidden-but-DOM-present CSS techniques (like a common `.sr-only` class), from an accessibility standpoint?</summary><div class="answer"><p>`display: none` removes the element from both the render tree and the accessibility tree entirely — it's invisible to screen readers too. A `.sr-only`-style technique (clipping/positioning off-screen while keeping the element technically rendered and focusable) keeps the element present in the accessibility tree, so screen readers still announce it, even though sighted users never see it — this is exactly the technique used for skip links and screen-reader-only descriptive text.</p></div><div class="followup">Follow-up: Would `visibility: hidden` behave the same as `display: none` for this purpose?</div></details>
+      </div>
+      <div class="qa-level advanced"><h4>Advanced</h4>
+      <details class="qa"><summary>Design the accessible focus-management behavior for a client-side-routed single-page app with no full page reloads, covering both route changes and modal dialogs.</summary><div class="answer"><p>For route changes: on each navigation, move focus programmatically to a stable, meaningful landmark (commonly the page's `h1`, given a `tabindex="-1"` so it's focusable without being in the normal tab order) and update an `aria-live="polite"` region with the new page's title so screen reader users get an explicit announcement equivalent to what a full page load would provide natively. For modals: on open, trap focus within the dialog (Tab/Shift+Tab cycle only among its focusable descendants, typically via `inert` on everything else or a focus-trap utility), move focus to the dialog's first focusable element (or a sensible default like its heading or primary action), and on close, explicitly restore focus to whatever element triggered the dialog's opening — losing this restoration step is one of the most common real-world regressions when a team migrates off an accessible library's modal onto a custom one.</p></div><div class="followup">Follow-up: How would you handle focus management for a toast/notification that appears without any user-initiated action?</div></details>
+      <details class="qa"><summary>Critique: "Our site scores 100 on Lighthouse's Accessibility audit, so we're WCAG compliant." What's wrong with this claim?</summary><div class="answer"><p>Lighthouse's accessibility score is computed from axe-core's automated rule set, which checks a specific, finite list of programmatically-detectable issues (missing alt text, insufficient color contrast on certain elements, missing form labels, some ARIA misuse patterns) — it has no way to assess whether the actual experience is usable: whether keyboard focus order is logical, whether a screen reader's announced sequence makes sense, whether custom widgets implement the correct WAI-ARIA interaction patterns completely, or whether content reflows sensibly at high zoom/text-scaling. A 100 score indicates the absence of certain detectable violations, not WCAG conformance, which explicitly requires success criteria (many of them, like meaningful sequence and consistent navigation) that only manual/expert review and real assistive-technology testing can verify.</p></div><div class="followup">Follow-up: What would a legitimate WCAG 2.1 AA conformance audit process include that an automated Lighthouse run wouldn't?</div></details>
+      <details class="qa"><summary>Explain why a page using PPR (Ch.8) could still have an SEO problem even though its static shell is server-rendered.</summary><div class="answer"><p>If SEO-relevant content (e.g., the main article body, product price, or key descriptive text) ends up inside a PPR dynamic hole — because it was placed inside a Suspense boundary that also happens to read a request-specific API, even unintentionally via a shared utility — that content is absent from the static shell delivered in the initial HTML response and only resolves per-request after. A crawler that doesn't wait long enough, or a non-JS-executing bot, would miss it entirely, the same failure mode as pure CSR, just scoped to one subtree instead of the whole page. The fix is auditing exactly which content ends up in the static shell versus a dynamic hole and ensuring genuinely SEO-critical content never depends on a request-specific API unnecessarily.</p></div><div class="followup">Follow-up: How would you audit a PPR route to confirm which specific content is actually in the static shell versus a dynamic hole?</div></details>
+      <details class="qa"><summary>A product page needs to show different prices to different users based on a negotiated B2B discount (read from a cookie), but the page must still be indexed by Google with a single canonical price for rich-result eligibility. How would you architect this?</summary><div class="answer"><p>Serve the public/standard price in the server-rendered static shell (or plain SSG/ISR) — this is what crawlers see and what populates the JSON-LD structured data's `offers.price`, satisfying rich-result requirements with one canonical, crawlable price. The B2B-specific discounted price becomes a separate, clearly-scoped dynamic element (a PPR dynamic hole or a client-side-fetched widget reading the cookie) that overlays or supplements the displayed price only for authenticated B2B sessions — critically, it should not be the only price present in the initial HTML/structured data, since an inconsistent or missing canonical price in structured data risks rich-result rejection or Search Console errors for price mismatches.</p></div><div class="followup">Follow-up: What would happen to rich-result eligibility if the JSON-LD price and the visually-displayed price diverged for anonymous users due to a caching bug?</div></details>
+      <details class="qa"><summary>Why is "it looks fine visually" an insufficient bar for judging whether a custom combobox/autocomplete component is accessible?</summary><div class="answer"><p>A combobox has a specific, non-trivial WAI-ARIA interaction pattern (role="combobox" on the input, aria-expanded, aria-activedescendant tracking the currently highlighted option without moving actual DOM focus, role="listbox"/"option" on the popup and its items, specific arrow-key/Enter/Escape keyboard behavior) — visually it can look identical to a correct implementation while being entirely unusable via keyboard or screen reader if any of these pieces (especially aria-activedescendant, which is easy to omit since it has no visual effect) are missing. This is exactly the class of component where hand-rolling from scratch has a high real-world failure rate, and leaning on a tested accessible primitive (Radix, React Aria, downshift) is the pragmatic senior-level choice over reimplementing the full ARIA authoring pattern correctly from scratch.</p></div><div class="followup">Follow-up: What specifically does `aria-activedescendant` solve that moving real DOM focus between options wouldn't?</div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment"><span class="level-tag">Beginner (30-60 min)</span><h4>Audit and fix a div-based interactive component</h4>
+      <p>Take a component built with a `&lt;div onClick&gt;` pretending to be a button (or build one deliberately). Fix it to be a real `&lt;button&gt;`, or if a div is unavoidable for some reason, add the complete set of ARIA attributes and keyboard handlers needed to make it genuinely keyboard-operable with correct announced state.</p>
+      <p><strong>Acceptance criteria:</strong> The component is fully operable via keyboard alone (Tab to focus, Enter/Space to activate) and announces a sensible role/name/state via a screen reader or the browser's accessibility inspector.</p>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>Chrome DevTools' Accessibility pane (under Elements) lets you inspect the computed accessible name/role/state directly without needing a real screen reader.</p></div></details>
+      <p><strong>Bonus:</strong> Run axe DevTools on both the before and after version and compare what it does and doesn't catch.</p></div>
+
+      <div class="assignment"><span class="level-tag">Intermediate (2-4 hrs)</span><h4>Implement full focus management for client-side routing and a modal</h4>
+      <p>In a Next.js App Router app, implement route-change focus management (focus moves to the new page's h1, with a screen-reader announcement via a live region) and build or integrate an accessible modal with correct focus trapping and focus restoration on close.</p>
+      <ul><li>Test both flows using only the keyboard (no mouse) end-to-end.</li></ul>
+      <p><strong>Acceptance criteria:</strong> Navigating via keyboard-only Link clicks correctly moves focus and announces the change; opening/closing the modal via keyboard never leaves focus stranded or lost (e.g., on `document.body`).</p>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>Store the triggering element in a ref before opening the modal so you have something concrete to restore focus to on close.</p></div></details>
+      <p><strong>Bonus:</strong> Test with a real screen reader (VoiceOver on Mac, NVDA on Windows) rather than relying solely on the accessibility inspector.</p></div>
+
+      <div class="assignment"><span class="level-tag">Advanced (1-2 days)</span><h4>Build an SEO-complete, accessible article page and validate both end-to-end</h4>
+      <p>Build an article/blog page that is server-rendered (SSG or ISR), includes correct `generateMetadata` output (title, description, Open Graph), embeds JSON-LD Article structured data, uses correct semantic heading structure, and is fully navigable/readable via keyboard and screen reader. Validate the structured data with Google's Rich Results Test and validate accessibility with both automated tooling and manual keyboard/screen-reader testing.</p>
+      <ul><li>Document any discrepancy you find between what automated tooling reports and what manual testing actually reveals.</li></ul>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>Check your actual initial HTML response (view-source, not DevTools' rendered Elements panel) to confirm the metadata and JSON-LD are truly present server-side, not just injected client-side after the fact.</p></div></details>
+      </div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet"><ul>
+        <li>The accessibility tree (role, name, state per node) — not the raw DOM — is what assistive tech actually queries.</li>
+        <li>Prefer real semantic HTML elements over divs reimplementing behavior with ARIA — native elements get correct behavior for free.</li>
+        <li>Accessible name computation precedence: aria-labelledby → aria-label → associated label → text content; placeholder text is not part of this chain.</li>
+        <li>Client-side route transitions need explicit focus management and announcement — the browser's automatic page-change behavior doesn't fire.</li>
+        <li>Modals need focus trapping on open and focus restoration to the trigger element on close — use a tested primitive (Radix/React Aria) rather than hand-rolling.</li>
+        <li>Crawlers execute JS in a deferred render-queue pass; non-JS bots (social previews, many search engines) never execute it at all — server-render SEO-critical content.</li>
+        <li>Next.js's Metadata API and JSON-LD structured data must be present in the server-rendered initial HTML, not injected client-side, to be reliably crawled.</li>
+        <li>Automated a11y audits (axe/Lighthouse) catch a fraction of real issues — manual keyboard and screen-reader testing is not optional for custom interactive widgets.</li>
+        <li>In PPR, verify SEO-critical content lives in the static shell, not an accidentally-dynamic Suspense hole.</li>
+      </ul></div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://web.dev/articles/accessibility">web.dev — Accessibility</a></li>
+        <li><a href="https://nextjs.org/docs/app/building-your-application/optimizing/metadata">Next.js — Metadata API</a></li>
+        <li><a href="https://react.dev/reference/react-dom/components/common#accessibility-attributes">react.dev — Accessibility Attributes (ARIA props)</a></li>
+        <li><a href="https://developers.google.com/search/docs/crawling-indexing/javascript/javascript-seo-basics">Google Search Central — JavaScript SEO Basics</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="10-frontend-architecture.html"><span class="dir">← Previous</span>Frontend Architecture</a>
+        <a class="next" href="../04-nodejs-advanced/index.html"><span class="dir">Next →</span>Node.js Advanced</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · React &amp; Next.js Advanced</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-jsx.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-typescript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-tsx.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "03-react-nextjs-advanced", chapterKey: "11-accessibility-seo" });</script>
+</body>
+</html>

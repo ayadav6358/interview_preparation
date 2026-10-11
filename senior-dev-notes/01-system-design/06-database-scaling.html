@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Database Scaling — System Design — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">System Design</a><span class="sep">›</span>Database Scaling</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>Database Scaling: Replication, Sharding, and Consistency Models</h1>
+      <p class="meta-line"><span>⏱ 2.5 hrs</span><span>📍 Chapter 6 of 14</span></p>
+      <p><strong>One-line summary:</strong> A single database server scales only so far — replication buys you read capacity and durability, sharding buys you write capacity, and every technique you add trades away some consistency guarantee you had for free on a single node, which is exactly the PACELC tradeoff from Chapter 1 playing out in concrete engineering decisions.</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>Almost every "design X at scale" interview question eventually reaches "the database is now the bottleneck — what do you do?" The honest answer is never just "shard it." A senior engineer needs to explain which scaling technique solves which specific bottleneck (read load vs write load vs storage size), what guarantee gets weaker as a result, and how to detect and live with that weaker guarantee in production (stale reads, resharding pain, hot partitions). This chapter is the mechanism behind nearly every "scale the database" follow-up in a system design interview.</p>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>Required: <a href="01-fundamentals.html">Fundamentals</a> (CAP/PACELC — this chapter is CAP/PACELC made concrete) and <a href="05-databases.html">Databases</a> (indexing and query internals assumed). Feeds into <a href="07-transactions.html">Transactions</a> and <a href="13-hld-case-studies.html">HLD Case Studies</a>.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="replication">Replication: leader-follower, sync vs async, lag, multi-leader conflicts</h3>
+      <p><strong>Leader-follower (primary-replica) replication.</strong> One node (the leader) accepts all writes, appends them to a write-ahead log (WAL), and streams that log to one or more followers who replay it to stay in sync. Followers serve reads, offloading read traffic from the leader — this is the standard first scaling move once a single node can't handle read QPS, and it's why "read replica" is usually the first infrastructure change a growing app makes, well before sharding.</p>
+      <p><strong>Synchronous vs asynchronous replication.</strong> Synchronous: the leader waits for a follower (or quorum of followers) to acknowledge the write before returning success to the client — strong durability (a follower can be promoted with zero data loss) but higher write latency and the leader can stall if a follower is slow or down. Asynchronous: the leader returns success immediately after its own local write, replicating in the background — low latency, but if the leader crashes before replicating, acknowledged writes are lost, and followers temporarily lag behind. Most production systems use a hybrid: one synchronous follower for durability (semi-synchronous) and the rest asynchronous for read scaling, balancing the PACELC latency-vs-consistency tradeoff per replica rather than system-wide.</p>
+      <p><strong>Replication lag problems.</strong> Async replication means a follower is always some milliseconds-to-seconds behind the leader. This breaks naive assumptions constantly: a user submits a comment (written to the leader), the page reloads and reads from a lagging follower, and the comment appears to vanish. Standard mitigations: <strong>read-your-writes consistency</strong> (route a user's own reads to the leader for some window after their write, or read from whichever replica they just wrote to), <strong>monotonic reads</strong> (always route a given user's reads to the same replica so they never see time go backwards), and <strong>timestamp/version-based reads</strong> (client tracks the last write's log position and a read waits until the replica has caught up to at least that position).</p>
+      <p><strong>Multi-leader replication and conflicts.</strong> Some systems (especially multi-region deployments where you want local low-latency writes in each region) allow multiple leaders, each accepting writes and replicating to the others asynchronously. This inevitably produces write conflicts: two users in different regions update the same record concurrently before either region has seen the other's write. Resolution strategies: last-write-wins (simple, silently loses data — dangerous for anything users care about), version vectors/CRDTs (merge concurrent writes deterministically, e.g., a counter CRDT that sums regional increments), or application-level conflict resolution (surface the conflict and let the user or domain logic decide, e.g., merging two concurrently-edited document sections). Multi-leader is strictly harder to reason about than single-leader and should only be reached for when cross-region write latency is a measured, real problem — not by default.</p>
+
+      <h3 id="sharding">Sharding and partitioning: range, hash, directory-based</h3>
+      <p><strong>Range-based sharding.</strong> Partition by a range of the shard key (e.g., user IDs 1-1M on shard A, 1M-2M on shard B). Simple to reason about and supports efficient range queries within a shard, but creates <strong>hot shards</strong> when access isn't uniform — if user IDs are assigned sequentially and new users are most active, the newest shard takes disproportionate load while old shards sit idle. Classic example: a naive timestamp-range shard key for an events table puts 100% of current write traffic on exactly one shard (today's range) at all times.</p>
+      <p><strong>Hash-based sharding.</strong> Hash the shard key and assign by hash range (often via consistent hashing to minimize data movement on resharding). Spreads load far more evenly than range-based for uniformly-distributed keys, but destroys the ability to do efficient range queries across the key (e.g., "all orders from last week" now touches every shard, because order IDs are scattered by hash). The fix for needing both is often a secondary index or a separate analytical store, not fighting the primary shard key.</p>
+      <p><strong>Directory-based sharding.</strong> A separate lookup service/table maps each key (or key range) explicitly to a shard, rather than deriving it algorithmically. Most flexible — you can rebalance by moving individual keys and updating the directory, and you can handle non-uniform, business-driven partitioning (e.g., "enterprise customers get their own dedicated shard"). Cost: the directory itself is a new critical, must-be-fast, must-be-highly-available service and potential single point of failure/bottleneck — you've traded a sharding problem for a "don't let the directory become the new bottleneck" problem.</p>
+      <p><strong>Hot shard / hot partition problem.</strong> Even with good key design, some keys are inherently more active than others — a celebrity's account on a social platform, a viral product on an e-commerce site, a popular chat room. If your shard key is "user ID" or "chat room ID," one shard can absorb wildly disproportionate traffic no matter how evenly you hash, because the skew is in the real-world data, not the hash function. Mitigations: sub-partition a hot key further (e.g., shard a viral room's messages by a secondary hash + room ID, "salting" the key), cache aggressively in front of the hot shard, or isolate known-hot keys onto dedicated capacity.</p>
+      <p><strong>Resharding pain.</strong> When shards need to be added (growth) or rebalanced (hot shard mitigation), every key's shard assignment can change, requiring a data migration while the system stays live. Naive modulo-based hashing (<code>shard = hash(key) % N</code>) is especially bad here — changing N remaps almost every key. <strong>Consistent hashing</strong> (keys and shards placed on a hash ring; a shard only owns the arc between it and its neighbor) solves this: adding a shard only moves the keys in the arc it takes over from its neighbor, not a global remap. This is why consistent hashing (used by DynamoDB, Cassandra, and CDN request routing) is a standard senior-interview topic — know that the practical benefit is "adding/removing a node moves O(1/N) of the data, not O(N)."</p>
+
+      <h3 id="consistency-models">Consistency models in a scaled system, tied back to CAP/PACELC</h3>
+      <p>Once you have multiple replicas and/or shards, "consistency" stops being binary and becomes a spectrum of specific guarantees you choose per operation:</p>
+      <ul>
+        <li><strong>Strong consistency (linearizability):</strong> every read reflects the most recent completed write, system-wide, as if there were one copy of the data. Requires either reading from the leader always, or a consensus/quorum read across replicas. This is the "C" in CAP — expensive in latency (the "Else, Consistency" cost in PACELC) but necessary for things like "is this username already taken" or account balances.</li>
+        <li><strong>Eventual consistency:</strong> given enough time with no new writes, all replicas converge to the same value, but there's no bound on how stale an individual read can be right now. Cheapest in latency, standard default for AP systems (DynamoDB, Cassandra at consistency level ONE).</li>
+        <li><strong>Read-your-writes consistency:</strong> a user is guaranteed to see their own writes immediately, even if other users might see a stale view briefly. Implemented by routing a user's reads to the leader (or the replica that served their write) for some window after writing — the most common "good enough" fix for the "my comment disappeared" replication-lag bug.</li>
+        <li><strong>Monotonic reads:</strong> a user never sees data go "backwards in time" across successive reads (e.g., never see a comment, then not see it, then see it again) — typically guaranteed by pinning a user's session to one replica rather than load-balancing their reads across replicas with independent lag.</li>
+      </ul>
+      <p>Tying back to Chapter 1: choosing strong consistency system-wide is choosing CP (or paying the PACELC "Else: Consistency" latency tax even absent a partition). Choosing eventual consistency with read-your-writes/monotonic reads as targeted patches is the pragmatic AP-leaning middle ground most real products actually ship — full linearizability everywhere is rare outside of financial ledgers and coordination services (etcd, Zookeeper, Spanner).</p>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>Concretely: a write lands on the leader's WAL at log sequence number (LSN) 1000. The leader streams this to followers A and B asynchronously. A client writes, gets a 200 OK (leader-only ack), then immediately issues a read that the load balancer routes to follower A, which is still at LSN 998 — the read misses the write. This is replication lag causing a stale read, and it's the single most common "why is my data inconsistent" production bug in any system with read replicas, almost always traced back to "we load-balance reads across replicas without tracking LSN/replication position per client session."</p>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+flowchart TD
+    A["Need to scale a single DB"] --> B{What's the bottleneck?}
+    B -->|Read load| C["Add read replicas<br/>(leader-follower)"]
+    B -->|Write load or storage size| D{Shard key access pattern?}
+    D -->|Need range queries| E["Range-based sharding<br/>(watch for hot-range skew)"]
+    D -->|Need even load distribution| F["Hash-based sharding<br/>(use consistent hashing)"]
+    D -->|Need flexible/custom placement| G["Directory-based sharding<br/>(directory becomes critical path)"]
+    C --> H{Stale reads acceptable?}
+    H -->|No| I["Route to leader or track LSN<br/>-&gt; read-your-writes"]
+    H -->|Yes| J["Load balance reads freely<br/>-&gt; eventual consistency"]
+      </div>
+      <div class="mermaid">
+sequenceDiagram
+    participant Client
+    participant LB as Load Balancer
+    participant Leader
+    participant Follower as Follower (lagging)
+    Client->>Leader: WRITE comment="hello"
+    Leader->>Leader: append to WAL (LSN 1000)
+    Leader-->>Client: 200 OK
+    Leader->>Follower: async replicate (in flight)
+    Client->>LB: READ comments
+    LB->>Follower: route read (round-robin)
+    Note over Follower: Follower still at LSN 998,<br/>has not received LSN 1000 yet
+    Follower-->>Client: comments (missing "hello")
+    Note over Client: Stale read -- comment appears to vanish
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <p>Consistent hashing to minimize data movement on resharding (simplified illustrative implementation):</p>
+      <pre><code class="language-typescript">import { createHash } from 'crypto';
+
+function hashToRing(key: string): number {
+  const hex = createHash('md5').update(key).digest('hex').slice(0, 8);
+  return parseInt(hex, 16); // position on a 32-bit ring
+}
+
+class ConsistentHashRing {
+  private ring: { hash: number; shardId: string }[] = [];
+
+  addShard(shardId: string, virtualNodes = 100) {
+    // virtual nodes smooth out load distribution across physical shards
+    for (let i = 0; i < virtualNodes; i++) {
+      this.ring.push({ hash: hashToRing(`${shardId}#${i}`), shardId });
+    }
+    this.ring.sort((a, b) => a.hash - b.hash);
+  }
+
+  getShardFor(key: string): string {
+    const h = hashToRing(key);
+    const node = this.ring.find(n => n.hash >= h) ?? this.ring[0]; // wrap around
+    return node.shardId;
+  }
+}
+
+const ring = new ConsistentHashRing();
+ring.addShard('shard-A');
+ring.addShard('shard-B');
+ring.addShard('shard-C');
+console.log(ring.getShardFor('user-8821')); // deterministic, evenly distributed
+
+// Adding shard-D only steals a slice of the ring from its clockwise neighbor --
+// only ~1/N of all keys remap, not all of them, unlike `hash(key) % N`.
+ring.addShard('shard-D');</code></pre>
+      <p>Pinning a user's reads to avoid monotonic-read violations:</p>
+      <pre><code class="language-typescript">// Track replica affinity per session so a user never sees data go backwards
+async function readComments(session: { stickyReplica?: string; userId: string }) {
+  const replica = session.stickyReplica ?? pickLeastLoadedReplica();
+  session.stickyReplica = replica; // pin for the rest of the session
+  return queryReplica(replica, 'SELECT * FROM comments WHERE post_id = $1', [session.userId]);
+}
+
+// After a write, force read-your-writes for a short window
+async function writeComment(userId: string, text: string) {
+  await queryLeader('INSERT INTO comments (user_id, text) VALUES ($1, $2)', [userId, text]);
+  cache.set(`ryw:${userId}`, Date.now() + 5000); // next 5s, route this user's reads to leader
+}</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4><p>A social app sharded its posts table by <code>user_id % 256</code>. It worked fine until an influencer's account went viral overnight — every like, comment, and profile view on that one account hashed to the same shard, which became CPU and connection-pool saturated while the other 255 shards sat near idle. Switching shard keys would have required a massive migration, so the team instead added a per-shard "hot key" detector (tracking request rate per key over a sliding window) that, on detection, transparently fans out that specific user's writes across several sub-partitions (salting the key with a secondary hash) and merges reads across them — effectively sharding the hot key further without resharding the whole table. This is a common production pattern: design for the average case with simple hash sharding, but build an escape hatch for the inevitable outlier hot key rather than trying to pre-solve for worst-case skew in the initial key design.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Load-balancing reads round-robin across replicas without any session affinity or LSN tracking, then being surprised users report "my data disappeared" — this is almost always a monotonic-read violation caused by hopping between replicas at different lag.</p></div>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Using <code>hash(key) % N</code> for shard assignment instead of consistent hashing. It works fine until you need to add a shard — then nearly every key remaps, requiring a massive synchronized migration instead of an incremental one.</p></div>
+      <ul>
+        <li>Pick the shard key based on your dominant access pattern, not your primary key by default — a bad shard key is one of the hardest things to fix later.</li>
+        <li>Monitor replication lag as a first-class metric (seconds behind leader) — treat sustained lag above an SLO threshold as an incident, not background noise.</li>
+        <li>Prefer semi-synchronous replication (at least one sync follower) for data you cannot afford to lose on leader failure, async for pure read-scaling replicas.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs: When to Use vs When NOT To</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>Read replicas</td><td>Read-heavy load, writes fit on one node</td><td>Write volume itself is the bottleneck</td><td>Sharding, caching (Ch. 4)</td></tr>
+        <tr><td>Range-based sharding</td><td>Need efficient range scans within shard key</td><td>Access pattern is skewed by time/sequence</td><td>Hash-based sharding</td></tr>
+        <tr><td>Hash-based sharding</td><td>Need even load distribution, point lookups dominate</td><td>Need range queries across the shard key</td><td>Secondary index / separate analytical store</td></tr>
+        <tr><td>Multi-leader replication</td><td>Multi-region low-latency writes are a hard requirement</td><td>Conflict resolution complexity isn't justified by actual latency need</td><td>Single-leader with regional read replicas</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic"><h4>Basic</h4>
+        <details class="qa"><summary>What's the difference between replication and sharding?</summary><div class="answer"><p>Replication copies the same data to multiple nodes (scales reads, adds durability). Sharding splits data across nodes so each holds a subset (scales writes and storage).</p></div></details>
+        <details class="qa"><summary>What is replication lag?</summary><div class="answer"><p>The delay between a write landing on the leader and that write being visible on a follower, inherent to asynchronous replication.</p></div></details>
+        <details class="qa"><summary>Name the three sharding strategies covered and one weakness of each.</summary><div class="answer"><p>Range-based: hot ranges. Hash-based: loses efficient range queries. Directory-based: the directory itself becomes a critical bottleneck/SPOF.</p></div></details>
+        <details class="qa"><summary>What is a hot shard/hot partition?</summary><div class="answer"><p>A shard that receives disproportionate load relative to others, usually because real-world access patterns are skewed (a viral item, a popular key) even when the hashing itself is uniform.</p></div></details>
+        <details class="qa"><summary>What does "read-your-writes consistency" guarantee?</summary><div class="answer"><p>A user is guaranteed to see their own writes immediately after making them, even if other users might briefly see a stale view from a lagging replica.</p></div></details>
+        <details class="qa"><summary>Why is synchronous replication slower but safer than asynchronous?</summary><div class="answer"><p>The leader waits for follower acknowledgment before confirming the write to the client, so a follower can be promoted with zero data loss, at the cost of added write latency and potential blocking if a follower is slow/down.</p></div></details>
+      </div>
+      <div class="qa-level medium"><h4>Medium</h4>
+        <details class="qa"><summary>Why does consistent hashing minimize data movement on resharding compared to hash(key) % N?</summary><div class="answer"><p>Keys and shards are placed on a hash ring; each shard only owns the arc up to its neighbor. Adding/removing a shard only moves the keys in the arc it takes from/gives to its immediate neighbor — roughly 1/N of keys — instead of remapping almost everything as a modulo change does.</p></div><div class="followup">Follow-up: Why do real implementations use many virtual nodes per physical shard?</div></details>
+        <details class="qa"><summary>A user posts a comment then immediately refreshes and doesn't see it. Diagnose and fix.</summary><div class="answer"><p>Classic replication-lag stale read: the write hit the leader, the refresh read hit a lagging follower. Fix with read-your-writes (route that user's reads to the leader for a short window after writing) or track the write's LSN and have the read wait until the chosen replica catches up.</p></div></details>
+        <details class="qa"><summary>Why is multi-leader replication harder to reason about than single-leader, and when is it worth the complexity?</summary><div class="answer"><p>Concurrent writes to the same record in different regions create conflicts with no single source of truth to arbitrate in real time, requiring conflict resolution (LWW, CRDTs, app-level merge). Worth it only when cross-region write latency is a measured, real business requirement (e.g., real-time collaborative editing across continents) — not as a default multi-region setup.</p></div></details>
+        <details class="qa"><summary>How would you detect and mitigate a hot shard in production without a full resharding migration?</summary><div class="answer"><p>Monitor per-shard/per-key request rate; on detecting an outlier hot key, "salt" that specific key with a secondary hash to spread its traffic across several sub-partitions and merge on read, or add dedicated caching in front of just that key — avoids a full migration for an isolated outlier.</p></div></details>
+        <details class="qa"><summary>Tie "eventual consistency" and "monotonic reads" back to PACELC.</summary><div class="answer"><p>Eventual consistency is the Else-Latency choice in PACELC — low latency, accept temporary staleness. Monotonic reads is a targeted, cheap patch on top of that (pin a client to one replica) that removes the specific user-visible symptom of going "back in time" without paying for full linearizability.</p></div></details>
+      </div>
+      <div class="qa-level advanced"><h4>Advanced</h4>
+        <details class="qa"><summary>Design the sharding strategy for a multi-tenant SaaS product where tenant sizes vary by 1000x.</summary><div class="answer"><p>Directory-based sharding keyed by tenant ID: small tenants pool together on shared shards (hash-assigned within the pool for even distribution), while large tenants get dedicated shards assigned explicitly in the directory. This avoids both the "one giant tenant floods a shared shard" problem and the waste of giving every tiny tenant a dedicated shard — the directory service itself needs its own HA design (e.g., backed by a strongly consistent store) since it's now a critical lookup on every request.</p></div></details>
+        <details class="qa"><summary>Explain how you'd implement a zero-downtime resharding migration from 4 shards to 8 using consistent hashing.</summary><div class="answer"><p>Add the 4 new shards as nodes on the existing hash ring; each new shard only needs to receive the keys in the ring-arc it takes over from its clockwise neighbor. Dual-write (or use change-data-capture/replication) from the old owning shard to the new one for that arc's key range while backfilling historical data, verify consistency, then atomically flip read traffic for that range once backfill + live replication are confirmed caught up, finally stop dual-writing. The key property: each old shard only needs to coordinate migration with one new neighbor, not globally.</p></div></details>
+        <details class="qa"><summary>How would you provide strong consistency for a specific critical read (e.g., account balance check before a withdrawal) in an otherwise eventually-consistent, sharded system?</summary><div class="answer"><p>Route that specific read to the leader of the relevant shard (bypassing replicas entirely), or use a quorum read (read from a majority of replicas and take the highest version/LSN) if the system supports tunable per-operation consistency (e.g., Cassandra QUORUM, DynamoDB strongly consistent reads). The key senior point: consistency should be a per-operation choice, not a system-wide default — pay the latency cost only where correctness genuinely requires it.</p></div></details>
+        <details class="qa"><summary>What failure mode does semi-synchronous replication (one sync follower, rest async) still not protect against, and how would you close that gap?</summary><div class="answer"><p>It protects against losing the single sync follower's acknowledged writes on leader failure, but if the sync follower itself is unreachable, the leader either blocks (hurting availability) or the system must demote to fully-async temporarily (reintroducing the data-loss window) — this is itself a live CP-vs-AP decision. Closing the gap fully requires quorum-based consensus replication (e.g., Raft/Paxos-backed systems) rather than a fixed sync/async split, at a real latency cost.</p></div></details>
+        <details class="qa"><summary>Why can't you just "add more read replicas" indefinitely to scale reads?</summary><div class="answer"><p>Every replica adds load to the leader's replication stream (network + WAL shipping overhead), and beyond some point, replication itself becomes the bottleneck or lag increases across the fleet; there are also diminishing returns and increased operational/consistency complexity (more replicas to keep monotonic-read-pinned, more lag variance). At that point you need sharding (to reduce total data/load per node) or a caching layer in front of the replicas rather than continuing to add replicas.</p></div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment"><span class="level-tag">Beginner (30-60 min)</span><h4>Pick a shard key</h4><p>You're designing a ride-sharing backend's trips table. Evaluate range-based, hash-based, and directory-based sharding using <code>rider_id</code> as the candidate shard key, considering that a small number of power users (frequent riders) exist alongside millions of occasional riders.</p><ul><li>State which strategy you'd pick and why.</li><li>Identify the specific hot-key risk and one mitigation.</li></ul><p><strong>Acceptance criteria:</strong> A clear strategy choice with reasoning tied to the access pattern and an explicit hot-key mitigation.</p><details class="qa"><summary>Hints</summary><div class="answer"><p>Hash-based with consistent hashing handles the general case well; consider whether trips should instead be sharded by city/region (a natural, business-meaningful partition) to also keep related data (driver matching) local.</p></div></details><p><strong>Bonus:</strong> How would your answer change if the dominant query pattern is "all trips in the last hour, citywide" (an operational dashboard) rather than "all trips for this rider"?</p></div>
+      <div class="assignment"><span class="level-tag">Intermediate (2-4 hrs)</span><h4>Implement and test a consistent hash ring</h4><p>Extend the ConsistentHashRing code from this chapter: add a <code>removeShard</code> method, and write a test that adds 4 shards, assigns 10,000 random keys, records their shard assignment, adds a 5th shard, and measures what percentage of keys moved.</p><ul><li>Report the actual percentage of remapped keys and compare it to the theoretical ~1/5 (20%) expectation.</li><li>Experiment with virtual node count (10 vs 100 vs 1000) and report its effect on load distribution evenness.</li></ul><p><strong>Acceptance criteria:</strong> Working code, a measured remap percentage close to theory, and a clear virtual-node-count finding.</p><details class="qa"><summary>Hints</summary><div class="answer"><p>Build a map of key -> shardId before and after adding the shard, then count differences. For distribution evenness, count keys-per-shard and compute standard deviation at each virtual node count.</p></div></details><p><strong>Bonus:</strong> Modify the ring to simulate one hot key (force it into a small sub-ring) and show how salting that key reduces its single-shard load.</p></div>
+      <div class="assignment"><span class="level-tag">Advanced (1-2 days)</span><h4>Design a multi-region consistency strategy</h4><p>Design the replication and consistency strategy for a global collaborative to-do list app (users in US, EU, and APAC, each wanting low-latency local reads/writes) that must never silently lose a user's task.</p><ul><li>Decide single-leader vs multi-leader, and justify per-region behavior for reads and writes separately.</li><li>If you choose multi-leader, specify your conflict resolution strategy for the case where a task is edited concurrently in two regions.</li><li>Describe what happens to each region during a cross-region network partition.</li></ul><p><strong>Acceptance criteria:</strong> A written design (no full code required) that explicitly separates the read consistency decision from the write consistency decision, with a concrete conflict-resolution mechanism if multi-leader is chosen.</p><details class="qa"><summary>Hints</summary><div class="answer"><p>Consider CRDTs for simple fields (completion status as a boolean OR-merge, text edits via an operational-transform or CRDT text type) versus last-write-wins for simpler fields where occasional silent overwrite is tolerable — and consider whether "delete" needs special tombstone handling to avoid resurrecting a concurrently-deleted task.</p></div></details><p><strong>Bonus:</strong> How would you detect, in production, that your conflict resolution strategy is silently losing user edits more often than acceptable?</p></div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet"><ul>
+        <li>Replication scales reads and adds durability; sharding scales writes and storage — different bottlenecks, different fixes.</li>
+        <li>Sync replication = durable, slower. Async = fast, risk of data loss and stale reads (replication lag).</li>
+        <li>Read-your-writes and monotonic reads are cheap, targeted patches for the most visible replication-lag symptoms.</li>
+        <li>Range sharding: easy range queries, risk of hot ranges. Hash sharding: even load, loses range queries.</li>
+        <li>Directory-based sharding is most flexible but makes the directory itself a critical, must-scale service.</li>
+        <li>Hot shards come from real-world data skew, not bad hashing — mitigate with key salting, caching, or dedicated capacity.</li>
+        <li>Consistent hashing bounds resharding data movement to ~1/N of keys, unlike hash(key) % N.</li>
+        <li>Multi-leader replication requires explicit conflict resolution (LWW, CRDTs, app-level) — only adopt when cross-region write latency genuinely demands it.</li>
+        <li>Consistency should be a per-operation knob, not a system-wide default — pay the strong-consistency cost only where correctness demands it.</li>
+      </ul></div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://www.postgresql.org/docs/current/high-availability.html">PostgreSQL Documentation — High Availability, Replication</a></li>
+        <li><a href="https://cassandra.apache.org/doc/latest/cassandra/architecture/dynamo.html">Apache Cassandra Architecture — Dynamo</a></li>
+        <li><a href="https://aws.amazon.com/builders-library/amazon-dynamodb-a-scalable-predictable-and-highly-available-key-value-store/">AWS Builders' Library — Amazon DynamoDB internals</a></li>
+        <li><a href="https://www.allthingsdistributed.com/files/amazon-dynamo-sosp2007.pdf">Dynamo: Amazon's Highly Available Key-value Store (paper)</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="05-databases.html"><span class="dir">← Previous</span>Databases</a>
+        <a class="next" href="07-transactions.html"><span class="dir">Next →</span>Transactions</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · System Design</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-typescript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-sql.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-yaml.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "01-system-design", chapterKey: "06-database-scaling" });</script>
+</body>
+</html>

@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LLM Providers Comparison</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <input class="searchbox" placeholder="Search topics..." />
+    <a href="../index.html">← Home</a>
+    <h3>06-LLM-Providers</h3>
+    <a href="llm-providers-comparison.html">Providers Comparison</a>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumbs"><a href="../index.html">Home</a> / 06-LLM-Providers / Comparison</div>
+      <button class="theme-toggle" onclick="toggleTheme()">🌓 Theme</button>
+    </div>
+    <h1>LLM Providers: OpenAI, Anthropic, Google, Meta, Mistral, and more</h1>
+    <span class="tag warn">Fast-changing</span><span class="tag">Last verified: 2026-10-06 — re-check official docs before relying on specifics</span>
+
+    <div class="toc">
+      <b>On this page</b>
+      <a href="#what">1. What is this?</a>
+      <a href="#whyexist">2. Why does it exist?</a>
+      <a href="#whyimportant">3. Why is it important?</a>
+      <a href="#whereused">4. Where is it used?</a>
+      <a href="#prereq">5. Prerequisites</a>
+      <a href="#core">6. Core concepts</a>
+      <a href="#terms">7. Terminology</a>
+      <a href="#arch">8. Architecture (provider abstraction)</a>
+      <a href="#internal">9. How it works internally</a>
+      <a href="#steps">10. Step-by-step: choosing a provider</a>
+      <a href="#simple">11. Simple example</a>
+      <a href="#real">12. Real-world example</a>
+      <a href="#code">13. Code example</a>
+      <a href="#advanced">14. Advanced example</a>
+      <a href="#mistakes">15. Common mistakes</a>
+      <a href="#best">16. Best practices</a>
+      <a href="#production">17. Production considerations</a>
+      <a href="#security">18. Security considerations</a>
+      <a href="#performance">19. Performance considerations</a>
+      <a href="#cost">20. Cost considerations</a>
+      <a href="#debug">21. Debugging/troubleshooting</a>
+      <a href="#related">22. Related concepts</a>
+      <a href="#comparison">23. Comparison table</a>
+      <a href="#exercise">24. Mini practical exercise</a>
+      <a href="#project">25. Practical project</a>
+      <a href="#projectarch">26. Project architecture</a>
+      <a href="#interview-b">27. Interview Questions — Beginner</a>
+      <a href="#interview-i">28. Interview Questions — Intermediate</a>
+      <a href="#interview-a">29. Interview Questions — Advanced</a>
+      <a href="#interview-s">30. Interview Questions — Senior/Architect</a>
+      <a href="#interview-sc">31. Scenario-Based Questions</a>
+      <a href="#revision">32. Quick revision notes</a>
+      <a href="#cheat">33. Cheat sheet</a>
+      <a href="#further">34. Further topics to learn</a>
+    </div>
+
+    <h2 id="what">1. What is this?</h2>
+    <p>An overview of the major LLM providers as of 2026 — OpenAI, Anthropic, Google (Gemini), Meta (Llama), Mistral, Cohere, DeepSeek, Qwen, xAI — focused on practical engineering differences: API shape, tool calling, structured output, streaming, multimodal support, and where each tends to be strongest, rather than company history.</p>
+
+    <h2 id="whyexist">2. Why does it exist?</h2>
+    <p>Multiple competing providers exist because frontier model training is capital-intensive but commercially valuable, and different organizations optimized for different trade-offs (safety/reasoning focus, open-weights accessibility, multimodal breadth, cost efficiency) — giving engineers real architectural choices rather than a single monopoly API.</p>
+
+    <h2 id="whyimportant">3. Why is it important?</h2>
+    <p>Provider lock-in is a real production risk — pricing, rate limits, and even model behavior can shift with little notice. Engineers who understand the landscape build provider-agnostic abstractions and make informed build-vs-buy, open-vs-closed decisions instead of hardcoding assumptions about one vendor.</p>
+
+    <h2 id="whereused">4. Where is it used?</h2>
+    <p>Every LLM-powered application ultimately calls one or more of these providers' APIs (or self-hosts their open-weight models) — chatbots, agents, RAG systems, coding assistants.</p>
+
+    <h2 id="prereq">5. Prerequisites</h2>
+    <p><a href="../05-LLM-Fundamentals/what-is-llm.html">What is an LLM</a>.</p>
+
+    <h2 id="core">6. Core concepts</h2>
+    <ul>
+      <li><b>Closed/proprietary vs open-weight:</b> OpenAI/Anthropic/Google models are API-only (closed weights); Meta Llama, Mistral, Qwen, DeepSeek offer open-weight models you can self-host.</li>
+      <li><b>Model families/tiers:</b> most providers offer a range from fast/cheap to frontier/expensive (e.g., Claude Haiku vs Sonnet vs Opus) — matching model tier to task complexity is a core cost lever.</li>
+      <li><b>Tool/function calling:</b> nearly universal now, but schema format and multi-tool/parallel-call support differ by provider.</li>
+      <li><b>Structured output:</b> native JSON-schema-constrained output support varies in strictness/guarantee across providers.</li>
+    </ul>
+
+    <h2 id="terms">7. Terminology</h2>
+    <table>
+      <tr><th>Term</th><th>Meaning</th></tr>
+      <tr><td>Closed-weight model</td><td>Model accessible only via API; weights not released (OpenAI GPT, Anthropic Claude, Google Gemini).</td></tr>
+      <tr><td>Open-weight model</td><td>Model weights are publicly downloadable and self-hostable (Llama, Mistral, Qwen, DeepSeek).</td></tr>
+      <tr><td>Model tier</td><td>A provider's lineup from fast/cheap to most capable/expensive.</td></tr>
+      <tr><td>Function/tool calling</td><td>The model's ability to request a defined function be executed, with structured arguments.</td></tr>
+      <tr><td>Context window</td><td>Max tokens per request — varies significantly by provider and model tier.</td></tr>
+    </table>
+
+    <h2 id="arch">8. Architecture (provider abstraction)</h2>
+    <pre><code>Application code
+ → Provider-agnostic interface (e.g., LiteLLM, custom adapter)
+      → OpenAI SDK
+      → Anthropic SDK
+      → Google GenAI SDK
+      → Self-hosted open-weight model (vLLM, Ollama)</code></pre>
+
+    <h2 id="internal">9. How it works internally</h2>
+    <p>All major providers' APIs converge on a similar conceptual shape (messages array, system prompt, tool definitions, streaming, usage/token accounting) because the underlying problem (serving a chat-style LLM) is the same — differences are mostly in schema naming, specific parameter names/defaults, and feature maturity (e.g., which provider added native structured-output constraints first).</p>
+
+    <h2 id="steps">10. Step-by-step: choosing a provider</h2>
+    <ol>
+      <li>Define requirements: reasoning quality, latency, cost ceiling, multimodal needs, data residency/compliance constraints.</li>
+      <li>Shortlist 2–3 providers whose model tiers plausibly meet the requirements.</li>
+      <li>Benchmark on your own representative tasks (not generic leaderboards) — quality varies by task type.</li>
+      <li>Evaluate total cost at expected volume, not just headline per-token price.</li>
+      <li>Build a provider abstraction layer regardless of choice, to enable future fallback/migration.</li>
+    </ol>
+
+    <h2 id="simple">11. Simple example</h2>
+    <p>A startup prototyping a chatbot might start with a single provider's SDK directly; as it matures toward production, it typically introduces an abstraction layer to support fallback and cost-based routing across providers.</p>
+
+    <h2 id="real">12. Real-world example</h2>
+    <p>Many production systems route cheap/simple requests to a fast, inexpensive model tier (e.g., Claude Haiku, GPT-4o-mini-class models) and escalate complex reasoning requests to a frontier tier (e.g., Claude Opus, GPT-5-class, Gemini Ultra-class) — a provider-agnostic pattern enabled by understanding each provider's tiering.</p>
+
+    <h2 id="code">13. Code example</h2>
+    <pre><code class="language-python"># A minimal provider-agnostic interface
+class LLMProvider:
+    def complete(self, messages: list, **kwargs) -> str: ...
+
+class AnthropicProvider(LLMProvider):
+    def __init__(self, client):
+        self.client = client
+    def complete(self, messages, **kwargs):
+        resp = self.client.messages.create(model="claude-sonnet-5", messages=messages, max_tokens=500, **kwargs)
+        return resp.content[0].text
+
+class OpenAIProvider(LLMProvider):
+    def __init__(self, client):
+        self.client = client
+    def complete(self, messages, **kwargs):
+        resp = self.client.chat.completions.create(model="gpt-5", messages=messages, **kwargs)
+        return resp.choices[0].message.content
+</code></pre>
+
+    <h2 id="advanced">14. Advanced example</h2>
+    <pre><code class="language-python"># Model-tier routing based on estimated task complexity
+def route_request(prompt: str, complexity_score: float, providers: dict):
+    if complexity_score < 0.3:
+        return providers["fast_cheap"].complete([{"role": "user", "content": prompt}])
+    elif complexity_score < 0.7:
+        return providers["balanced"].complete([{"role": "user", "content": prompt}])
+    else:
+        return providers["frontier_reasoning"].complete([{"role": "user", "content": prompt}])
+</code></pre>
+
+    <h2 id="mistakes">15. Common mistakes</h2>
+    <ul>
+      <li>Hardcoding a single provider's SDK throughout application logic, making future migration/fallback expensive.</li>
+      <li>Comparing providers only by generic public benchmark scores instead of your own task-specific evaluation.</li>
+      <li>Ignoring rate limits and regional availability differences until a production incident forces the issue.</li>
+      <li>Assuming all providers' "structured output" guarantees are equally strict.</li>
+    </ul>
+
+    <h2 id="best">16. Best practices</h2>
+    <ul>
+      <li>Build a thin provider abstraction layer from day one, even with a single provider initially.</li>
+      <li>Benchmark candidate providers/models against your own golden evaluation set.</li>
+      <li>Track provider status pages and have a tested fallback path.</li>
+      <li>Treat open-weight self-hosted models as a serious alternative for cost-sensitive or data-residency-constrained workloads.</li>
+    </ul>
+
+    <h2 id="production">17. Production considerations</h2>
+    <p>Maintain fallback logic (secondary provider/model) for outages; monitor each provider's status page and rate-limit headers; version-pin specific model identifiers (not just "latest") to avoid silent behavior drift.</p>
+
+    <h2 id="security">18. Security considerations</h2>
+    <p>Different providers have different data-retention and training-opt-out policies — verify contractual/API-level guarantees before sending sensitive data, especially for regulated industries.</p>
+
+    <h2 id="performance">19. Performance considerations</h2>
+    <p>Latency varies by provider, region, and model tier; benchmark p50/p99 latency for your specific request pattern (prompt size, streaming vs non-streaming) rather than trusting marketing claims.</p>
+
+    <h2 id="cost">20. Cost considerations</h2>
+    <p>Compare total cost at your actual usage pattern (input/output token ratio, caching eligibility, volume discounts) — headline per-token pricing alone is often misleading.</p>
+
+    <h2 id="debug">21. Debugging/troubleshooting</h2>
+    <ul>
+      <li><b>Inconsistent behavior after a "model upgrade":</b> check if you're pinned to a specific model version or floating on an alias like "latest" that silently changed.</li>
+      <li><b>Rate limit errors under moderate load:</b> check your tier's actual rate limits and implement backoff/queuing rather than retry storms.</li>
+    </ul>
+
+    <h2 id="related">22. Related concepts</h2>
+    <p><a href="../07-LLM-APIs-and-SDKs/">LLM APIs and SDKs</a> · <a href="../39-AI-Gateways/">AI Gateways</a> · <a href="../27-Local-LLMs/">Local LLMs</a></p>
+
+    <h2 id="comparison">23. Comparison table</h2>
+    <table>
+      <tr><th>Provider</th><th>Weights</th><th>Strengths (general positioning)</th><th>Notes</th></tr>
+      <tr><td>OpenAI</td><td>Closed</td><td>Broad ecosystem, strong tool-calling maturity</td><td>Verify current model lineup via official docs</td></tr>
+      <tr><td>Anthropic</td><td>Closed</td><td>Strong reasoning/safety focus, large context windows, strong coding performance</td><td>Claude model family</td></tr>
+      <tr><td>Google</td><td>Closed</td><td>Strong multimodal, deep integration with Google infra</td><td>Gemini model family</td></tr>
+      <tr><td>Meta</td><td>Open</td><td>Strong open-weight option for self-hosting</td><td>Llama model family</td></tr>
+      <tr><td>Mistral</td><td>Open + closed</td><td>Efficient smaller models, strong open-weight options</td><td>Europe-based</td></tr>
+      <tr><td>DeepSeek / Qwen</td><td>Open</td><td>Strong open-weight reasoning models, competitive cost</td><td>Verify licensing terms</td></tr>
+      <tr><td>xAI</td><td>Closed</td><td>Grok model family</td><td>Verify current capabilities via official docs</td></tr>
+    </table>
+    <p class="callout warn">Specific model names, prices, and capabilities change frequently — always verify against each provider's official documentation before making production decisions.</p>
+
+    <h2 id="exercise">24. Mini practical exercise</h2>
+    <p>Call two different providers' APIs with the identical prompt and compare response latency, token usage, and output quality for your use case.</p>
+
+    <h2 id="project">25. Practical project</h2>
+    <p><b>Multi-Provider Benchmark Tool:</b> build a script that sends the same set of test prompts to 2–3 providers, logs latency/cost/output, and produces a comparison report.</p>
+
+    <h2 id="projectarch">26. Project architecture</h2>
+    <pre><code>test_prompts.json
+ → for each provider: send prompt, record latency/tokens/output
+ → aggregate into comparison_report.csv
+ → manual or LLM-as-judge quality scoring per provider</code></pre>
+
+    <h2 id="interview-b">27. Interview Questions — Beginner</h2>
+    <div class="qa"><b>Q1.</b> What's the difference between an open-weight and closed-weight model?<br><b>A.</b> Open-weight models' parameters are publicly downloadable and self-hostable; closed-weight models are accessible only via the provider's API.</div>
+    <div class="qa"><b>Q2.</b> Name two closed-weight LLM providers.<br><b>A.</b> OpenAI and Anthropic (or Google).</div>
+    <div class="qa"><b>Q3.</b> Name two open-weight model families.<br><b>A.</b> Meta's Llama and Mistral (or Qwen, DeepSeek).</div>
+    <div class="qa"><b>Q4.</b> What is a "model tier"?<br><b>A.</b> A provider's lineup of models ranging from fast/cheap to most capable/expensive.</div>
+    <div class="qa"><b>Q5.</b> Why would you self-host an open-weight model instead of using an API?<br><b>A.</b> For data residency/compliance control, potentially lower cost at high volume, or avoiding vendor dependency.</div>
+    <div class="qa"><b>Q6.</b> What's a reason to use a provider abstraction layer?<br><b>A.</b> To avoid vendor lock-in and enable fallback/migration between providers without rewriting application logic.</div>
+    <div class="qa"><b>Q7.</b> Should you compare providers only using public benchmark leaderboards?<br><b>A.</b> No — benchmark against your own representative tasks, since quality varies significantly by task type.</div>
+    <div class="qa"><b>Q8.</b> What is tool/function calling?<br><b>A.</b> The model's ability to request a defined function be executed with structured arguments, now supported by nearly all major providers.</div>
+    <div class="qa"><b>Q9.</b> Why might you pin to a specific model version instead of "latest"?<br><b>A.</b> To avoid silent behavior changes when the provider updates what "latest" points to.</div>
+    <div class="qa"><b>Q10.</b> What's one non-price factor to consider when choosing a provider?<br><b>A.</b> Data residency/compliance requirements, context window size, or multimodal support needs.</div>
+
+    <h2 id="interview-i">28. Interview Questions — Intermediate</h2>
+    <div class="qa"><b>Q1.</b> How would you design a provider abstraction layer that supports both OpenAI and Anthropic without leaking provider-specific details into business logic?<br><b>A.</b> Define a common interface (e.g., a `complete(messages, tools) -> response` method) with provider-specific adapter classes translating to/from each provider's actual API schema, so business logic only interacts with the common interface.</div>
+    <div class="qa"><b>Q2.</b> Why might model-tier routing (cheap model for simple tasks, frontier model for complex ones) be provider-agnostic in principle but require provider-specific implementation?<br><b>A.</b> The routing logic/concept is universal, but each provider has different tier names, pricing, and capability thresholds, so the actual routing thresholds and model identifiers must be configured per provider.</div>
+    <div class="qa"><b>Q3.</b> What's a risk of benchmarking providers using only public leaderboard scores?<br><b>A.</b> Public benchmarks may not reflect your specific domain, prompt style, or language; a model ranking highly on general benchmarks can still underperform on your narrow production task compared to a lower-ranked alternative.</div>
+    <div class="qa"><b>Q4.</b> Why is self-hosting an open-weight model not automatically cheaper than using a closed API?<br><b>A.</b> Self-hosting incurs GPU infrastructure, serving-engine operational overhead, and engineering maintenance cost, which can exceed API costs unless volume is high enough to amortize that fixed investment.</div>
+    <div class="qa"><b>Q5.</b> How would you handle a scenario where your primary provider deprecates a model version you depend on?<br><b>A.</b> Maintain provider/model version pinning with monitored deprecation notices, re-run your evaluation suite against the suggested replacement model before migrating, and roll out the change gradually with rollback capability.</div>
+
+    <h2 id="interview-a">29. Interview Questions — Advanced</h2>
+    <div class="qa"><b>Q1.</b> How would you architect cross-provider failover that preserves conversation state and avoids inconsistent behavior mid-conversation?<br><b>A.</b> Store conversation history in a provider-agnostic format, convert it to the target provider's message schema only at call time, and when failing over mid-conversation, be aware that different models may interpret the same history with subtly different stylistic/behavioral tendencies — test failover scenarios explicitly in your eval suite, not just assume transparent interchangeability.</div>
+    <div class="qa"><b>Q2.</b> What are the hidden costs of maintaining multi-provider support in a production system?<br><b>A.</b> Duplicated evaluation/testing effort per provider, increased complexity in prompt engineering (prompts tuned for one model may need adjustment for another), and additional operational monitoring surface — multi-provider support is an investment, not a free insurance policy.</div>
+
+    <h2 id="interview-s">30. Interview Questions — Senior/Architect</h2>
+    <div class="qa"><b>Q1.</b> How would you decide, for a new company building an AI product, whether to commit to a single provider or invest in multi-provider abstraction from day one?<br><b>A.</b> For an early-stage product prioritizing speed, start with a single well-chosen provider but structure code behind a thin interface; invest in full multi-provider abstraction and fallback only once the product has meaningful production traffic/revenue at risk from outages or cost concentration — premature multi-provider investment can slow early iteration without proportional benefit.</div>
+    <div class="qa"><b>Q2.</b> How would you build organizational confidence in a provider migration (e.g., moving the primary model from Provider A to Provider B) before committing to it in production?<br><b>A.</b> Run the full evaluation suite against both providers on identical representative tasks, run a shadow/canary deployment comparing live outputs side by side without affecting users, quantify cost/latency/quality deltas in business terms, and roll out gradually with monitoring and instant rollback capability.</div>
+
+    <h2 id="interview-sc">31. Scenario-Based Questions</h2>
+    <div class="qa"><b>Scenario 1.</b> Your primary LLM provider has a multi-hour outage during peak traffic. What's your immediate mitigation and what should have been in place beforehand?<br><b>A.</b> Immediate: fail over to a pre-configured secondary provider/model if one exists; if not, serve degraded functionality (cached responses, reduced feature set) rather than full outage. Beforehand: a tested fallback provider integration and circuit-breaker logic should have been in place, validated via periodic failover drills.</div>
+    <div class="qa"><b>Scenario 2.</b> Finance asks why switching from a frontier model to a cheaper model tier for 80% of traffic didn't proportionally reduce costs. What do you investigate?<br><b>A.</b> Check whether the "simple" 80% of traffic was correctly classified as low-complexity (routing logic may be misclassifying harder requests as simple), whether retries/escalations to the frontier model are happening more often than expected due to lower quality, and whether token usage per request increased on the cheaper model (sometimes needing more back-and-forth) offsetting the per-token savings.</div>
+
+    <h2 id="revision">32. Quick revision notes</h2>
+    <ul>
+      <li>Closed-weight (OpenAI, Anthropic, Google) vs open-weight (Llama, Mistral, Qwen, DeepSeek).</li>
+      <li>Benchmark on your own tasks, not generic leaderboards.</li>
+      <li>Build a provider abstraction layer regardless of initial single-provider choice.</li>
+      <li>Pin specific model versions; monitor deprecations.</li>
+    </ul>
+
+    <h2 id="cheat">33. Cheat sheet</h2>
+    <div class="callout">Closed (OpenAI/Anthropic/Google) = API-only. Open (Llama/Mistral/Qwen/DeepSeek) = self-hostable. Benchmark on your own tasks. Abstract behind a provider-agnostic interface. Pin model versions; watch deprecations. Always verify current specifics against official docs — this space moves fast.</div>
+
+    <h2 id="further">34. Further topics to learn</h2>
+    <p><a href="../07-LLM-APIs-and-SDKs/">LLM APIs and SDKs</a> → <a href="../39-AI-Gateways/">AI Gateways (LiteLLM, Portkey)</a> → <a href="../27-Local-LLMs/">Local LLMs</a> → <a href="../40-Cost-Optimization/">Cost Optimization</a></p>
+
+    <div class="prevnext">
+      <a href="../04-Transformers/transformers-deep-dive.html">← Transformers</a>
+      <a href="../07-LLM-APIs-and-SDKs/llm-apis-and-sdks.html">Next: LLM APIs and SDKs →</a>
+    </div>
+  </main>
+</div>
+<script src="../assets/app.js"></script>
+</body>
+</html>

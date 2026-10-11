@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Open-Source LLMs</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <input class="searchbox" placeholder="Search topics..." />
+    <a href="../index.html">← Home</a>
+    <h3>26-Open-Source-LLMs</h3>
+    <a href="open-source-models.html">Open-Source LLMs</a>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumbs"><a href="../index.html">Home</a> / 26-Open-Source-LLMs</div>
+      <button class="theme-toggle" onclick="toggleTheme()">🌓 Theme</button>
+    </div>
+    <h1>Open-Source LLMs (Llama, Qwen, Mistral, Gemma, DeepSeek, Phi)</h1>
+    <span class="tag warn">Fast-changing</span><span class="tag">Last verified: 2026-10-06 — verify current model lineup/licenses against official sources</span>
+
+    <div class="toc">
+      <b>On this page</b>
+      <a href="#what">1. What is this?</a>
+      <a href="#whyexist">2. Why does it exist?</a>
+      <a href="#whyimportant">3. Why is it important?</a>
+      <a href="#whereused">4. Where is it used?</a>
+      <a href="#prereq">5. Prerequisites</a>
+      <a href="#core">6. Core concepts</a>
+      <a href="#terms">7. Terminology</a>
+      <a href="#arch">8. Architecture</a>
+      <a href="#internal">9. How it works internally</a>
+      <a href="#steps">10. Step-by-step: selecting an open-source model</a>
+      <a href="#simple">11. Simple example</a>
+      <a href="#real">12. Real-world example</a>
+      <a href="#code">13. Code example</a>
+      <a href="#advanced">14. Advanced example</a>
+      <a href="#mistakes">15. Common mistakes</a>
+      <a href="#best">16. Best practices</a>
+      <a href="#production">17. Production considerations</a>
+      <a href="#security">18. Security considerations</a>
+      <a href="#performance">19. Performance considerations</a>
+      <a href="#cost">20. Cost considerations</a>
+      <a href="#debug">21. Debugging/troubleshooting</a>
+      <a href="#related">22. Related concepts</a>
+      <a href="#comparison">23. Comparison table</a>
+      <a href="#exercise">24. Mini practical exercise</a>
+      <a href="#project">25. Practical project</a>
+      <a href="#projectarch">26. Project architecture</a>
+      <a href="#interview-b">27. Interview Questions — Beginner</a>
+      <a href="#interview-i">28. Interview Questions — Intermediate</a>
+      <a href="#interview-a">29. Interview Questions — Advanced</a>
+      <a href="#interview-s">30. Interview Questions — Senior/Architect</a>
+      <a href="#interview-sc">31. Scenario-Based Questions</a>
+      <a href="#revision">32. Quick revision notes</a>
+      <a href="#cheat">33. Cheat sheet</a>
+      <a href="#further">34. Further topics to learn</a>
+    </div>
+
+    <h2 id="what">1. What is this?</h2>
+    <p>Open-source (open-weight) LLMs — Meta's Llama, Alibaba's Qwen, Mistral, Google's Gemma, DeepSeek, Microsoft's Phi, and the broader Hugging Face ecosystem — are models whose weights are publicly downloadable, allowing self-hosting, fine-tuning, and inspection, unlike closed-API-only providers.</p>
+
+    <h2 id="whyexist">2. Why does it exist?</h2>
+    <p>Open-weight models exist to democratize access to capable LLMs beyond API-only providers — enabling data residency control, cost optimization at scale, customization via fine-tuning, and research/transparency that closed models don't offer.</p>
+
+    <h2 id="whyimportant">3. Why is it important?</h2>
+    <p>Open-weight models now compete closely with closed frontier models on many benchmarks, making "self-host an open model" a genuinely competitive option for many production use cases — not just a budget fallback.</p>
+
+    <h2 id="whereused">4. Where is it used?</h2>
+    <p>Data-residency-constrained enterprises, cost-sensitive high-volume applications, research, fine-tuning for specialized domains, local/offline AI applications.</p>
+
+    <h2 id="prereq">5. Prerequisites</h2>
+    <p><a href="../06-LLM-Providers/llm-providers-comparison.html">LLM Providers</a>.</p>
+
+    <h2 id="core">6. Core concepts</h2>
+    <ul>
+      <li><b>Open weights ≠ open training data/code necessarily:</b> "open-source" in this space usually means downloadable weights, not always fully open training pipelines.</li>
+      <li><b>Model families/sizes:</b> most open model families offer multiple sizes (e.g., 7B, 70B parameters) trading capability for resource requirements.</li>
+      <li><b>Licensing:</b> varies by model (some permissive, some with usage restrictions) — always verify license terms for commercial use.</li>
+      <li><b>Hugging Face ecosystem:</b> the dominant hub for discovering, downloading, and sharing open models, datasets, and tooling.</li>
+    </ul>
+
+    <h2 id="terms">7. Terminology</h2>
+    <table>
+      <tr><th>Term</th><th>Meaning</th></tr>
+      <tr><td>Open-weight model</td><td>A model whose trained parameters are publicly downloadable.</td></tr>
+      <tr><td>Model card</td><td>Documentation accompanying a published model describing its training, capabilities, and limitations.</td></tr>
+      <tr><td>Parameter count</td><td>Model size indicator (e.g., 7B = 7 billion parameters); larger generally means more capable but more resource-intensive.</td></tr>
+      <tr><td>Quantization</td><td>Reducing model weight precision (e.g., to 4-bit) to shrink memory footprint, often used to run large open models on consumer hardware.</td></tr>
+    </table>
+
+    <h2 id="arch">8. Architecture</h2>
+    <pre><code>Hugging Face Hub (model weights + model card)
+ → Download weights
+ → Load via a serving framework (vLLM, Transformers, llama.cpp)
+ → Self-hosted inference (your own GPU/cloud infra)
+ (vs. closed models: API call to provider's hosted infra)</code></pre>
+
+    <h2 id="internal">9. How it works internally</h2>
+    <p>Open-weight models are trained the same way closed models are (pretraining, instruction tuning, alignment) — the key practical difference is distribution: instead of being locked behind an API, the final trained weights are published, letting anyone load them into an inference engine and run them on their own hardware, modify them via fine-tuning, or inspect their architecture directly.</p>
+
+    <h2 id="steps">10. Step-by-step: selecting an open-source model</h2>
+    <ol>
+      <li>Define requirements: task type, latency/throughput needs, available hardware, licensing constraints.</li>
+      <li>Shortlist candidate model families/sizes matching your hardware budget.</li>
+      <li>Benchmark on your actual task (not just public leaderboards).</li>
+      <li>Verify license terms permit your intended commercial use.</li>
+      <li>Choose a serving framework (vLLM for throughput, llama.cpp/Ollama for local/edge).</li>
+    </ol>
+
+    <h2 id="simple">11. Simple example</h2>
+    <p>Running a 7B-parameter open model locally via Ollama for a privacy-sensitive prototype that can't send data to an external API.</p>
+
+    <h2 id="real">12. Real-world example</h2>
+    <p>A healthcare company fine-tunes an open-weight model on their own de-identified clinical notes and self-hosts it entirely within their compliance boundary, something impossible with a closed, API-only provider that would require sending sensitive data externally.</p>
+
+    <h2 id="code">13. Code example</h2>
+    <pre><code class="language-bash"># Running an open model locally via Ollama
+ollama pull llama3
+ollama run llama3 "Explain RAG in 2 sentences."
+</code></pre>
+    <pre><code class="language-python"># Using a self-hosted open model via an OpenAI-compatible local server (e.g., vLLM)
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:8000/v1", api_key="not-needed")
+response = client.chat.completions.create(
+    model="meta-llama/Llama-3-70b",
+    messages=[{"role": "user", "content": "Explain RAG in 2 sentences."}],
+)
+print(response.choices[0].message.content)
+</code></pre>
+
+    <h2 id="advanced">14. Advanced example</h2>
+    <pre><code class="language-python"># Quantized model loading for resource-constrained hardware
+from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+
+quant_config = BitsAndBytesConfig(load_in_4bit=True)
+model = AutoModelForCausalLM.from_pretrained(
+    "mistralai/Mistral-7B-Instruct", quantization_config=quant_config, device_map="auto"
+)
+tokenizer = AutoTokenizer.from_pretrained("mistralai/Mistral-7B-Instruct")
+</code></pre>
+
+    <h2 id="mistakes">15. Common mistakes</h2>
+    <ul>
+      <li>Assuming all open models have permissive commercial licenses without checking.</li>
+      <li>Underestimating the GPU/infrastructure cost and operational burden of self-hosting at scale.</li>
+      <li>Comparing open vs closed models only on public benchmarks, not your actual task.</li>
+      <li>Not accounting for the engineering effort of serving infrastructure (vLLM tuning, scaling) when budgeting self-hosting.</li>
+    </ul>
+
+    <h2 id="best">16. Best practices</h2>
+    <ul>
+      <li>Always verify license terms for your specific commercial use case before committing.</li>
+      <li>Benchmark candidate open models against your actual task and against closed-API alternatives.</li>
+      <li>Factor in full infrastructure + ops cost, not just "it's free," when comparing to API costs.</li>
+      <li>Use quantization to fit larger, more capable models onto available hardware when acceptable quality trade-offs apply.</li>
+    </ul>
+
+    <h2 id="production">17. Production considerations</h2>
+    <p>Self-hosting requires your own capacity planning, scaling, and reliability engineering (see <a href="../28-LLM-Inference/">LLM Inference</a>) — a significant operational investment compared to API-based usage.</p>
+
+    <h2 id="security">18. Security considerations</h2>
+    <p>Self-hosting keeps data within your infrastructure boundary (a security benefit for sensitive data), but shifts responsibility for securing the serving infrastructure itself (patching, access control) onto your team.</p>
+
+    <h2 id="performance">19. Performance considerations</h2>
+    <p>Self-hosted performance depends entirely on your own hardware/serving optimization; a well-tuned self-hosted setup (vLLM, continuous batching) can match or exceed API latency for predictable workloads, but requires real engineering investment to achieve.</p>
+
+    <h2 id="cost">20. Cost considerations</h2>
+    <p>Self-hosting has high fixed costs (GPUs) but low marginal cost per request at high volume; API usage has zero fixed cost but ongoing marginal cost per token — the crossover point depends on your actual volume; model this explicitly rather than assuming "open-source is always cheaper."</p>
+
+    <h2 id="debug">21. Debugging/troubleshooting</h2>
+    <ul>
+      <li><b>Open model underperforms expectations from public benchmarks:</b> benchmarks often don't reflect your specific domain/language/task — always validate on your own evaluation set.</li>
+      <li><b>Self-hosted inference is slower than expected:</b> check serving framework configuration (batching, quantization settings) and GPU utilization.</li>
+      <li><b>License ambiguity for commercial use:</b> consult the specific model's license terms directly; don't assume based on the model being "open."</li>
+    </ul>
+
+    <h2 id="related">22. Related concepts</h2>
+    <p><a href="../27-Local-LLMs/">Local LLMs</a> · <a href="../28-LLM-Inference/">LLM Inference</a> · <a href="../29-Fine-Tuning/">Fine-Tuning</a></p>
+
+    <h2 id="comparison">23. Comparison table</h2>
+    <table>
+      <tr><th>Model family</th><th>Notes</th></tr>
+      <tr><td>Llama (Meta)</td><td>Widely adopted, strong ecosystem support, multiple sizes</td></tr>
+      <tr><td>Qwen (Alibaba)</td><td>Strong multilingual/reasoning performance, actively updated</td></tr>
+      <tr><td>Mistral</td><td>Efficient smaller models, strong performance-per-parameter</td></tr>
+      <tr><td>Gemma (Google)</td><td>Smaller, efficient models with Google research backing</td></tr>
+      <tr><td>DeepSeek</td><td>Strong reasoning-focused open models, competitive cost-efficiency</td></tr>
+      <tr><td>Phi (Microsoft)</td><td>Small, efficient models optimized for resource-constrained deployment</td></tr>
+    </table>
+    <p class="callout warn">Model capabilities, sizes, and licenses change frequently — verify current specifics against each provider's official model card before deciding.</p>
+
+    <h2 id="exercise">24. Mini practical exercise</h2>
+    <p>Pull and run a small open model locally via Ollama, and compare its response quality on 3 test prompts against a closed-API model's responses to the same prompts.</p>
+
+    <h2 id="project">25. Practical project</h2>
+    <p><b>Open vs Closed Model Benchmark:</b> build a small evaluation harness comparing an open-weight model (self-hosted or via a hosting provider) against a closed-API model on cost, latency, and quality for your target task.</p>
+
+    <h2 id="projectarch">26. Project architecture</h2>
+    <pre><code>test_prompts.json
+ → run against open model (local/hosted) → log latency, cost, output
+ → run against closed API model → log latency, cost, output
+ → score outputs (LLM-as-judge or rule-based) → comparison_report.csv</code></pre>
+
+    <h2 id="interview-b">27. Interview Questions — Beginner</h2>
+    <div class="qa"><b>Q1.</b> What does "open-weight" mean for an LLM?<br><b>A.</b> The model's trained parameters are publicly downloadable, allowing self-hosting and inspection.</div>
+    <div class="qa"><b>Q2.</b> Name three open-weight model families.<br><b>A.</b> Llama, Mistral, and Qwen (or Gemma, DeepSeek, Phi).</div>
+    <div class="qa"><b>Q3.</b> What is the Hugging Face ecosystem?<br><b>A.</b> The dominant hub for discovering, downloading, and sharing open models, datasets, and related tooling.</div>
+    <div class="qa"><b>Q4.</b> Why might you self-host an open model instead of using a closed API?<br><b>A.</b> For data residency/compliance control, potential cost savings at high volume, or the ability to fine-tune/customize the model.</div>
+    <div class="qa"><b>Q5.</b> What is quantization?<br><b>A.</b> Reducing model weight precision (e.g., to 4-bit) to shrink memory footprint, enabling large models to run on smaller hardware.</div>
+    <div class="qa"><b>Q6.</b> Does "open-source" always mean free for any commercial use?<br><b>A.</b> No — licenses vary by model and may have usage restrictions; always verify the specific license before commercial use.</div>
+    <div class="qa"><b>Q7.</b> What is a model card?<br><b>A.</b> Documentation accompanying a published model describing its training, capabilities, and limitations.</div>
+    <div class="qa"><b>Q8.</b> Is self-hosting always cheaper than using a closed API?<br><b>A.</b> Not necessarily — self-hosting has high fixed infrastructure costs; the cost comparison depends on your actual usage volume.</div>
+    <div class="qa"><b>Q9.</b> What tool lets you easily run open models locally?<br><b>A.</b> Ollama (or llama.cpp, LM Studio).</div>
+    <div class="qa"><b>Q10.</b> Should you trust public benchmark rankings alone when choosing an open model?<br><b>A.</b> No — always validate against your own representative task, since benchmarks may not reflect your specific use case.</div>
+
+    <h2 id="interview-i">28. Interview Questions — Intermediate</h2>
+    <div class="qa"><b>Q1.</b> What's the practical trade-off between a larger open model requiring more GPU memory versus a smaller quantized version?<br><b>A.</b> The larger model typically has higher raw capability but requires significantly more GPU memory/compute; quantization shrinks memory footprint (enabling it to run on smaller hardware) at some cost to precision/quality — the right choice depends on whether your task's quality bar tolerates the quantization trade-off.</div>
+    <div class="qa"><b>Q2.</b> Why might "open-weight" not mean "fully transparent" for a given model?<br><b>A.</b> Many open-weight releases don't disclose full training data composition, training code, or methodology — "open weights" specifically refers to the downloadable parameters, which is a narrower claim than full research transparency.</div>
+    <div class="qa"><b>Q3.</b> How would you calculate the cost crossover point between self-hosting an open model and using a closed API for a given workload?<br><b>A.</b> Estimate self-hosting's fixed costs (GPU instances, ops engineering time) amortized over expected request volume, compare against the API's per-token cost at that same volume, and solve for the request volume where self-hosting's amortized per-request cost drops below the API's marginal cost — below that volume, the API is cheaper; above it, self-hosting wins.</div>
+    <div class="qa"><b>Q4.</b> Why is fine-tuning more practical with open-weight models than closed API models?<br><b>A.</b> Open weights can be directly modified via techniques like LoRA/full fine-tuning on your own infrastructure; closed models only offer fine-tuning if the provider explicitly supports it via their API, with less control over the underlying process.</div>
+    <div class="qa"><b>Q5.</b> What's a practical reason a data-residency-constrained company might prefer open-weight self-hosting even at higher operational cost?<br><b>A.</b> Compliance requirements may mandate that sensitive data never leaves their own infrastructure boundary, which a closed API (sending data to an external provider) cannot satisfy regardless of cost — compliance constraints can override pure cost optimization.</div>
+
+    <h2 id="interview-a">29. Interview Questions — Advanced</h2>
+    <div class="qa"><b>Q1.</b> How would you design an evaluation process to decide between fine-tuning an open model versus using a larger closed frontier model with better prompting for a specialized domain task?<br><b>A.</b> Benchmark a well-prompted closed frontier model and a fine-tuned open model (on representative domain data) against the same evaluation set, considering not just accuracy but also inference cost at expected volume, latency requirements, and data residency constraints — fine-tuning open models typically wins when you have sufficient quality training data and high enough volume to amortize the fine-tuning and hosting investment, while a well-prompted frontier model often wins for lower volume or when quality training data is scarce.</div>
+    <div class="qa"><b>Q2.</b> What's a subtle risk of relying heavily on a single open-weight model family for a long-term production system?<br><b>A.</b> Open model development pace and ecosystem support can shift (a family that was dominant can be superseded or abandoned), and migrating a fine-tuned/deeply-integrated self-hosted system to a different model family later involves significant re-validation and potentially re-fine-tuning effort — treat model-family dependency as a long-term architectural commitment, not a trivial swap.</div>
+
+    <h2 id="interview-s">30. Interview Questions — Senior/Architect</h2>
+    <div class="qa"><b>Q1.</b> How would you advise a company deciding between fully closed-API, fully self-hosted open-weight, or a hybrid approach for their AI product's model strategy?<br><b>A.</b> Map out actual requirements across axes (data residency/compliance, cost at projected volume, latency SLAs, need for fine-tuning/customization, team's ops capacity for self-hosting); recommend closed-API for teams prioritizing speed-to-market and lacking ML-infra expertise, self-hosted open-weight for high-volume or compliance-constrained use cases with the ops capacity to support it, and a hybrid approach (open model for high-volume simple tasks, closed frontier model for complex/low-volume tasks) as often the pragmatic middle ground that most mature production systems converge toward.</div>
+
+    <h2 id="interview-sc">31. Scenario-Based Questions</h2>
+    <div class="qa"><b>Scenario 1.</b> Your company adopted an open model for cost savings, but total cost of ownership ended up higher than the closed API it replaced. What went wrong?<br><b>A.</b> Likely underestimated operational/infrastructure costs (GPU provisioning, serving engineering, scaling, monitoring) relative to actual request volume — redo the cost model including full ops burden, not just hardware sticker price, and compare against actual realized volume rather than projected volume.</div>
+    <div class="qa"><b>Scenario 2.</b> A compliance team requires that customer data never leave company infrastructure, blocking your planned use of a closed-API frontier model. What's your recommendation?<br><b>A.</b> Recommend self-hosting an open-weight model within the company's own infrastructure boundary, accepting the associated capability trade-off (likely lower raw performance than the frontier closed model) and operational investment as the cost of meeting the compliance requirement, and benchmark open-model options to find the best available fit for the task within that constraint.</div>
+
+    <h2 id="revision">32. Quick revision notes</h2>
+    <ul>
+      <li>Open-weight = downloadable parameters; enables self-hosting, fine-tuning, inspection.</li>
+      <li>Open ≠ always free for commercial use — check licenses.</li>
+      <li>Self-hosting cost crossover depends on volume — model it explicitly.</li>
+      <li>Benchmark on your own task, not just public leaderboards.</li>
+    </ul>
+
+    <h2 id="cheat">33. Cheat sheet</h2>
+    <div class="callout">Open-weight = downloadable, self-hostable, fine-tunable. Check licenses before commercial use. Self-hosting cost crossover depends on volume — model explicitly, don't assume "free." Benchmark on your own task.</div>
+
+    <h2 id="further">34. Further topics to learn</h2>
+    <p><a href="../27-Local-LLMs/">Local LLMs</a> → <a href="../28-LLM-Inference/">LLM Inference</a> → <a href="../29-Fine-Tuning/">Fine-Tuning</a></p>
+
+    <div class="prevnext">
+      <a href="../25-Multimodal-AI/multimodal-ai-fundamentals.html">← Multimodal AI</a>
+      <a href="../27-Local-LLMs/local-llms-fundamentals.html">Next: Local LLMs →</a>
+    </div>
+  </main>
+</div>
+<script src="../assets/app.js"></script>
+</body>
+</html>

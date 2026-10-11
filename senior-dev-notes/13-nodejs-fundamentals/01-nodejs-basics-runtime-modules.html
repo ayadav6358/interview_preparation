@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Node.js Basics: Runtime &amp; Modules — Node.js Fundamentals — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">Node.js Fundamentals</a><span class="sep">›</span>Node.js Basics: Runtime &amp; Modules</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>Node.js Basics: Runtime &amp; Modules</h1>
+      <p class="meta-line"><span>⏱ 2 hrs</span><span>📍 Chapter 1 of 6</span></p>
+      <p><strong>One-line summary:</strong> Node.js is V8 plus libuv plus a set of C++/JS bindings exposed as
+      globals and core modules — and the CommonJS-vs-ESM split isn't a style preference, it's two genuinely
+      different module systems with different resolution algorithms, loading semantics (sync vs async), and
+      interop rules you're expected to state precisely in a senior interview.</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>You've shipped Node services for years, but "explain what Node.js actually is" and "explain exactly how
+      require resolves a module path" are two questions that trip up experienced engineers in interviews because
+      day-to-day you never need the precise mental model — you just write code that works. At senior/staff level,
+      interviewers use this topic to check whether you can reason about module interop bugs (the single most
+      common real-world Node packaging headache in 2025-26: a dependency shipping ESM-only while your codebase is
+      CommonJS, or vice versa), explain startup/cold-start cost in serverless contexts, and justify architectural
+      choices like "why did we pick ESM for this new service" with more than a vibe.</p>
+      <div class="box why"><h4>Why</h4><p>Module system mismatches are a leading cause of "works on my machine,
+      breaks in the pipeline" bugs when upgrading dependencies — a package goes ESM-only in a major version bump,
+      and your CommonJS codebase's <code>require()</code> throws <code>ERR_REQUIRE_ESM</code>. Knowing the exact
+      interop rules (CJS can't synchronously require ESM; ESM can import CJS with caveats) turns a confusing
+      runtime error into a two-minute fix.</p></div>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>Comfortable writing and running JavaScript day-to-day; basic command-line usage. Related in this topic:
+      <a href="02-npm-and-package-management.html">npm &amp; Package Management</a> (package.json's <code>"type"</code>
+      field controls module resolution), <a href="04-http-module-and-basic-servers.html">HTTP Module &amp; Basic
+      Servers</a>. Related elsewhere: <a href="../11-web-fundamentals/02-javascript-fundamentals.html">JavaScript
+      Fundamentals</a> for closures/scope that underpin module encapsulation, and
+      <a href="../04-nodejs-advanced/01-event-loop.html">Event Loop Internals &amp; libuv</a> once you want the
+      deep runtime internals beyond this refresher.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="what-is-node">What Node.js actually is</h3>
+      <p>Node.js is not "JavaScript on the server" in the sense of a spec — it's a C++ program that embeds V8
+      (Google's JS engine: parser, bytecode interpreter/Ignition, optimizing compiler/Turbofan, garbage collector)
+      and <strong>libuv</strong> (a C library providing an event loop, async I/O, and a thread pool), and glues
+      them together with a layer of C++ bindings and JS "internal" modules that implement the Node-specific APIs
+      you call every day — <code>fs</code>, <code>http</code>, <code>process</code>, <code>Buffer</code>, etc.
+      V8 alone has no concept of a filesystem, a socket, or <code>setTimeout</code> — those are all Node/libuv
+      additions. This is precisely why the same JS runs differently in a browser vs Node: the language is
+      identical (both use ECMAScript), but the host-provided APIs around it differ completely.</p>
+
+      <h3 id="commonjs-vs-esm">CommonJS vs ECMAScript Modules (ESM): two real systems, not a style choice</h3>
+      <p>CommonJS (CJS) is Node's original module system: <code>require()</code>, <code>module.exports</code>,
+      synchronous resolution and loading, and each file wrapped in an implicit function giving you
+      <code>require</code>, <code>module</code>, <code>exports</code>, <code>__filename</code>, <code>__dirname</code>
+      as locals. ESM is the standard JS module system: <code>import</code>/<code>export</code> syntax, asynchronous
+      and statically-analyzable (imports are resolved and hoisted before any code runs — this is what enables
+      live bindings and tree-shaking), and it has <em>no</em> <code>__dirname</code>/<code>__filename</code>/
+      <code>require</code> by default (you reconstruct them from <code>import.meta.url</code>).</p>
+      <p>Node decides which system a file uses via, in order of precedence: a <code>.mjs</code>/<code>.cjs</code>
+      extension (always wins), else the nearest parent <code>package.json</code>'s <code>"type"</code> field
+      (<code>"module"</code> → ESM, <code>"commonjs"</code> or absent → CJS, historically), else CJS. Interop rules
+      that actually bite in practice: ESM can <code>import</code> a CJS module (its <code>module.exports</code>
+      becomes the default export, with best-effort named-export detection for simple cases); CJS <strong>cannot</strong>
+      synchronously <code>require()</code> a pure-ESM module — as of modern Node (22 LTS), <code>require()</code> of
+      a synchronous ESM module graph is supported experimentally/stably in recent versions, but top-level-await-using
+      ESM still cannot be required synchronously, so the universally safe pattern remains a dynamic
+      <code>import()</code> (which returns a Promise) from CJS when you need an ESM-only dependency.</p>
+
+      <h3 id="module-exports-exports">module.exports vs exports, and the require cache</h3>
+      <p>Inside a CJS file, <code>exports</code> is just a local variable that initially points to the same object
+      as <code>module.exports</code>. Assigning properties onto <code>exports.foo = ...</code> works because you're
+      mutating the shared object; reassigning <code>exports = {...}</code> breaks the link (now <code>exports</code>
+      points elsewhere while <code>module.exports</code> — the thing actually returned by <code>require</code> —
+      is unchanged). The safe habit: always export via <code>module.exports</code> directly when replacing the
+      whole export object, and <code>exports.x = ...</code> only when adding named properties.</p>
+      <p><code>require()</code> caches modules by resolved absolute file path — the first <code>require('./x')</code>
+      executes the file and caches <code>module.exports</code>; every subsequent <code>require('./x')</code>
+      anywhere in the process returns the <em>same cached object reference</em>, which is why mutable singleton
+      state (DB connections, config objects) "just works" via plain requires, and also why circular requires can
+      hand back a partially-populated object (the cache entry exists before the file finishes executing).</p>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>CJS module resolution (the algorithm behind <code>require('x')</code>) is synchronous and file-system-walking:
+      for a relative/absolute path, Node tries the exact path, then <code>path.js</code>, then
+      <code>path/index.js</code>, then checks <code>package.json</code> <code>"main"</code>. For a bare specifier
+      (<code>require('lodash')</code>), Node walks up through <code>node_modules</code> directories starting from
+      the current file's directory to the filesystem root, checking each for a matching package — this is why a
+      deeply nested dependency can resolve to a different installed version than a top-level one (version
+      hoisting/dedup in the lockfile affects exactly this walk).</p>
+      <p>ESM resolution is different in kind: it's specified by the ECMAScript spec plus Node's resolution
+      algorithm, is asynchronous end-to-end, and supports <code>package.json</code> <code>"exports"</code> maps
+      (which can expose different entry points for <code>import</code> vs <code>require</code>, or restrict which
+      subpaths of a package are importable at all — a "dual package" ships both and picks based on how it's
+      loaded). Because ESM imports are statically declared, Node can build the entire module graph and detect
+      missing exports <em>before</em> executing any module body — a class of error CJS can only catch at runtime
+      when the property turns out to be <code>undefined</code>.</p>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+flowchart TB
+  A[Your JS code] --> B[Node core/internal JS modules<br/>fs, http, process, Buffer...]
+  B --> C[C++ bindings layer]
+  C --> D[V8 engine<br/>parse, compile, GC, call stack]
+  C --> E[libuv<br/>event loop, thread pool, async I/O]
+  E --> F[OS: epoll/kqueue/IOCP, filesystem, sockets]
+      </div>
+      <div class="mermaid">
+flowchart LR
+  A["require('pkg')"] --> B{".mjs/.cjs<br/>extension?"}
+  B -- yes --> C[Use that system directly]
+  B -- no --> D{"nearest package.json<br/>'type' field?"}
+  D -- "module" --> E[Treat as ESM]
+  D -- "commonjs / absent" --> F[Treat as CJS]
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-javascript">// ---- CommonJS: math.js ----
+function add(a, b) { return a + b; }
+function multiply(a, b) { return a * b; }
+
+module.exports = { add, multiply };          // GOOD: replace whole export object
+// exports.add = add;                        // also fine: named property assignment
+// exports = { add, multiply };               // BAD: breaks the module.exports link, require() won't see this
+
+// ---- CommonJS: app.js ----
+const { add, multiply } = require('./math');
+console.log(add(2, 3), __dirname, __filename); // __dirname/__filename are free locals in CJS
+
+
+// ---- ESM: math.mjs (or "type": "module" in package.json) ----
+export function add(a, b) { return a + b; }
+export function multiply(a, b) { return a * b; }
+export default { add, multiply };
+
+// ---- ESM: app.mjs ----
+import { add, multiply } from './math.mjs';
+import defaultExport from './math.mjs';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
+
+const __filename = fileURLToPath(import.meta.url);   // ESM has no __filename by default
+const __dirname = path.dirname(__filename);           // ...so you reconstruct it
+
+
+// ---- The interop pain point: requiring an ESM-only dependency from CJS ----
+// BAD (throws ERR_REQUIRE_ESM if "esm-only-pkg" is pure ESM):
+// const pkg = require('esm-only-pkg');
+
+// GOOD: dynamic import returns a Promise, works from CJS
+async function loadPkg() {
+  const pkg = await import('esm-only-pkg');
+  return pkg.default ?? pkg;
+}
+
+
+// ---- require cache: singleton behavior ----
+// db.js
+let connection = null;
+module.exports = {
+  getConnection() {
+    if (!connection) connection = { connectedAt: Date.now() }; // created once
+    return connection;
+  }
+};
+// Every require('./db') across the whole app returns the SAME module.exports object,
+// so getConnection() keeps returning the same connection after the first call.
+</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4><p>A mid-sized API team bumped a logging library's minor version in a
+      routine dependency update PR. CI failed everywhere with <code>Error [ERR_REQUIRE_ESM]: require() of ES
+      Module ... not supported</code>. The library had quietly shipped an ESM-only build starting from that minor
+      (a semver-irresponsible move, but common in the ecosystem). The team's entire codebase was CommonJS
+      (package.json had no <code>"type": "module"</code>, every file used <code>require</code>). Two real fixes
+      existed: pin the dependency to the last CJS-compatible version (fast, technical-debt-accruing), or convert
+      the one import site to a dynamic <code>await import()</code> wrapped behind a small async-initialized
+      singleton (correct, slightly more invasive since the call site needed to become async). They chose the
+      dynamic import fix for that one module and used it as the trigger to start a deliberate, module-by-module
+      migration plan toward ESM across the codebase, rather than reactively pinning versions forever as more
+      dependencies go ESM-only (a one-way trend across the npm ecosystem since ~2022-2023).</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Assuming <code>"type": "module"</code> in package.json is purely
+      cosmetic. It changes real runtime behavior: <code>.js</code> files are now parsed as ESM (no
+      <code>require</code>, no <code>__dirname</code>, <code>this</code> at module top level is <code>undefined</code>
+      instead of <code>module.exports</code>), and any script relying on CJS globals breaks immediately — this is
+      the single most common "it worked yesterday" bug after someone adds that field to migrate the project.</p></div>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Reassigning <code>exports</code> instead of mutating it
+      (<code>exports = { foo }</code>) and then being confused why <code>require()</code> doesn't see <code>foo</code>.
+      Only <code>module.exports</code> is ever returned by <code>require()</code> — <code>exports</code> is a
+      convenience alias that stops being useful the moment you reassign it.</p></div>
+      <ul>
+        <li>Don't mix <code>require</code> and top-level <code>import</code> in the same file — pick the module system per file/package, and bridge with dynamic <code>import()</code> when truly necessary.</li>
+        <li>Check a package's <code>"exports"</code> map in package.json before assuming <code>require('pkg/internal/thing')</code> will keep working — modern packages often lock down which subpaths are importable.</li>
+        <li>Remember circular <code>require()</code>s can hand back a partially-built object — order-sensitive circular dependencies are a design smell, not a Node quirk to "fix" with workarounds.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>CommonJS</td><td>Legacy codebase, broad ecosystem compatibility still matters, synchronous <code>require</code> semantics are relied on</td><td>Starting a greenfield project in 2025-26 with no legacy constraint</td><td>ESM</td></tr>
+        <tr><td>ESM</td><td>New projects, want static analysis/tree-shaking, aligning with the standard and most modern tooling</td><td>Deeply embedded legacy CJS dependencies with no ESM build, team unfamiliar with top-level await semantics</td><td>CommonJS, or a dual-package build</td></tr>
+        <tr><td>Dynamic <code>import()</code> bridge from CJS</td><td>One or two ESM-only dependencies inside an otherwise-CJS codebase</td><td>You need synchronous access at module load time (import() is always async)</td><td>Full migration to ESM, or pin dependency version</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic"><h4>Basic</h4>
+      <details class="qa"><summary>What is Node.js, precisely?</summary><div class="answer"><p>A C++ program that embeds the V8 JavaScript engine and the libuv library (event loop, async I/O, thread pool), exposing filesystem, networking, and other OS-level capabilities to JavaScript through core modules and C++ bindings. It is not part of the JS language spec — it's a runtime/host environment.</p></div><div class="followup">Follow-up: name one thing V8 provides and one thing libuv provides.</div></details>
+      <details class="qa"><summary>What's the difference between require() and import?</summary><div class="answer"><p>require() is CommonJS: synchronous, dynamic (can be called conditionally/anywhere), returns module.exports from a cache. import is ESM: asynchronous under the hood, statically analyzed/hoisted (must appear at top level in standard usage), and supports live bindings.</p></div><div class="followup">Follow-up: can you call require() conditionally inside an if block? Can you do the same with static import syntax?</div></details>
+      <details class="qa"><summary>What does module.exports do?</summary><div class="answer"><p>It's the object that require() actually returns for that file; whatever module.exports references at the end of the file's execution is what callers receive.</p></div><div class="followup">Follow-up: what's the difference between module.exports and the exports shorthand variable?</div></details>
+      <details class="qa"><summary>How does Node decide if a .js file is CommonJS or ESM?</summary><div class="answer"><p>In order: explicit .mjs/.cjs extension wins outright; otherwise it looks at the nearest parent package.json's "type" field ("module" = ESM, "commonjs" or absent = CJS).</p></div><div class="followup">Follow-up: what happens if you put .mjs code in a file but the nearest package.json says "type": "commonjs"?</div></details>
+      <details class="qa"><summary>What are __dirname and __filename, and why don't they exist in ESM by default?</summary><div class="answer"><p>They're CJS-only locals injected by the module wrapper function giving the current file's directory/path. ESM has no implicit module wrapper providing these; you derive them from import.meta.url via node:url's fileURLToPath.</p></div><div class="followup">Follow-up: write the two lines needed to get __dirname equivalent behavior in an ESM file.</div></details>
+      <details class="qa"><summary>Is require() cached? What does that mean practically?</summary><div class="answer"><p>Yes — cached by resolved absolute file path. The module's code runs once; every subsequent require of the same resolved path returns the same object reference, enabling singleton patterns like a shared DB connection object.</p></div><div class="followup">Follow-up: what would happen if you deleted the require cache entry manually and required it again?</div></details>
+      </div>
+      <div class="qa-level medium"><h4>Medium</h4>
+      <details class="qa"><summary>Can a CommonJS file require() a pure ESM module synchronously? What's the workaround?</summary><div class="answer"><p>Not for ESM modules that use top-level await; those cannot be required synchronously because require() is fundamentally synchronous and such ESM evaluation is inherently asynchronous. The portable workaround is a dynamic import() call, which returns a Promise, from an async context in the CJS file.</p></div><div class="followup">Follow-up: why can ESM import a CJS module more easily than the reverse?</div></details>
+      <details class="qa"><summary>Explain the package.json "exports" field and why it matters for library authors.</summary><div class="answer"><p>It's an explicit map of which subpaths of a package are importable/requirable and what file each resolves to (optionally different files for "import" vs "require" conditions, enabling dual CJS/ESM packages). It replaces blanket access to every file in the package, letting authors enforce a public API surface and prevent consumers from depending on internals.</p></div><div class="followup">Follow-up: what breaks for a consumer doing require('pkg/src/internal/util') if the exports map doesn't list that subpath?</div></details>
+      <details class="qa"><summary>Walk through exactly how require('lodash') resolves when called from deep inside nested node_modules.</summary><div class="answer"><p>Node starts at the current file's directory, checks for a node_modules/lodash there; if absent, walks up to the parent directory's node_modules, repeating until found or reaching the filesystem root. This means a deeply nested dependency can resolve to a different installed version of lodash than a sibling package higher in the tree, depending on how the package manager deduped/hoisted during install.</p></div><div class="followup">Follow-up: how does npm's flat node_modules structure (vs older nested structures) change this in practice?</div></details>
+      <details class="qa"><summary>Why can reassigning exports = {...} inside a CJS file silently break your module?</summary><div class="answer"><p>exports starts as a reference to the same object as module.exports, but it's just a local variable — reassigning it points that local variable elsewhere while module.exports (the thing require() actually returns) is untouched, so none of the new properties are visible to callers.</p></div><div class="followup">Follow-up: what's the fix, and why does exports.foo = ... still work fine?</div></details>
+      <details class="qa"><summary>What's a circular require() and what actually happens at runtime?</summary><div class="answer"><p>When module A requires B and B (directly or transitively) requires A again before A finishes executing, the second require gets whatever partial module.exports A has built so far (often an incomplete object), not the final version — because the cache entry is created before the module body finishes running, specifically to handle this case without infinite recursion.</p></div><div class="followup">Follow-up: how would you refactor two circularly-dependent modules to remove the cycle?</div></details>
+      <details class="qa"><summary>Why does V8 alone not provide setTimeout or fetch, and where do those actually come from in Node?</summary><div class="answer"><p>V8 implements only the ECMAScript language spec — no I/O, timers, or networking. setTimeout, fetch, and similar are Node-provided globals implemented via libuv (timers) and Node's own HTTP client code (fetch, added as a built-in using undici under the hood), injected into the global scope by Node's bootstrap process, not by V8 itself.</p></div><div class="followup">Follow-up: why does this mean the exact same setTimeout behaves slightly differently in a browser vs Node for edge cases?</div></details>
+      </div>
+      <div class="qa-level advanced"><h4>Advanced</h4>
+      <details class="qa"><summary>You're migrating a large CJS codebase to ESM incrementally. Describe your strategy for doing this safely without a single big-bang rewrite.</summary><div class="answer"><p>Start by auditing dependency ESM-only status (several haven't gone ESM-only; prioritize migrating leaf modules with no circular dependencies first). Use file extensions (.mjs/.cjs) rather than flipping the package.json "type" field globally too early, since that field affects every plain .js file at once. Convert module-by-module leaf-to-root, running a dual-mode test suite, and keep a dynamic-import bridge available for stragglers. Only flip "type": "module" once the dependency graph is majority converted and you've validated top-level await usage doesn't break synchronous startup assumptions elsewhere (e.g., clustering, process managers expecting synchronous require at boot).</p></div><div class="followup">Follow-up: what's uniquely risky about flipping the "type" field as the very first step instead of the last?</div></details>
+      <details class="qa"><summary>Explain precisely why ESM enables tree-shaking and dead-code elimination in bundlers but CJS fundamentally resists it.</summary><div class="answer"><p>ESM imports/exports are static and declared at the top level — a bundler can build the full dependency graph and determine, without executing any code, exactly which exports are used where, then drop unused ones. CJS exports are the result of arbitrary runtime code (module.exports could be conditionally assigned, computed, or mutated based on control flow), so a bundler cannot safely prove which parts are dead without actually running the code — it must conservatively keep nearly everything.</p></div><div class="followup">Follow-up: can a bundler tree-shake a CJS module that's required by an ESM entry point? Why or why not, in general?</div></details>
+      <details class="qa"><summary>Design a dual-package (CJS + ESM) build strategy for a library you maintain, and explain the pitfalls of getting it wrong.</summary><div class="answer"><p>Ship separate build outputs (e.g. dist/cjs and dist/esm) and use package.json "exports" with "require"/"import" conditions pointing to each, keeping a single source of truth compiled by your bundler/tsc with two targets. The classic pitfall is the "dual package hazard": if your library has internal singleton state (e.g., a cache, a registry) and a consumer's dependency tree pulls in both the CJS and ESM build simultaneously (common with transitive deps), you get two separate module instances with two separate copies of that state, causing subtle bugs like "my singleton isn't shared" that are very hard to diagnose.</p></div><div class="followup">Follow-up: how would you detect in your test suite that a dual package hazard is actually occurring for your library?</div></details>
+      <details class="qa"><summary>How does Node's ESM loader's static analysis enable detecting a missing named export at load time, and why can't CJS do the same?</summary><div class="answer"><p>Because ESM import statements must name their bindings statically, Node's module loader can build the complete module graph, resolve what each module exports, and verify at link time (before any module body executes) that every named import actually exists on the target module — producing a SyntaxError/ReferenceError-class failure before a single line runs. CJS exports are just properties on a plain object assembled by arbitrary runtime code, so "does this property exist" can only be answered after the required module has fully executed — any missing property just resolves to undefined at the use site, a runtime TypeError waiting to happen rather than a load-time failure.</p></div><div class="followup">Follow-up: is this early-detection property still true if the ESM module being imported is itself a CJS module under the hood (default-export interop)? Why or why not?</div></details>
+      <details class="qa"><summary>In a serverless/Lambda context, how does the choice between CJS and ESM affect cold start time, and why?</summary><div class="answer"><p>CJS's synchronous, eager module resolution can be marginally faster for small dependency graphs typical of serverless functions since there's less async overhead in the loading machinery itself, but the dominant cold-start cost is almost always V8 parsing/compiling your bundled code and initializing SDK clients, not the module system per se. In practice, bundling (esbuild/webpack) to a single flattened file collapses most of this difference regardless of source module system, so the module-system choice matters far less than whether you've bundled and minimized dependency footprint at all.</p></div><div class="followup">Follow-up: given that, why do many serverless style guides still recommend CJS for Lambda specifically, historically?</div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment"><span class="level-tag">Beginner (30-60 min)</span>
+      <h4>Convert a small CJS module to ESM and back</h4>
+      <p>Write a tiny utility module (3-4 functions) in CommonJS. Convert it to ESM (rename to .mjs, convert
+      require/module.exports to import/export), get the equivalent of __dirname working via import.meta.url, then
+      convert it back to CJS. Note every single line that had to change.</p>
+      <ul><li>Must run correctly in both forms via `node file.mjs` / `node file.cjs`.</li><li>Must include a working __dirname-equivalent in the ESM version.</li></ul>
+      <p><strong>Acceptance criteria:</strong> Both versions produce identical console output; you can explain why each changed line had to change.</p>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>Use `node:url`'s `fileURLToPath(import.meta.url)` plus `node:path`'s `dirname()` for the ESM __dirname equivalent.</p></div></details>
+      <p><strong>Bonus:</strong> Add a default export in the ESM version and show how a CJS consumer sees it via require() (it lands on `.default` unless Node's CJS/ESM interop collapses it).</p>
+      </div>
+      <div class="assignment"><span class="level-tag">Intermediate (2-4 hrs)</span>
+      <h4>Build and diagnose a circular require</h4>
+      <p>Create two CommonJS modules, A and B, that require each other at the top level, each exporting a function
+      that calls the other's exported function. Run it, observe the actual failure/partial-object behavior, then
+      fix it using a lazy-require pattern (require the other module inside the function body, not at the top) and
+      explain why that fixes it.</p>
+      <ul><li>Must demonstrate the broken behavior first with console output showing a partial/undefined export.</li><li>Must then show the fixed version working correctly.</li></ul>
+      <p><strong>Acceptance criteria:</strong> Written explanation correctly ties the broken behavior to require's caching-before-completion mechanism.</p>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>The module that gets required second in the cycle will see the first module's exports object as it existed at the moment of the circular require call — likely missing properties defined after that point in the file.</p></div></details>
+      <p><strong>Bonus:</strong> Reproduce the same scenario in ESM and compare the error/behavior difference.</p>
+      </div>
+      <div class="assignment"><span class="level-tag">Advanced (1-2 days)</span>
+      <h4>Build a dual CJS/ESM npm package from scratch</h4>
+      <p>Create a tiny utility library, write its source once, and produce two build outputs (a CJS build and an
+      ESM build) using a bundler or tsc. Configure package.json's "exports" field to correctly route `require()`
+      and `import` consumers to the right build. Write two tiny test projects (one CJS, one ESM) that both consume
+      your package and verify both work correctly.</p>
+      <ul><li>Must work when installed via a local `npm link` or `file:` dependency, not just in-repo.</li><li>Must correctly expose TypeScript types for both if you use TS.</li></ul>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>Use the "exports" field's conditional exports (`"require"` and `"import"` keys) under your package's main export entry; test with both a `.cjs` and `.mjs` consumer script.</p></div></details>
+      <p><strong>Bonus:</strong> Deliberately introduce a dual-package hazard (shared singleton state) and demonstrate it breaking, then document the fix.</p>
+      </div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet"><ul>
+        <li>Node.js = V8 (JS engine) + libuv (event loop, thread pool, async I/O) + C++ bindings + core JS modules. Not part of the JS spec itself.</li>
+        <li>CJS: require/module.exports, synchronous, dynamic, cached by resolved absolute path.</li>
+        <li>ESM: import/export, asynchronous under the hood, statically analyzed/hoisted, no require/__dirname/__filename by default.</li>
+        <li>Module type decided by: .mjs/.cjs extension (wins) → nearest package.json "type" field → default CJS.</li>
+        <li>CJS cannot synchronously require a top-level-await-using ESM module — bridge with dynamic import().</li>
+        <li>exports is a convenience alias for module.exports; reassigning exports breaks the link, module.exports is what require() actually returns.</li>
+        <li>package.json "exports" field locks down which subpaths of a package are importable and can route require vs import to different builds (dual packages).</li>
+        <li>Circular require() can hand back a partially-built module.exports — a design smell to refactor, not just patch around.</li>
+        <li>Dual-package hazard: if both a CJS and ESM build of the same library load simultaneously, singleton state isn't shared between them.</li>
+      </ul></div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://nodejs.org/api/modules.html">Node.js docs: Modules — CommonJS modules</a></li>
+        <li><a href="https://nodejs.org/api/esm.html">Node.js docs: Modules — ECMAScript modules</a></li>
+        <li><a href="https://nodejs.org/api/packages.html">Node.js docs: Modules — Packages (exports, dual packages)</a></li>
+        <li><a href="https://nodejs.org/en/learn/getting-started/introduction-to-nodejs">Node.js official: Introduction to Node.js</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="../12-react-fundamentals/06-project-structure-and-tooling.html"><span class="dir">← Previous</span>React Fundamentals</a>
+        <a class="next" href="02-npm-and-package-management.html"><span class="dir">Next →</span>npm &amp; Package Management</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · Node.js Fundamentals</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-javascript.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "13-nodejs-fundamentals", chapterKey: "01-nodejs-basics-runtime-modules" });</script>
+</body>
+</html>

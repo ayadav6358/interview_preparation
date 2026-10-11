@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Data Structures, Comprehensions, Generators — Python Intermediate — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">Python Intermediate</a><span class="sep">›</span>Data Structures, Comprehensions, Generators</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>Data Structures, Comprehensions, Generators</h1>
+      <p class="meta-line"><span>⏱ ~2.5 hrs</span><span>📍 Chapter 2 of 6</span></p>
+      <p><strong>One-line summary:</strong> Python's built-in collections map closely to JS's, but
+      comprehensions, the iterator protocol, and generators give you a memory-efficient lazy-evaluation
+      toolkit that JS only approximates with generator functions and iterables.</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>Comprehensions and generators are the single most distinctive "write it the Python way" skill —
+      interviewers use them to separate someone translating JS line-by-line from someone who's actually
+      fluent. Beyond style, generators are a real memory/performance tool: processing a 10GB file or an
+      unbounded stream without loading it all into memory is a daily concern in data/ML-adjacent backend work,
+      and it maps directly onto Node generator functions and streams, which you already understand.</p>
+      <div class="box why"><h4>Why</h4><p>If you can explain <em>why</em> a generator doesn't hold the whole
+      sequence in memory (what <code>__next__</code> actually does, frame suspension), you can also explain
+      backpressure and lazy evaluation in any language — this is transferable systems knowledge, not Python trivia.</p></div>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>Related: <a href="01-python-for-js-devs.html">Python for JS Developers</a>,
+      <a href="04-async-python.html">Async Python</a> (async generators build directly on this).</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="collections-basics">Built-in collections (bridge from JS)</h3>
+      <table>
+        <tr><th>JS</th><th>Python</th><th>Notes</th></tr>
+        <tr><td><code>Array</code></td><td><code>list</code></td><td>Mutable, ordered, heterogeneous. <code>list.append</code> not <code>.push</code>.</td></tr>
+        <tr><td>frozen array (none built-in)</td><td><code>tuple</code></td><td>Immutable, ordered — use for fixed-shape records or dict keys.</td></tr>
+        <tr><td><code>Object</code> / <code>Map</code></td><td><code>dict</code></td><td>Insertion-ordered since 3.7 (guaranteed). Keys must be hashable (no lists as keys — like JS Map allows objects as keys but plain Object stringifies them).</td></tr>
+        <tr><td><code>Set</code></td><td><code>set</code> / <code>frozenset</code></td><td>Same semantics; <code>frozenset</code> is the immutable/hashable variant, usable as a dict key.</td></tr>
+        <tr><td>destructuring <code>const [a,b]=arr</code></td><td>tuple unpacking <code>a, b = pair</code></td><td>Python also supports <code>*rest</code> unpacking: <code>a, *rest = [1,2,3]</code>.</td></tr>
+        <tr><td>spread <code>[...a, ...b]</code></td><td><code>[*a, *b]</code> or <code>a + b</code></td><td>Dict spread: <code>{**a, **b}</code> same idea as JS object spread.</td></tr>
+      </table>
+      <p>Two structures JS doesn't have built-in equivalents for: <code>collections.defaultdict</code>
+      (auto-initializes missing keys — no more <code>if key not in d: d[key] = []</code>) and
+      <code>collections.Counter</code> (frequency counting in one line: <code>Counter(items)</code>).</p>
+
+      <h3 id="comprehensions">Comprehensions</h3>
+      <p>A list comprehension is <code>Array.map</code>/<code>.filter</code> fused into one expression, built
+      into the syntax rather than a method call: <code>[x * 2 for x in items if x > 0]</code> is
+      <code>items.filter(x => x > 0).map(x => x * 2)</code> — but evaluated in one pass, not two. Dict and set
+      comprehensions follow the same shape: <code>{k: v for k, v in pairs}</code>, <code>{x for x in items}</code>.</p>
+      <p>Prefer a comprehension over an equivalent <code>for</code> loop with <code>.append()</code> when the
+      body is simple — it's idiomatic, often faster (no repeated method-call overhead per iteration), and
+      clearer at a glance once you're fluent. Don't nest more than two levels or cram complex conditionals in —
+      that's where it stops being readable and a plain loop wins.</p>
+
+      <h3 id="iterator-protocol">The iterator protocol (the actual mechanism)</h3>
+      <p>This is the part that doesn't map 1:1 from JS and is worth understanding precisely, because it's
+      exactly what interviewers probe to check real understanding vs memorized syntax.</p>
+      <ul>
+        <li>An <strong>iterable</strong> is any object with an <code>__iter__</code> method that returns an
+        <strong>iterator</strong>. An iterator is any object with a <code>__next__</code> method that returns
+        the next value or raises <code>StopIteration</code> when exhausted.</li>
+        <li><code>for x in obj:</code> is syntactic sugar for: call <code>iter(obj)</code> (which calls
+        <code>obj.__iter__()</code>), then repeatedly call <code>next()</code> on the result (which calls
+        <code>__next__()</code>) until <code>StopIteration</code> is raised.</li>
+        <li>This is the direct analog of JS's iterable protocol (<code>Symbol.iterator</code> returning an
+        object with a <code>.next()</code> method returning <code>{value, done}</code>) — the mechanics are
+        almost identical, just Python uses a sentinel exception (<code>StopIteration</code>) instead of a
+        <code>{done: true}</code> flag.</li>
+        <li>Lists, dicts, sets, strings are all iterable (have <code>__iter__</code>) but are <strong>not</strong>
+        iterators themselves — calling <code>iter()</code> on a list creates a separate, stateful
+        <code>list_iterator</code> object. This is why you can loop over the same list twice independently,
+        but can't call <code>next()</code> twice and get two different starting points for the "same" iteration.</li>
+      </ul>
+
+      <h3 id="generators">Generator functions and generator expressions</h3>
+      <p>A function with a <code>yield</code> statement anywhere in its body becomes a <strong>generator
+      function</strong> — calling it doesn't run the body, it returns a generator object (an iterator) that
+      runs the body lazily, one step per <code>__next__()</code> call, suspending at each <code>yield</code>
+      and resuming exactly there on the next call. This is identical in spirit to a JS <code>function*</code>
+      generator — same suspend/resume mechanism, same "nothing executes until you ask for the next value."</p>
+      <p>A <strong>generator expression</strong> — <code>(x * 2 for x in items)</code>, note the parens instead
+      of brackets — is a generator built inline without a <code>def</code>, for cases where you want laziness
+      without a comprehension's eager materialization of the whole list in memory.</p>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>A generator's magic is <strong>frame suspension</strong>: when CPython executes a generator function
+      and hits <code>yield</code>, it doesn't discard the function's stack frame the way a normal return would —
+      it freezes the frame (local variables, instruction pointer, the works) and hands control back to the
+      caller. The next <code>__next__()</code> call resumes execution from exactly that frozen instruction
+      pointer, with all local state intact. This is the same conceptual mechanism as a coroutine, and it's
+      precisely what <code>asyncio</code>'s <code>async def</code> functions build on (covered in depth in
+      <a href="04-async-python.html">chapter 4</a>) — an <code>async def</code> function is, under the hood,
+      a specialized generator-like coroutine that suspends at <code>await</code> instead of <code>yield</code>.</p>
+      <p>Memory-wise, this is the entire reason generators matter at scale: a list comprehension over a
+      10-million-row dataset materializes all 10 million results in memory before you can touch the first one.
+      A generator expression over the same data holds only the current item (and whatever state the loop
+      needs) at any instant — O(1) memory instead of O(n), the same tradeoff as streaming a file in Node with
+      a Readable stream vs loading it entirely with <code>fs.readFileSync</code>.</p>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+sequenceDiagram
+  participant Caller
+  participant Gen as Generator frame
+  Caller->>Gen: next(gen)
+  Gen->>Gen: run until first yield
+  Gen-->>Caller: yielded value (frame frozen: locals + instruction pointer kept)
+  Caller->>Gen: next(gen)
+  Gen->>Gen: resume exactly after that yield
+  Gen-->>Caller: next yielded value
+  Caller->>Gen: next(gen)
+  Gen->>Gen: function body returns
+  Gen-->>Caller: raises StopIteration
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-python">
+# ---- Comprehensions vs map/filter ----
+nums = [1, -2, 3, -4, 5]
+
+# BAD-ish: works, but verbose for simple transforms
+doubled_positive = []
+for n in nums:
+    if n > 0:
+        doubled_positive.append(n * 2)
+
+# GOOD: idiomatic, single expression, same result
+doubled_positive = [n * 2 for n in nums if n > 0]
+# JS equivalent: nums.filter(n => n > 0).map(n => n * 2)
+
+# dict comprehension
+squares_by_n = {n: n ** 2 for n in nums if n > 0}
+
+# defaultdict -- no "if key not in d" boilerplate
+from collections import defaultdict
+groups = defaultdict(list)
+for word in ["cat", "car", "dog", "do"]:
+    groups[word[:2]].append(word)
+# groups == {'ca': ['cat', 'car'], 'do': ['dog', 'do']}
+
+# ---- The iterator protocol, written out manually ----
+class CountUpTo:
+    """Mirrors a JS class implementing Symbol.iterator + next()."""
+    def __init__(self, limit: int):
+        self.limit = limit
+
+    def __iter__(self):
+        self.n = 0
+        return self   # the object is its own iterator here
+
+    def __next__(self):
+        if self.n >= self.limit:
+            raise StopIteration
+        self.n += 1
+        return self.n
+
+for value in CountUpTo(3):
+    print(value)   # 1 2 3
+
+# ---- Generator function: same result, far less code, lazy ----
+def count_up_to(limit: int):
+    n = 1
+    while n <= limit:
+        yield n
+        n += 1
+
+for value in count_up_to(3):
+    print(value)   # 1 2 3
+
+# ---- Why laziness matters: memory at scale ----
+def read_large_file_eager(path: str) -> list[str]:
+    with open(path) as f:
+        return [line.strip() for line in f]   # whole file in memory
+
+def read_large_file_lazy(path: str):
+    with open(path) as f:
+        for line in f:                         # file object is ALREADY an iterator
+            yield line.strip()                 # one line in memory at a time
+
+# consuming a 10GB log file to count ERROR lines -- lazy version never
+# holds more than one line + a counter in memory
+error_count = sum(1 for line in read_large_file_lazy("huge.log") if "ERROR" in line)
+</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4><p>An ETL job ingests a nightly 40GB CSV export and needs to
+      transform and upsert rows into a warehouse. A junior implementation reads the whole file with
+      <code>pandas.read_csv</code> into one DataFrame — it works in dev with a 10MB sample file, then OOMs the
+      container in production. The fix is <code>pandas.read_csv(path, chunksize=50_000)</code> (itself a
+      generator yielding DataFrame chunks) composed with a generator pipeline: read chunk → transform chunk →
+      yield rows → batch-upsert — so memory usage stays flat regardless of file size. This is the same
+      pattern as piping a large file through Node Transform streams instead of buffering it whole; the
+      interview-relevant point is recognizing "this needs to be lazy" before the OOM, not after.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4><p>A generator is <strong>exhausted after one full iteration</strong> —
+      unlike a list, you can't loop over it twice. <code>gen = (x for x in range(3)); list(gen); list(gen)</code>
+      gives you the values once, then an empty list the second time. If you need to iterate multiple times,
+      either materialize it (<code>list(gen)</code>) once and reuse that, or write a function that returns a
+      fresh generator each time it's called, not a generator object itself.</p></div>
+      <ul>
+        <li>Don't build a huge list comprehension just to immediately iterate it once and discard it — use a
+        generator expression instead (same syntax, swap <code>[]</code> for <code>()</code>, drop the memory cost).</li>
+        <li><code>dict</code> keys must be hashable — using a list as a key raises <code>TypeError: unhashable type</code>;
+        use a tuple instead, same way you'd use a stable string key in a JS <code>Map</code> rather than an object reference.</li>
+        <li>Mutating a list while iterating over it (<code>for x in lst: lst.remove(x)</code>) skips elements
+        unpredictably — iterate over a copy (<code>for x in lst[:]:</code>) or build a new list instead.</li>
+        <li>Nested comprehensions beyond 2 levels hurt readability fast — refactor into a named helper function or plain loop.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>List comprehension</td><td>You need the full result as a list, now, and it's reasonably sized</td><td>Dataset is huge and you only need to iterate once</td><td>Generator expression</td></tr>
+        <tr><td>Generator expression / function</td><td>Large or unbounded data, single-pass consumption, pipeline composition</td><td>You need random access, len(), or multiple passes</td><td>List (materialize once) or <code>itertools</code> for reusable patterns</td></tr>
+        <tr><td>tuple</td><td>Fixed-shape immutable record, dict key, "this will never change"</td><td>Need to grow/mutate the collection</td><td>list, or a dataclass for named fields (ch. 3)</td></tr>
+        <tr><td>defaultdict</td><td>Grouping/accumulating without boilerplate init checks</td><td>You need the absence of a key to be meaningful/detectable (defaultdict creates it on access)</td><td>Plain dict + <code>.setdefault()</code> or explicit <code>if key not in d</code></td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic">
+        <h4>Basic</h4>
+        <details class="qa"><summary>What's the difference between a list comprehension and a generator expression?</summary><div class="answer"><p>
+        Syntax: brackets vs parens. Behavior: a list comprehension eagerly builds the entire list in memory
+        immediately; a generator expression produces a lazy iterator that computes each value on demand and
+        holds only one item's worth of state at a time.</p></div><div class="followup">Follow-up: which one would you use processing a 50GB file line by line?</div></details>
+        <details class="qa"><summary>What makes an object "iterable" in Python?</summary><div class="answer"><p>
+        Having an <code>__iter__</code> method that returns an iterator (an object with <code>__next__</code>).
+        The <code>for</code> loop calls <code>iter()</code> once, then <code>next()</code> repeatedly until
+        <code>StopIteration</code> is raised.</p></div><div class="followup">Follow-up: can an object be its own iterator? When would you do that vs return a separate iterator object?</div></details>
+        <details class="qa"><summary>Can you iterate over the same generator twice?</summary><div class="answer"><p>
+        No — once a generator is exhausted (StopIteration raised), it stays exhausted. You'd need to call the
+        generator function again to get a fresh generator object, or materialize the values into a list first.</p></div><div class="followup">Follow-up: is the same true for a list? For a dict's .keys() view?</div></details>
+        <details class="qa"><summary>What does <code>collections.defaultdict</code> do that a plain dict doesn't?</summary><div class="answer"><p>
+        It takes a factory function and auto-creates a default value (calling the factory) for any missing
+        key accessed, instead of raising KeyError — removing the "if key not in d: d[key] = []" boilerplate.</p></div><div class="followup">Follow-up: what's a surprising side effect of using defaultdict for a read that you expected to just check existence?</div></details>
+        <details class="qa"><summary>Why can't you use a list as a dict key?</summary><div class="answer"><p>
+        Dict keys must be hashable, and lists are mutable — Python disallows hashing mutable types because
+        the hash would need to stay constant for the object's lifetime for dict lookups to work, which
+        mutation would violate. Tuples (immutable) are hashable and commonly used instead.</p></div><div class="followup">Follow-up: why is a tuple containing a list still unhashable?</div></details>
+        <details class="qa"><summary>What's the Python equivalent of JS array destructuring with a rest element?</summary><div class="answer"><p>
+        Tuple/list unpacking with a starred name: <code>first, *rest = [1, 2, 3, 4]</code> gives
+        <code>first = 1</code>, <code>rest = [2, 3, 4]</code>, mirroring <code>const [first, ...rest] = arr</code>.</p></div><div class="followup">Follow-up: can the starred name be in the middle, like `a, *mid, b = [1,2,3,4,5]`?</div></details>
+      </div>
+      <div class="qa-level medium">
+        <h4>Medium</h4>
+        <details class="qa"><summary>Explain exactly what happens, mechanically, when CPython executes a `for` loop over a list.</summary><div class="answer"><p>
+        <code>iter(lst)</code> calls <code>lst.__iter__()</code>, which returns a new <code>list_iterator</code>
+        object holding an internal index starting at 0. The loop then calls <code>next(iterator)</code>
+        repeatedly; each call increments the internal index and returns <code>lst[index]</code>, raising
+        <code>StopIteration</code> once the index reaches the list's length. The list itself is never mutated
+        by this process, and multiple independent iterators over the same list don't interfere.</p></div><div class="followup">Follow-up: what happens if you mutate the list's length while a `for` loop is iterating it?</div></details>
+        <details class="qa"><summary>How does frame suspension work for a generator, and how does it relate to `async def`?</summary><div class="answer"><p>
+        When a generator function hits `yield`, CPython doesn't tear down its stack frame as a normal return
+        would — it freezes the frame object (local variables, bytecode instruction pointer) and returns
+        control to the caller holding a reference to that frame via the generator object. The next call to
+        `__next__()` resumes bytecode execution at the instruction right after that `yield`, with all locals
+        intact. `async def` coroutines use the same frame-suspension machinery, suspending at `await`
+        expressions instead of `yield` — which is why early Python async code was literally built on top of
+        generators before `async`/`await` became first-class syntax.</p></div><div class="followup">Follow-up: what's stored differently between a plain generator frame and a coroutine frame?</div></details>
+        <details class="qa"><summary>You have a generator pipeline: `read_lines() -> parse() -> filter() -> write()`, each a generator. Walk through what actually executes when you call `write()`'s loop once.</summary><div class="answer"><p>
+        Nothing executes eagerly when the generators are created — only when `write()`'s `for` loop calls
+        `next()` on `filter()`'s generator, which calls `next()` on `parse()`'s, which calls `next()` on
+        `read_lines()`'s, which actually reads one line from disk, returns it up through parse and filter
+        (each doing its transform/check), and only then does `write()` receive one fully-processed item. This
+        "pull" model means at most one item is "in flight" through the whole pipeline at once — the same
+        backpressure-by-construction you get composing Node Transform streams with `.pipe()`.</p></div><div class="followup">Follow-up: what would change if `filter()` used a list comprehension instead of `yield`ing?</div></details>
+        <details class="qa"><summary>When would a dict comprehension be the wrong tool, even though it's syntactically clean?</summary><div class="answer"><p>
+        When the data is large and you only need to look up a few keys, or when building the dict requires
+        side effects/ordering guarantees that are easier to express with an explicit loop — comprehensions
+        hide control flow, which is a cost when the logic isn't a pure one-to-one transform. Also when keys
+        might collide and you need to decide how to handle the collision (comprehensions silently keep the
+        last value written for a duplicate key, which can hide a bug).</p></div><div class="followup">Follow-up: how would you detect duplicate keys being silently overwritten in a dict comprehension?</div></details>
+        <details class="qa"><summary>What's the practical memory difference between `sum(x*x for x in range(10**8))` and `sum([x*x for x in range(10**8)])`?</summary><div class="answer"><p>
+        The generator version holds one squared value at a time — effectively O(1) memory overhead beyond
+        the running sum. The list comprehension version first builds a 10^8-element list in memory (hundreds
+        of MB to low GB depending on int sizes/overhead) before summing it — a huge, usually pointless,
+        transient allocation for a reduction that never needed the whole list materialized.</p></div><div class="followup">Follow-up: does `range()` itself behave lazily here, and why does that matter?</div></details>
+      </div>
+      <div class="qa-level advanced">
+        <h4>Advanced</h4>
+        <details class="qa"><summary>Design a generator-based pipeline to process a continuous stream of JSON log lines from stdin, filtering and aggregating, without ever holding more than a bounded window in memory.</summary><div class="answer"><p>
+        Chain generators: a line-reading generator over `sys.stdin` (already lazy, line-buffered), a
+        `json.loads`-per-line parsing generator (skip/log malformed lines rather than crash the pipeline), a
+        filtering generator for the fields you care about, and a bounded aggregation step using a fixed-size
+        structure (e.g., a `collections.deque(maxlen=N)` for a sliding window, or periodic flush of an
+        accumulator) rather than an ever-growing dict. The key design point: every stage must be a generator
+        (or operate on one item at a time) — introducing a single `list(...)` materialization anywhere in the
+        chain reintroduces unbounded memory growth for an unbounded stream.</p></div><div class="followup">Follow-up: how would you add graceful shutdown (flush partial aggregates) on SIGTERM to this pipeline?</div></details>
+        <details class="qa"><summary>Explain `yield from` and what problem it solves versus manually delegating to a sub-generator with a loop.</summary><div class="answer"><p>
+        `yield from subgen` delegates iteration to `subgen`, yielding each of its values directly to the
+        caller, and — critically — also forwards `.send()`, `.throw()`, and `.close()` calls through to the
+        sub-generator, and its final return value becomes the value of the `yield from` expression itself. A
+        manual `for x in subgen: yield x` only forwards the yielded values; it silently breaks two-way
+        communication (send/throw) with the sub-generator and loses its return value. This matters anywhere
+        generators are used as coroutines (pre-async/await style) or when composing generators that need
+        bidirectional signaling.</p></div><div class="followup">Follow-up: how is `yield from` related to how `await` works on a coroutine internally?</div></details>
+        <details class="qa"><summary>A teammate wants to "parallelize" a CPU-heavy generator pipeline by running each stage in its own thread, passing items through queues. Evaluate this design given the GIL.</summary><div class="answer"><p>
+        If each stage's per-item work is CPU-bound Python code, threading buys nothing — the GIL still
+        serializes execution of the actual transform logic across those threads; you've added queue and
+        context-switch overhead without real parallelism. The queues do let you overlap I/O-bound stages
+        (e.g., a stage reading from a socket) with CPU-bound stages in a different thread, which is a
+        legitimate win, but any stage that's pure CPU-bound Python should go to a
+        `multiprocessing`/`ProcessPoolExecutor` worker pool instead if parallel throughput is genuinely needed.</p></div><div class="followup">Follow-up: what's the cost of moving generator items across a process boundary (pickling) that doesn't exist across threads?</div></details>
+        <details class="qa"><summary>How would you make a custom object support both `for x in obj` and random access `obj[i]`, and what's the tradeoff of each?</summary><div class="answer"><p>
+        Implement `__iter__`/`__next__` (or just `__getitem__` with sequential integer indices — Python falls
+        back to that for iteration if `__iter__` is absent) for iteration, and implement `__getitem__` with
+        arbitrary index support plus `__len__` for random access and `len()`. The tradeoff: true random access
+        generally requires the full data to be addressable (in memory or on fast storage), which conflicts
+        with the lazy, single-pass nature that makes generators memory-efficient in the first place — you
+        can't have O(1)-memory laziness and O(1) random access to arbitrary past elements simultaneously
+        unless you buffer or recompute.</p></div><div class="followup">Follow-up: how does Python's own `range` object manage to support both efficiently?</div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment">
+        <span class="level-tag">Beginner (30-60 min)</span>
+        <h4>Rewrite loops as comprehensions</h4>
+        <p>Take 6 small <code>for</code> loops that build a list/dict/set (provided or written by you, mirroring
+        common JS <code>.map</code>/<code>.filter</code>/<code>.reduce</code> patterns) and rewrite each as a
+        comprehension. Include at least one dict comprehension and one set comprehension.</p>
+        <ul><li>Each pair (loop version + comprehension version) must produce identical output on the same input.</li>
+        <li>Write a one-sentence note on any comprehension you felt was less readable than the loop, and why.</li></ul>
+        <p><strong>Acceptance criteria:</strong> All 6 pairs verified equal via assertions, not just visual inspection.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>Use `assert comprehension_result == loop_result` for each pair rather than just printing both and eyeballing them.</p></div></details>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Intermediate (2-4 hrs)</span>
+        <h4>Build a lazy CSV processing pipeline</h4>
+        <p>Given a (synthetically generated, large-ish — at least 500k rows) CSV of transactions, build a
+        generator pipeline: read rows lazily → parse/validate each row (skip and log malformed ones) → filter
+        to a date range → compute a running total per category → yield summary rows. No step may use a list
+        comprehension or `list()` call on the full dataset.</p>
+        <ul><li>Measure and report peak memory usage (e.g., via `tracemalloc` or `resource.getrusage`) for your pipeline vs a naive "load everything into a list first" version.</li>
+        <li>Include malformed rows in your test data and confirm they're skipped, not crashing the pipeline.</li></ul>
+        <p><strong>Acceptance criteria:</strong> Your lazy version's peak memory should be dramatically lower (report the actual numbers) than the eager version on the same input.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>Generate the test CSV with its own small generator-based script rather than hand-writing 500k rows. Use
+        `csv.reader` directly on the open file object — it's already an iterator over rows.</p></div></details>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Advanced (1-2 days)</span>
+        <h4>Implement a custom lazy `GroupBy` iterator from scratch</h4>
+        <p>Without using `itertools.groupby`, implement a class `LazyGroupBy` that takes an iterable and a key
+        function, and when iterated, yields `(key, group_iterator)` pairs for consecutive runs of equal keys —
+        matching the semantics of `itertools.groupby` (including the gotcha that each group iterator becomes
+        invalid once you advance to the next group). Then write a pytest suite proving your implementation
+        matches `itertools.groupby`'s behavior, including that gotcha.</p>
+        <ul><li>Must implement the iterator protocol by hand (`__iter__`/`__next__`), not wrap a list.</li>
+        <li>Must correctly handle empty input, a single group spanning the whole input, and groups of size 1.</li>
+        <li>Test suite must include a test proving a previously-yielded group iterator is exhausted/stale after advancing past it.</li></ul>
+        <p><strong>Acceptance criteria:</strong> Your test suite passes against your implementation and documents, in comments, exactly where the "stale group iterator" gotcha comes from. No full reference solution provided — this requires actually tracing through the iterator protocol yourself.</p>
+      </div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet"><ul>
+        <li>Iterable = has <code>__iter__</code>; Iterator = has <code>__next__</code>, raises StopIteration when done.</li>
+        <li><code>for x in obj</code> = <code>it = iter(obj)</code> then repeated <code>next(it)</code> until StopIteration.</li>
+        <li>List/dict/set comprehensions are eager (build the whole thing now); generator expressions `()` are lazy.</li>
+        <li>A generator freezes its stack frame at `yield` and resumes exactly there — the same mechanism `async def` builds on.</li>
+        <li>Generators are single-use: exhausted once, exhausted forever. Materialize with `list()` to reuse.</li>
+        <li>`yield from` forwards values AND send/throw/return — a manual loop only forwards yielded values.</li>
+        <li>Use generators for large/unbounded data and pipeline composition; lists when you need length/random access/multiple passes.</li>
+        <li>dict keys must be hashable — use tuples, not lists, as composite keys.</li>
+        <li><code>defaultdict</code>/<code>Counter</code> remove manual "check-then-init" boilerplate for grouping/counting.</li>
+      </ul></div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://docs.python.org/3/library/stdtypes.html#iterator-types">Python docs: Iterator Types</a></li>
+        <li><a href="https://docs.python.org/3/howto/functional.html#generators">Python docs: Generators (Functional Programming HOWTO)</a></li>
+        <li><a href="https://docs.python.org/3/library/itertools.html">Python docs: itertools</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="01-python-for-js-devs.html"><span class="dir">← Previous</span>Python for JS Developers</a>
+        <a class="next" href="03-oop-dataclasses.html"><span class="dir">Next →</span>OOP, Dataclasses, Type Hints</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · Python Intermediate</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "08-python-intermediate", chapterKey: "02-data-structures" });</script>
+</body>
+</html>

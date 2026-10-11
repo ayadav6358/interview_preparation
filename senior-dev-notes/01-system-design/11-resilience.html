@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Resilience Patterns — System Design — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">System Design</a><span class="sep">›</span>Resilience Patterns</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>Resilience Patterns</h1>
+      <p class="meta-line"><span>⏱ 2 hrs</span><span>📍 Chapter 11 of 14</span></p>
+      <p><strong>One-line summary:</strong> Resilience isn't "handle the error" — it's a set of precise mechanical patterns (rate limiting, circuit breaking, backoff, bulkheads, timeout budgets, fallback) that stop one slow or failing dependency from taking down everything it touches.</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>Every outage retrospective you'll ever read has the same shape: a dependency got slow (not even down — just slow), and the slowness propagated upward because nothing stopped it. Threads piled up waiting on it, connection pools exhausted, retries multiplied the load on the already-struggling dependency, and the whole fleet fell over in minutes. This is called a <strong>cascading failure</strong>, and it's the single most common root cause of major production incidents at companies operating at scale (AWS, Netflix, and most large outages you've read postmortems for). A senior engineer is expected to design the call chain so this can't happen — not just "add a try/catch." Interviewers test this directly: "your payment provider starts timing out — walk me through what happens to your system" is a question that separates people who've only read about resilience from people who've paged on it at 3am.</p>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>This chapter builds on <a href="01-fundamentals.html">Chapter 1: Fundamentals</a> (availability composition, tail latency) and <a href="09-microservices.html">Chapter 9: Microservices</a> (service-to-service call chains). Read those first if cascading failure and p99 math aren't already second nature.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="rate-limiting">Rate limiting algorithms</h3>
+      <p>Rate limiting protects a service from being overwhelmed — by a noisy client, a buggy retry loop, or an actual attack — by capping how many requests are allowed in a window. The four classic algorithms trade off burst tolerance, memory, and precision differently.</p>
+      <p><strong>Fixed window counter:</strong> count requests per discrete window (e.g., per calendar minute). Trivial to implement with a single Redis <code>INCR</code> + <code>EXPIRE</code>, but has a boundary bug: a client can send the full limit at 00:59 and another full limit at 01:00, giving 2x the intended rate in a 1-second span straddling the boundary.</p>
+      <p><strong>Sliding window log:</strong> store a timestamp per request (e.g., in a Redis sorted set), and on each request, drop entries older than the window and count what's left. Perfectly accurate, no boundary bug — but memory grows with request volume, which is expensive at high QPS.</p>
+      <p><strong>Sliding window counter:</strong> a practical compromise — keep counters for the current and previous fixed window, and compute a weighted estimate based on how far into the current window you are. Fixes the boundary bug with O(1) memory, at the cost of being an approximation rather than exact.</p>
+      <p><strong>Token bucket:</strong> a bucket holds up to <em>N</em> tokens, refilled at rate <em>r</em> tokens/sec; each request consumes one token, and requests are rejected (or queued) when the bucket is empty. This is the most widely used algorithm in production (AWS API Gateway, Stripe) because it naturally allows bursts up to the bucket size while enforcing a long-run average rate — unlike fixed/sliding window, which are rate-only with no notion of "saved up" capacity.</p>
+      <p><strong>Leaky bucket:</strong> conceptually the reverse — requests enter a queue (the bucket) and are processed ("leak out") at a fixed rate; if the queue is full, new requests are dropped. This smooths bursty traffic into a constant output rate, which is what you want when protecting a downstream system that genuinely can't handle bursts (e.g., a fixed-capacity legacy mainframe), whereas token bucket is what you want when you want to allow bursts up to your own capacity.</p>
+
+      <h3 id="circuit-breaker">Circuit breaker pattern</h3>
+      <p>A circuit breaker wraps a call to a dependency and tracks its failure rate. It has three states: <strong>closed</strong> (normal — requests pass through, failures are counted), <strong>open</strong> (the dependency is considered unhealthy — requests fail immediately without even attempting the call, for a cooldown period), and <strong>half-open</strong> (after cooldown, a small number of trial requests are let through; if they succeed, the breaker closes; if they fail, it reopens). The entire point is to stop hammering a struggling dependency with load it can't handle (which only makes recovery slower) and to fail fast for callers instead of letting them queue up waiting on timeouts.</p>
+      <p>Key tuning knobs: failure threshold (count or percentage over a rolling window), cooldown duration, and half-open trial count. In Node, <a href="https://github.com/nodeshift/opossum">opossum</a> is the standard library; it wraps any async function and exposes events (<code>open</code>, <code>halfOpen</code>, <code>close</code>, <code>fallback</code>) for observability.</p>
+
+      <h3 id="retries">Retries with exponential backoff and jitter</h3>
+      <p>A naive retry ("on failure, retry immediately, 3 times") is actively dangerous at scale: if a dependency is struggling because it's overloaded, an immediate retry adds more load at the exact moment it has the least capacity to handle it, and if every client retries on the same schedule, you get synchronized waves of traffic hitting the dependency in lockstep — a <strong>retry storm</strong> that turns a brief blip into a sustained outage. This is precisely what happened in several well-documented AWS and GitHub outages.</p>
+      <p>The fix: <strong>exponential backoff</strong> (wait 2^n × base delay before the nth retry, capped at a max) spreads retries out over time so load decreases rather than increases during distress. <strong>Jitter</strong> (randomizing the delay, e.g. "full jitter": random between 0 and the exponential cap) prevents synchronized waves — without jitter, every client computing the same backoff schedule from the same failure moment retries at the same instant. AWS's own architecture blog (Marc Brooker's "Exponential Backoff and Jitter") is the canonical reference here and is worth reading verbatim.</p>
+      <p>Retries should also be bounded by a retry budget (e.g., never let retries exceed 10% of total request volume) and should only apply to idempotent operations or operations with idempotency keys — retrying a non-idempotent payment charge without one can double-charge a customer.</p>
+
+      <h3 id="bulkheading">Bulkheading / isolation</h3>
+      <p>Named after ship design — a bulkhead is a wall that stops water flooding one compartment from sinking the whole ship. In software, this means partitioning resources (thread pools, connection pools, process pools) per dependency so that one slow dependency exhausting its pool doesn't starve requests meant for unrelated, healthy dependencies. Classic example: a monolith handles both "search" and "checkout" requests from a shared thread pool; search's backing service gets slow and every thread blocks waiting on it, so checkout — which has nothing to do with search — grinds to a halt too because no threads are left to serve it. Fix: separate thread/connection pools per dependency (or separate deployable services, which is a more extreme but more robust form of bulkheading).</p>
+
+      <h3 id="timeouts">Timeouts and budget propagation</h3>
+      <p>Every network call needs a timeout — an unbounded call is a resource leak waiting to cascade. But a single flat timeout per hop isn't enough in a multi-hop call chain: if the client has a 3-second budget and the first hop takes 2.5s before calling the second hop, the second hop must know it only has 0.5s left, not its own default 3s — otherwise the first hop's own timeout fires while the second hop is still "working," wasting resources on work that will be thrown away. This is <strong>deadline propagation</strong>: pass the remaining budget (usually as an absolute deadline timestamp, not a relative duration, to avoid clock-drift and re-basing errors) down the call chain in a header (e.g., gRPC's built-in deadline propagation, or a custom <code>X-Deadline</code> header over HTTP), and every hop checks it before doing further work or making further calls.</p>
+
+      <h3 id="graceful-degradation">Graceful degradation and fallback</h3>
+      <p>When a dependency is unavailable, the best response is often not an error but a degraded-but-useful response: serve a cached/stale version of the data, serve a default/generic version (e.g., generic recommendations instead of personalized ones when the personalization service is down), or omit a non-critical section of a page entirely rather than failing the whole page. The discipline here is classifying every dependency upfront as <strong>critical</strong> (no sane fallback exists — payment authorization, auth) vs <strong>non-critical</strong> (recommendations, "customers also bought," review counts) — only critical dependencies should ever be allowed to fail a whole request.</p>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>Concretely, here's how a token bucket and a circuit breaker interact in a real request path: an API gateway rate-limits each client via token bucket (protects your own fleet from a noisy client), then your service calls a downstream payment provider through a circuit breaker (protects you from a struggling dependency), and the call itself is wrapped in a timeout tied to the remaining deadline budget propagated from the original request. If the breaker is open, you skip the network call entirely and go straight to whatever fallback is configured — this is why opossum's fallback fires synchronously and cheaply, with no network round trip, which is the entire performance benefit of a breaker over a timeout alone (a timeout still pays the full wait before failing; an open breaker fails in microseconds).</p>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+stateDiagram-v2
+    [*] --> Closed
+    Closed --> Open: failure rate exceeds threshold
+    Open --> HalfOpen: cooldown timer expires
+    HalfOpen --> Closed: trial requests succeed
+    HalfOpen --> Open: trial request fails
+    Closed --> Closed: request succeeds (reset failure count)
+    note right of Open
+      All requests fail fast
+      without calling dependency
+    end note
+    note right of HalfOpen
+      Small number of trial
+      requests let through
+    end note
+      </div>
+      <div class="mermaid">
+sequenceDiagram
+    participant C as Client
+    participant S as Service
+    C->>S: request (attempt 1)
+    S-->>C: 503 (dependency overloaded)
+    Note over C: wait base_delay * 2^0 + jitter ≈ 100-200ms
+    C->>S: request (attempt 2)
+    S-->>C: 503 (still overloaded)
+    Note over C: wait base_delay * 2^1 + jitter ≈ 200-400ms
+    C->>S: request (attempt 3)
+    S-->>C: 200 OK
+    Note over C,S: Jitter prevents every client's<br/>retries from landing in the same instant
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-typescript">// Token bucket rate limiter backed by Redis (atomic via Lua script)
+// Allows bursts up to `capacity`, refills at `refillPerSec` tokens/sec.
+import Redis from "ioredis";
+const redis = new Redis();
+
+const TOKEN_BUCKET_LUA = `
+local key = KEYS[1]
+local capacity = tonumber(ARGV[1])
+local refillPerSec = tonumber(ARGV[2])
+local now = tonumber(ARGV[3])
+local requested = tonumber(ARGV[4])
+
+local bucket = redis.call("HMGET", key, "tokens", "ts")
+local tokens = tonumber(bucket[1])
+local ts = tonumber(bucket[2])
+
+if tokens == nil then
+  tokens = capacity
+  ts = now
+end
+
+local elapsed = math.max(0, now - ts)
+tokens = math.min(capacity, tokens + elapsed * refillPerSec)
+
+local allowed = 0
+if tokens >= requested then
+  tokens = tokens - requested
+  allowed = 1
+end
+
+redis.call("HMSET", key, "tokens", tokens, "ts", now)
+redis.call("EXPIRE", key, 3600)
+return { allowed, tokens }
+`;
+
+async function allowRequest(clientId: string, capacity = 100, refillPerSec = 10): Promise<boolean> {
+  const now = Date.now() / 1000;
+  const [allowed] = (await redis.eval(
+    TOKEN_BUCKET_LUA, 1, `ratelimit:${clientId}`, capacity, refillPerSec, now, 1
+  )) as [number, number];
+  return allowed === 1;
+}
+// Usage in middleware: if (!await allowRequest(req.user.id)) return res.status(429).end();
+</code></pre>
+      <pre><code class="language-typescript">// Sliding window counter rate limiter backed by Redis — O(1) memory, no boundary bug
+async function slidingWindowAllow(clientId: string, limit = 100, windowSec = 60): Promise<boolean> {
+  const now = Math.floor(Date.now() / 1000);
+  const currentWindow = Math.floor(now / windowSec);
+  const prevWindow = currentWindow - 1;
+  const elapsedInCurrent = now - currentWindow * windowSec;
+
+  const currKey = `rl:${clientId}:${currentWindow}`;
+  const prevKey = `rl:${clientId}:${prevWindow}`;
+
+  const [currCount, prevCount] = await redis
+    .multi()
+    .incr(currKey)
+    .expire(currKey, windowSec * 2)
+    .get(prevKey)
+    .exec()
+    .then((res) => [Number(res![0][1]), Number(res![2][1] ?? 0)]);
+
+  // Weight the previous window's count by how much of it still "overlaps" the sliding window
+  const weight = (windowSec - elapsedInCurrent) / windowSec;
+  const estimatedCount = currCount + prevCount * weight;
+
+  return estimatedCount <= limit;
+}
+</code></pre>
+      <pre><code class="language-typescript">// Circuit breaker with opossum, plus fallback and deadline-aware timeout
+import CircuitBreaker from "opossum";
+
+async function callPaymentProvider(payload: unknown, deadlineMs: number): Promise<any> {
+  const remaining = deadlineMs - Date.now();
+  if (remaining <= 0) throw new Error("deadline exceeded before call");
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), remaining);
+  try {
+    const res = await fetch("https://payments.internal/charge", {
+      method: "POST", body: JSON.stringify(payload), signal: controller.signal,
+    });
+    if (!res.ok) throw new Error(`payment provider ${res.status}`);
+    return res.json();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+const breaker = new CircuitBreaker(callPaymentProvider, {
+  timeout: 3000,              // if callPaymentProvider itself hangs past this, treat as failure
+  errorThresholdPercentage: 50, // open if >=50% of requests fail in rolling window
+  resetTimeout: 10_000,        // stay open 10s before trying half-open
+  rollingCountTimeout: 10_000,
+  rollingCountBuckets: 10,
+});
+
+breaker.fallback(() => ({ status: "queued_for_manual_review" }));
+breaker.on("open", () => console.warn("payment breaker OPEN — failing fast"));
+breaker.on("halfOpen", () => console.info("payment breaker HALF-OPEN — trial request"));
+
+// Usage: const result = await breaker.fire(payload, Date.now() + 2500);
+</code></pre>
+      <pre><code class="language-typescript">// Exponential backoff with full jitter, bounded retry budget, idempotency key
+async function retryWithBackoff&lt;T&gt;(
+  fn: () => Promise&lt;T&gt;,
+  opts: { maxRetries: number; baseMs: number; maxMs: number }
+): Promise&lt;T&gt; {
+  let attempt = 0;
+  while (true) {
+    try {
+      return await fn();
+    } catch (err) {
+      attempt++;
+      if (attempt > opts.maxRetries) throw err;
+      const cap = Math.min(opts.maxMs, opts.baseMs * 2 ** attempt);
+      const delay = Math.random() * cap; // "full jitter" per AWS's formula
+      await new Promise((r) => setTimeout(r, delay));
+    }
+  }
+}
+
+// Only safe because the server treats this key as idempotent (dedupes retried charges)
+const idempotencyKey = crypto.randomUUID();
+await retryWithBackoff(
+  () => callPaymentProvider({ amount: 999, idempotencyKey }, Date.now() + 5000),
+  { maxRetries: 4, baseMs: 100, maxMs: 2000 }
+);
+</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4><p>An e-commerce checkout service calls a third-party fraud-check API on the critical path. One day the fraud API's p50 latency goes from 80ms to 4 seconds (their database is under maintenance) without going fully down. Without a circuit breaker, every checkout request now waits up to its full timeout (say 5s) before failing or succeeding — the checkout service's own thread/connection pool fills up with requests stuck waiting on the fraud API, and because checkout shares infrastructure with order-status lookups (no bulkhead), order-status pages start failing too, even though they never call the fraud API. The actual fix deployed: (1) a circuit breaker around the fraud-check call that opens after 50% failure rate over a 10s rolling window, falling back to a conservative default ("flag for manual review" instead of auto-approve) rather than blocking; (2) a separate connection pool for the fraud-check client so its exhaustion can't starve order-status; (3) a deadline of 1.5s on the fraud call specifically, propagated from the overall 3s checkout budget, so it fails fast instead of consuming the whole budget. End-to-end checkout p99 latency during the incident dropped from a user-facing timeout failure to a consistent ~1.6s degraded-but-successful response.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Retrying a non-idempotent write (e.g., "create order") without an idempotency key. Under a retry storm or network blip, this can create duplicate orders/charges. Always generate an idempotency key client-side and have the server dedupe on it before adding retries to any mutating call.</p></div>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Setting a circuit breaker's failure threshold too low (e.g., opens after 2 failures) in a low-traffic service — a couple of unrelated transient blips trip the breaker and now you're serving fallback responses for healthy traffic. Tune the rolling window size and minimum request volume before the threshold percentage is evaluated, not just the percentage itself.</p></div>
+      <ul>
+        <li>Always pair timeouts with retries — a retry without a tight timeout just multiplies how long you wait before giving up.</li>
+        <li>Propagate an absolute deadline (timestamp), not a relative duration, across hops to avoid each hop silently re-granting itself a fresh full budget.</li>
+        <li>Classify every outbound dependency as critical or non-critical up front, and only let critical ones fail the whole request.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs: When to Use vs When NOT To</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>Token bucket</td><td>Want to allow legitimate bursts (file uploads, batch jobs)</td><td>Downstream truly cannot absorb any burst</td><td>Leaky bucket</td></tr>
+        <tr><td>Leaky bucket</td><td>Downstream has fixed, hard capacity (legacy system, hardware)</td><td>You want to reward bursty-but-bounded clients</td><td>Token bucket</td></tr>
+        <tr><td>Sliding window log</td><td>Need exact accuracy (billing, strict quotas)</td><td>Extremely high QPS where memory cost matters</td><td>Sliding window counter</td></tr>
+        <tr><td>Circuit breaker</td><td>Dependency can become slow/unhealthy under load</td><td>Dependency failures are binary and instant (fail fast already)</td><td>Plain timeout + retry</td></tr>
+        <tr><td>Retries with backoff</td><td>Transient failures (network blip, momentary overload)</td><td>Non-idempotent operation with no idempotency key available</td><td>Fail fast, surface error to caller</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic"><h4>Basic</h4>
+        <details class="qa"><summary>What problem does a circuit breaker solve that a plain timeout doesn't?</summary><div class="answer"><p>A timeout still waits the full duration before failing on every single call. A circuit breaker, once open, fails immediately without even attempting the call, protecting both the caller's resources and the struggling dependency from additional load while it's unhealthy.</p></div></details>
+        <details class="qa"><summary>Name the three circuit breaker states and what happens in each.</summary><div class="answer"><p>Closed: requests pass through normally, failures counted. Open: requests fail immediately without calling the dependency, for a cooldown period. Half-open: a limited number of trial requests are allowed through to test recovery; success closes the breaker, failure reopens it.</p></div></details>
+        <details class="qa"><summary>What is a retry storm and what causes it?</summary><div class="answer"><p>A wave of synchronized retries from many clients hitting an already-struggling dependency at the same moment, usually because retries happen immediately or on identical fixed schedules without jitter, amplifying load exactly when the dependency can least handle it.</p></div></details>
+        <details class="qa"><summary>What's the difference between token bucket and leaky bucket?</summary><div class="answer"><p>Token bucket allows bursts up to the bucket size while enforcing a long-run average rate. Leaky bucket smooths bursty input into a constant output rate by queueing requests and processing them at a fixed rate, dropping new ones when the queue is full.</p></div></details>
+        <details class="qa"><summary>Why is jitter added to exponential backoff?</summary><div class="answer"><p>Without jitter, clients that fail at the same time compute identical backoff delays and retry in synchronized waves. Jitter randomizes the delay so retries spread out over time instead of landing together.</p></div></details>
+        <details class="qa"><summary>What is bulkheading?</summary><div class="answer"><p>Partitioning resources (thread pools, connection pools) per dependency so that one dependency's failure or slowness can't exhaust resources needed to serve requests to unrelated, healthy dependencies.</p></div></details>
+        <details class="qa"><summary>Why should retries only apply to idempotent operations?</summary><div class="answer"><p>Retrying a non-idempotent operation (like "charge card" or "create order") without a dedup mechanism can cause the operation to execute multiple times — e.g., double-charging a customer — if the original request actually succeeded but the response was lost.</p></div></details>
+      </div>
+      <div class="qa-level medium"><h4>Medium</h4>
+        <details class="qa"><summary>Walk through what happens with and without a circuit breaker when a downstream dependency's latency spikes from 50ms to 5s under load.</summary><div class="answer"><p>Without a breaker: every caller waits up to its timeout, threads/connections pile up waiting, pools exhaust, and if those pools are shared with unrelated functionality, that also fails (cascading failure). With a breaker: after the failure/timeout threshold is crossed, it opens and subsequent calls fail instantly (or hit a fallback), freeing resources and reducing load on the struggling dependency, which also gives it room to recover.</p></div></details>
+        <details class="qa"><summary>Why is deadline propagation better than giving every hop in a call chain the same flat timeout?</summary><div class="answer"><p>A flat timeout per hop can let a later hop keep "working" well past the point where the original caller has already given up and moved on, wasting resources on work that will be discarded. Propagating the remaining budget as an absolute deadline lets every hop know exactly how much time is left and abandon work that can no longer matter.</p></div></details>
+        <details class="qa"><summary>How would you design a rate limiter that needs to be both memory-efficient at high QPS and accurate at window boundaries?</summary><div class="answer"><p>Sliding window counter: keep O(1) counters for the current and previous fixed window and compute a weighted estimate based on how far into the current window you are. This avoids the fixed-window boundary burst bug while not requiring per-request storage like a sliding window log.</p></div></details>
+        <details class="qa"><summary>Your service has a non-critical "recommendations" call and a critical "inventory check" call on the same request path. How should their failure handling differ?</summary><div class="answer"><p>Recommendations should have an aggressive circuit breaker with a cheap static fallback (e.g., generic bestsellers) so its failure never fails the whole request. Inventory check, if truly critical to correctness, should not have a fallback that silently assumes success — it should fail the request (or degrade to a conservative "assume reserved, reconcile later" mode) rather than risk overselling.</p></div></details>
+        <details class="qa"><summary>What's wrong with implementing a circuit breaker per-instance in a horizontally scaled fleet of 50 servers, each making calls to the same downstream dependency?</summary><div class="answer"><p>Each instance tracks failures independently, so it can take much longer for enough instances to independently detect and open their breakers, and an instance with low traffic may never accumulate enough samples to trip at all. Shared state (e.g., in Redis) or faster propagation of health signals across instances gives more uniform, faster protection, though it adds its own coordination cost — many systems accept the per-instance tradeoff for simplicity.</p></div></details>
+        <details class="qa"><summary>How do you decide the retry budget (max retries, backoff cap) for a given call?</summary><div class="answer"><p>Base it on the remaining deadline budget (don't retry past what the caller can afford to wait), the idempotency safety of the operation, and the downstream's own capacity — a retry budget that could itself amount to a meaningful fraction of total traffic (e.g., &gt;10%) risks becoming part of the overload problem rather than a mitigation.</p></div></details>
+      </div>
+      <div class="qa-level advanced"><h4>Advanced</h4>
+        <details class="qa"><summary>Design a system-wide "retry budget" mechanism that prevents retries across your entire fleet from exceeding a safe fraction of total request volume to a given dependency.</summary><div class="answer"><p>Track, per downstream dependency, a rolling count of total requests and retried requests (e.g., via a shared counter in Redis or a local token-bucket-style budget replenished proportionally to successful non-retry traffic). Before issuing a retry, check whether the retry budget (e.g., 10% of recent total volume) has been exhausted; if so, fail fast instead of retrying. This caps the worst-case amplification a retry storm can cause regardless of how many individual clients decide to retry.</p></div></details>
+        <details class="qa"><summary>How would hedged requests interact with a circuit breaker and a rate limiter on the same call path?</summary><div class="answer"><p>Hedged requests intentionally duplicate load to cut tail latency, which directly conflicts with a rate limiter's goal of capping load — hedging should be excluded from (or counted double against) the caller's own outbound rate limit to the dependency. A circuit breaker should treat a hedge-triggering slow response the same as a failure signal for threshold purposes, since hedging is itself evidence the dependency is degrading; most production systems disable hedging entirely once a breaker to that dependency is open.</p></div></details>
+        <details class="qa"><summary>Explain how you'd implement deadline propagation in a system with both synchronous (HTTP/gRPC) and asynchronous (message queue) hops in the same logical request.</summary><div class="answer"><p>For sync hops, pass an absolute deadline in a header (gRPC has this built in; HTTP needs a custom header like X-Deadline). For async hops, the notion of a single end-to-end deadline often breaks down because the original caller isn't waiting — instead, attach a TTL/expiry to the queued message so a consumer that picks it up too late (past usefulness) can discard it rather than process stale work, and treat the async boundary as the natural end of the synchronous deadline chain.</p></div></details>
+        <details class="qa"><summary>A circuit breaker opens, but the fallback itself has a dependency that's also degraded (e.g., fallback reads from a cache that's also struggling). How do you prevent fallback failures from cascading further?</summary><div class="answer"><p>Wrap the fallback path itself in its own lightweight protection (a cheap in-memory default, or its own breaker with a hard-coded last-resort value with no further dependencies) so the fallback chain terminates in something that cannot fail — e.g., a static default value or an in-process stale cache rather than another network call.</p></div></details>
+        <details class="qa"><summary>How would you distinguish, from monitoring data alone, a dependency failure that calls for opening a circuit breaker versus one that calls for scaling up the dependency instead?</summary><div class="answer"><p>Look at whether failure/latency correlates with the dependency's own saturation metrics (CPU, queue depth, connection pool usage) versus being constant regardless of load — the former suggests a capacity problem better solved by scaling (and a breaker is just a stopgap), the latter (e.g., a bug, bad deploy, or hard dependency outage) is what a breaker is specifically designed to contain since more capacity wouldn't help.</p></div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment"><span class="level-tag">Beginner (30-60 min)</span><h4>Implement and test a fixed-window vs sliding-window-counter rate limiter</h4><p>Using the Redis-backed sliding window counter code in this chapter as a reference, implement a plain fixed-window counter too, then write a small test harness that sends a burst of requests straddling a window boundary and compares how many each algorithm allows through.</p><ul><li>Demonstrate the boundary-burst bug concretely with real numbers from your test.</li><li>State which algorithm you'd pick for a public API's rate limit and why.</li></ul><p><strong>Acceptance criteria:</strong> Working code for both algorithms plus a short written comparison showing the boundary bug reproduced.</p><details class="qa"><summary>Hints</summary><div class="answer"><p>Send N requests at t=59.9s and another N at t=60.1s where N equals your limit — fixed window allows 2N in a ~200ms span; sliding window counter should allow roughly N.</p></div></details><p><strong>Bonus:</strong> Add token bucket to the comparison and discuss how its burst allowance differs from both.</p></div>
+      <div class="assignment"><span class="level-tag">Intermediate (2-4 hrs)</span><h4>Build a resilient HTTP client wrapper</h4><p>Build a reusable TypeScript function/class that wraps any async call with: a deadline-aware timeout, exponential backoff with full jitter (bounded retries, only on retryable status codes), and an opossum circuit breaker with a configurable fallback.</p><ul><li>Demonstrate it against a mock endpoint that you can make fail/slow down on demand.</li><li>Show the breaker opening and the fallback firing in a test.</li></ul><p><strong>Acceptance criteria:</strong> One composable wrapper function used consistently, with a test proving each layer (timeout, retry, breaker) activates correctly in isolation and in combination.</p><details class="qa"><summary>Hints</summary><div class="answer"><p>Layer order matters: breaker should wrap the retry logic (so retries count toward breaker failure stats), and the deadline should be computed once at the top and passed down, shrinking on each retry attempt.</p></div></details><p><strong>Bonus:</strong> Add a shared retry budget across all calls to the same dependency, not just per-call bounded retries.</p></div>
+      <div class="assignment"><span class="level-tag">Advanced (1-2 days)</span><h4>Design fleet-wide cascading failure protection</h4><p>Design (no code required, written design doc) a resilience strategy for a 100-instance fleet of API servers that all call a single shared downstream dependency (e.g., a recommendation service) which occasionally degrades under load.</p><ul><li>Decide what's local (per-instance) vs shared (via Redis or similar) — breaker state, rate limit counters, retry budget.</li><li>Address the "thundering herd on recovery" problem: when the dependency recovers, how do you avoid every instance's half-open trial flooding it simultaneously?</li><li>Discuss what happens if your shared coordination store (Redis) itself becomes slow — does your resilience mechanism depend on something that can itself cascade?</li></ul><p><strong>Acceptance criteria:</strong> A written design addressing all three bullets explicitly, with tradeoffs stated for local vs shared state.</p><details class="qa"><summary>Hints</summary><div class="answer"><p>Stagger half-open trials across instances (e.g., random jittered cooldown per instance, or a single designated "canary" instance that tests recovery before signaling the rest via pub/sub). Keep the resilience mechanism's own dependency (Redis) optional/degradable — fall back to local-only state if Redis itself is unreachable, rather than failing open or closed on a coordination failure.</p></div></details></div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet"><ul>
+        <li>Token bucket = allows bursts up to capacity + steady refill rate; leaky bucket = smooths bursts into constant output rate.</li>
+        <li>Sliding window counter = O(1) memory, fixes fixed-window boundary bug via weighted estimate.</li>
+        <li>Circuit breaker states: closed (normal) → open (fail fast, no call) → half-open (trial requests) → closed or open.</li>
+        <li>Naive retries cause retry storms; always use exponential backoff + jitter, and bound with a retry budget.</li>
+        <li>Only retry idempotent operations, or non-idempotent ones with a server-side idempotency key.</li>
+        <li>Bulkhead = separate resource pools per dependency so one slow dependency can't starve unrelated traffic.</li>
+        <li>Propagate an absolute deadline (not relative timeout) across call-chain hops so later hops don't re-grant a fresh budget.</li>
+        <li>Classify dependencies as critical (no fallback, must succeed) vs non-critical (fallback allowed) before designing failure handling.</li>
+        <li>opossum is the standard Node circuit breaker library; wraps any async function with timeout, threshold, fallback, and events.</li>
+      </ul></div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter/">Exponential Backoff and Jitter (AWS Architecture Blog, Marc Brooker)</a></li>
+        <li><a href="https://github.com/nodeshift/opossum">opossum — Node.js circuit breaker library</a></li>
+        <li><a href="https://martinfowler.com/bliki/CircuitBreaker.html">CircuitBreaker (Martin Fowler)</a></li>
+        <li><a href="https://cloud.google.com/architecture/rate-limiting-strategies-techniques">Rate limiting strategies and techniques (Google Cloud)</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="10-api-design.html"><span class="dir">← Previous</span>API Design</a>
+        <a class="next" href="12-lld-design-patterns.html"><span class="dir">Next →</span>LLD: SOLID &amp; Design Patterns</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · System Design</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-typescript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-sql.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-yaml.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "01-system-design", chapterKey: "11-resilience" });</script>
+</body>
+</html>

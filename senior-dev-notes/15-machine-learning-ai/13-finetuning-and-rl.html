@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fine-tuning & RL — Machine Learning & AI — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">Machine Learning & AI</a><span class="sep">›</span>Fine-tuning & RL</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>Fine-tuning & RL</h1>
+      <p class="meta-line"><span>⏱ ~3.5 hrs</span><span>📍 Chapter 13 of 14</span></p>
+      <p><strong>One-line summary:</strong> Fine-tuning changes a model's weights (not just its context), LoRA
+      makes that affordable by learning a low-rank update instead of a full one, and the RLHF/DPO layer on top
+      of supervised fine-tuning exists because "imitate good examples" and "prefer good outputs over bad ones"
+      are genuinely different training signals that optimize different things.</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>You've spent chapters 9-12 learning how to get more out of a frozen, pretrained model — RAG, context
+      engineering, agents. This chapter covers the other lever: actually changing the model's weights. Senior
+      engineers get asked "would you fine-tune or just improve the prompt/RAG here" constantly, and a shallow
+      answer ("fine-tuning is expensive, let's just prompt") is wrong often enough to be a real liability — there
+      are tasks (consistent output format at scale, domain-specific tone, a narrow classification task run
+      millions of times) where fine-tuning a small model is dramatically cheaper and more reliable than repeatedly
+      paying for a long prompt against a large model. Understanding LoRA/QLoRA precisely (not as "some efficient
+      fine-tuning magic") and knowing what RLHF/DPO actually optimize, versus SFT, is what separates "I've read
+      the blog post" from "I can make this decision and defend it."</p>
+      <div class="box why"><h4>Why</h4><p>A pretrained model's weights encode a general-purpose next-token
+      predictor shaped by internet-scale data. Fine-tuning narrows that distribution toward your specific task or
+      style by further adjusting weights on targeted data — it's a permanent, baked-in shift in behavior, unlike
+      a prompt or retrieved context, which only shapes behavior for the duration of one call. That permanence is
+      exactly fine-tuning's power and its cost: it's slower to iterate on, harder to "undo" per-request, and
+      requires real training infrastructure — which is why it's a deliberate choice, not a default.</p></div>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>Requires <a href="04-pytorch-and-tensors.html">PyTorch & Tensors</a> and <a href="06-attention-and-transformers.html">Attention
+      & Transformers</a> (you need to know what the weight matrices you're updating actually are). Helpful:
+      <a href="07-huggingface-ecosystem.html">HuggingFace Ecosystem</a> (the actual tooling used for fine-tuning
+      in practice). Leads into <a href="14-evals-advanced-topics-multimodal.html">Evals, Advanced Topics &
+      Multimodal</a>.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="what-finetuning-changes">What fine-tuning actually changes</h3>
+      <p>A transformer's learned parameters are almost entirely weight matrices — the projection matrices inside
+      attention (Q/K/V/output projections), the feed-forward layers' weight matrices, embedding tables. Pretraining
+      sets these via next-token prediction over a massive, general corpus. Fine-tuning continues training
+      (further gradient updates via backpropagation) on a smaller, targeted dataset, nudging those same weight
+      matrices toward behavior that fits the new data's patterns. Nothing architectural changes — same layers,
+      same attention mechanism — only the numeric values inside the weight matrices shift. This is the
+      fundamental difference from prompting/RAG: those change what's in the context window for one call; fine-tuning
+      changes the function the model computes, permanently, for every future call until fine-tuned again.</p>
+
+      <h3 id="full-vs-peft">Full fine-tuning vs. parameter-efficient fine-tuning (PEFT)</h3>
+      <p><strong>Full fine-tuning</strong> updates every weight in the model. For a model with billions of
+      parameters this means: storing a full-precision gradient and optimizer state (e.g. Adam's momentum and
+      variance terms) for every single parameter during training, which multiplies memory requirements several
+      times over the base model's own size — a 7B-parameter model can need well over 100GB of accelerator memory
+      to full fine-tune with a standard optimizer, pricing most teams out of doing it on anything but serious
+      multi-GPU infrastructure. It also risks <strong>catastrophic forgetting</strong> — aggressively updating
+      every weight toward a narrow new dataset can degrade the model's general capabilities that weren't
+      represented in that narrow dataset.</p>
+      <p><strong>Parameter-efficient fine-tuning (PEFT)</strong> methods freeze the vast majority of the original
+      weights and train only a small number of new or additional parameters, dramatically cutting memory and
+      compute while retaining most of full fine-tuning's benefit for the targeted task. <strong>LoRA</strong>
+      (Low-Rank Adaptation) is the dominant PEFT method in 2025-26 practice; <strong>prompt tuning</strong> and
+      <strong>adapter layers</strong> are older alternatives largely superseded by LoRA for most use cases.</p>
+
+      <h3 id="lora-mechanics">LoRA mechanics, precisely</h3>
+      <p>For a frozen pretrained weight matrix <code>W</code> (shape <code>d × k</code>), full fine-tuning would
+      learn an update <code>ΔW</code> (also <code>d × k</code>) added to it: <code>W' = W + ΔW</code>. LoRA's
+      core insight: the <em>update</em> needed to adapt a model to a new task empirically tends to have low
+      "intrinsic rank" — it doesn't need the full <code>d × k</code> degrees of freedom to express the change
+      that matters. So LoRA decomposes <code>ΔW</code> into the product of two much smaller matrices:
+      <code>ΔW = B·A</code>, where <code>A</code> is <code>r × k</code> and <code>B</code> is <code>d × r</code>,
+      with rank <code>r</code> chosen small (commonly 4-64, versus <code>d</code> and <code>k</code> which are
+      often in the thousands). Only <code>A</code> and <code>B</code> are trained; the original <code>W</code>
+      stays frozen throughout. At inference, the effective weight is <code>W + B·A</code> (either computed on the
+      fly or merged back into a single matrix after training).</p>
+      <p>Why this saves memory: the number of trainable parameters drops from <code>d×k</code> to
+      <code>r×(d+k)</code> — for typical transformer dimensions and small <code>r</code>, this is often under 1%
+      of the original parameter count for the matrices LoRA targets (commonly the attention Q/V projections, and
+      sometimes all linear layers). Since gradients and optimizer state only need to be stored for the trainable
+      parameters, not the frozen base weights, both the compute and memory cost of backpropagation shrink by
+      roughly that same proportion — this is what makes fine-tuning a multi-billion-parameter model feasible on a
+      single consumer or prosumer GPU rather than a multi-GPU cluster.</p>
+      <p><strong>QLoRA</strong> adds one more lever: it quantizes the frozen base model to a low-precision format
+      (typically 4-bit, via techniques like NF4 quantization) before attaching LoRA adapters, then trains the
+      (still full-precision) LoRA matrices on top. The frozen base model's memory footprint shrinks roughly 4x
+      versus full-precision (16-bit) storage, while the actual learning happens in the small, full-precision LoRA
+      matrices, so quantization-induced precision loss in the frozen weights doesn't directly degrade the
+      fine-tuning signal the way quantizing the entire training process would. This combination is what makes
+      fine-tuning a 70B-class model practical on a single high-memory consumer GPU.</p>
+
+      <h3 id="when-finetune">When fine-tuning beats prompting/RAG, and when it doesn't</h3>
+      <ul>
+        <li><strong>Fine-tune when</strong>: you need a consistent output format/style/tone at scale and paying
+        per-call for a long few-shot prompt is a real cost at your volume; the task is narrow and well-defined
+        enough to have clean training examples (classification, structured extraction, a specific voice); you
+        want a much smaller/cheaper model to match a larger model's performance on one narrow task; you need
+        behavior the base model fundamentally doesn't exhibit even with good prompting (a very unusual output
+        schema, a specialized domain vocabulary essentially absent from pretraining data).</li>
+        <li><strong>Prompting/RAG beats fine-tuning when</strong>: the knowledge changes frequently (fine-tuning
+        bakes in a snapshot; RAG retrieves current information at call time); you need the behavior to be easily
+        inspectable/adjustable without a retraining cycle; the task genuinely varies per request in ways a fixed
+        set of training examples can't anticipate; you don't have a dataset of good examples yet (gather data via
+        prompting first, fine-tune later once you do).</li>
+        <li>In practice, the two are usually combined, not competing: fine-tune for format/style/domain
+        vocabulary, keep RAG for up-to-date factual grounding, and keep prompting for per-request instructions —
+        fine-tuning doesn't replace the need for good context, it changes the baseline the model starts from.</li>
+      </ul>
+
+      <h3 id="sft">Supervised fine-tuning (SFT): data format and process</h3>
+      <p>SFT trains the model, via ordinary next-token-prediction loss, on a curated dataset of
+      <strong>(prompt, ideal completion)</strong> pairs — the exact same training objective as pretraining, just
+      on a much smaller, much higher-quality, task-specific dataset instead of the general web corpus. A typical
+      SFT example is formatted as a full conversation turn (system/user/assistant roles, matching the chat
+      template the base model expects), and the loss is typically computed only over the assistant's tokens (the
+      prompt/user turns are included for context but masked out of the loss) so the model is explicitly trained
+      to produce good completions, not to "learn" to predict the prompt itself. Data quality matters far more than
+      data quantity for SFT — a few hundred to a few thousand carefully curated, representative examples
+      routinely outperform a much larger but noisier or inconsistent dataset, because SFT is teaching the model a
+      narrow behavioral pattern, not new world knowledge.</p>
+
+      <h3 id="rlhf">RLHF/RLAIF: why RL after SFT</h3>
+      <p>SFT teaches the model to imitate good examples, but "imitate this set of ideal completions" is a
+      different and weaker signal than "prefer good outputs over bad ones, including outputs the model generates
+      itself." <strong>RLHF</strong> (Reinforcement Learning from Human Feedback) closes that gap: (1) collect
+      human preference data — given a prompt and two (or more) candidate completions, a human (or, in
+      <strong>RLAIF</strong>, another capable model) ranks which is better; (2) train a separate <strong>reward
+      model</strong> to predict that preference score from a completion; (3) use reinforcement learning — commonly
+      <strong>PPO</strong> (Proximal Policy Optimization) — to further update the SFT model's weights so that it
+      generates completions the reward model scores highly, while a KL-divergence penalty constrains it from
+      drifting too far from the original SFT model (preventing it from degenerating into reward-hacking gibberish
+      that scores well on the reward model but is actually bad). RLHF matters because the space of "plausible good
+      completions" the model could generate is far larger than any practical imitation dataset can cover — RL
+      lets the model explore its own output distribution and get a direct comparative signal on what's actually
+      preferred, which is closer to what "better" actually means for open-ended generation than any fixed set of
+      gold examples can fully specify.</p>
+
+      <h3 id="dpo">DPO as a simpler alternative</h3>
+      <p><strong>DPO</strong> (Direct Preference Optimization) achieves a similar end result to RLHF without the
+      separate reward model and RL training loop. It reformulates the same preference data (chosen vs. rejected
+      completion per prompt) into a single, directly-differentiable loss function that increases the model's
+      relative likelihood of the preferred completion over the rejected one — mathematically derived so that
+      optimizing it is provably equivalent, under certain assumptions, to optimizing the same objective RLHF's
+      reward-model-plus-PPO pipeline targets. In practice, DPO is substantially simpler to implement and more
+      stable to train (no separate reward model, no RL hyperparameter tuning, no reward-hacking dynamics to
+      guard against), which is why it's become a common default for preference alignment in 2025-26, with full
+      PPO-based RLHF reserved for cases needing its specific flexibility (e.g. more complex, multi-objective
+      reward signals that don't reduce cleanly to pairwise preferences).</p>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>The standard modern alignment pipeline, in order:</p>
+      <ol>
+        <li><strong>Pretraining</strong> (not covered here — see <a href="06-attention-and-transformers.html">chapter
+        6</a>): next-token prediction over a massive general corpus, producing a base model.</li>
+        <li><strong>SFT</strong>: fine-tune the base model on curated (prompt, ideal completion) pairs so it
+        reliably follows instructions and produces well-formed, on-task completions — this alone already produces
+        a usable instruction-following model.</li>
+        <li><strong>Preference data collection</strong>: generate multiple completions per prompt from the SFT
+        model, have humans (RLHF) or a strong model (RLAIF) rank/compare them.</li>
+        <li><strong>Preference optimization</strong>: either train a reward model and run PPO against it (RLHF),
+        or skip straight to a DPO loss computed directly from the preference pairs — both push the model toward
+        generating more of what's preferred and less of what's dispreferred, beyond what imitation alone taught it.</li>
+        <li><strong>(For a specific downstream task)</strong> Task-specific fine-tuning, usually via LoRA/QLoRA on
+        top of the aligned model, adapts it further to a narrow domain or format without repeating the full
+        alignment pipeline.</li>
+      </ol>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+flowchart LR
+  W["Frozen pretrained weight W (d x k)"] --> SUM["W' = W + B·A"]
+  A["Trainable A (r x k)"] --> MUL["B · A"]
+  B["Trainable B (d x r)"] --> MUL
+  MUL --> SUM
+  SUM --> OUT["Effective weight used at inference"]
+      </div>
+      <div class="mermaid">
+flowchart TB
+  PT[Pretraining: next-token prediction, general corpus] --> SFT[SFT: imitate curated prompt-completion pairs]
+  SFT --> GEN[Generate multiple completions per prompt]
+  GEN --> PREF[Human or AI preference ranking]
+  PREF --> RM[Train reward model]
+  RM --> PPO[PPO: optimize policy against reward model + KL penalty]
+  PREF --> DPO[DPO: direct preference loss, no reward model]
+  PPO --> ALIGNED[Aligned model]
+  DPO --> ALIGNED
+  ALIGNED --> TASK[Task-specific LoRA/QLoRA fine-tuning]
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-python"># LoRA config using HuggingFace PEFT -- the standard 2025-26 tooling.
+# Shows exactly which matrices get adapters and the rank/alpha hyperparameters.
+from peft import LoraConfig, get_peft_model
+from transformers import AutoModelForCausalLM
+
+base_model = AutoModelForCausalLM.from_pretrained(
+    "meta-llama/Llama-3.1-8B", load_in_4bit=True  # QLoRA: quantize frozen base weights
+)
+
+lora_config = LoraConfig(
+    r=16,                     # rank -- low-rank bottleneck dimension
+    lora_alpha=32,            # scaling factor applied to the B·A update
+    target_modules=["q_proj", "v_proj"],  # which weight matrices get adapters
+    lora_dropout=0.05,
+    bias="none",
+    task_type="CAUSAL_LM",
+)
+
+model = get_peft_model(base_model, lora_config)
+model.print_trainable_parameters()
+# e.g. "trainable params: 4,194,304 || all params: 8,030,261,248 || trainable%: 0.052%"
+# -- this is the whole point: ~0.05% of parameters carry the entire task adaptation.
+
+
+# --- SFT data format: loss masked over the prompt, computed only on the completion ---
+def build_sft_example(tokenizer, prompt: str, completion: str):
+    prompt_ids = tokenizer(prompt, add_special_tokens=False)["input_ids"]
+    completion_ids = tokenizer(completion, add_special_tokens=False)["input_ids"]
+    input_ids = prompt_ids + completion_ids
+    labels = [-100] * len(prompt_ids) + completion_ids  # -100 = ignored by the loss
+    return {"input_ids": input_ids, "labels": labels}
+
+
+# --- DPO loss, conceptually (not production-ready, illustrates the mechanism) ---
+import torch
+import torch.nn.functional as F
+
+def dpo_loss(policy_chosen_logp, policy_rejected_logp,
+             ref_chosen_logp, ref_rejected_logp, beta=0.1):
+    """Higher reward for the chosen completion relative to the rejected one,
+    measured relative to a frozen reference (usually the SFT model) so the
+    policy doesn't drift arbitrarily far from sensible behavior."""
+    policy_logratios = policy_chosen_logp - policy_rejected_logp
+    ref_logratios = ref_chosen_logp - ref_rejected_logp
+    logits = beta * (policy_logratios - ref_logratios)
+    return -F.logsigmoid(logits).mean()
+
+
+# BAD: full fine-tuning a 7B+ model on a single consumer GPU by naively disabling
+# gradient checkpointing / using a full-precision optimizer state for every parameter.
+# This is the exact memory blowup LoRA/QLoRA exist to avoid -- don't "optimize" your way
+# around it with tricks when the real fix is training far fewer parameters.
+# model = AutoModelForCausalLM.from_pretrained("big-model", torch_dtype=torch.float32)
+# optimizer = torch.optim.Adam(model.parameters())  # full Adam state for EVERY weight
+</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4><p>A company runs a high-volume customer-message classification
+      task (routing incoming support messages to the correct team) using a large general-purpose model with a
+      detailed few-shot prompt, at a cost that scales linearly with message volume and a p95 latency driven
+      largely by that long prompt. They collect 3,000 labeled (message, correct-team) examples from historical
+      routing decisions and LoRA fine-tune a much smaller open model specifically for this classification task.
+      The fine-tuned small model matches the large model's routing accuracy on a held-out eval set, cuts per-call
+      cost by over 90%, and cuts p95 latency significantly since the prompt no longer needs lengthy few-shot
+      examples to establish the task. Crucially, they keep the large general-purpose model for the genuinely
+      open-ended support conversation that follows routing — fine-tuning replaced the narrow, high-volume,
+      well-defined sub-task, not the whole system.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Fine-tuning to "teach the model new facts" instead of using RAG.
+      SFT on a narrow dataset is good at teaching behavior/format/style, but is a poor and unreliable mechanism
+      for injecting large volumes of factual knowledge — the model may memorize some of it inconsistently, and
+      every future fact update requires a full retraining cycle instead of just updating a retrieval index. If
+      the actual problem is "the model doesn't know X," check whether RAG solves it before reaching for fine-tuning.</p></div>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Choosing a LoRA rank far larger than needed "to be safe." A higher
+      rank increases trainable parameters and can increase overfitting risk on a small dataset without a
+      corresponding accuracy benefit — most tasks saturate at a surprisingly low rank (commonly 8-32). Treat rank
+      as a hyperparameter to sweep on a validation set, not a knob to maximize defensively.</p></div>
+      <ul>
+        <li>Mask the loss over the prompt tokens in SFT — training the model to also predict the prompt itself
+        wastes capacity and can subtly bias generation.</li>
+        <li>Always hold out a validation/eval set the fine-tuning data never touches, and watch for catastrophic
+        forgetting of general capability, not just improvement on the target task.</li>
+        <li>Prefer DPO over full PPO-based RLHF unless you have a specific reason needing RL's extra flexibility —
+        DPO's simplicity and stability make it the sensible default for most preference-alignment needs today.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>Full fine-tuning</td><td>Large team, serious compute budget, need maximum task adaptation</td><td>Limited compute, risk of catastrophic forgetting matters</td><td>LoRA / QLoRA</td></tr>
+        <tr><td>LoRA / QLoRA</td><td>Narrow task adaptation, limited compute/GPU memory</td><td>Need to fundamentally alter broad model behavior beyond a narrow task</td><td>Full fine-tuning (with more compute)</td></tr>
+        <tr><td>Fine-tuning (any method)</td><td>Stable task, consistent format/style, high call volume</td><td>Frequently changing facts, highly variable per-request tasks</td><td>RAG / prompting</td></tr>
+        <tr><td>Full RLHF (reward model + PPO)</td><td>Complex, multi-objective reward signals</td><td>Standard pairwise preference alignment</td><td>DPO</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+
+      <div class="qa-level basic">
+        <h4>Basic</h4>
+        <details class="qa"><summary>What's the fundamental difference between what fine-tuning changes versus what prompting/RAG changes?</summary><div class="answer"><p>Fine-tuning permanently updates the model's weights via further gradient-based training, changing the function the model computes for every future call. Prompting/RAG only change what's in the context window for one specific call, leaving the underlying weights untouched.</p></div><div class="followup">Follow-up: which approach would you pick if the information you need the model to use changes daily?</div></details>
+        <details class="qa"><summary>What does LoRA stand for and what's the one-sentence idea behind it?</summary><div class="answer"><p>Low-Rank Adaptation. Instead of learning a full-size weight update matrix, it learns the update as the product of two much smaller matrices (a low-rank decomposition), since the update needed for task adaptation empirically doesn't need the full rank of the original weight matrix.</p></div><div class="followup">Follow-up: what hyperparameter controls how "small" those two matrices are?</div></details>
+        <details class="qa"><summary>What does QLoRA add on top of LoRA?</summary><div class="answer"><p>It quantizes the frozen base model to low precision (typically 4-bit) before attaching full-precision LoRA adapter matrices on top, cutting the base model's memory footprint substantially while the actual learning happens in the small, still-full-precision LoRA matrices.</p></div><div class="followup">Follow-up: why doesn't quantizing the frozen base weights directly hurt the quality of what's being learned?</div></details>
+        <details class="qa"><summary>What is supervised fine-tuning (SFT) training on, and what's the loss objective?</summary><div class="answer"><p>SFT trains on curated (prompt, ideal completion) pairs using the same next-token-prediction loss as pretraining, but the loss is typically computed only over the completion tokens, with the prompt tokens masked out.</p></div><div class="followup">Follow-up: why mask the loss over the prompt rather than training on the whole sequence?</div></details>
+        <details class="qa"><summary>What problem does RLHF solve that SFT alone doesn't?</summary><div class="answer"><p>SFT only teaches the model to imitate a fixed set of ideal example completions. RLHF gives the model a comparative preference signal (which of several outputs, including its own generations, is better) which covers a much larger space of "what's actually preferred" than any fixed imitation dataset can enumerate.</p></div><div class="followup">Follow-up: what's the role of the KL-divergence penalty during RLHF's RL step?</div></details>
+        <details class="qa"><summary>What is DPO, and what does it simplify away compared to full RLHF?</summary><div class="answer"><p>Direct Preference Optimization reformulates preference data directly into a differentiable loss, optimized with standard gradient descent — it removes the need for a separate reward model and an RL training loop (like PPO), making preference alignment simpler and more stable to implement.</p></div><div class="followup">Follow-up: under what circumstance would you still reach for full RLHF instead of DPO?</div></details>
+        <details class="qa"><summary>Give one scenario where fine-tuning is clearly the better choice over prompting, and one where it's clearly worse.</summary><div class="answer"><p>Better: a high-volume, narrow, well-defined task (e.g. message classification) where a long few-shot prompt's per-call cost matters at scale and training examples are available. Worse: a task requiring frequently-changing factual knowledge, where fine-tuning would require constant retraining versus simply updating a RAG index.</p></div><div class="followup">Follow-up: what would make you combine both rather than choosing one?</div></details>
+      </div>
+
+      <div class="qa-level medium">
+        <h4>Medium</h4>
+        <details class="qa"><summary>Walk through the LoRA parameter-count math: for a weight matrix of size d x k with LoRA rank r, how many trainable parameters does LoRA introduce, and why does this matter for memory?</summary><div class="answer"><p>LoRA introduces r×(d+k) trainable parameters (matrix A is r×k, matrix B is d×r), versus d×k for the full matrix. For large d and k and small r, this is a small fraction of the original parameter count. Since optimizer state (e.g. Adam's momentum/variance) and gradients only need to be stored for trainable parameters, memory and compute for backpropagation shrink proportionally — this is what makes fine-tuning large models feasible on far less hardware than full fine-tuning requires.</p></div><div class="followup">Follow-up: does reducing rank r always proportionally reduce training time, or are there other costs (like the forward pass) that don't shrink the same way?</div></details>
+        <details class="qa"><summary>Why is data quality more important than data quantity for SFT, in a way that's different from pretraining?</summary><div class="answer"><p>Pretraining is teaching the model broad world knowledge and language modeling capability from a massive, necessarily noisy general corpus, where scale matters because the goal is broad coverage. SFT is teaching a narrow behavioral pattern (format, style, task-following) the model's weights already have the underlying capability for — a small set of clean, representative, consistent examples teaches that pattern more reliably than a larger but inconsistent dataset, which can actually confuse the narrow signal SFT is trying to instill.</p></div><div class="followup">Follow-up: how would you detect, from eval results, that your SFT dataset has a consistency problem rather than just needing more examples?</div></details>
+        <details class="qa"><summary>Explain catastrophic forgetting and why PEFT methods like LoRA are less prone to it than full fine-tuning.</summary><div class="answer"><p>Catastrophic forgetting is when aggressively updating all of a model's weights toward a narrow new dataset degrades general capabilities that weren't represented in that dataset, because every weight — including ones responsible for broad capabilities — is free to move. LoRA keeps the original weights completely frozen and only adds a small, additive low-rank update, so the model's original broad behavior is preserved by construction wherever the LoRA update doesn't actively redirect it, making unintended degradation of unrelated capabilities structurally less likely (though not impossible if the LoRA update is poorly scaled or trained too aggressively).</p></div><div class="followup">Follow-up: can LoRA still cause some forgetting? Under what conditions?</div></details>
+        <details class="qa"><summary>Why does RLHF train a separate reward model instead of directly optimizing human preference labels with RL?</summary><div class="answer"><p>RL needs a reward signal it can query on arbitrary generated completions, including many sampled during training that no human has ever labeled — a human can't realistically label every completion the policy generates during RL exploration. The reward model is trained once on the available human preference comparisons, then used as a fast, queryable proxy for human judgment during the RL loop, letting PPO explore and get reward feedback on completions far beyond the original labeled set.</p></div><div class="followup">Follow-up: what failure mode does "reward hacking" refer to in this setup, and what's used to constrain it?</div></details>
+        <details class="qa"><summary>In DPO's loss function, why is the computation relative to a frozen reference model rather than absolute?</summary><div class="answer"><p>Computing preference purely in absolute terms (just maximizing likelihood of chosen over rejected with no reference) risks the policy drifting arbitrarily far from sensible, well-formed language in pursuit of the preference signal alone. Comparing against a frozen reference (typically the SFT model) and weighting by how much the policy's relative preference differs from the reference's keeps the optimization anchored — the policy is pulled toward preferred behavior without being free to collapse into degenerate outputs the reference would never have produced.</p></div><div class="followup">Follow-up: what's the practical effect of the beta hyperparameter in the DPO loss?</div></details>
+      </div>
+
+      <div class="qa-level advanced">
+        <h4>Advanced</h4>
+        <details class="qa"><summary>A team fine-tunes a model with LoRA on a narrow task and sees great task-specific accuracy, but the model's general instruction-following noticeably degrades on unrelated prompts. Diagnose plausible causes and fixes.</summary><div class="answer"><p>Likely causes: LoRA rank or learning rate set too aggressively for the dataset size, causing the small adapter to overfit hard enough to meaningfully shift generation behavior even outside its target distribution; target_modules chosen too broadly (adapting layers more central to general capability than needed for the narrow task); or training for too many epochs on a small, narrow dataset past the point of diminishing task-specific returns. Fixes: reduce rank and/or learning rate and re-sweep against a held-out general-capability eval (not just the task eval) during training, restrict target_modules to the minimal set needed (often just attention Q/V projections), add early stopping keyed to a general-capability regression metric, and consider mixing a small amount of general instruction-following data into the fine-tuning set to anchor broad behavior.</p></div><div class="followup">Follow-up: how would you structure your eval suite so this regression would have been caught before shipping, not after?</div></details>
+        <details class="qa"><summary>Design the training pipeline for taking a base model through SFT, then preference alignment, then a final task-specific LoRA adaptation, specifying what's frozen/trainable at each stage and why.</summary><div class="answer"><p>Stage 1 (SFT): all weights trainable (or LoRA, depending on compute budget), training on curated prompt-completion pairs with loss masked to completions only — produces an instruction-following base. Stage 2 (preference alignment): starting from the SFT model, either train a reward model (separate network, trained on preference comparisons) then run PPO on the SFT model's weights against it with a KL penalty back to the SFT model as reference, or skip the reward model and run DPO directly using the SFT model as both initialization and reference — in both cases the SFT model's weights are what's being further updated, anchored by the reference to avoid runaway drift. Stage 3 (task-specific adaptation): freeze the now-aligned model's full weights and attach fresh LoRA adapters trained on the narrow task data, keeping the general alignment behavior intact while cheaply specializing to the task — this stage is deliberately decoupled from stages 1-2 so it can be redone per task without repeating the expensive alignment pipeline.</p></div><div class="followup">Follow-up: what happens if you try to run stage 3's LoRA adaptation directly on the base model from stage 1, skipping stage 2 entirely — what capability would you lose?</div></details>
+        <details class="qa"><summary>Compare the practical engineering tradeoffs of RLAIF (AI feedback) versus RLHF (human feedback) for preference data collection at scale.</summary><div class="answer"><p>RLAIF substitutes a strong existing model's judgments for human labels, which is dramatically cheaper and faster to scale (no human labeling pipeline, no inter-annotator disagreement to resolve, can generate preference data on-demand for any prompt distribution) but inherits and can amplify whatever biases or blind spots the judging model has — if the judge model has systematic preferences unrelated to true quality (e.g. favoring longer or more confident-sounding answers), the trained model learns to exploit exactly that. RLHF's human labels are more expensive and slower to collect but ground preferences in actual human judgment, which matters most for subjective or safety-critical dimensions a model judge may not reliably assess. In practice, teams often use RLAIF for high-volume, lower-stakes preference signal and reserve human labeling for sampled spot-checks or specifically high-stakes/ambiguous cases.</p></div><div class="followup">Follow-up: how would you detect that your RLAIF judge model has a systematic bias being exploited by the policy being trained?</div></details>
+        <details class="qa"><summary>Explain, mechanically, why LoRA's low-rank assumption tends to hold in practice for large pretrained transformers — why doesn't task adaptation generally need the full rank of the weight matrix?</summary><div class="answer"><p>Large pretrained models already encode a very rich, general-purpose representation space; task adaptation is typically a comparatively small, targeted shift in behavior within that space (e.g. "weight certain existing learned features more heavily for this task" rather than "learn an entirely new representation from scratch"). Empirically, the intrinsic dimensionality of the weight changes needed to achieve this kind of targeted shift is far smaller than the full matrix rank — this is consistent with broader findings in deep learning that fine-tuning updates for a downstream task often live in a low-dimensional subspace relative to the full parameter space, which LoRA's authors validated empirically across multiple model scales and tasks rather than assuming a priori.</p></div><div class="followup">Follow-up: would you expect the optimal LoRA rank to scale with model size, task complexity, both, or neither? Justify your answer.</div></details>
+        <details class="qa"><summary>You need to serve many customers, each wanting a slightly different fine-tuned behavior on the same base model, cost-effectively. How does LoRA's structure specifically enable this, and what would the serving architecture look like?</summary><div class="answer"><p>Because each customer's LoRA adapter is just a small pair of matrices (A, B) rather than a full copy of the model, you can store one shared frozen base model in GPU memory and dynamically swap in/apply a different customer's small LoRA adapter per request — multiple adapters can even be batched and served concurrently against the same base model with techniques like multi-LoRA serving (computing each request's effective weight on the fly per adapter rather than physically merging and duplicating the full model per customer). This avoids the alternative of hosting a full separate fine-tuned model copy per customer, which would multiply GPU memory and deployment cost linearly with customer count instead of staying roughly constant (one base model) plus a small per-customer adapter overhead.</p></div><div class="followup">Follow-up: what request-routing complexity does this multi-tenant LoRA serving approach add compared to serving one fixed fine-tuned model?</div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment">
+        <span class="level-tag">Beginner (30-60 min)</span>
+        <h4>LoRA parameter-count calculator</h4>
+        <p>Write a small script that, given a weight matrix's dimensions (d, k) and a LoRA rank r, computes and
+        prints: full fine-tuning trainable parameter count, LoRA trainable parameter count, and the percentage
+        reduction. Run it for a few realistic transformer dimensions (e.g. d=k=4096) across ranks 4, 8, 16, 32, 64.</p>
+        <ul>
+          <li>Plot or tabulate how the percentage reduction changes as rank increases.</li>
+        </ul>
+        <p><strong>Acceptance criteria:</strong> a table/plot showing the tradeoff clearly, plus a one-paragraph
+        explanation of why this number matters for real GPU memory budgets.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>The formula is straightforward: full = d*k, LoRA = r*(d+k). Use real dimensions from an open model's config (e.g. Llama's hidden size) rather than made-up numbers for a more convincing result.</p></div></details>
+        <p><strong>Bonus:</strong> extend the calculator to account for QLoRA's 4-bit base model quantization and estimate total memory (base + adapters + optimizer state) for a specific model size.</p>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Intermediate (2-4 hrs)</span>
+        <h4>LoRA fine-tune a small open model on a narrow task</h4>
+        <p>Using HuggingFace PEFT + Transformers, LoRA fine-tune a small open-source model (1-3B parameters) on a
+        narrow, well-defined task of your choosing (e.g. classify support messages into categories, or convert
+        natural language into a fixed JSON schema).</p>
+        <ul>
+          <li>Build or curate a dataset of at least 200 (prompt, completion) examples.</li>
+          <li>Train with masked loss over the completion only.</li>
+          <li>Evaluate on a held-out set before and after fine-tuning, reporting accuracy or exact-match rate.</li>
+        </ul>
+        <p><strong>Acceptance criteria:</strong> a measurable accuracy improvement on the held-out set after
+        fine-tuning versus the base model's zero/few-shot performance, with trainable-parameter percentage
+        reported from `print_trainable_parameters()`.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>Keep the task narrow and the output format rigid (e.g. strict JSON) — this makes exact-match evaluation trivial and makes the fine-tuning signal clean and easy to interpret.</p></div></details>
+        <p><strong>Bonus:</strong> also run the base model with a few-shot prompt on the same held-out set and report cost/latency per call for the few-shot approach versus the fine-tuned model, demonstrating the production tradeoff described in this chapter's scenario.</p>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Advanced (1-2 days)</span>
+        <h4>DPO preference alignment on top of your SFT model</h4>
+        <p>Starting from the model you LoRA fine-tuned in the intermediate assignment (or a fresh SFT pass),
+        generate multiple candidate completions per prompt on a small set of prompts, construct preference pairs
+        (chosen/rejected, either self-labeled or via a rubric), and run DPO training on top.</p>
+        <ul>
+          <li>Build at least 100 preference pairs.</li>
+          <li>Train with DPO using the pre-DPO model as the frozen reference.</li>
+          <li>Evaluate pre- and post-DPO completions on a held-out prompt set using an LLM-as-judge rubric scoring
+          which is preferred, and report the win rate shift.</li>
+        </ul>
+        <p><strong>Acceptance criteria:</strong> a measurable shift in preferred-completion win rate after DPO
+        training, plus a sanity check that general completion quality (coherence, not just the targeted
+        preference dimension) didn't visibly degrade.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>Pick one clear, easily-judgeable preference dimension to start (e.g. "concise and direct" vs. "verbose and hedging") rather than a vague "better overall" — a narrow, well-defined preference axis makes both the preference-pair construction and the win-rate eval much more reliable.</p></div></details>
+        <p><strong>Bonus:</strong> sweep the DPO beta hyperparameter and show how it affects the tradeoff between win-rate shift magnitude and drift from the reference model's general output style.</p>
+      </div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet">
+        <ul>
+          <li>Fine-tuning permanently changes weights; prompting/RAG only change the context for one call.</li>
+          <li>LoRA: ΔW = B·A, low-rank decomposition, only A and B are trained, original W stays frozen.</li>
+          <li>LoRA trainable params ≈ r×(d+k) vs. full fine-tuning's d×k — often under 1% of parameters.</li>
+          <li>QLoRA = quantize the frozen base model (4-bit) + full-precision LoRA adapters on top.</li>
+          <li>Fine-tune for stable, high-volume, narrow tasks; prefer RAG/prompting for frequently-changing knowledge.</li>
+          <li>SFT = imitate curated (prompt, completion) pairs; loss masked over the prompt tokens.</li>
+          <li>RLHF: reward model trained on human/AI preference comparisons, then PPO optimizes against it + KL penalty.</li>
+          <li>DPO: one differentiable loss directly from preference pairs — no reward model, no RL loop, generally simpler and more stable.</li>
+          <li>Catastrophic forgetting risk is real for full fine-tuning, structurally reduced (not eliminated) by LoRA's frozen-base design.</li>
+        </ul>
+      </div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://arxiv.org/abs/2106.09685">LoRA: Low-Rank Adaptation of Large Language Models (original paper)</a></li>
+        <li><a href="https://arxiv.org/abs/2305.14314">QLoRA: Efficient Finetuning of Quantized LLMs</a></li>
+        <li><a href="https://huggingface.co/docs/peft/index">HuggingFace PEFT documentation</a></li>
+        <li><a href="https://arxiv.org/abs/2305.18290">Direct Preference Optimization (DPO) paper</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="12-agent-frameworks-memory-mcp.html"><span class="dir">← Previous</span>Agent Frameworks, Memory & MCP</a>
+        <a class="next" href="14-evals-advanced-topics-multimodal.html"><span class="dir">Next →</span>Evals, Advanced Topics & Multimodal</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · Machine Learning & AI</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "15-machine-learning-ai", chapterKey: "13-finetuning-and-rl" });</script>
+</body>
+</html>

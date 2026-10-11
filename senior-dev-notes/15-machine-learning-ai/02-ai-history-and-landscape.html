@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI History & Landscape — Machine Learning & AI — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">Machine Learning & AI</a><span class="sep">›</span>AI History & Landscape</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>AI History & Landscape</h1>
+      <p class="meta-line"><span>⏱ ~2 hrs</span><span>📍 Chapter 2 of 14</span></p>
+      <p><strong>One-line summary:</strong> AI didn't start with ChatGPT — it's a 70-year oscillation between
+      symbolic rule-based systems and statistical learning, and understanding why each paradigm shift happened
+      (and what problem it actually solved) is what lets you speak credibly about "how did we get here" instead
+      of reciting a timeline.</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>Senior and staff interviews increasingly include an open "so, tell me about how you think about where
+      AI is headed" style question — not a trivia check, but a test of whether you understand AI as an
+      engineering discipline with real tradeoffs and real history, rather than a black box that appeared in
+      2022. Knowing <em>why</em> symbolic AI hit a wall, <em>why</em> deep learning needed both big data and GPU
+      compute to work (ideas that existed decades earlier), and <em>why</em> transformers displaced RNNs gives
+      you the vocabulary to discuss build-vs-buy decisions, model selection, and "is this problem even a good
+      fit for an LLM" with genuine technical grounding instead of buzzword fluency.</p>
+      <div class="box why"><h4>Why</h4><p>Every major AI paradigm shift was a response to a specific, nameable
+      limitation of the previous one — symbolic systems couldn't handle ambiguity and didn't scale with human
+      effort to write rules; early statistical ML needed hand-engineered features; deep learning automated
+      feature learning but needed scale (data + compute) that wasn't available until the 2010s; RNNs couldn't
+      parallelize or capture long-range dependencies well, which transformers fixed. Knowing this chain means
+      you can predict, reason about, and critique the <em>next</em> shift instead of just reacting to it.</p></div>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>None required, though <a href="01-ml-math-and-foundations.html">ML Math & Foundations</a> (chapter 1)
+      helps you understand <em>why</em> some of the technical inflection points below (backprop, attention)
+      mattered mathematically, not just historically. This chapter directly motivates
+      <a href="03-neural-networks-from-scratch.html">Neural Networks from Scratch</a> (chapter 3) and
+      <a href="06-attention-and-transformers.html">Attention & Transformers</a> (chapter 6).</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="symbolic-era">The symbolic AI era (1950s-1980s): rules, logic, and expert systems</h3>
+      <p>Early AI research assumed intelligence was fundamentally about manipulating symbols with logical rules
+      — if you could encode enough "if-then" knowledge from human experts, a system could reason like an
+      expert. This produced <strong>expert systems</strong> (e.g. MYCIN for medical diagnosis, in the 1970s)
+      that worked impressively well in narrow domains with clean, rule-expressible knowledge. The approach broke
+      down on anything involving ambiguity, common-sense reasoning, or perception (vision, speech) — the real
+      world simply doesn't decompose cleanly into hand-written rules, and the cost of manually encoding enough
+      rules to cover edge cases grew faster than any team could sustain. This led to the first "AI winter" in
+      the late 1980s/early 1990s, when funding and enthusiasm collapsed as expert systems failed to generalize
+      beyond their narrow training domains.</p>
+
+      <h3 id="statistical-era">The statistical ML era (1990s-2000s): learning from data instead of rules</h3>
+      <p>Instead of hand-coding rules, statistical ML (SVMs, decision trees, random forests, logistic
+      regression) learned patterns directly from labeled data. This was a genuine paradigm shift: instead of a
+      human expert writing "if symptom X and symptom Y then diagnosis Z," you gave the algorithm thousands of
+      labeled examples and let it discover the pattern statistically. The catch was <strong>feature
+      engineering</strong> — these algorithms still needed a human to decide which numeric features
+      (hand-crafted from raw data) were worth feeding in; the algorithm learned how to weigh features, not which
+      features to look at in the first place. This is the key limitation deep learning would later remove.</p>
+
+      <h3 id="deep-learning-era">The deep learning era (2012-2017): automated feature learning at scale</h3>
+      <p>The ideas behind neural networks and backpropagation existed since the 1980s, but they were starved of
+      the two things needed to make deep (many-layer) networks actually work well: enough labeled data, and
+      enough compute to train on it. Both arrived around 2010-2012. <strong>ImageNet</strong> (a dataset of ~1.2
+      million labeled images across 1,000 categories, released 2009) gave the field the scale of data needed,
+      and <strong>AlexNet</strong> (2012) — a deep convolutional neural network trained on GPUs — won the
+      ImageNet competition by a staggering margin over traditional computer vision approaches, proving that deep
+      networks trained at scale could automatically learn useful features (edges, textures, shapes) directly
+      from raw pixels, with no hand-engineering. This is widely regarded as the moment that triggered the modern
+      deep learning boom. Around the same time, <strong>word2vec</strong> (2013) showed the same principle
+      applied to language: instead of hand-crafted linguistic features, train a shallow network to predict
+      context words and get, as a side effect, dense word embeddings that captured semantic relationships
+      (famously, <code>king - man + woman ≈ queen</code>) purely from learned structure in raw text.</p>
+
+      <h3 id="transformer-era">The transformer era (2017-present): attention and scale</h3>
+      <p>Before transformers, sequence modeling (translation, language modeling) relied on RNNs/LSTMs, which
+      process tokens one at a time in order — this made them slow to train (can't parallelize across the
+      sequence) and bad at capturing dependencies between tokens far apart in a long sequence. The 2017 paper
+      <strong>"Attention Is All You Need"</strong> introduced the transformer architecture, which replaced
+      sequential processing with a fully parallelizable <strong>attention mechanism</strong> (every token can
+      directly attend to every other token in one step, covered in depth in chapter 6) — this simultaneously
+      fixed the long-range-dependency problem and made training vastly more parallelizable on GPUs, which turned
+      out to matter enormously as the field discovered <strong>scaling laws</strong>: model quality improves
+      remarkably predictably as you increase model size, data, and compute together (the GPT series, starting
+      2018, was largely a demonstration of this — GPT-2, then GPT-3, then GPT-4 each scaled up and gained
+      qualitatively new capabilities with comparatively modest architectural changes). This is the single
+      biggest reason modern AI progress has looked like "the same basic idea, but bigger" rather than a
+      sequence of fundamentally new architectures.</p>
+
+      <h3 id="current-landscape">The current landscape (2024-2026): foundation models, open vs. closed, and where it's heading</h3>
+      <p>Today's field is organized around <strong>foundation models</strong> — large models pretrained on vast,
+      broad data (text, code, sometimes images/audio) that are then adapted (via fine-tuning, prompting, or
+      RAG — chapters 9-13) to specific tasks, rather than training a narrow model from scratch per task. The
+      major axis of competition is <strong>closed models</strong> (GPT, Claude, Gemini — accessed via API,
+      state-of-the-art capability, no visibility into weights/training data) versus <strong>open-weight
+      models</strong> (Llama, Mistral, Qwen, DeepSeek — downloadable weights, self-hostable, fine-tunable, often
+      close behind the closed frontier within months). The practical engineering tradeoff: closed models
+      typically lead on raw capability and require zero infra, while open-weight models offer data control, cost
+      control at scale, and no vendor lock-in at the cost of operational complexity. The field is currently
+      trending toward multimodality (text+image+audio+video in one model), much longer and cheaper context
+      windows, agentic capabilities (chapters 11-12), and a growing emphasis on evaluation/safety tooling
+      (chapter 14) as these systems get embedded in higher-stakes production use cases.</p>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>The throughline across every shift above is the same tension, resolved differently each era:
+      <strong>how much should be hand-designed by a human versus learned from data?</strong> Symbolic AI put
+      everything in human hands (100% rules, 0% learning). Statistical ML moved the weighing/decision logic into
+      learning but kept feature design manual. Deep learning moved feature design into learning too, but still
+      needed task-specific architectures (CNNs for images, RNNs for sequences). Transformers plus scaling
+      unified almost everything into one architecture that learns features, structure, and (via in-context
+      learning) even task adaptation, purely from data and scale — which is exactly why the current era's
+      central question has shifted from "what architecture should I design" to "what data, how much compute,
+      and how do I adapt a pretrained model to my task."</p>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+timeline
+  title AI Paradigm Shifts
+  1956-1980s : Symbolic AI, expert systems
+  1990s-2000s : Statistical ML, hand-engineered features
+  2012 : AlexNet, ImageNet - deep learning takes off
+  2013 : word2vec - learned embeddings
+  2017 : Attention Is All You Need - transformers
+  2018-2023 : GPT series, scaling laws confirmed
+  2024-2026 : Foundation models, agents, multimodality
+      </div>
+      <div class="mermaid">
+flowchart TD
+  A[How much is hand-designed vs learned?] --> B[Symbolic AI: 100% hand-designed rules]
+  B --> C[Statistical ML: learned weighting, manual features]
+  C --> D[Deep learning: learned features, manual architecture per task]
+  D --> E[Transformers + scale: learned features, structure, and task adaptation]
+  E --> F[Current: adapt pretrained foundation models via prompting, RAG, fine-tuning]
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-python"># A minimal illustration of the "rules vs learning" shift this chapter describes,
+# using a toy spam-detection problem to make the paradigm difference concrete.
+
+# --- Symbolic era approach: hand-written rules ---
+def is_spam_symbolic(email_text: str) -> bool:
+    spam_keywords = ["free money", "click here now", "winner", "act now"]
+    text_lower = email_text.lower()
+    return any(keyword in text_lower for keyword in spam_keywords)
+    # Brittle: misses any spam that doesn't use these exact phrases, and a human
+    # must manually maintain this keyword list forever as spammers adapt.
+
+# --- Statistical ML era approach: learned weights over hand-crafted features ---
+import numpy as np
+
+def extract_features(email_text: str) -> np.ndarray:
+    # A human still decides *what* to measure (feature engineering) ...
+    return np.array([
+        email_text.lower().count("free"),
+        email_text.lower().count("click"),
+        1.0 if email_text.isupper() else 0.0,
+        len(email_text),
+    ])
+
+def train_logistic_regression(X, y, lr=0.1, epochs=200):
+    # ... but the *weighting* of those features is learned from labeled data,
+    # not hand-tuned — this is the statistical ML shift.
+    w = np.zeros(X.shape[1])
+    for _ in range(epochs):
+        preds = 1 / (1 + np.exp(-(X @ w)))
+        grad = X.T @ (preds - y) / len(y)
+        w -= lr * grad
+    return w
+
+# --- Deep learning era approach: features themselves are learned, not hand-crafted ---
+# (conceptual — real text deep learning uses embeddings + transformer layers, chapter 6)
+# Instead of extract_features() being hand-written, a neural network's early layers
+# learn their own feature detectors directly from raw (tokenized) text during training —
+# no human decides what to count; the network discovers what's predictive on its own.
+print("Deep learning removes the hand-crafted extract_features() step entirely —")
+print("that's the core shift AlexNet demonstrated for images in 2012.")
+</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4><p>A fraud-detection team built a rules-based system (symbolic
+      approach) over several years, accumulating hundreds of hand-written "if transaction pattern X, flag it"
+      rules maintained by an on-call analyst team. As fraud patterns evolved faster than rules could be written
+      and reviewed, false-negative rates crept up while the rule set grew unmanageable (rules conflicting with
+      each other, no one fully understanding the whole set). The team migrated incrementally: first replacing
+      the hardest-to-rule-write patterns with a statistical gradient-boosted model trained on hand-engineered
+      transaction features (statistical ML era pattern), then later adding a deep model trained directly on raw
+      transaction sequences for the hardest remaining cases (deep learning era pattern) — while deliberately
+      keeping a thin layer of hard symbolic rules for cases with absolute business/legal certainty (e.g.
+      "transaction from a sanctioned country, always block"), because that's exactly the kind of
+      unambiguous-and-non-negotiable logic symbolic rules remain the right tool for, even in 2026. The lesson:
+      understanding each paradigm's actual strength (not just chronology) lets you combine them deliberately
+      instead of assuming "newer is always better for every sub-problem."</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Treating AI history as "it was bad, then ChatGPT happened" —
+      this misses that the core ideas behind modern LLMs (neural networks, backprop, attention, even transformer
+      precursors) existed years to decades before their breakout moment, and were blocked by data/compute
+      availability, not by not-yet-discovered ideas. Interviewers who ask history questions are often testing
+      whether you understand that scaling existing ideas, not only inventing new ones, has been the dominant
+      driver of recent progress.</p></div>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Assuming "open-weight" means "equivalent capability" or
+      "fully transparent" — open-weight models give you the trained parameters to self-host and fine-tune, but
+      typically still don't disclose training data or full training methodology, and frontier open-weight
+      models still generally trail the best closed models on the hardest benchmarks, even if the gap has
+      narrowed significantly.</p></div>
+      <ul>
+        <li>Don't conflate "deep learning" with "transformers" — deep learning is the broader paradigm (any
+        many-layer learned-feature network); transformers are one specific, currently dominant, architecture
+        within it.</li>
+        <li>Scaling laws are empirical trends observed on current architectures/data regimes, not a law of
+        physics — be ready to discuss that they could (and some researchers argue already do) show diminishing
+        returns or require architectural changes to continue.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>Symbolic rules</td><td>Unambiguous, legally/business-critical logic, full explainability required</td><td>Patterns too complex or numerous to enumerate by hand</td><td>Statistical ML / learned model</td></tr>
+        <tr><td>Statistical ML (feature-engineered)</td><td>Tabular data, limited data, need for interpretability</td><td>Raw unstructured data (images, text, audio) where feature design is hard</td><td>Deep learning</td></tr>
+        <tr><td>Closed foundation models (API)</td><td>Need best-in-class capability fast, no infra team</td><td>Strict data residency, heavy customization, high-volume cost sensitivity</td><td>Open-weight self-hosted models</td></tr>
+        <tr><td>Open-weight models</td><td>Data control, fine-tuning, cost at scale, offline/edge deployment</td><td>Need absolute frontier capability, minimal ops overhead</td><td>Closed model APIs</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+
+      <div class="qa-level basic">
+        <h4>Basic</h4>
+        <details class="qa"><summary>What is the core difference between symbolic AI and statistical machine learning?</summary><div class="answer"><p>Symbolic AI relies on hand-written logical rules encoded by humans; statistical ML learns patterns (and the weighting of features) directly from labeled data instead of relying on manually authored rules.</p></div><div class="followup">Follow-up: why did symbolic AI struggle with ambiguous, real-world tasks?</div></details>
+        <details class="qa"><summary>Why is AlexNet (2012) considered a key inflection point in AI history?</summary><div class="answer"><p>It demonstrated that a deep convolutional neural network trained on GPUs, using the large labeled ImageNet dataset, could dramatically outperform traditional hand-engineered computer vision approaches, proving deep networks could automatically learn useful features from raw data at scale.</p></div><div class="followup">Follow-up: what two resources (besides a new algorithm) made this possible, that weren't available a decade earlier?</div></details>
+        <details class="qa"><summary>What problem did the transformer architecture ("Attention Is All You Need," 2017) solve relative to RNNs?</summary><div class="answer"><p>RNNs process sequences token by token, which is slow to train (can't parallelize across the sequence) and struggles to capture dependencies between distant tokens. Transformers replaced this with an attention mechanism letting every token attend directly to every other token in parallel, fixing both the speed and long-range dependency problems.</p></div><div class="followup">Follow-up: why did this parallelizability matter so much for later scaling?</div></details>
+        <details class="qa"><summary>What is a "scaling law" in the context of modern AI, in plain terms?</summary><div class="answer"><p>An empirically observed, fairly predictable relationship where model performance improves as you increase model size, training data, and compute together — much of the GPT series' progress came from applying this relationship rather than fundamentally new architectures.</p></div><div class="followup">Follow-up: are scaling laws guaranteed to continue indefinitely? Why might they not?</div></details>
+        <details class="qa"><summary>What is the practical difference between a closed and an open-weight foundation model?</summary><div class="answer"><p>Closed models (like GPT or Claude) are accessed only via API with no access to the underlying weights; open-weight models (like Llama or Mistral) have their trained parameters published, allowing self-hosting and fine-tuning, usually trailing closed frontier models somewhat on raw capability.</p></div><div class="followup">Follow-up: what's one scenario where you'd choose open-weight despite lower raw capability?</div></details>
+        <details class="qa"><summary>What was a "feature" in the statistical ML era, and why did deep learning remove the need to hand-design them?</summary><div class="answer"><p>A feature was a numeric measurement a human decided to extract from raw data (e.g. word counts, pixel edge detectors) and feed into a learning algorithm. Deep learning's layered architecture learns its own internal feature representations directly from raw data during training, removing the need for a human to decide what to measure.</p></div><div class="followup">Follow-up: what's one downside of this automation, in terms of interpretability?</div></details>
+      </div>
+
+      <div class="qa-level medium">
+        <h4>Medium</h4>
+        <details class="qa"><summary>Explain why the ideas behind deep learning existed well before 2012, but didn't produce breakthrough results until then.</summary><div class="answer"><p>Backpropagation and multi-layer neural networks were understood since the 1980s, but training deep networks effectively requires large labeled datasets (not widely available until datasets like ImageNet, 2009) and significant parallel compute (GPUs became practical and affordable for this purpose around 2010-2012). The algorithmic idea was necessary but not sufficient; data and compute availability were the actual bottleneck.</p></div><div class="followup">Follow-up: what does this imply about judging a new AI idea's near-term potential versus its long-term potential?</div></details>
+        <details class="qa"><summary>Why did word2vec's embeddings (e.g. king - man + woman ≈ queen) matter beyond just being a cute demo?</summary><div class="answer"><p>It demonstrated that meaningful semantic structure (analogy relationships, similarity) could emerge purely from training a simple model to predict context words in raw text, with no hand-crafted linguistic features or rules — validating that learned dense representations could capture semantics that symbolic/rule-based NLP approaches struggled to encode manually, and setting the template for embeddings used throughout modern NLP (chapter 9).</p></div><div class="followup">Follow-up: how do modern transformer-based embeddings differ from word2vec's embeddings?</div></details>
+        <details class="qa"><summary>What is the central engineering tradeoff between choosing a closed-model API versus self-hosting an open-weight model for a new product feature?</summary><div class="answer"><p>Closed APIs offer the best available capability with zero infrastructure burden, at the cost of per-token pricing that scales with usage, data leaving your infrastructure, and dependency on a vendor's roadmap/pricing/availability. Open-weight self-hosting offers data control, potentially lower marginal cost at very high volume, and full customization via fine-tuning, at the cost of needing GPU infrastructure, MLOps expertise, and generally accepting somewhat lower ceiling capability.</p></div><div class="followup">Follow-up: at what point (usage volume, data sensitivity) does self-hosting typically start to make more sense?</div></details>
+        <details class="qa"><summary>Why is "foundation model" a more precise term than just "a big neural network"?</summary><div class="answer"><p>"Foundation model" specifically describes a model pretrained broadly (often self-supervised, on massive general data) with the explicit intent of being adapted afterward (via fine-tuning, prompting, or retrieval) to many different downstream tasks, rather than a model trained end-to-end for one specific task — the term captures the "pretrain once, adapt many times" pattern, not just scale.</p></div><div class="followup">Follow-up: how does this pattern change the economics of building an ML-powered product compared to the pre-2017 norm of training a bespoke model per task?</div></details>
+        <details class="qa"><summary>What is an AI winter, and what caused the one following the symbolic AI era?</summary><div class="answer"><p>An AI winter is a period of sharply reduced funding and interest in AI research following disillusionment with overhyped promises. The one following the symbolic era was driven by expert systems failing to generalize beyond narrow, cleanly rule-expressible domains, and the cost of manually maintaining ever-larger rule sets growing faster than the systems' practical value.</p></div><div class="followup">Follow-up: do you think the current AI boom is at risk of a similar winter? What would need to happen?</div></details>
+      </div>
+
+      <div class="qa-level advanced">
+        <h4>Advanced</h4>
+        <details class="qa"><summary>Argue both sides: is the progress from GPT-2 to GPT-4-class models primarily a story of scale, or primarily a story of architectural/training innovation?</summary><div class="answer"><p>The scale argument: parameter count, training data volume, and compute all grew by orders of magnitude across this span, and scaling laws predicted much of the capability improvement from these factors alone, with the core transformer architecture remaining largely similar. The innovation argument: critical non-scale changes mattered a great deal too — RLHF/instruction-tuning (turning a raw next-token predictor into an instruction-following assistant), better data curation/filtering, mixture-of-experts architectures for efficient scaling, and context-length extensions all represent genuine technique improvements, not just "more of the same, bigger." The honest answer is both were necessary; scale alone without alignment techniques like RLHF would have produced a more capable but far less usable raw text completion engine, not a usable assistant.</p></div><div class="followup">Follow-up: what's one concrete piece of evidence that would support the "mostly scale" side versus the "mostly innovation" side?</div></details>
+        <details class="qa"><summary>Why might current scaling laws eventually hit diminishing returns, and what are the leading proposed responses?</summary><div class="answer"><p>Returns can diminish because high-quality training data is a finite, increasingly exhausted resource (synthetic data generation and data quality curation are partial responses, but risk model collapse if synthetic data increasingly trains on itself), because compute cost grows faster than the marginal capability gain at extreme scale, and because some capabilities (multi-step reasoning, long-horizon planning) may not emerge simply from more next-token-prediction scale regardless of size. Leading responses include test-time/inference-time compute scaling (e.g. reasoning models that "think longer" per query rather than just being bigger), better data curation and synthetic data pipelines, architectural changes (sparse/MoE models, new attention variants), and increased reliance on reinforcement learning and tool use rather than pure pretraining scale.</p></div><div class="followup">Follow-up: how does test-time compute scaling change the cost/latency tradeoff compared to simply using a bigger pretrained model?</div></details>
+        <details class="qa"><summary>How would you evaluate, from an engineering leadership perspective, whether a new AI paradigm shift is real versus hype, using the historical pattern from symbolic AI through transformers as a reference?</summary><div class="answer"><p>Each genuine paradigm shift in this history solved a specific, previously-intractable limitation (symbolic rules didn't scale with complexity; statistical ML still needed manual features; RNNs couldn't parallelize or capture long-range dependencies) and did so with results independently reproducible and measurably superior on hard benchmarks, not just impressive demos. A credible new shift should similarly: name the specific prior limitation it removes, be reproducible by independent teams (not just the originating lab's cherry-picked demo), and show measurable gains on benchmarks that were previously considered hard, ideally with some evidence of the mechanism (not just "it works, we're not sure why" at the point of initial hype). Hype, by contrast, tends to rely on anecdotal demos, lacks reproducible benchmarks, and often reframes an existing capability with new terminology rather than removing an actual prior limitation.</p></div><div class="followup">Follow-up: apply this framework to agentic AI (chapters 11-12) — is it a genuine paradigm shift by this standard, or still unproven?</div></details>
+        <details class="qa"><summary>Why did the field move from task-specific architectures (CNNs for images, RNNs for sequences) toward a single unified transformer architecture applied across modalities, and what does this imply for future architecture research?</summary><div class="answer"><p>Transformers' attention mechanism makes minimal assumptions about input structure (unlike CNNs, which assume local spatial structure, or RNNs, which assume strict sequential order) — this generality, combined with its parallelizability for training at scale, let the same basic architecture be applied to text, images (vision transformers), audio, and more, simply by changing how raw input is tokenized/embedded into the same sequence-of-vectors format. This implies the field is currently biased toward "fewer architectural inductive biases + more scale/data" as a strategy, which raises an open research question: are there tasks or modalities where a more specialized inductive bias (like CNNs' spatial locality assumption) will always remain more data/compute-efficient than a generic transformer, even at large scale?</p></div><div class="followup">Follow-up: can you name a domain where specialized architectures still meaningfully outperform generic transformers today?</div></details>
+        <details class="qa"><summary>How should a senior engineer frame the "open vs. closed" debate to a leadership team deciding on AI strategy, beyond a simple cost comparison?</summary><div class="answer"><p>Frame it as a multi-dimensional decision, not a single cost axis: capability ceiling (closed models generally lead), data control and compliance (open-weight self-hosting keeps sensitive data in-house, often decisive for regulated industries), vendor dependency risk (pricing changes, deprecations, rate limits, and API changes outside your control versus owning your deployment), total cost of ownership at your actual expected volume (closed APIs often cheaper at low-to-moderate volume once you account for MLOps headcount; open-weight can become cheaper at very high sustained volume), and customization depth needed (fine-tuning open-weight models for a narrow domain can sometimes outperform a generic closed model on that specific task). The right answer is frequently hybrid: closed models for general-purpose, rapidly-evolving use cases, open-weight fine-tuned models for narrow, high-volume, or data-sensitive specific tasks.</p></div><div class="followup">Follow-up: what metric would you track over the first 6 months to validate or invalidate this hybrid strategy's cost assumption?</div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment">
+        <span class="level-tag">Beginner (30-60 min)</span>
+        <h4>Build a one-page AI history timeline with "why it mattered" annotations</h4>
+        <p>Research and write a timeline covering at least 8 key events from this chapter (expert systems,
+        AI winter, SVMs, ImageNet/AlexNet, word2vec, Attention Is All You Need, GPT-2/3, a 2024-2026 development
+        of your choosing), with one sentence per event explaining the specific prior limitation it addressed.</p>
+        <ul>
+          <li>Each entry must name a concrete prior limitation, not just "it was a big model."</li>
+        </ul>
+        <p><strong>Acceptance criteria:</strong> 8+ events, each with a correct date and a specific
+        "what problem did this solve" sentence, not a generic description.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>For each event, ask "what could you not do the day before this, that you could do the day after" — that question forces you past generic descriptions into the actual limitation being solved.</p></div></details>
+        <p><strong>Bonus:</strong> add one event you predict might be considered historically significant in 5 years, with your reasoning.</p>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Intermediate (2-4 hrs)</span>
+        <h4>Compare an open-weight and closed model on the same task, and write up a decision memo</h4>
+        <p>Pick a concrete task relevant to your work (e.g. summarization, classification, code generation on a
+        sample codebase) and run it against one closed model (via API) and one open-weight model (self-hosted
+        locally or via a hosted open-weight inference provider), on at least 10 identical test inputs.</p>
+        <ul>
+          <li>Score both on task quality (your own rubric), latency, and estimated cost at a hypothetical
+          production volume (e.g. 1M requests/month).</li>
+          <li>Write a one-page decision memo recommending one or the other for this specific task, with
+          reasoning tied to the tradeoffs table above.</li>
+        </ul>
+        <p><strong>Acceptance criteria:</strong> a completed comparison table and a memo with a clear
+        recommendation and explicit reasoning (not just "the closed model scored higher").</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>Don't skip the cost-at-volume calculation — it's often the single factor that flips the recommendation compared to just looking at raw quality scores on 10 samples.</p></div></details>
+        <p><strong>Bonus:</strong> fine-tune the open-weight model on a small task-specific dataset and see if it closes the quality gap.</p>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Advanced (1-2 days)</span>
+        <h4>Write a technical position paper on the next likely paradigm shift</h4>
+        <p>Using the "what specific limitation does it solve, is it reproducible, is it benchmarked" framework
+        from the advanced interview question above, research a candidate for the "next paradigm shift" (e.g.
+        test-time compute scaling / reasoning models, world models, neurosymbolic hybrids, or another candidate
+        of your choosing) and write a structured position paper evaluating whether it qualifies as a genuine
+        shift or is still unproven hype.</p>
+        <ul>
+          <li>Cite at least 4 real sources (papers, technical blog posts, benchmark results).</li>
+          <li>Explicitly apply the framework: named limitation solved, reproducibility evidence, benchmark
+          evidence, and mechanistic understanding.</li>
+          <li>State a clear verdict with your confidence level and what evidence would change your mind.</li>
+        </ul>
+        <p><strong>Acceptance criteria:</strong> a well-sourced, structured paper (1,500+ words) with a clear,
+        defensible verdict and explicit acknowledgment of counter-evidence.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>Actively search for the strongest counter-argument to your own initial intuition before writing your verdict — a position paper that doesn't address the best counter-case reads as biased rather than analytical.</p></div></details>
+        <p><strong>Bonus:</strong> present your paper's core argument as a 5-minute talk outline, as if pitching to a skeptical engineering leadership team.</p>
+      </div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet">
+        <ul>
+          <li>Symbolic AI (1950s-80s): hand-written rules, broke on ambiguity and real-world complexity.</li>
+          <li>Statistical ML (1990s-2000s): learned weighting, but still needed hand-engineered features.</li>
+          <li>Deep learning (2012+): AlexNet + ImageNet proved learned features at scale beat hand-engineering.</li>
+          <li>word2vec (2013): meaningful semantics emerge from learned embeddings, not hand-crafted linguistics.</li>
+          <li>Transformers (2017): attention replaced sequential RNN processing — parallelizable + better long-range dependencies.</li>
+          <li>Scaling laws: performance improves predictably with model size + data + compute — drove GPT-2 → GPT-4 progress.</li>
+          <li>Foundation models: pretrain broadly once, adapt many times via prompting/fine-tuning/RAG.</li>
+          <li>Closed vs open-weight is a multi-axis tradeoff (capability, data control, cost at volume, vendor risk), not just "which is better."</li>
+          <li>Every real paradigm shift solved a specific, nameable prior limitation — use that lens to evaluate new hype.</li>
+        </ul>
+      </div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://arxiv.org/abs/1706.03762">Attention Is All You Need (Vaswani et al., 2017)</a></li>
+        <li><a href="https://arxiv.org/abs/1301.3781">word2vec paper (Mikolov et al., 2013)</a></li>
+        <li><a href="https://www.image-net.org/">ImageNet project and AlexNet history</a></li>
+        <li><a href="https://openai.com/research/">OpenAI research publications (GPT series, scaling laws)</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="01-ml-math-and-foundations.html"><span class="dir">← Previous</span>ML Math & Foundations</a>
+        <a class="next" href="03-neural-networks-from-scratch.html"><span class="dir">Next →</span>Neural Networks from Scratch</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · Machine Learning & AI</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "15-machine-learning-ai", chapterKey: "02-ai-history-and-landscape" });</script>
+</body>
+</html>

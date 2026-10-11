@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Python for AI Fundamentals</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <input class="searchbox" placeholder="Search topics..." />
+    <a href="../index.html">← Home</a>
+    <h3>01-Python-for-AI</h3>
+    <a href="python-for-ai-fundamentals.html">Python for AI Fundamentals</a>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumbs"><a href="../index.html">Home</a> / 01-Python-for-AI / Fundamentals</div>
+      <button class="theme-toggle" onclick="toggleTheme()">🌓 Theme</button>
+    </div>
+    <h1>Python for AI Fundamentals</h1>
+    <span class="tag good">Stable</span><span class="tag">Last verified: 2026-10-06</span>
+
+    <div class="toc">
+      <b>On this page</b>
+      <a href="#what">1. What is this?</a>
+      <a href="#whyexist">2. Why does it exist?</a>
+      <a href="#whyimportant">3. Why is it important?</a>
+      <a href="#whereused">4. Where is it used?</a>
+      <a href="#prereq">5. Prerequisites</a>
+      <a href="#core">6. Core concepts</a>
+      <a href="#terms">7. Terminology</a>
+      <a href="#arch">8. Architecture (AI Python stack)</a>
+      <a href="#internal">9. How it works internally</a>
+      <a href="#steps">10. Step-by-step: setting up an AI project</a>
+      <a href="#simple">11. Simple example</a>
+      <a href="#real">12. Real-world example</a>
+      <a href="#code">13. Code example</a>
+      <a href="#advanced">14. Advanced example</a>
+      <a href="#mistakes">15. Common mistakes</a>
+      <a href="#best">16. Best practices</a>
+      <a href="#production">17. Production considerations</a>
+      <a href="#security">18. Security considerations</a>
+      <a href="#performance">19. Performance considerations</a>
+      <a href="#cost">20. Cost considerations</a>
+      <a href="#debug">21. Debugging/troubleshooting</a>
+      <a href="#related">22. Related concepts</a>
+      <a href="#comparison">23. Comparison with alternatives</a>
+      <a href="#exercise">24. Mini practical exercise</a>
+      <a href="#project">25. Practical project</a>
+      <a href="#projectarch">26. Project architecture</a>
+      <a href="#interview-b">27. Interview Questions — Beginner</a>
+      <a href="#interview-i">28. Interview Questions — Intermediate</a>
+      <a href="#interview-a">29. Interview Questions — Advanced</a>
+      <a href="#interview-s">30. Interview Questions — Senior/Architect</a>
+      <a href="#interview-sc">31. Scenario-Based Questions</a>
+      <a href="#revision">32. Quick revision notes</a>
+      <a href="#cheat">33. Cheat sheet</a>
+      <a href="#further">34. Further topics to learn</a>
+    </div>
+
+    <h2 id="what">1. What is this?</h2>
+    <p>Python is the dominant language for AI engineering: virtually every ML/DL framework (PyTorch, TensorFlow, Hugging Face), LLM SDK (OpenAI, Anthropic, Google), and orchestration framework (LangChain, LangGraph, LlamaIndex) ships a Python-first API. This page covers the Python subset and ecosystem (environments, async, typing, key libraries) most relevant to AI engineering specifically — not general Python basics.</p>
+
+    <h2 id="whyexist">2. Why does it exist?</h2>
+    <p>Python became AI's lingua franca because of NumPy/SciPy's early numerical computing ecosystem, its readability enabling fast research iteration, and the resulting network effect — once PyTorch/TensorFlow and Hugging Face standardized on it, virtually all new AI tooling followed to interoperate.</p>
+
+    <h2 id="whyimportant">3. Why is it important?</h2>
+    <p>As a software engineer moving into AI, you don't need to relearn Python — you need the specific idioms AI code relies on heavily: virtual environments/dependency management (fragile AI dependency trees), async/await (every LLM SDK supports streaming/concurrent calls), type hints + Pydantic (structured output validation), and context managers (resource/session handling in ML frameworks).</p>
+
+    <h2 id="whereused">4. Where is it used?</h2>
+    <p>LLM API calls, RAG pipelines, agent frameworks, data preprocessing, model training scripts, MCP servers, evaluation harnesses — essentially the entire AI engineering stack.</p>
+
+    <h2 id="prereq">5. Prerequisites</h2>
+    <p>General programming experience (any language) and basic Python syntax familiarity.</p>
+
+    <h2 id="core">6. Core concepts</h2>
+    <ul>
+      <li><b>Virtual environments:</b> isolate project dependencies (venv, conda, uv) — critical since AI libraries have notoriously conflicting version requirements.</li>
+      <li><b>Async/await:</b> most LLM SDKs offer async clients for concurrent API calls without blocking.</li>
+      <li><b>Type hints + Pydantic:</b> used pervasively for validating structured LLM outputs and API request/response schemas.</li>
+      <li><b>Generators/iterators:</b> used for streaming LLM responses token-by-token.</li>
+      <li><b>Context managers:</b> used for resource handling (e.g., streaming API contexts, file/database connections).</li>
+    </ul>
+
+    <h2 id="terms">7. Terminology</h2>
+    <table>
+      <tr><th>Term</th><th>Meaning</th></tr>
+      <tr><td>venv / conda / uv</td><td>Tools for creating isolated Python environments with their own dependencies.</td></tr>
+      <tr><td>pip / poetry / uv</td><td>Package managers for installing Python dependencies.</td></tr>
+      <tr><td>async/await</td><td>Syntax for writing non-blocking, concurrent code — essential for calling multiple LLM APIs in parallel.</td></tr>
+      <tr><td>Pydantic</td><td>A data-validation library used to define and validate structured schemas (e.g., for LLM structured output).</td></tr>
+      <tr><td>Type hints</td><td>Optional static type annotations (e.g., `def f(x: int) -> str`) improving code clarity and enabling tooling/validation.</td></tr>
+      <tr><td>Decorator</td><td>A function that wraps another function to add behavior — used heavily in frameworks like LangChain (`@tool`) and FastAPI (`@app.get`).</td></tr>
+    </table>
+
+    <h2 id="arch">8. Architecture (typical AI Python stack)</h2>
+    <pre><code>Project
+ ├── pyproject.toml / requirements.txt   (dependencies)
+ ├── .venv/ (isolated environment)
+ ├── src/
+ │    ├── main.py          (entry point)
+ │    ├── llm_client.py    (provider SDK wrapper)
+ │    ├── models.py        (Pydantic schemas)
+ │    └── agent.py         (orchestration logic)
+ └── tests/</code></pre>
+
+    <h2 id="internal">9. How it works internally</h2>
+    <p>Async LLM calls work via Python's event loop (asyncio): an `await client.messages.create(...)` call yields control back to the event loop while waiting on the network I/O, allowing other coroutines (e.g., other concurrent API calls) to run — this is why async clients dramatically improve throughput for applications making many LLM calls (e.g., batch processing, multi-agent fan-out) compared to synchronous sequential calls.</p>
+
+    <h2 id="steps">10. Step-by-step: setting up an AI project</h2>
+    <ol>
+      <li>Create an isolated environment (`python -m venv .venv` or `uv venv`).</li>
+      <li>Define dependencies in `pyproject.toml` or `requirements.txt`.</li>
+      <li>Install the relevant SDK(s) (`pip install anthropic langchain`).</li>
+      <li>Define Pydantic schemas for any structured data (API requests, LLM outputs).</li>
+      <li>Write async client wrappers if concurrency/streaming is needed.</li>
+      <li>Add `.env`-based configuration for API keys (never hardcode secrets).</li>
+    </ol>
+
+    <h2 id="simple">11. Simple example</h2>
+    <pre><code class="language-python">from pydantic import BaseModel
+
+class ExtractedPerson(BaseModel):
+    name: str
+    age: int
+
+data = ExtractedPerson(name="Alice", age=30)
+print(data.model_dump_json())
+</code></pre>
+
+    <h2 id="real">12. Real-world example</h2>
+    <p>A production RAG API built with FastAPI + Pydantic validates every incoming request and every LLM structured output against explicit schemas, catching malformed data before it reaches business logic — this pattern (type-safe boundaries around inherently "fuzzy" LLM output) is standard in production AI Python code.</p>
+
+    <h2 id="code">13. Code example</h2>
+    <pre><code class="language-python">import asyncio
+from anthropic import AsyncAnthropic
+
+client = AsyncAnthropic()
+
+async def ask(question: str) -> str:
+    resp = await client.messages.create(
+        model="claude-sonnet-5", max_tokens=200,
+        messages=[{"role": "user", "content": question}],
+    )
+    return resp.content[0].text
+
+async def main():
+    questions = ["What is RAG?", "What is MCP?", "What is LangGraph?"]
+    results = await asyncio.gather(*(ask(q) for q in questions))  # concurrent calls
+    for q, r in zip(questions, results):
+        print(q, "->", r[:80])
+
+asyncio.run(main())
+</code></pre>
+
+    <h2 id="advanced">14. Advanced example</h2>
+    <pre><code class="language-python">from pydantic import BaseModel, ValidationError
+
+class ToolCallArgs(BaseModel):
+    city: str
+    unit: str = "celsius"
+
+def validate_llm_tool_call(raw_args: dict):
+    try:
+        return ToolCallArgs(**raw_args)
+    except ValidationError as e:
+        # Return structured error back to the LLM for self-correction
+        return {"error": str(e)}
+</code></pre>
+
+    <h2 id="mistakes">15. Common mistakes</h2>
+    <ul>
+      <li>Not using virtual environments, leading to dependency conflicts across projects.</li>
+      <li>Mixing sync and async clients inconsistently, causing blocking calls inside async code.</li>
+      <li>Hardcoding API keys instead of using environment variables/secret managers.</li>
+      <li>Skipping Pydantic validation on LLM structured output, trusting it blindly.</li>
+    </ul>
+
+    <h2 id="best">16. Best practices</h2>
+    <ul>
+      <li>Use `uv` or `poetry` for fast, reproducible dependency management.</li>
+      <li>Validate every LLM structured output through a Pydantic model before using it in business logic.</li>
+      <li>Use async clients for any workload making multiple concurrent LLM calls.</li>
+      <li>Keep secrets in environment variables or a secret manager, never in source.</li>
+    </ul>
+
+    <h2 id="production">17. Production considerations</h2>
+    <p>Pin exact dependency versions (lockfiles) for AI projects more aggressively than typical web projects — AI library APIs change frequently and breaking changes are common across minor versions.</p>
+
+    <h2 id="security">18. Security considerations</h2>
+    <p>Never commit API keys to source control; use `.env` files excluded via `.gitignore` plus a proper secret manager in production. Validate all LLM-controlled tool-call arguments before executing them (e.g., via Pydantic) to prevent injection into downstream systems (shell commands, SQL, file paths).</p>
+
+    <h2 id="performance">19. Performance considerations</h2>
+    <p>Use async/concurrent calls for any batch of independent LLM requests — sequential synchronous calls to a slow, network-bound API is one of the most common avoidable performance bugs in AI Python code.</p>
+
+    <h2 id="cost">20. Cost considerations</h2>
+    <p>Concurrency doesn't reduce per-call cost but reduces wall-clock time, which matters for user-facing latency SLAs and batch-processing throughput targets.</p>
+
+    <h2 id="debug">21. Debugging/troubleshooting</h2>
+    <ul>
+      <li><b>"RuntimeWarning: coroutine was never awaited":</b> an async function was called without `await` — a very common AI-SDK bug when mixing sync/async code.</li>
+      <li><b>Dependency conflicts between AI libraries:</b> isolate in a fresh virtual environment and check for version pin mismatches between libraries sharing a dependency (e.g., `pydantic` v1 vs v2).</li>
+    </ul>
+
+    <h2 id="related">22. Related concepts</h2>
+    <p><a href="../07-LLM-APIs-and-SDKs/">LLM APIs and SDKs</a> · <a href="../09-Structured-Output/">Structured Output</a></p>
+
+    <h2 id="comparison">23. Comparison with alternatives</h2>
+    <table>
+      <tr><th>Tool</th><th>Use case</th></tr>
+      <tr><td>pip + venv</td><td>Simple, universal, slower dependency resolution</td></tr>
+      <tr><td>poetry</td><td>Better dependency locking, project management</td></tr>
+      <tr><td>uv</td><td>Very fast modern alternative, increasingly standard for new AI projects in 2026</td></tr>
+    </table>
+
+    <h2 id="exercise">24. Mini practical exercise</h2>
+    <p>Write an async function that calls an LLM API for 5 different prompts concurrently using `asyncio.gather`, and compare its total wall-clock time against calling them sequentially.</p>
+
+    <h2 id="project">25. Practical project</h2>
+    <p><b>Async Batch Summarizer:</b> build a CLI tool that reads N text files and summarizes them concurrently via async LLM calls, validating each summary through a Pydantic schema before writing output.</p>
+
+    <h2 id="projectarch">26. Project architecture</h2>
+    <pre><code>CLI entry → read files → async gather(summarize(file) for file in files)
+ → validate each result via Pydantic → write validated summaries to output/</code></pre>
+
+    <h2 id="interview-b">27. Interview Questions — Beginner</h2>
+    <div class="qa"><b>Q1.</b> Why is Python the dominant language for AI engineering?<br><b>A.</b> Its early numerical computing ecosystem (NumPy/SciPy) and readability led major frameworks (PyTorch, Hugging Face) and LLM SDKs to standardize on it, creating strong network effects.</div>
+    <div class="qa"><b>Q2.</b> What is a virtual environment and why use one?<br><b>A.</b> An isolated Python dependency environment per project, preventing version conflicts between projects with different library requirements.</div>
+    <div class="qa"><b>Q3.</b> What does `async`/`await` do?<br><b>A.</b> Lets code perform non-blocking operations (like network calls), yielding control to the event loop so other work can proceed while waiting.</div>
+    <div class="qa"><b>Q4.</b> What is Pydantic used for in AI projects?<br><b>A.</b> Defining and validating structured data schemas, commonly used to validate LLM structured outputs and API requests.</div>
+    <div class="qa"><b>Q5.</b> Why shouldn't you hardcode API keys in source code?<br><b>A.</b> It risks leaking secrets via version control and makes key rotation/management harder; use environment variables or a secret manager instead.</div>
+    <div class="qa"><b>Q6.</b> What's the difference between pip and poetry/uv?<br><b>A.</b> pip is the basic package installer; poetry/uv add dependency locking, project management, and (for uv) much faster resolution/installation.</div>
+    <div class="qa"><b>Q7.</b> Why do many LLM SDKs offer both sync and async clients?<br><b>A.</b> To support both simple sequential scripts (sync) and high-throughput concurrent applications (async) depending on the use case.</div>
+    <div class="qa"><b>Q8.</b> What is a type hint?<br><b>A.</b> An optional annotation indicating a variable or function's expected type, improving readability and enabling tooling/validation.</div>
+    <div class="qa"><b>Q9.</b> What's a decorator in Python, and name one used in AI frameworks.<br><b>A.</b> A function that wraps another function to add behavior; e.g., LangChain's `@tool` decorator marks a function as an LLM-callable tool.</div>
+    <div class="qa"><b>Q10.</b> Why is dependency pinning especially important in AI projects?<br><b>A.</b> AI libraries change APIs frequently, and unpinned dependencies can silently break a project when a new version is installed.</div>
+
+    <h2 id="interview-i">28. Interview Questions — Intermediate</h2>
+    <div class="qa"><b>Q1.</b> How does `asyncio.gather` improve performance for batch LLM calls compared to a for-loop of sequential calls?<br><b>A.</b> It issues all the API calls concurrently rather than waiting for each one to complete before starting the next, so wall-clock time approaches the slowest single call rather than the sum of all calls.</div>
+    <div class="qa"><b>Q2.</b> What's the risk of calling a synchronous, blocking function inside an async coroutine?<br><b>A.</b> It blocks the entire event loop during that call, preventing other concurrent coroutines from making progress — defeating the purpose of using async in the first place.</div>
+    <div class="qa"><b>Q3.</b> How would you validate and safely handle an LLM's tool-call arguments before executing them?<br><b>A.</b> Define a Pydantic model matching the expected tool schema, parse the LLM's raw arguments through it, and catch validation errors to either reject the call or return a structured error back to the LLM for self-correction, rather than executing unvalidated input directly.</div>
+    <div class="qa"><b>Q4.</b> Why might two AI libraries conflict on a shared dependency like Pydantic v1 vs v2?<br><b>A.</b> Different libraries may have been built/tested against different major versions with breaking API changes; installing both in the same environment can cause one library to receive an incompatible version, leading to runtime errors.</div>
+    <div class="qa"><b>Q5.</b> What's a practical reason to prefer `uv` over traditional `pip`+`venv` for a new AI project in 2026?<br><b>A.</b> Significantly faster dependency resolution and installation, plus built-in lockfile support for reproducibility — meaningful for AI projects with large, complex dependency trees (ML frameworks, multiple SDKs).</div>
+
+    <h2 id="interview-a">29. Interview Questions — Advanced</h2>
+    <div class="qa"><b>Q1.</b> How would you design a rate-limited async batch-calling utility for an LLM API to avoid hitting provider rate limits while maximizing throughput?<br><b>A.</b> Use an `asyncio.Semaphore` to cap concurrent in-flight requests to the provider's rate limit, combine with exponential backoff retry logic on 429 responses, and optionally a token-bucket algorithm to smooth request bursts over time.</div>
+    <div class="qa"><b>Q2.</b> What's a subtle bug that can occur when using Pydantic models to validate streaming/partial LLM structured output?<br><b>A.</b> Validating a partial/incomplete JSON chunk against a strict schema will fail even though the full stream would eventually be valid — streaming structured output requires either buffering until complete or using a schema validator designed for incremental/partial JSON.</div>
+
+    <h2 id="interview-s">30. Interview Questions — Senior/Architect</h2>
+    <div class="qa"><b>Q1.</b> How would you structure a Python monorepo serving multiple AI services (RAG API, agent runtime, evaluation harness) to manage shared dependencies and avoid version drift?<br><b>A.</b> Use a workspace-based dependency tool (e.g., uv workspaces or poetry monorepo setup) with shared base dependencies pinned centrally, per-service lockfiles for service-specific additions, and CI checks that fail on dependency drift between services sharing core libraries like the LLM SDK.</div>
+
+    <h2 id="interview-sc">31. Scenario-Based Questions</h2>
+    <div class="qa"><b>Scenario 1.</b> Your batch-processing script calling an LLM API sequentially for 1000 items takes hours. How do you speed it up?<br><b>A.</b> Convert to async with `asyncio.gather` and a semaphore-limited concurrency cap matching the provider's rate limits, dramatically reducing wall-clock time without exceeding rate limits.</div>
+    <div class="qa"><b>Scenario 2.</b> A teammate's PR hardcodes an API key directly in a Python file. What do you flag and what's the fix?<br><b>A.</b> Flag as a security issue — the key is now in git history even if later removed; recommend immediate key rotation and moving configuration to environment variables or a secret manager, never committed to source.</div>
+
+    <h2 id="revision">32. Quick revision notes</h2>
+    <ul>
+      <li>Use virtual environments; pin dependencies tightly for AI projects.</li>
+      <li>Use async clients for concurrent LLM calls.</li>
+      <li>Validate all LLM-controlled data (tool args, structured output) via Pydantic.</li>
+      <li>Never hardcode secrets.</li>
+    </ul>
+
+    <h2 id="cheat">33. Cheat sheet</h2>
+    <div class="callout">Isolate dependencies (uv/poetry/venv) → use async for concurrent LLM calls → validate everything LLM-controlled via Pydantic → secrets in env vars, never in code.</div>
+
+    <h2 id="further">34. Further topics to learn</h2>
+    <p><a href="../07-LLM-APIs-and-SDKs/">LLM APIs and SDKs</a> → <a href="../09-Structured-Output/">Structured Output</a> → <a href="../15-LangChain/">LangChain</a></p>
+
+    <div class="prevnext">
+      <a href="../00-AI-Fundamentals/generative-vs-discriminative.html">← AI Fundamentals</a>
+      <a href="../02-Machine-Learning-Basics/ml-basics-fundamentals.html">Next: Machine Learning Basics →</a>
+    </div>
+  </main>
+</div>
+<script src="../assets/app.js"></script>
+</body>
+</html>

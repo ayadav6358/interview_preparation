@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Computer Use Fundamentals</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <input class="searchbox" placeholder="Search topics..." />
+    <a href="../index.html">← Home</a>
+    <h3>33-Computer-Use</h3>
+    <a href="computer-use-fundamentals.html">Computer Use Fundamentals</a>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumbs"><a href="../index.html">Home</a> / 33-Computer-Use</div>
+      <button class="theme-toggle" onclick="toggleTheme()">🌓 Theme</button>
+    </div>
+    <h1>Computer Use & Browser Agents</h1>
+    <span class="tag warn">Emerging / rapidly maturing</span><span class="tag">Last verified: 2026-10-06</span>
+
+    <div class="toc">
+      <b>On this page</b>
+      <a href="#what">1. What is this?</a>
+      <a href="#whyexist">2. Why does it exist?</a>
+      <a href="#whyimportant">3. Why is it important?</a>
+      <a href="#whereused">4. Where is it used?</a>
+      <a href="#prereq">5. Prerequisites</a>
+      <a href="#core">6. Core concepts</a>
+      <a href="#terms">7. Terminology</a>
+      <a href="#arch">8. Architecture</a>
+      <a href="#internal">9. How it works internally</a>
+      <a href="#steps">10. Step-by-step: a computer-use loop</a>
+      <a href="#simple">11. Simple example</a>
+      <a href="#real">12. Real-world example</a>
+      <a href="#code">13. Code example</a>
+      <a href="#advanced">14. Advanced example (safety checks)</a>
+      <a href="#mistakes">15. Common mistakes</a>
+      <a href="#best">16. Best practices</a>
+      <a href="#production">17. Production considerations</a>
+      <a href="#security">18. Security considerations</a>
+      <a href="#performance">19. Performance considerations</a>
+      <a href="#cost">20. Cost considerations</a>
+      <a href="#debug">21. Debugging/troubleshooting</a>
+      <a href="#related">22. Related concepts</a>
+      <a href="#comparison">23. Comparison with alternatives</a>
+      <a href="#exercise">24. Mini practical exercise</a>
+      <a href="#project">25. Practical project</a>
+      <a href="#projectarch">26. Project architecture</a>
+      <a href="#interview-b">27. Interview Questions — Beginner</a>
+      <a href="#interview-i">28. Interview Questions — Intermediate</a>
+      <a href="#interview-a">29. Interview Questions — Advanced</a>
+      <a href="#interview-s">30. Interview Questions — Senior/Architect</a>
+      <a href="#interview-sc">31. Scenario-Based Questions</a>
+      <a href="#revision">32. Quick revision notes</a>
+      <a href="#cheat">33. Cheat sheet</a>
+      <a href="#further">34. Further topics to learn</a>
+    </div>
+
+    <h2 id="what">1. What is this?</h2>
+    <p>Computer-use agents let an LLM perceive a screen (via screenshots) and act on it (via clicks, typing, scrolling) — automating tasks in arbitrary software through the same visual interface a human would use, rather than requiring an API integration for every application.</p>
+
+    <h2 id="whyexist">2. Why does it exist?</h2>
+    <p>Many useful applications (legacy software, internal tools, most consumer websites) have no API — computer-use exists to let an AI agent interact with any software a human can, using vision and simulated input, when no structured API/MCP integration is available.</p>
+
+    <h2 id="whyimportant">3. Why is it important?</h2>
+    <p>Computer-use dramatically expands what agents can automate beyond API-integrated systems, but carries unique safety/reliability challenges (visual misinterpretation, unintended clicks) that make it one of the higher-risk agentic capabilities to deploy responsibly.</p>
+
+    <h2 id="whereused">4. Where is it used?</h2>
+    <p>Browser automation (testing, scraping, form-filling), legacy desktop software automation, QA/testing agents, general computer-task automation where no API exists.</p>
+
+    <h2 id="prereq">5. Prerequisites</h2>
+    <p><a href="../25-Multimodal-AI/multimodal-ai-fundamentals.html">Multimodal AI</a>, <a href="../16-Tool-Calling/tool-calling-fundamentals.html">Tool Calling</a>.</p>
+
+    <h2 id="core">6. Core concepts</h2>
+    <ul>
+      <li><b>Screenshot perception:</b> the model receives a screenshot as visual input to understand current screen state.</li>
+      <li><b>Actions:</b> simulated mouse clicks, keyboard input, scrolling, issued by the agent based on what it perceives.</li>
+      <li><b>Browser agents:</b> a specialization focused specifically on web browser automation, often with DOM access in addition to screenshots.</li>
+      <li><b>Safety/human approval:</b> given the risk of unintended actions, computer-use systems typically require human confirmation for consequential actions.</li>
+      <li><b>Tool permissions:</b> restricting what applications/actions the agent can access, critical given the broad "do anything a human can" capability.</li>
+    </ul>
+
+    <h2 id="terms">7. Terminology</h2>
+    <table>
+      <tr><th>Term</th><th>Meaning</th></tr>
+      <tr><td>Computer-use agent</td><td>An agent that perceives a screen and acts via simulated input.</td></tr>
+      <tr><td>Browser agent</td><td>A computer-use agent specialized for web browser interaction, often with DOM access.</td></tr>
+      <tr><td>Action space</td><td>The set of possible actions an agent can take (click, type, scroll, etc.).</td></tr>
+      <tr><td>Sandboxing</td><td>Running computer-use actions in an isolated environment to limit blast radius if something goes wrong.</td></tr>
+    </table>
+
+    <h2 id="arch">8. Architecture</h2>
+    <pre><code>Take screenshot of current screen state
+ → Send screenshot + task context to LLM
+ → LLM decides next action (click at (x,y), type text, scroll, etc.)
+ → Application executes the action (simulated input)
+ → Take new screenshot → repeat
+ → (loop until task complete or human intervention needed)</code></pre>
+
+    <h2 id="internal">9. How it works internally</h2>
+    <p>The model is typically a vision-capable LLM trained/prompted specifically to output structured action commands (e.g., "click at coordinates (420, 180)") given a screenshot and task description — much like standard tool calling, but the "tools" are generic input primitives (click, type, scroll) rather than domain-specific functions, making the agent's capability as broad (and as risky) as direct human input.</p>
+
+    <h2 id="steps">10. Step-by-step: a computer-use loop</h2>
+    <ol>
+      <li>Capture a screenshot of the current screen state.</li>
+      <li>Send the screenshot and task context to the vision-capable LLM.</li>
+      <li>The model decides and outputs the next action (click, type, scroll).</li>
+      <li>The application executes that action via simulated input.</li>
+      <li>Capture a new screenshot reflecting the result; repeat.</li>
+      <li>For consequential actions, pause for human approval before executing.</li>
+    </ol>
+
+    <h2 id="simple">11. Simple example</h2>
+    <p>"Open the settings menu and enable dark mode" — the agent takes a screenshot, identifies and clicks the settings icon, takes a new screenshot, locates and clicks the dark mode toggle, verifying the change visually.</p>
+
+    <h2 id="real">12. Real-world example</h2>
+    <p>A QA automation tool uses a computer-use agent to test a web application by visually navigating through user flows (login, checkout, form submission) the same way a human tester would, catching UI issues that pure API-level testing would miss.</p>
+
+    <h2 id="code">13. Code example</h2>
+    <pre><code class="language-python"># Conceptual computer-use loop (API specifics vary by provider)
+def computer_use_loop(task, max_steps=20):
+    for step in range(max_steps):
+        screenshot = take_screenshot()
+        response = client.messages.create(
+            model="claude-sonnet-5", max_tokens=500,
+            tools=[{"type": "computer_20250124", "name": "computer",
+                    "display_width_px": 1920, "display_height_px": 1080}],
+            messages=[{"role": "user", "content": [
+                {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": screenshot}},
+                {"type": "text", "text": f"Task: {task}. What's the next action?"},
+            ]}],
+        )
+        action = extract_action(response)
+        if action["type"] == "done":
+            return "Task complete"
+        if action["requires_approval"]:
+            if not get_human_approval(action):
+                return "Action rejected by human"
+        execute_action(action)  # click, type, scroll, etc.
+    return "Max steps reached"
+</code></pre>
+
+    <h2 id="advanced">14. Advanced example (safety checks)</h2>
+    <pre><code class="language-python">RISKY_ACTIONS = {"submit_payment", "delete", "send_email"}
+
+def execute_action_safely(action):
+    if action["type"] in RISKY_ACTIONS:
+        if not get_human_approval(action):
+            log_rejected_action(action)
+            return False
+    if action["type"] == "click" and is_outside_sandboxed_region(action["coordinates"]):
+        log_safety_violation(action)
+        return False
+    return execute_action(action)
+</code></pre>
+
+    <h2 id="mistakes">15. Common mistakes</h2>
+    <ul>
+      <li>Giving a computer-use agent unrestricted access to a production environment or personal accounts.</li>
+      <li>No human approval gate for irreversible/consequential actions (payments, deletions, sending messages).</li>
+      <li>Not sandboxing the environment, risking unintended side effects beyond the intended task scope.</li>
+      <li>Assuming visual perception is always accurate — misclicks from misinterpreted screenshots are a real failure mode.</li>
+    </ul>
+
+    <h2 id="best">16. Best practices</h2>
+    <ul>
+      <li>Run computer-use agents in a sandboxed environment (isolated browser profile, VM, or test account) by default.</li>
+      <li>Require explicit human approval for any irreversible or consequential action.</li>
+      <li>Set hard step limits to bound worst-case runaway behavior.</li>
+      <li>Log every action with its corresponding screenshot for auditability and debugging.</li>
+    </ul>
+
+    <h2 id="production">17. Production considerations</h2>
+    <p>Computer-use is among the highest-risk agentic capabilities — production deployment requires robust sandboxing, approval gates, and monitoring well beyond typical tool-calling agents.</p>
+
+    <h2 id="security">18. Security considerations</h2>
+    <p>A computer-use agent effectively has the same access as a human user at the keyboard/mouse level — apply the principle of least privilege rigorously (dedicated low-privilege accounts, sandboxed environments), and never grant access to systems with real financial/safety consequences without strict human-approval gating.</p>
+
+    <h2 id="performance">19. Performance considerations</h2>
+    <p>Each action requires a full screenshot-analyze-decide round trip — this is inherently slower than API-based tool calling; expect multi-second latency per action, unsuitable for latency-sensitive use cases.</p>
+
+    <h2 id="cost">20. Cost considerations</h2>
+    <p>Each step involves an image (screenshot) in the LLM call, adding meaningful token cost per action; multi-step tasks can accumulate significant cost — budget accordingly and set step limits.</p>
+
+    <h2 id="debug">21. Debugging/troubleshooting</h2>
+    <ul>
+      <li><b>Agent clicks the wrong element:</b> review the screenshot at that step — likely a visual misinterpretation; consider higher-resolution screenshots or clearer task framing.</li>
+      <li><b>Agent gets stuck in a loop:</b> check for a UI state the agent isn't correctly recognizing as changed (e.g., a modal that didn't visually register as open).</li>
+      <li><b>Unintended side effects:</b> verify sandboxing/approval gates were actually in place and functioning as configured.</li>
+    </ul>
+
+    <h2 id="related">22. Related concepts</h2>
+    <p><a href="../25-Multimodal-AI/multimodal-ai-fundamentals.html">Multimodal AI</a> · <a href="../17-AI-Agents/ai-agents-fundamentals.html">AI Agents</a> · <a href="../38-AI-Security/">AI Security</a></p>
+
+    <h2 id="comparison">23. Comparison with alternatives</h2>
+    <table>
+      <tr><th>Approach</th><th>When to use</th></tr>
+      <tr><td>API/MCP integration</td><td>Whenever a proper API exists — always preferred: more reliable, faster, cheaper</td></tr>
+      <tr><td>Computer-use</td><td>Only when no API exists and visual/input-level automation is the only option</td></tr>
+      <tr><td>Browser automation (Playwright/Selenium, scripted)</td><td>Deterministic, well-defined web tasks not needing dynamic visual reasoning</td></tr>
+    </table>
+
+    <h2 id="exercise">24. Mini practical exercise</h2>
+    <p>Design (on paper) the approval-gate logic for a computer-use agent tasked with "clean up my downloads folder," identifying which actions would need human approval versus which are safe to execute autonomously.</p>
+
+    <h2 id="project">25. Practical project</h2>
+    <p><b>Sandboxed Form-Filling Agent:</b> build a computer-use agent restricted to a sandboxed browser profile that fills out a test web form, with human approval required before the final submit action.</p>
+
+    <h2 id="projectarch">26. Project architecture</h2>
+    <pre><code>sandboxed_browser (test profile, no real accounts)
+ → computer_use_loop(task="fill out the contact form")
+ → each action logged with screenshot
+ → submit action requires explicit human approval before executing
+ → max_steps=15 safety limit</code></pre>
+
+    <h2 id="interview-b">27. Interview Questions — Beginner</h2>
+    <div class="qa"><b>Q1.</b> What is a computer-use agent?<br><b>A.</b> An agent that perceives a screen via screenshots and acts on it via simulated clicks, typing, and scrolling.</div>
+    <div class="qa"><b>Q2.</b> Why would you use computer-use instead of a direct API integration?<br><b>A.</b> When no API exists for the target application, computer-use lets the agent interact through the same visual interface a human would use.</div>
+    <div class="qa"><b>Q3.</b> What is a browser agent?<br><b>A.</b> A computer-use agent specialized for web browser interaction, often with additional DOM access.</div>
+    <div class="qa"><b>Q4.</b> Why is sandboxing important for computer-use agents?<br><b>A.</b> To limit the blast radius of unintended actions, since the agent has broad, human-like access to whatever environment it's given.</div>
+    <div class="qa"><b>Q5.</b> Why would you require human approval for certain computer-use actions?<br><b>A.</b> Irreversible or consequential actions (payments, deletions, sending messages) carry real risk if the agent misinterprets the screen or task.</div>
+    <div class="qa"><b>Q6.</b> Is computer-use generally faster or slower than API-based tool calling?<br><b>A.</b> Slower — each action requires a full screenshot-analyze-decide round trip.</div>
+    <div class="qa"><b>Q7.</b> Why might a computer-use agent click the wrong element?<br><b>A.</b> Visual misinterpretation of the screenshot — a real and expected failure mode of this approach.</div>
+    <div class="qa"><b>Q8.</b> Should you always prefer an API/MCP integration over computer-use when both are available?<br><b>A.</b> Yes — APIs are more reliable, faster, and cheaper; computer-use is a fallback for when no API exists.</div>
+    <div class="qa"><b>Q9.</b> What's a real-world use case for computer-use agents?<br><b>A.</b> QA automation testing web applications by visually navigating user flows like a human tester would.</div>
+    <div class="qa"><b>Q10.</b> Why does computer-use add meaningful token cost per action?<br><b>A.</b> Each action's decision involves sending a screenshot (an image) to the LLM, and images carry substantial token cost compared to text alone.</div>
+
+    <h2 id="interview-i">28. Interview Questions — Intermediate</h2>
+    <div class="qa"><b>Q1.</b> Why does computer-use carry fundamentally higher risk than standard API-based tool calling?<br><b>A.</b> Its action space (click, type anywhere on screen) is as broad as direct human input, without the natural scoping a purpose-built API/tool provides — a misinterpreted screenshot can lead to clicking something unintended anywhere on screen, a much larger blast radius than a narrowly-scoped API call.</div>
+    <div class="qa"><b>Q2.</b> How would you design an approval-gating system that doesn't require human approval for every single action (which would make the agent impractically slow)?<br><b>A.</b> Classify actions by risk/reversibility — require approval only for irreversible or consequential actions (payments, deletions, external communications), while allowing low-risk, easily-reversible actions (navigation, form field entry before submission) to proceed autonomously, striking a balance between safety and practical usability.</div>
+    <div class="qa"><b>Q3.</b> Why might a computer-use agent perform inconsistently across different screen resolutions or UI themes?<br><b>A.</b> The model's visual perception and coordinate-based action decisions are sensitive to the actual rendered layout; a UI that looks/positions differently at a different resolution or theme can confuse an agent trained/tested primarily on a specific visual configuration.</div>
+    <div class="qa"><b>Q4.</b> What's a practical reason to prefer DOM-based browser automation over pure screenshot-based computer-use for web-specific tasks?<br><b>A.</b> DOM access provides structured, precise information about page elements (exact selectors, element state) rather than relying purely on visual interpretation of a screenshot, generally improving reliability and reducing the risk of visual misinterpretation for web-specific automation.</div>
+    <div class="qa"><b>Q5.</b> How would you debug a computer-use agent that repeatedly fails at the same step in a multi-step task?<br><b>A.</b> Review the logged screenshot and the model's reasoning/chosen action at that specific step to understand whether it's a visual misinterpretation, an ambiguous task instruction, or a UI state the agent isn't correctly recognizing (e.g., a loading state it should wait through).</div>
+
+    <h2 id="interview-a">29. Interview Questions — Advanced</h2>
+    <div class="qa"><b>Q1.</b> How would you design a computer-use agent's safety architecture for a task that necessarily involves some real-world consequential actions (e.g., automated bill payment)?<br><b>A.</b> Use a sandboxed, scoped-permission account wherever possible; require explicit human approval with a clear summary of the specific action and its consequences before executing any payment/consequential step; implement a dry-run/preview mode showing exactly what would happen before committing; and maintain detailed audit logs (screenshots + actions) of every step for post-hoc review and dispute resolution.</div>
+    <div class="qa"><b>Q2.</b> What's a subtle failure mode where a computer-use agent could cause harm even with per-action human approval gates in place?<br><b>A.</b> If the human approver is shown a summary that doesn't fully capture the action's actual context/risk (e.g., approving "click submit" without realizing the form now contains different data than when they last reviewed it, due to an earlier agent action), approval becomes a false sense of security — the approval UI must surface sufficient context (e.g., the actual current screen state) for the approval to be meaningful, not just a rubber-stamp on an abstract action label.</div>
+
+    <h2 id="interview-s">30. Interview Questions — Senior/Architect</h2>
+    <div class="qa"><b>Q1.</b> Design a production computer-use automation platform for enterprise QA testing, covering safety, reliability, and scalability.<br><b>A.</b> Run all agents in isolated, ephemeral sandboxed environments (dedicated test accounts/VMs, never production credentials); implement risk-tiered action approval (autonomous for navigation/reading, human-gated for any state-changing action in ambiguous cases); log full screenshot+action traces for every run to support debugging and audit; parallelize across many sandboxed environments for scale while capping per-task step limits and cost; and continuously evaluate agent reliability against a suite of known UI flows, flagging regressions when UI changes break previously-working automation.</div>
+
+    <h2 id="interview-sc">31. Scenario-Based Questions</h2>
+    <div class="qa"><b>Scenario 1.</b> A computer-use agent accidentally submitted a form with incorrect data because it misread a dropdown selection. What systemic fix do you implement?<br><b>A.</b> Add a human-approval/review step before any form submission showing the actual filled-out state (not just an abstract "submit" action label), and improve the agent's verification step to explicitly re-check field values against the intended values before proceeding to submit.</div>
+    <div class="qa"><b>Scenario 2.</b> Your computer-use QA agent's reliability dropped significantly after a UI redesign. What's happening and how do you respond?<br><b>A.</b> The agent's visual understanding was likely tuned/tested against the old UI layout; redesigns can shift element positions and visual patterns the agent relied on — re-validate and likely re-tune/re-test the agent against the new UI, treating UI changes as requiring the same regression testing as any dependency update.</div>
+
+    <h2 id="revision">32. Quick revision notes</h2>
+    <ul>
+      <li>Computer-use: screenshot → LLM decides action → execute → repeat.</li>
+      <li>Highest-risk agentic capability — sandbox by default, gate consequential actions with human approval.</li>
+      <li>Slower and costlier per-action than API tool calling — prefer APIs/MCP when available.</li>
+      <li>Visual misinterpretation is a real, expected failure mode.</li>
+    </ul>
+
+    <h2 id="cheat">33. Cheat sheet</h2>
+    <div name="cheat" class="callout">Computer-use: screenshot → LLM decides click/type/scroll → execute → repeat. Prefer API/MCP when available. Sandbox always; human-approve consequential actions; set step limits; log everything.</div>
+
+    <h2 id="further">34. Further topics to learn</h2>
+    <p><a href="../34-Coding-Agents/">Coding Agents</a> → <a href="../38-AI-Security/">AI Security</a></p>
+
+    <div class="prevnext">
+      <a href="../32-Voice-AI/voice-ai-fundamentals.html">← Voice AI</a>
+      <a href="../34-Coding-Agents/coding-agents-fundamentals.html">Next: Coding Agents →</a>
+    </div>
+  </main>
+</div>
+<script src="../assets/app.js"></script>
+</body>
+</html>

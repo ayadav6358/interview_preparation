@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Load Balancing & Reverse Proxies — System Design — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">System Design</a><span class="sep">›</span>Load Balancing & Reverse Proxies</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>Load Balancing & Reverse Proxies: L4 vs L7, Algorithms, Consistent Hashing</h1>
+      <p class="meta-line"><span>⏱ 2 hrs</span><span>📍 Chapter 3 of 14</span></p>
+      <p><strong>One-line summary:</strong> A load balancer is the single most consequential box in most architecture diagrams — the algorithm you pick there determines whether horizontal scaling actually works or whether you've just built a system that silently overloads one node while others idle.</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>Anyone can put "load balancer" as a box in a diagram. A senior engineer is expected to answer follow-ups: L4 or L7, which algorithm, what happens to in-flight requests when a backend dies, how do sticky sessions interact with autoscaling, and — the question that separates mid from senior — "you're adding a cache node to a 100-node fleet, why doesn't that remap every key?" That last one is consistent hashing, and if you can't derive it on a whiteboard, it's a hard signal in a Staff interview. This chapter builds directly on <a href="02-networking.html">Networking Basics</a> (TCP/HTTP mechanics) and feeds into <a href="04-caching.html">Caching</a>, <a href="06-database-scaling.html">Database Scaling</a>, and every HLD case study.</p>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>Read <a href="02-networking.html">Networking Basics</a> first — understanding TCP connections and HTTP semantics is required to understand the L4 vs L7 distinction. Also useful: <a href="01-fundamentals.html">Fundamentals</a> for availability composition math.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="l4-vs-l7">L4 vs L7 load balancing</h3>
+      <p><strong>L4 (transport layer)</strong> load balancers route based on IP address and port only — they don't look inside the packet payload. They operate at the TCP/UDP level, typically just forwarding packets (or doing NAT) to a backend chosen once per connection. Extremely fast (minimal CPU per packet), protocol-agnostic (works for any TCP/UDP traffic, not just HTTP), but blind to application semantics — it can't route based on a URL path, HTTP header, or cookie, because it never parses that far up the stack.</p>
+      <p><strong>L7 (application layer)</strong> load balancers terminate the connection, parse the actual HTTP request (path, headers, cookies, even body in some cases), and route based on that content — e.g., <code>/api/orders/*</code> → order-service, <code>/api/users/*</code> → user-service, or route logged-in users to a specific backend based on a cookie. This costs more CPU (TLS termination, HTTP parsing) and adds latency, but enables content-based routing, request-level retries, and features like A/B testing or canary routing by header.</p>
+      <p>Senior framing: L4 for raw throughput and protocol flexibility (database proxies, non-HTTP TCP services), L7 for anything where routing depends on the request's content — which is most modern microservice API gateways. Many real deployments layer both: an L4 LB (e.g., AWS NLB) in front of a fleet of L7 reverse proxies (e.g., Nginx/Envoy) for defense in depth and to offload connection-level concerns from the L7 layer.</p>
+
+      <h3 id="algorithms">Load balancing algorithms</h3>
+      <p><strong>Round robin:</strong> cycle through backends in order. Simple, works well when all backends and requests are roughly equal in cost. Fails when backends have different capacity or requests have wildly different costs (one backend ends up overloaded with "expensive" requests just by bad luck).</p>
+      <p><strong>Weighted round robin:</strong> same as round robin but backends with more capacity get proportionally more requests (e.g., a weight of 3 means 3x the traffic of a weight-1 node) — used when fleet is heterogeneous (mixed instance types during a migration, or canary nodes getting a small weight).</p>
+      <p><strong>Least connections:</strong> route to whichever backend currently has the fewest active connections. Adapts to backends that are slow or stuck processing long requests, unlike round robin which keeps sending traffic blindly. Better default for workloads with variable request duration.</p>
+      <p><strong>Consistent hashing:</strong> used when you need the *same* key (user ID, cache key, session ID) to consistently route to the *same* backend — critical for caching efficiency and session affinity without a shared session store. Explained in depth below because it's the one senior interviewers actually ask you to derive.</p>
+
+      <h3 id="consistent-hashing">Consistent hashing — the hash ring, explained properly</h3>
+      <p>The naive approach to "which of N servers owns this key" is <code>hash(key) % N</code>. The problem: when N changes (a server added or removed), almost every key's assigned server changes too, because the modulus changed — for a cache cluster this means a near-total cache wipe on every scaling event, which is catastrophic (a thundering herd of cache misses hitting the database simultaneously — more on this in Chapter 4).</p>
+      <p><strong>Consistent hashing</strong> fixes this by mapping both servers and keys onto the same circular hash space (e.g., a ring of 0 to 2^32-1). Each server is hashed to one or more positions on the ring. To find which server owns a key: hash the key, then walk clockwise around the ring until you hit the first server position — that server owns the key. When you add a server, it only takes ownership of the slice of keys between its new position and the previous server going counter-clockwise — every other key's ownership is untouched. When you remove a server, only its slice of keys gets reassigned to the next server clockwise — everyone else is unaffected. This is why consistent hashing bounds remapping to roughly <code>K/N</code> keys affected (K = total keys, N = server count) instead of nearly all of them.</p>
+      <p><strong>Virtual nodes (vnodes):</strong> hashing each physical server to just one ring position creates uneven load — by chance, some servers end up owning much bigger arcs than others. The fix is to hash each physical server to many positions (e.g., 100-200 virtual nodes per physical server, each a different hash of "server-id + vnode-index"), spreading its ownership across many small arcs scattered around the ring. This smooths out load distribution dramatically and is what production systems (Cassandra, DynamoDB, many CDN and caching layers) actually implement — Karger's original consistent hashing paper plus vnodes.</p>
+
+      <h3 id="health-checks-sticky">Health checks and sticky sessions</h3>
+      <p><strong>Active health checks:</strong> the load balancer proactively pings a `/health` endpoint on each backend at a fixed interval and removes unhealthy ones from rotation. Catches failures quickly but adds constant background traffic and the check endpoint itself must be a true signal of health, not just "process is running" (a backend with an exhausted DB connection pool can still answer `/health` with 200 if the check doesn't actually touch the dependency chain).</p>
+      <p><strong>Passive health checks:</strong> the load balancer observes real traffic — if a backend returns a burst of 5xx errors or times out on real requests, it's marked unhealthy without a dedicated probe. Lower overhead, but detection is inherently slower (you need real failed requests first) and can cause a few real users to hit the bad backend before it's ejected.</p>
+      <p><strong>Sticky sessions</strong> (session affinity) pin a client to the same backend for the duration of a session, usually via a cookie the LB sets or by hashing the client IP. This is often a crutch for stateful application design (session data stored in server memory instead of a shared store like Redis) and it directly fights horizontal scaling: it creates uneven load (one backend might end up with an unlucky concentration of long, active sessions), makes rolling deploys harder (can't freely drain a backend that holds unique state), and defeats the purpose of autoscaling (new backends get no traffic until new sessions start). The senior-level fix is almost always to externalize session state (shared Redis/DB-backed session store) so *any* backend can serve *any* request — true statelessness — rather than relying on stickiness.</p>
+
+      <h3 id="reverse-proxy-dns-gslb">Reverse proxies, DNS-based LB, and GSLB</h3>
+      <p>A <strong>reverse proxy</strong> (Nginx, Envoy, HAProxy) sits in front of backend servers, forwarding client requests to them and returning responses — clients only ever see the proxy. It can do load balancing, TLS termination, caching, compression, and request routing all in one layer, which is why "reverse proxy" and "L7 load balancer" overlap heavily in practice (Nginx is routinely used as both).</p>
+      <p><strong>DNS-based load balancing:</strong> return multiple IPs for one hostname (or different IPs to different resolvers based on geography) and let the client/OS pick one, or rotate which IP is returned (round-robin DNS). Cheap and simple, but DNS has no visibility into actual backend health or load — a dead backend's IP keeps getting handed out until someone updates the record, and TTL caching (Chapter 2) means changes propagate slowly. Dedicated load balancers (AWS ALB for L7, NLB for L4) solve this with real-time health awareness and instant failover, at the cost of being a managed, sometimes more expensive layer.</p>
+      <p><strong>GSLB (Global Server Load Balancing)</strong> extends load balancing across regions/data centers — routing a user to the nearest or healthiest region based on geo-IP, latency measurements, or regional health, typically implemented via smart DNS (e.g., Route 53 latency-based or geolocation routing) combined with per-region load balancers underneath. It's the outer layer in a two-tier scheme: GSLB picks the region, a regional LB picks the specific instance.</p>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>Concretely, an L7 request's journey through an Nginx reverse proxy doing least-connections load balancing: client TCP connects to Nginx, Nginx terminates TLS, parses the HTTP request line and headers, matches it against configured `location` blocks (path-based routing), consults its upstream pool's current connection counts, opens (or reuses, via a keepalive pool) a connection to the backend with the fewest active connections, forwards the request, streams the response back to the client, and logs/updates metrics. If the chosen backend fails to respond within a timeout, Nginx can retry against a different upstream (`proxy_next_upstream`) transparently to the client — this retry behavior is a key reason L7 proxies can mask single-backend failures that L4 cannot.</p>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+flowchart TD
+    A["Request arrives: GET /api/orders/42<br/>Cookie: session=abc"] --> B{"L7 reverse proxy<br/>parses path + headers"}
+    B -->|"/api/orders/*"| C["Route to order-service pool"]
+    B -->|"/api/users/*"| D["Route to user-service pool"]
+    C --> E{"Pick backend:<br/>least connections"}
+    E --> F["order-svc-1 (2 active)"]
+    E --> G["order-svc-2 (7 active)"]
+    F --> H["Forward request, stream response"]
+      </div>
+      <div class="mermaid">
+flowchart LR
+    subgraph Ring["Hash Ring (0 to 2^32-1)"]
+    direction TB
+    S1["Server A<br/>(+ vnodes)"]
+    S2["Server B<br/>(+ vnodes)"]
+    S3["Server C<br/>(+ vnodes)"]
+    K1["key1 hash"] -.clockwise.-> S2
+    K2["key2 hash"] -.clockwise.-> S3
+    K3["key3 hash"] -.clockwise.-> S1
+    end
+    N["Add Server D<br/>between B and C"] --> M["Only keys between B and D<br/>remap to D — A, B, C's other keys untouched"]
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <p>A minimal correct consistent hashing ring implementation with virtual nodes, then an Nginx reverse proxy config:</p>
+      <pre><code class="language-typescript">// Consistent hashing ring with virtual nodes — the core data structure behind
+// distributed caches, sharded services, and CDN request routing.
+import { createHash } from "crypto";
+
+function hash32(input: string): number {
+  const h = createHash("md5").update(input).digest();
+  return h.readUInt32BE(0);
+}
+
+class HashRing {
+  private ring: Map<number, string> = new Map();
+  private sortedHashes: number[] = [];
+  private readonly vnodesPerServer = 150;
+
+  addServer(serverId: string) {
+    for (let i = 0; i < this.vnodesPerServer; i++) {
+      const pos = hash32(`${serverId}#${i}`);
+      this.ring.set(pos, serverId);
+    }
+    this.rebuildSorted();
+  }
+
+  removeServer(serverId: string) {
+    for (let i = 0; i < this.vnodesPerServer; i++) {
+      this.ring.delete(hash32(`${serverId}#${i}`));
+    }
+    this.rebuildSorted();
+  }
+
+  private rebuildSorted() {
+    this.sortedHashes = [...this.ring.keys()].sort((a, b) => a - b);
+  }
+
+  // Walk clockwise from the key's hash to find the first vnode >= it
+  getServerForKey(key: string): string {
+    const h = hash32(key);
+    let idx = this.sortedHashes.findIndex((pos) => pos >= h);
+    if (idx === -1) idx = 0; // wrap around the ring
+    return this.ring.get(this.sortedHashes[idx])!;
+  }
+}
+
+const ring = new HashRing();
+["cache-1", "cache-2", "cache-3"].forEach((s) => ring.addServer(s));
+console.log(ring.getServerForKey("user:1042")); // deterministic owner
+
+// Adding a 4th server only steals a slice of keys from its neighbor on the ring —
+// everyone else's getServerForKey() result is unchanged.
+ring.addServer("cache-4");
+</code></pre>
+      <pre><code class="language-yaml"># nginx.conf — L7 reverse proxy with least-connections LB and active health checks
+upstream order_service {
+    least_conn;
+    server 10.0.1.10:8080 max_fails=3 fail_timeout=10s;
+    server 10.0.1.11:8080 max_fails=3 fail_timeout=10s;
+    server 10.0.1.12:8080 weight=2;  # bigger instance, gets ~2x traffic
+}
+
+server {
+    listen 443 ssl;
+    server_name api.example.com;
+
+    location /api/orders/ {
+        proxy_pass http://order_service;
+        proxy_next_upstream error timeout http_502;  # retry a different backend on failure
+        proxy_connect_timeout 2s;
+        proxy_set_header X-Forwarded-For $remote_addr;
+    }
+}
+</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4><p>A video-streaming CDN's edge cache layer originally used <code>hash(video_id) % num_cache_nodes</code> to decide which edge cache node held which video's chunks. Every time they scaled the cache tier (a routine weekly event to handle growth), roughly 90%+ of keys remapped to a different node simultaneously — every affected video briefly became a cache miss across the fleet, causing a correlated spike of origin-fetch traffic right at the moment of a scaling event, sometimes bad enough to need origin rate limiting to protect the backend. Migrating to consistent hashing with ~150 virtual nodes per physical cache node reduced remapping on a scale event to roughly <code>1/N</code> of keys (adding the Nth node), eliminating the correlated-miss spike entirely and making scaling events a non-event operationally — exactly the property that made the switch worth the migration effort.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Using plain <code>hash(key) % N</code> for any system where N (the node count) changes over time — this is the single most common cause of "we scaled and everything got slow/cache hit rate crashed" incidents. Always reach for consistent hashing (or a similarly stable partitioning scheme) when node count is expected to change.</p></div>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Relying on sticky sessions as a substitute for externalized session state, then being surprised that autoscaling doesn't actually relieve load evenly, or that rolling deploys cause visible user-facing session loss. Treat stickiness as a smell, not a design pattern — externalize state instead.</p></div>
+      <ul>
+        <li>Always configure both a reasonable health check interval/timeout AND a `max_fails`/circuit-breaker-style ejection — a single flaky check shouldn't yank a healthy backend out of rotation.</li>
+        <li>Use weighted algorithms during any heterogeneous-fleet period (migrations, mixed instance types) rather than plain round robin, which assumes equal capacity.</li>
+        <li>When doing consistent hashing, always use virtual nodes (100+ per physical node) — a naive single-position ring has meaningfully uneven load distribution in practice.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs: When to Use vs When NOT To</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>L4 load balancing</td><td>Raw TCP/UDP throughput, non-HTTP protocols, minimal latency overhead</td><td>Need routing based on URL/headers/cookies</td><td>L7 load balancing</td></tr>
+        <tr><td>L7 load balancing</td><td>Content-based routing, canary/A-B by header, per-route retries</td><td>Ultra-high-throughput raw TCP where CPU parsing cost matters</td><td>L4 + app-level routing downstream</td></tr>
+        <tr><td>Round robin</td><td>Homogeneous backends, uniform request cost</td><td>Mixed capacity fleet or highly variable request cost</td><td>Weighted round robin / least connections</td></tr>
+        <tr><td>Consistent hashing</td><td>Cache/session affinity needed, node count changes over time</td><td>No affinity requirement at all (plain least-connections is simpler)</td><td>Plain round robin / least connections</td></tr>
+        <tr><td>Sticky sessions</td><td>Legacy app can't easily externalize session state quickly</td><td>You control the app and can use a shared session store</td><td>Externalized session store (Redis) + stateless routing</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic"><h4>Basic</h4>
+        <details class="qa"><summary>What's the core difference between L4 and L7 load balancing?</summary><div class="answer"><p>L4 routes based on IP/port without inspecting payload (fast, protocol-agnostic). L7 terminates the connection and routes based on parsed application-layer content like URL path or headers (more CPU cost, enables content-based routing).</p></div></details>
+        <details class="qa"><summary>Why does round robin fail when backends have different capacities?</summary><div class="answer"><p>It sends equal traffic to every backend regardless of capacity, so smaller/slower backends get overloaded relative to their actual capability. Weighted round robin fixes this by proportioning traffic to declared weights.</p></div></details>
+        <details class="qa"><summary>What's the difference between active and passive health checks?</summary><div class="answer"><p>Active checks proactively probe a health endpoint on a schedule. Passive checks infer health from real traffic outcomes (errors/timeouts), with no dedicated probe — lower overhead but slower detection.</p></div></details>
+        <details class="qa"><summary>What is a sticky session and what problem does it usually paper over?</summary><div class="answer"><p>Pinning a client to the same backend for a session's duration, usually to compensate for session state stored in server memory instead of a shared store — the real fix is externalizing that state.</p></div></details>
+        <details class="qa"><summary>What's the basic problem with hash(key) % N for routing to a set of servers?</summary><div class="answer"><p>When N changes (server added/removed), the modulus changes and nearly every key's assigned server changes too, causing massive remapping (e.g., cache wipe) on any scaling event.</p></div></details>
+        <details class="qa"><summary>What is a reverse proxy?</summary><div class="answer"><p>A server that sits in front of backend servers, forwarding client requests to them and returning responses, so clients only ever interact with the proxy — commonly also doing load balancing, TLS termination, and caching.</p></div></details>
+      </div>
+      <div class="qa-level medium"><h4>Medium</h4>
+        <details class="qa"><summary>Walk through how consistent hashing bounds the number of keys remapped when a node is added, and why virtual nodes matter.</summary><div class="answer"><p>Keys and servers are mapped onto the same ring; a key belongs to the first server clockwise from its hash. Adding a server only takes ownership of the arc between it and the previous server counter-clockwise, leaving all other keys' ownership unchanged — bounding remapping to roughly K/N keys. Virtual nodes (hashing each physical server to many ring positions) smooth out otherwise uneven arc sizes that a single-position mapping would produce by chance.</p></div><div class="followup">Follow-up: roughly how many virtual nodes per physical server would you use in practice, and why not just one?</div></details>
+        <details class="qa"><summary>Why might an L7 load balancer be able to mask a single backend failure in ways an L4 load balancer cannot?</summary><div class="answer"><p>Because an L7 proxy terminates the HTTP request itself, it can inspect the response status/timeout and transparently retry against a different backend before the client ever sees a failure (proxy_next_upstream). An L4 balancer just forwards packets on an established connection and has no visibility into HTTP-level success/failure to trigger a retry.</p></div></details>
+        <details class="qa"><summary>Why is DNS-based load balancing generally insufficient as the sole load balancing mechanism for a production service?</summary><div class="answer"><p>DNS has no real-time visibility into backend health or load, and TTL-based caching means changes propagate slowly across clients/resolvers — a dead backend's IP can keep being handed out well after it fails, unlike a dedicated LB with active health checks and instant rotation.</p></div></details>
+        <details class="qa"><summary>How does least-connections load balancing adapt better than round robin for workloads with variable request duration?</summary><div class="answer"><p>It routes new requests to whichever backend currently has the fewest active connections, so a backend stuck processing long requests naturally receives less new traffic — round robin would keep sending it an equal share regardless of how backed up it already is.</p></div></details>
+        <details class="qa"><summary>What's the architectural relationship between GSLB and a regional load balancer?</summary><div class="answer"><p>GSLB (often via smart DNS with geo/latency-based routing) picks which region/data center a user's traffic should go to; a regional load balancer underneath then picks the specific instance within that region. It's a two-tier scheme — coarse geographic routing, then fine-grained instance routing.</p></div></details>
+        <details class="qa"><summary>Why does externalizing session state to Redis help both load balancing and deploy safety?</summary><div class="answer"><p>If any backend can read a user's session from a shared store, requests can be routed by pure load-based algorithms (least connections) instead of stickiness, improving load distribution; it also means any backend can be drained/replaced during a deploy without losing in-memory session state tied to that specific instance.</p></div></details>
+      </div>
+      <div class="qa-level advanced"><h4>Advanced</h4>
+        <details class="qa"><summary>Design the load balancing strategy for a multi-tenant SaaS API where a small number of tenants generate disproportionate load ("noisy neighbors"). How would you prevent one tenant from degrading others sharing the same backend pool?</summary><div class="answer"><p>Combine L7 routing keyed on tenant ID with per-tenant rate limiting/quota enforcement at the proxy layer, and consider dedicating a separate backend pool (or a consistent-hashing partition) to the heaviest tenants so their load is isolated rather than shared with the general pool. Least-connections alone doesn't solve this since it balances connection count, not the actual resource cost per tenant's requests — you need request-cost-aware or tenant-aware routing/limits on top.</p></div></details>
+        <details class="qa"><summary>You're migrating a cache cluster from modulo hashing to consistent hashing without downtime. What's your migration strategy?</summary><div class="answer"><p>Run both schemes briefly: write new cache entries under the consistent-hashing scheme while leaving old modulo-hashed entries to expire naturally via TTL, or do a dual-read (check consistent-hash location first, fall back to modulo location on miss) during a transition window. Avoid a hard cutover that invalidates the entire cache at once, which reproduces the exact thundering-herd problem the migration is meant to prevent going forward.</p></div></details>
+        <details class="qa"><summary>Explain a scenario where consistent hashing alone is insufficient and you'd need bounded-load or rendezvous hashing variants instead.</summary><div class="answer"><p>Plain consistent hashing (even with vnodes) doesn't guarantee a hard cap on any single node's load — it reduces but doesn't eliminate skew, especially under adversarial or very non-uniform key popularity (hot keys). Bounded-load consistent hashing adds an explicit per-node capacity limit, overflowing excess keys to the next node on the ring, which matters when a small number of extremely popular keys could otherwise overload whichever node they land on.</p></div></details>
+        <details class="qa"><summary>How would you design health checks to avoid both false positives (ejecting a healthy node) and false negatives (keeping a degraded node in rotation) under real production noise?</summary><div class="answer"><p>Use a threshold-based approach (require N consecutive failures before ejection, not one), check an endpoint that exercises real downstream dependencies (DB, cache) rather than a trivial liveness ping, and combine active checks (catch total outage) with passive checks on real traffic (catch partial degradation that a health endpoint might not reflect, like slow responses under real load that a quick health check wouldn't trigger).</p></div></details>
+        <details class="qa"><summary>In a two-tier GSLB + regional LB architecture, what happens during a regional outage, and what has to be true of your system for failover to actually work?</summary><div class="answer"><p>GSLB must detect the region's health degrading (via health checks on the regional endpoint, not just DNS TTL expiry) and stop routing new users there, redirecting to a healthy region. This only works if the failover region can actually serve the traffic — meaning data replication/availability in that region must already be in place (not provisioned reactively), and in-flight sessions/state in the failed region need a defined fate (lost, replayed, or redirected with reduced functionality).</p></div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment"><span class="level-tag">Beginner (30-60 min)</span><h4>Round robin vs least connections simulation</h4><p>Write a small script simulating 100 requests with random durations (some short, some long) arriving at 4 backends, under round robin vs least-connections assignment. Track the max and average "backend busy time" under each strategy.</p><ul><li>Show the distribution of load across the 4 backends for both strategies.</li><li>Explain in 2-3 sentences why least connections produces a more even distribution under variable request duration.</li></ul><p><strong>Acceptance criteria:</strong> Working simulation with numeric output and a correct explanation tied to the numbers.</p><details class="qa"><summary>Hints</summary><div class="answer"><p>Model each backend as tracking "busy until" timestamp; for least-connections, pick whichever backend has the fewest requests currently assigned (busy_until > now).</p></div></details><p><strong>Bonus:</strong> Add a 5th backend mid-simulation and compare how quickly each strategy "catches up" to using it evenly.</p></div>
+      <div class="assignment"><span class="level-tag">Intermediate (2-4 hrs)</span><h4>Build and test the consistent hashing ring under scaling events</h4><p>Extend the HashRing class from the Code Examples section. Seed it with 1,000 random keys across 5 servers, record the key-to-server mapping, then add a 6th server and remove a different server — measure what percentage of keys actually changed owner in each case.</p><ul><li>Report the percentage remapped for add and for remove, compared to what plain modulo hashing would produce for the same operations.</li><li>Experiment with vnode counts (1 vs 50 vs 150) and report load distribution evenness (e.g., standard deviation of keys per server).</li></ul><p><strong>Acceptance criteria:</strong> Measured remap percentages and a vnode-count-vs-evenness comparison with actual numbers, not just assertions.</p><details class="qa"><summary>Hints</summary><div class="answer"><p>Compute standard deviation of keys-per-server across the 5-6 servers at each vnode count to quantify "evenness" rather than eyeballing it.</p></div></details><p><strong>Bonus:</strong> Simulate a single extremely hot key (90% of traffic) and discuss what breaks even with a well-balanced ring.</p></div>
+      <div class="assignment"><span class="level-tag">Advanced (1-2 days)</span><h4>Design load balancing for a global multiplayer game backend</h4><p>Players connect from all continents; matches require low latency (<80ms) between all players in a match, and a match's game-state server must stay consistent for its duration (players can't be load-balanced mid-match to a different instance).</p><ul><li>Design the GSLB layer: how do you route a player to the right region before matchmaking even starts?</li><li>Design matchmaking's interaction with sticky routing — once a match is assigned to a specific game-state server, how do you ensure every player's packets reach that exact instance, and what happens if that instance fails mid-match?</li><li>Discuss whether L4 or L7 load balancing is more appropriate for the real-time game traffic itself (likely UDP) versus the matchmaking API (likely HTTP).</li></ul><p><strong>Acceptance criteria:</strong> A written design distinguishing the matchmaking control plane (HTTP, L7-appropriate) from the real-time data plane (UDP, L4-appropriate or direct), with explicit handling of mid-match server failure.</p><details class="qa"><summary>Hints</summary><div class="answer"><p>Think of matchmaking as a stateless L7 HTTP service that, once it assigns a match to a specific game-state server instance, returns that instance's direct IP/port to clients so the real-time UDP traffic bypasses any load balancer entirely for the match's duration — this is a common pattern in real game backends (e.g., dedicated game servers behind a matchmaker, not behind a traditional LB).</p></div></details><p><strong>Bonus:</strong> How would you handle a player's ISP routing them to a suboptimal region despite GSLB's best effort, and is that worth solving?</p></div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet"><ul>
+        <li>L4 = fast, protocol-agnostic, routes on IP/port only. L7 = parses HTTP, enables content-based routing, costs more CPU.</li>
+        <li>Round robin assumes equal capacity/cost; weighted round robin and least connections adapt to heterogeneity and variable request duration.</li>
+        <li>hash(key) % N remaps nearly everything when N changes — the classic cause of scaling-event cache wipes.</li>
+        <li>Consistent hashing bounds remapping to ~K/N keys by placing servers and keys on the same ring.</li>
+        <li>Virtual nodes (100-200 per physical server) smooth out load distribution unevenness on the ring.</li>
+        <li>Active health checks = proactive probes; passive = inferred from real traffic. Use both, with a failure threshold.</li>
+        <li>Sticky sessions are usually a symptom of in-memory session state — externalize to Redis instead for true statelessness.</li>
+        <li>DNS-based LB is cheap but health-blind and slow to propagate; dedicated LBs (ALB/NLB) give real-time failover.</li>
+        <li>GSLB routes to a region; a regional LB then routes to an instance — a two-tier scheme.</li>
+      </ul></div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://www.akamai.com/glossary/what-is-consistent-hashing">Consistent Hashing overview</a></li>
+        <li><a href="https://nginx.org/en/docs/http/load_balancing.html">Nginx — HTTP Load Balancing docs</a></li>
+        <li><a href="https://docs.aws.amazon.com/elasticloadbalancing/latest/userguide/what-is-load-balancing.html">AWS — Elastic Load Balancing concepts (ALB vs NLB)</a></li>
+        <li><a href="https://www.envoyproxy.io/docs/envoy/latest/intro/arch_overview/load_balancing/load_balancers">Envoy — Load Balancing architecture overview</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="02-networking.html"><span class="dir">← Previous</span>Networking Basics</a>
+        <a class="next" href="04-caching.html"><span class="dir">Next →</span>Caching</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · System Design</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-typescript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-sql.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-yaml.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "01-system-design", chapterKey: "03-load-balancing" });</script>
+</body>
+</html>

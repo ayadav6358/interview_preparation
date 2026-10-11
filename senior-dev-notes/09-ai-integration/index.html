@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Integration — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span>AI Integration</div>
+      <div class="topbar-actions"><button id="theme-toggle" class="icon-btn">🌙</button></div>
+    </div>
+    <div class="content">
+      <h1>AI Integration</h1>
+      <p class="meta-line"><span>📚 7 chapters</span><span>⏱ ~17–20 hrs total</span></p>
+      <p>AI integration has become a real line item in senior and tech-lead interviews even outside dedicated ML
+      roles — interviewers want to know you can reason about LLM behavior, design a production RAG or agent
+      pipeline, control cost and latency, and avoid the failure modes (hallucination, prompt injection, runaway
+      tool loops) that non-ML-background engineers routinely miss. This track builds that from first principles:
+      how transformers actually generate tokens, how streaming and function calling work over the wire, how
+      vector search and chunking really behave, how agents loop and fail, and how to ship all of it safely and
+      cheaply inside a normal React/Node stack.</p>
+
+      <h2 id="outcomes">Learning Outcomes</h2>
+      <ul>
+        <li>Explain next-token generation, attention, and context windows well enough to reason about model
+        behavior and limitations in a design discussion — without needing an ML background.</li>
+        <li>Build against modern LLM APIs (Claude, GPT) using streaming, structured output, and tool/function
+        calling, and know the SSE/token mechanics underneath the SDK.</li>
+        <li>Choose and tune an embedding model, a chunking strategy, and a vector index (HNSW vs IVF vs
+        brute-force) for a given dataset size and recall/latency budget.</li>
+        <li>Design, build, and evaluate a RAG pipeline end-to-end, including retrieval quality metrics and
+        common failure modes (lost-in-the-middle, chunk fragmentation, stale indexes).</li>
+        <li>Design an agent loop (ReAct-style) with guardrails against infinite loops, tool hallucination, and
+        prompt injection from untrusted content.</li>
+        <li>Run AI features in production: cost/latency budgets, caching, rate limiting, PII handling, and
+        continuous evaluation — and wire all of it into a real React/Node application.</li>
+      </ul>
+
+      <h2 id="chapters">Chapters</h2>
+      <table>
+        <tr><th>#</th><th>Chapter</th><th>Time</th></tr>
+        <tr><td>01</td><td><a href="01-how-llms-work.html">How LLMs work (practical view for developers)</a></td><td>2.5 hrs</td></tr>
+        <tr><td>02</td><td><a href="02-llm-apis.html">Using LLM APIs: prompts, streaming, function/tool calling, structured output</a></td><td>2.5 hrs</td></tr>
+        <tr><td>03</td><td><a href="03-embeddings-vector-db.html">Embeddings and vector databases</a></td><td>2.5 hrs</td></tr>
+        <tr><td>04</td><td><a href="04-rag.html">RAG: architecture, chunking, retrieval, evaluation</a></td><td>3 hrs</td></tr>
+        <tr><td>05</td><td><a href="05-ai-agents.html">AI agents and workflows</a></td><td>2.5 hrs</td></tr>
+        <tr><td>06</td><td><a href="06-ai-in-production.html">AI in production: cost, latency, caching, safety, evaluation</a></td><td>2.5 hrs</td></tr>
+        <tr><td>07</td><td><a href="07-ai-features-react-node.html">AI features in React/Node apps (end-to-end)</a></td><td>3 hrs</td></tr>
+      </table>
+
+      <div class="capstone">
+        <h3>🏆 Capstone Project: Build a RAG-Based Chatbot Over Your Own Docs</h3>
+        <p><strong>Problem statement:</strong> Build a production-shaped RAG chatbot over a set of your own
+        markdown documents (e.g. this course's own chapter files, or a project's internal docs) that answers
+        questions with citations, streams its response token-by-token, and can take one real action via tool
+        calling (e.g. "create a support ticket") — with cost and latency logged on every request and a small
+        eval set to catch regressions.</p>
+        <p><strong>Required features:</strong></p>
+        <ul>
+          <li>Ingestion/chunking pipeline: parse markdown, chunk with heading-aware splitting + overlap, store
+          chunk metadata (source file, heading path, token count).</li>
+          <li>Embeddings generated per chunk and stored in a vector DB (pgvector, Qdrant, or even a local HNSW
+          index) with a re-embedding path for when docs change.</li>
+          <li>Retrieval + re-ranking: top-k vector search followed by a cheap re-rank step (cross-encoder or
+          LLM-based) before the chunks go into the prompt.</li>
+          <li>Node backend exposing a streaming chat endpoint (SSE or chunked HTTP) and a React chat UI that
+          renders tokens as they arrive, including interim "thinking/retrieving" states.</li>
+          <li>One real tool/function call (e.g. "create a ticket" that writes to a database or calls a mock
+          API), gated so the model can only invoke it with validated arguments.</li>
+          <li>Cost and latency logging per request (tokens in/out, model, retrieval time, generation time) and
+          a basic dashboard or log view.</li>
+          <li>A simple eval set (15–30 question/expected-answer or expected-citation pairs) run automatically
+          to catch retrieval or prompt regressions.</li>
+        </ul>
+        <p><strong>Tech stack suggestion:</strong> Node.js + TypeScript (Fastify/Express) for the API, React for
+        the chat UI, Claude or GPT API for generation, an embeddings API (OpenAI, Voyage, or Cohere) plus
+        pgvector or Qdrant for storage, SSE for streaming.</p>
+        <p><strong>Milestones:</strong></p>
+        <ol>
+          <li>Write a short design doc: data flow diagram, chunking strategy, index choice, and why.</li>
+          <li>Build the ingestion pipeline and populate the vector DB from a real set of markdown files.</li>
+          <li>Build the retrieval + re-rank step and verify it returns relevant chunks for 10 hand-picked
+          queries before touching generation.</li>
+          <li>Wire up the streaming chat endpoint and React UI, including citations rendered next to the
+          answer.</li>
+          <li>Add the tool-calling action with argument validation and a confirmation step.</li>
+          <li>Add cost/latency logging and the eval set; run the eval set before and after a prompt change to
+          prove it catches a regression.</li>
+        </ol>
+        <p><strong>Evaluation checklist:</strong></p>
+        <ul>
+          <li>☐ Can explain exactly why each retrieved chunk was selected (embedding similarity + re-rank score).</li>
+          <li>☐ Streaming works token-by-token with no visible buffering lag, and errors mid-stream are handled.</li>
+          <li>☐ The tool call cannot be triggered by injected text inside a retrieved document (tested with an
+          adversarial doc).</li>
+          <li>☐ Cost per query is known and a budget/rate-limit guard exists.</li>
+          <li>☐ Can defend the chunking size/overlap and index choice against at least one alternative.</li>
+        </ul>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · AI Integration</footer>
+  </main>
+</div>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "09-ai-integration" });</script>
+</body>
+</html>

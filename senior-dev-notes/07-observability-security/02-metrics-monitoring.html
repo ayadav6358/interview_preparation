@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Metrics, Monitoring & Alerting — Observability & Security — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">Observability &amp; Security</a><span class="sep">›</span>Metrics, Monitoring &amp; Alerting</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>Metrics, Monitoring &amp; Alerting</h1>
+      <p class="meta-line"><span>⏱ ~2.5 hrs</span><span>📍 Chapter 2 of 6</span></p>
+      <p><strong>One-line summary:</strong> Metrics are pre-aggregated numeric time series (counters, gauges,
+      histograms) that are cheap to collect at any volume and form the backbone of dashboards and alerting —
+      Prometheus is the de facto standard for collecting them, Grafana for visualizing them.</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>Logs tell you what happened to one request; metrics tell you the health of the whole system at a glance
+      and are what pages you at 3am before a customer complains. A senior engineer is expected to instrument new
+      services with the right metrics from day one (not bolt them on after the first outage), design alerts that
+      detect real problems without paging on noise, and reason about the RED/USE methods when asked "what would
+      you monitor for this service" in an interview. This is also where SLIs/SLOs/error budgets — a very common
+      senior/staff interview topic — come from.</p>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>Basic familiarity with HTTP services and time-series concepts. Related: <a href="01-logging.html">Logging</a>,
+      <a href="03-distributed-tracing.html">Distributed Tracing</a>.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="metric-types">Metric types: counter, gauge, histogram, summary</h3>
+      <p>A <strong>counter</strong> only increases (resets to 0 on restart) — total requests served, total errors.
+      A <strong>gauge</strong> can go up or down — current memory usage, active connections, queue depth. A
+      <strong>histogram</strong> buckets observations (e.g., request duration) into configurable ranges and lets
+      you compute approximate quantiles (p50, p95, p99) server-side at query time from the bucket counts — this is
+      what Prometheus recommends because bucket counts aggregate correctly across multiple instances. A
+      <strong>summary</strong> computes quantiles client-side before exposing them, which is more precise per-instance
+      but cannot be meaningfully aggregated across instances (you can't average two p99s and get a correct p99) —
+      this is why histograms are generally preferred for anything you'll aggregate across a fleet.</p>
+
+      <h3 id="red-use">The RED and USE methods</h3>
+      <p><strong>RED</strong> (for request-driven services): Rate (requests/sec), Errors (error rate), Duration
+      (latency distribution). This is the minimum viable instrumentation for any HTTP/RPC service — if you have
+      only these three per endpoint, you can answer "is this service healthy" in one glance. <strong>USE</strong>
+      (for resources, from Brendan Gregg): Utilization, Saturation, Errors — used for infrastructure-level
+      resources like CPU, disk, network (e.g., CPU utilization %, CPU saturation = run-queue length, disk errors).
+      Senior interview framing: RED for your services, USE for the infra underneath them.</p>
+
+      <h3 id="pull-vs-push">Pull vs push metric collection</h3>
+      <p>Prometheus uses a <strong>pull</strong> model: it scrapes a <code>/metrics</code> HTTP endpoint on each
+      target at a configured interval (e.g., every 15s). This is simpler to operate (no need for every service to
+      know where to push to, no fan-in bottleneck) and makes "is this target even reachable" itself an observable
+      signal (the <code>up</code> metric). The downside: short-lived jobs (e.g., a serverless function, a batch
+      job) may finish before a scrape happens — Prometheus solves this with a <strong>Pushgateway</strong>, where
+      such jobs push their final metrics once, and Prometheus scrapes the gateway instead. StatsD/Graphite use a
+      <strong>push</strong> model (every instance pushes metrics proactively), which fits short-lived processes
+      more naturally but requires the collector to handle fan-in from every instance.</p>
+
+      <h3 id="labels-cardinality">Labels and cardinality</h3>
+      <p>Prometheus metrics have key-value labels (<code>http_requests_total{method="GET", route="/orders", status="200"}</code>)
+      that let you slice and dice at query time. The critical senior-level gotcha: every unique combination of
+      label values creates a new time series. Using a label like <code>userId</code> or a raw URL (instead of a
+      normalized route template like <code>/orders/:id</code>) on a metric is a <strong>cardinality explosion</strong>
+      — millions of users or raw paths means millions of time series, which can take down a Prometheus instance's
+      memory and query performance. Always use bounded, low-cardinality labels; push high-cardinality data
+      (user IDs, request IDs) to logs or traces instead.</p>
+
+      <h3 id="slo-error-budget">SLIs, SLOs, and error budgets</h3>
+      <p>An <strong>SLI</strong> (Service Level Indicator) is a measured metric — e.g., "% of requests served in
+      under 300ms." An <strong>SLO</strong> (Service Level Objective) is a target for that SLI — e.g., "99.9% of
+      requests under 300ms, measured over 30 days." The <strong>error budget</strong> is the allowed failure
+      margin implied by the SLO (0.1% here) — once you've "spent" your error budget for the period (too many slow
+      or failed requests), the team should stop shipping risky changes and focus on reliability until the budget
+      resets. This reframes alerting from "page on every error" to "page when we're burning error budget too fast
+      to hit the SLO" — this is the basis of Google SRE's multi-window, multi-burn-rate alerting, a favorite
+      staff-level interview topic.</p>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>Prometheus's server has three core pieces: a scraper that pulls <code>/metrics</code> text-format output
+      from each target on an interval, a time-series database (TSDB) that stores samples on disk in compressed
+      chunks keyed by metric+label-set, and PromQL, a query language for slicing/aggregating those series
+      (<code>rate()</code>, <code>histogram_quantile()</code>, <code>sum by (route) (...)</code>). Alertmanager is
+      a separate component: Prometheus evaluates alerting rules (PromQL expressions that, when true for a
+      configured duration, fire an alert) and sends firing alerts to Alertmanager, which handles deduplication,
+      grouping (so 50 pods failing the same way becomes 1 page, not 50), silencing, and routing (Slack, PagerDuty,
+      email) based on label-matching rules. Grafana is purely a query/visualization layer on top — it doesn't
+      store data itself, it queries Prometheus (or Loki, or other data sources) live.</p>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+graph LR
+  A[Service /metrics endpoint] -- scrape every 15s --> B[Prometheus TSDB]
+  B -- PromQL --> C[Grafana Dashboards]
+  B -- alerting rules evaluate --> D[Alertmanager]
+  D -- group/dedupe/route --> E[PagerDuty]
+  D -- group/dedupe/route --> F[Slack]
+  G[Short-lived batch job] -- push once --> H[Pushgateway]
+  H -- scraped by --> B
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-typescript">// -----------------------------------------------------------------------
+// 1. prom-client: RED metrics for an Express app, with route templates
+//    (not raw URLs) to avoid cardinality explosion.
+// -----------------------------------------------------------------------
+import express from "express";
+import client from "prom-client";
+
+const register = new client.Registry();
+client.collectDefaultMetrics({ register }); // process/CPU/memory/event-loop metrics
+
+const httpRequestsTotal = new client.Counter({
+  name: "http_requests_total",
+  help: "Total HTTP requests",
+  labelNames: ["method", "route", "status"],
+  registers: [register],
+});
+
+const httpRequestDuration = new client.Histogram({
+  name: "http_request_duration_seconds",
+  help: "HTTP request duration in seconds",
+  labelNames: ["method", "route", "status"],
+  buckets: [0.01, 0.05, 0.1, 0.3, 0.5, 1, 2, 5], // tuned to this service's expected latency
+  registers: [register],
+});
+
+const app = express();
+
+app.use((req, res, next) => {
+  const start = process.hrtime.bigint();
+  res.on("finish", () => {
+    // IMPORTANT: req.route.path gives the route TEMPLATE ("/orders/:id"),
+    // never req.path/req.originalUrl — that would create one time series
+    // per unique order ID = cardinality explosion.
+    const route = req.route?.path ?? "unmatched";
+    const labels = { method: req.method, route, status: String(res.statusCode) };
+    const durationSeconds = Number(process.hrtime.bigint() - start) / 1e9;
+    httpRequestsTotal.inc(labels);
+    httpRequestDuration.observe(labels, durationSeconds);
+  });
+  next();
+});
+
+app.get("/orders/:id", (req, res) => res.json({ id: req.params.id }));
+
+app.get("/metrics", async (_req, res) => {
+  res.set("Content-Type", register.contentType);
+  res.end(await register.metrics());
+});
+
+// -----------------------------------------------------------------------
+// 2. PromQL examples you should be able to write cold in an interview
+// -----------------------------------------------------------------------
+/*
+// Request rate per route over the last 5 minutes:
+sum by (route) (rate(http_requests_total[5m]))
+
+// Error rate (%) per route:
+sum by (route) (rate(http_requests_total{status=~"5.."}[5m]))
+  /
+sum by (route) (rate(http_requests_total[5m])) * 100
+
+// p95 latency per route, from histogram buckets:
+histogram_quantile(
+  0.95,
+  sum by (route, le) (rate(http_request_duration_seconds_bucket[5m]))
+)
+
+// Multi-window, multi-burn-rate SLO alert (simplified):
+// Fires if we are burning error budget fast enough that at this rate
+// we would exhaust the monthly 0.1% budget in less than ~2 days.
+(
+  sum(rate(http_requests_total{status=~"5.."}[1h]))
+  /
+  sum(rate(http_requests_total[1h]))
+) > (14.4 * 0.001)
+*/
+
+// -----------------------------------------------------------------------
+// 3. BAD vs GOOD label usage
+// -----------------------------------------------------------------------
+// BAD — userId and raw path create unbounded cardinality; this metric
+// set will grow forever and can OOM a Prometheus instance.
+const badCounter = new client.Counter({
+  name: "requests_bad",
+  labelNames: ["userId", "fullPath"],
+  registers: [register],
+});
+// badCounter.inc({ userId: "user_8821", fullPath: "/orders/9f2e8" }); // DON'T
+
+// GOOD — bounded labels only; put the userId in a log line or trace
+// attribute instead, where high cardinality is expected and indexed
+// differently (or not indexed at all, as with Loki/Tempo).
+const goodCounter = new client.Counter({
+  name: "requests_good",
+  labelNames: ["route", "status"],
+  registers: [register],
+});
+// goodCounter.inc({ route: "/orders/:id", status: "200" }); // OK
+</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod">
+        <h4>At scale</h4>
+        <p>An e-commerce platform added a metric labeled by raw request path during a Black Friday prep sprint
+        (<code>http_requests_total{path="/products/skateboard-xl-navy-blue"}</code> for every unique product slug).
+        Within hours, Prometheus memory usage climbed from 4GB to 40GB and queries started timing out — a textbook
+        cardinality explosion, with hundreds of thousands of unique product slugs each creating their own time
+        series. The fix was immediate: redeploy with the label changed to a normalized route template
+        (<code>/products/:slug</code>), delete the exploded series, and add a cardinality-limit alert
+        (<code>prometheus_tsdb_symbol_table_size_bytes</code> trending up) so this class of regression pages
+        someone before it takes down monitoring itself — which is especially dangerous because losing monitoring
+        during your highest-traffic period of the year is its own incident.</p>
+      </div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha">
+        <h4>Gotcha</h4>
+        <p>Alerting directly on raw thresholds ("CPU > 80%") without context causes chronic false pages — 80% CPU
+        might be totally fine for a batch-processing node and catastrophic for a latency-sensitive API node.
+        Alert on symptoms that map to user impact (latency, error rate, SLO burn) rather than causes (CPU, memory)
+        wherever possible; use the resource metrics for debugging once paged, not as the page trigger itself.</p>
+      </div>
+      <ul>
+        <li>Use histograms (not summaries) for anything you need to aggregate across instances.</li>
+        <li>Pick bucket boundaries deliberately based on your actual latency distribution — default buckets are
+        rarely right for your service.</li>
+        <li>Default Prometheus retention is short (often 15 days) — pair with long-term storage (Thanos, Mimir,
+        Cortex) if you need historical trend analysis.</li>
+        <li>Alertmanager grouping/inhibition rules matter as much as the alert rule itself — ungrouped alerts
+        during a real outage can page an on-call engineer hundreds of times in minutes.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>Histogram</td><td>Need aggregatable quantiles across many instances</td><td>Need very precise per-instance quantiles and never aggregate</td><td>Summary</td></tr>
+        <tr><td>Pull (Prometheus)</td><td>Long-running services, simpler ops, service discovery is available</td><td>Many short-lived/serverless jobs that finish before a scrape</td><td>Pushgateway or push model (StatsD)</td></tr>
+        <tr><td>Threshold alerting</td><td>Simple, well-understood failure modes (disk full)</td><td>Noisy/variable workloads where fixed thresholds false-positive often</td><td>SLO-based multi-burn-rate alerting</td></tr>
+        <tr><td>Self-hosted Prometheus/Grafana</td><td>Full control, cost-sensitive at scale, existing k8s expertise</td><td>Small team without ops bandwidth to run HA Prometheus</td><td>Managed (Grafana Cloud, Datadog, New Relic)</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic">
+        <h4>Basic</h4>
+        <details class="qa"><summary>What are the four main Prometheus metric types?</summary><div class="answer"><p>Counter (monotonically increasing), Gauge (goes up/down), Histogram (bucketed observations with aggregatable quantiles), Summary (client-side quantiles, not aggregatable).</p></div><div class="followup">Follow-up: why can't you average two summaries' p99 across instances?</div></details>
+        <details class="qa"><summary>Explain the RED method.</summary><div class="answer"><p>Rate, Errors, Duration — the minimum metrics to instrument any request-driven service to answer "is this healthy" at a glance.</p></div><div class="followup">Follow-up: what's the USE method and when would you use it instead?</div></details>
+        <details class="qa"><summary>What's the difference between pull-based and push-based metric collection?</summary><div class="answer"><p>Pull: the monitoring system scrapes a metrics endpoint on each target on an interval (Prometheus). Push: each instance proactively sends metrics to a collector (StatsD/Graphite).</p></div><div class="followup">Follow-up: how does Prometheus handle a short-lived job that would finish before a scrape?</div></details>
+        <details class="qa"><summary>What is cardinality in the context of metrics, and why is it dangerous?</summary><div class="answer"><p>The number of unique label-value combinations for a metric. High-cardinality labels (user IDs, raw URLs) create unbounded numbers of time series, which can exhaust memory/storage on the metrics backend.</p></div><div class="followup">Follow-up: where should high-cardinality data go instead?</div></details>
+        <details class="qa"><summary>What does Grafana do, and what does it not do?</summary><div class="answer"><p>It's a visualization/dashboarding layer that queries data sources (Prometheus, Loki, etc.) live; it does not store the data itself.</p></div><div class="followup">Follow-up: what happens to a Grafana dashboard if the underlying Prometheus instance is down?</div></details>
+        <details class="qa"><summary>What is Alertmanager and how does it relate to Prometheus?</summary><div class="answer"><p>A separate component that receives firing alerts from Prometheus and handles deduplication, grouping, silencing, and routing to notification channels (Slack, PagerDuty).</p></div><div class="followup">Follow-up: why is grouping important during a large-scale outage?</div></details>
+        <details class="qa"><summary>What is an SLO and how does it differ from an SLA?</summary><div class="answer"><p>An SLO is an internal reliability target (e.g., 99.9% of requests under 300ms); an SLA is an external, often contractual, commitment to customers, usually with consequences (credits/penalties) if missed, and typically looser than the internal SLO.</p></div><div class="followup">Follow-up: why would you set your SLO stricter than your SLA?</div></details>
+      </div>
+      <div class="qa-level medium">
+        <h4>Medium</h4>
+        <details class="qa"><summary>Why does Prometheus prefer histograms over summaries for service-level latency metrics?</summary><div class="answer"><p>Histogram bucket counts can be summed across instances at query time and then a quantile computed from the aggregated buckets — giving a fleet-wide p95/p99. Summary quantiles are computed client-side per instance and mathematically cannot be correctly combined across instances (averaging percentiles is not valid).</p></div><div class="followup">Follow-up: what's the cost of histograms (what do you pay for this aggregatability)?</div></details>
+        <details class="qa"><summary>Design an alerting strategy for an API with a 99.9% monthly availability SLO.</summary><div class="answer"><p>Use multi-window, multi-burn-rate alerts: a fast-burn alert (short window, high burn rate threshold) for "page now, we'll exhaust the budget in hours," and a slow-burn alert (long window, lower threshold) for "ticket, not page, we're trending toward exhausting the budget over days" — this avoids paging on brief blips while still catching slow degradations.</p></div><div class="followup">Follow-up: why use two windows instead of just one threshold?</div></details>
+        <details class="qa"><summary>How would you instrument a service to avoid cardinality explosions while still being able to debug per-customer issues?</summary><div class="answer"><p>Keep metric labels bounded (route templates, status codes, a small fixed set of tiers/plans) and push identifying, high-cardinality context (customerId, requestId) to logs/traces, correlating via a shared ID when you need to go from "metric shows a spike" to "which specific customers/requests."</p></div><div class="followup">Follow-up: what's an acceptable cardinality budget rule of thumb for a label?</div></details>
+        <details class="qa"><summary>Explain error budgets and how they change team behavior day to day.</summary><div class="answer"><p>An error budget is the allowed unreliability implied by an SLO over a period. While budget remains, teams can ship faster/take more risk; once exhausted, the team should pause risky releases and prioritize reliability work until the budget replenishes — this gives a data-driven, non-political way to balance velocity vs. stability.</p></div><div class="followup">Follow-up: who should own the decision to freeze releases when budget is exhausted?</div></details>
+        <details class="qa"><summary>Your Prometheus instance is running out of memory. How do you diagnose and fix it?</summary><div class="answer"><p>Check <code>prometheus_tsdb_head_series</code> and look for metrics/labels with unexpectedly high series counts (often a recently added high-cardinality label); fix by removing/relabeling the offending label, and consider remote-write to long-term storage (Thanos/Mimir) with downsampling instead of keeping everything in local TSDB.</p></div><div class="followup">Follow-up: how would you prevent this class of issue from recurring across teams?</div></details>
+        <details class="qa"><summary>What's the difference between Thanos/Mimir/Cortex and vanilla Prometheus?</summary><div class="answer"><p>They provide horizontally scalable, long-term, highly-available storage and global querying across many Prometheus instances, since vanilla Prometheus is single-node with limited local retention by design.</p></div><div class="followup">Follow-up: why might a small team not need this yet?</div></details>
+      </div>
+      <div class="qa-level advanced">
+        <h4>Advanced</h4>
+        <details class="qa"><summary>Design the full monitoring/alerting architecture for a multi-region, 200-service platform.</summary><div class="answer"><p>Per-cluster Prometheus (or Agent mode) scraping locally to avoid cross-region scrape latency/cost, remote-writing into a global long-term store (Thanos/Mimir) for cross-region queries and historical analysis, Alertmanager in HA pairs per region with a global routing tree, SLO dashboards per service owned by that team, and a platform-level "meta-monitoring" layer watching the monitoring stack itself (so monitoring outages are themselves detected).</p></div><div class="followup">Follow-up: how do you avoid the global store becoming a single point of failure for alerting?</div></details>
+        <details class="qa"><summary>How would you design multi-burn-rate alerting mathematically, and justify the burn-rate multiplier you choose?</summary><div class="answer"><p>If your error budget is (1 - SLO) over a period P, a burn rate of 1x exhausts the budget exactly at P. A short-window fast-burn alert might trigger at 14.4x burn rate over 1 hour (exhausts a 30-day budget in ~2 days) — tuned to balance detection speed against false-positive rate for short traffic blips; a slow-burn alert might trigger at 6x over 6 hours, catching sustained degradation that a 1-hour window would miss or dismiss as noise.</p></div><div class="followup">Follow-up: how do you validate your chosen multipliers don't produce excessive false pages in practice?</div></details>
+        <details class="qa"><summary>A key metric silently stopped reporting for 3 days before anyone noticed — how do you prevent this class of failure?</summary><div class="answer"><p>Add "metric absence" alerts (alert if a critical series hasn't been scraped/updated in N minutes, using <code>absent()</code> or the <code>up</code> metric), treat dashboards going flat/empty as itself suspicious rather than assuming "no news is good news," and include synthetic/canary traffic that should always produce a baseline metric value so true silence is distinguishable from "genuinely zero errors."</p></div><div class="followup">Follow-up: why is "no alerts fired" not the same as "system is healthy"?</div></details>
+        <details class="qa"><summary>How do you decide what NOT to alert on, given that over-alerting is as dangerous as under-alerting?</summary><div class="answer"><p>Every alert should map to concrete, immediate human action and real user impact — if an alert's runbook is "just look at it" or it routinely gets ack'd and ignored, it should be downgraded to a dashboard/ticket instead of a page. Periodically audit alert-to-action ratio and prune/demote alerts with low actionability.</p></div><div class="followup">Follow-up: how would you measure "alert quality" quantitatively across a team?</div></details>
+        <details class="qa"><summary>Compare building your own Prometheus/Grafana/Alertmanager stack vs. a managed vendor (Datadog, Grafana Cloud) for a Series B startup scaling fast.</summary><div class="answer"><p>Self-hosted gives cost control at real scale and full data ownership but requires dedicated ops investment (HA, storage scaling, upgrades); managed vendors get you production-grade observability immediately with less ops burden but costs scale aggressively with volume/cardinality and you're dependent on their roadmap/pricing changes. Most fast-scaling startups start managed and migrate to self-hosted once volume makes the vendor bill a board-level conversation.</p></div><div class="followup">Follow-up: what specific metric (cost per metric point, cost per host) would you track to know when to switch?</div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment">
+        <span class="level-tag">Beginner (30-60 min)</span>
+        <h4>Instrument an Express app with RED metrics</h4>
+        <p>Add prom-client to an Express app with 2-3 routes. Expose a <code>/metrics</code> endpoint with a
+        counter and histogram following the RED method, using route templates as labels.</p>
+        <ul>
+          <li>Counter: total requests by method/route/status.</li>
+          <li>Histogram: request duration by method/route/status.</li>
+          <li>Verify in a raw curl to <code>/metrics</code> that labels use route templates, not raw paths.</li>
+        </ul>
+        <p><strong>Acceptance criteria:</strong> Hitting <code>/orders/1</code> and <code>/orders/2</code> produces
+        metrics under the same <code>route="/orders/:id"</code> label, not two separate series.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>Express exposes the matched route template at <code>req.route.path</code> — use that, not <code>req.path</code>.</p></div></details>
+        <p><strong>Bonus:</strong> Run Prometheus + Grafana via Docker Compose and scrape your app.</p>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Intermediate (2-4 hrs)</span>
+        <h4>PromQL dashboard + alert rule</h4>
+        <p>Using the instrumented app from the beginner assignment, write PromQL queries for request rate, error
+        rate %, and p95 latency per route, build a Grafana dashboard with them, and write a Prometheus alert rule
+        that fires when error rate exceeds 5% for 5 minutes.</p>
+        <ul>
+          <li>Dashboard has at least 3 panels: rate, error %, p95 latency.</li>
+          <li>Alert rule defined in YAML, loaded into Prometheus, verified to actually fire (inject errors to trigger it).</li>
+          <li>Route the alert to a webhook or log output via Alertmanager config.</li>
+        </ul>
+        <p><strong>Acceptance criteria:</strong> You can demonstrate the alert transitioning from inactive → pending → firing in the Prometheus UI.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>Use <code>for: 5m</code> in the alert rule to require sustained breach, not a single noisy sample.</p></div></details>
+        <p><strong>Bonus:</strong> Add a cardinality-exploding label on purpose, observe the series count grow, then fix it.</p>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Advanced (1-2 days)</span>
+        <h4>Multi-burn-rate SLO alerting system</h4>
+        <p>Define a 99.9% latency SLO (e.g., 99.9% of requests under 500ms over 30 days) for your instrumented
+        service. Implement fast-burn and slow-burn alert rules, load-test to intentionally burn budget at
+        different rates, and verify each alert fires at the appropriate severity/urgency.</p>
+        <ul>
+          <li>Calculate and justify your burn-rate multipliers and windows in a short write-up.</li>
+          <li>Demonstrate a short traffic blip NOT triggering the slow-burn alert but triggering fast-burn if severe enough.</li>
+          <li>Demonstrate a sustained moderate degradation triggering slow-burn without ever tripping fast-burn.</li>
+        </ul>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>This is intentionally open-ended — think in terms of budget-exhaustion time, not raw thresholds, when picking your multipliers.</p></div></details>
+        <p><strong>Bonus:</strong> Add a second SLI (error rate) and combine both into one SLO dashboard.</p>
+      </div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet">
+        <ul>
+          <li>4 metric types: Counter, Gauge, Histogram, Summary — use Histogram for aggregatable quantiles.</li>
+          <li>RED for services (Rate, Errors, Duration); USE for infra resources (Utilization, Saturation, Errors).</li>
+          <li>Prometheus = pull model (scrapes /metrics); Pushgateway bridges short-lived jobs into the pull model.</li>
+          <li>Never put unbounded values (user IDs, raw URLs) in metric labels — cardinality explosion.</li>
+          <li>Use route templates, not raw paths, as labels.</li>
+          <li>SLI = measured indicator; SLO = internal target; SLA = external/contractual commitment.</li>
+          <li>Error budget = allowed unreliability from the SLO; exhausting it should slow down risky shipping.</li>
+          <li>Alert on symptoms (latency/error rate/SLO burn), not raw causes (CPU%) — fewer false pages.</li>
+          <li>Multi-window, multi-burn-rate alerting catches both sharp spikes and slow sustained degradation.</li>
+          <li>Grafana visualizes; it doesn't store data — Prometheus/Loki/Tempo are the actual stores.</li>
+        </ul>
+      </div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://prometheus.io/docs/introduction/overview/">Prometheus documentation</a></li>
+        <li><a href="https://sre.google/sre-book/service-level-objectives/">Google SRE Book: Service Level Objectives</a></li>
+        <li><a href="https://sre.google/workbook/alerting-on-slos/">Google SRE Workbook: Alerting on SLOs</a></li>
+        <li><a href="https://grafana.com/docs/grafana/latest/">Grafana documentation</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="01-logging.html"><span class="dir">← Previous</span>Logging &amp; Centralized Logging</a>
+        <a class="next" href="03-distributed-tracing.html"><span class="dir">Next →</span>Distributed Tracing</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · Observability &amp; Security</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-typescript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-yaml.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-sql.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "07-observability-security", chapterKey: "02-metrics-monitoring" });</script>
+</body>
+</html>

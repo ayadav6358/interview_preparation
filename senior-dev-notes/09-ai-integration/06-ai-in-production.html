@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI in Production: Cost, Latency & Safety — AI Integration — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">AI Integration</a><span class="sep">›</span>AI in Production</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>AI in Production: Cost, Latency, Caching, Safety, Evaluation</h1>
+      <p class="meta-line"><span>⏱ ~3 hrs</span><span>📍 Chapter 6 of 7</span></p>
+      <p><strong>One-line summary:</strong> Shipping an AI feature that works in a demo is the easy 20%; the
+      other 80% is making it affordable at scale, fast enough to feel responsive, safe enough not to embarrass
+      or expose the company, and measurably good enough that you can tell when a change made it better or
+      worse — this chapter is the operational discipline around the model call, not the model call itself.</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>Anyone can call an LLM API and get a working feature in an afternoon. What separates a senior/tech-lead
+      candidate is the ability to reason about what happens when that feature has 100,000 daily users instead of
+      3 — what it costs, why it's slow, what happens when the model says something harmful or wrong in front of
+      a customer, and how you'd know, with data rather than vibes, whether a prompt change or model swap actually
+      improved things. Interviewers in this space increasingly probe exactly these operational dimensions because
+      they're where real production AI systems actually fail and where real engineering judgment (not model
+      knowledge) is demonstrated.</p>
+      <div class="box why"><h4>Why</h4><p>Every AI feature has a per-request dollar cost and a latency floor set
+      by model generation speed — unlike a typical CRUD endpoint, you cannot simply "add more servers" to make an
+      LLM call cheaper or faster; the constraints come from the model provider's pricing and infrastructure. That
+      forces different engineering tradeoffs (caching, routing, streaming, batching) than most backend engineers
+      are used to reasoning about, which is exactly why it gets tested.</p></div>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>Requires <a href="01-how-llms-work.html">How LLMs Work</a> and <a href="05-ai-agents.html">AI Agents &
+      Workflows</a>. Builds toward <a href="07-ai-features-react-node.html">AI Features in React/Node</a>, where
+      these concerns show up as concrete architecture.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="cost-latency-basics">Token economics and the latency floor</h3>
+      <p>Frontier model APIs (Claude, GPT) bill per token, with <strong>input tokens priced lower than output
+      tokens</strong> (often by 3-5x) because generating output is autoregressive and sequential — each output
+      token requires a full forward pass conditioned on everything before it, while input tokens are processed
+      in parallel during the prompt-encoding phase. This asymmetry drives real design decisions: a verbose system
+      prompt repeated on every call is relatively cheap; a verbose, unconstrained model response is comparatively
+      expensive and also the dominant contributor to latency, because tokens are generated one at a time and
+      total response time is roughly proportional to output length. <strong>Time-to-first-token (TTFT)</strong>
+      and <strong>tokens-per-second generation rate</strong> are the two latency metrics that actually matter for
+      user-perceived responsiveness — streaming (covered in chapter 7) optimizes for the first, not the second,
+      which is why a streamed long response still "feels" fast even though total completion time is unchanged.</p>
+
+      <h3 id="caching-strategies">Caching strategies: prompt caching and semantic caching</h3>
+      <p><strong>Prompt caching</strong> (offered by both Anthropic and OpenAI) lets you mark a prefix of your
+      prompt — a long system prompt, a large document, a big tool-definition block — as cacheable; on subsequent
+      requests sharing that identical prefix within a short TTL window (commonly ~5 minutes, refreshed on each
+      hit), the provider skips re-processing that prefix and charges a small fraction of the normal input-token
+      rate for the cached portion (and a one-time, slightly higher write cost on the first call that creates the
+      cache). This is the single highest-leverage cost optimization for any system that repeatedly sends large,
+      mostly-static context (a RAG system's retrieved-but-stable reference docs, an agent's lengthy tool
+      definitions, a chatbot's long system prompt) — put the static, shared content first in the prompt and the
+      per-request variable content (the actual user question) last, since caching works on a prefix match and any
+      change earlier in the prompt invalidates everything after it.</p>
+      <p><strong>Semantic/response caching</strong> is a different layer: cache full request→response pairs (or
+      embed the request and look up near-duplicate past requests) so that a repeated or near-identical question
+      skips the model call entirely. This works well for high-repetition traffic (FAQ-style queries, common
+      support questions) but requires care — caching a response to a slightly-different-but-semantically-similar
+      query can silently serve a wrong or stale answer if the similarity threshold is too loose, and anything
+      personalized or time-sensitive should never hit this cache layer at all.</p>
+
+      <h3 id="model-routing">Model routing and cascading</h3>
+      <p>Not every request needs the most expensive, most capable model. <strong>Model routing</strong> classifies
+      incoming requests (by complexity, by task type, or by an explicit cheap classifier call) and sends simple
+      ones to a smaller/cheaper/faster model while reserving the frontier model for requests that genuinely need
+      its capability — e.g. route simple intent classification or short factual lookups to a small fast model,
+      and route multi-step reasoning or nuanced writing to the larger model. <strong>Cascading</strong> is a
+      related but distinct pattern: always try the cheap/fast model first, and only escalate to the expensive
+      model if the cheap model's output fails a confidence/quality check (low confidence score, a validator
+      rejecting the output, or the cheap model explicitly declining). Cascading adds a small latency tax on the
+      escalation path (you pay for both calls on escalated requests) but can cut aggregate cost substantially
+      when most traffic is actually simple — the key senior insight is that this is an empirical decision: you
+      need real traffic data on how often escalation actually triggers before claiming savings, not an assumption.</p>
+
+      <h3 id="safety-evaluation">Safety: guardrails, red-teaming, and output validation</h3>
+      <p><strong>Input guardrails</strong> screen what reaches the model: classifiers (often a small, fast model
+      call, or a dedicated moderation endpoint) flag prompt injection attempts, jailbreak patterns, or disallowed
+      content categories before the main model call ever runs. <strong>Output guardrails</strong> screen what
+      leaves the model before it reaches the user: structural validation (does the output match an expected
+      schema/format), content moderation (toxicity, PII leakage, disallowed-topic detection), and factuality/
+      groundedness checks for RAG-style systems. Neither layer is optional at any real scale, and both should be
+      treated as independent of the model's own built-in safety training — provider-level safety tuning reduces
+      but does not eliminate the need for application-level guardrails specific to your product's risk surface.</p>
+      <p><strong>Red-teaming</strong> is the practice of deliberately trying to break your own system before
+      launch and on an ongoing basis: adversarial prompts designed to extract system prompts, bypass content
+      restrictions, trigger unintended tool calls (for agentic systems), or produce outputs that would embarrass
+      the company if screenshotted. This should be a standing practice with a maintained adversarial test suite
+      re-run on every meaningful prompt/model change, not a one-time pre-launch exercise — new jailbreak
+      techniques and new product surface area both continuously create new attack vectors.</p>
+
+      <h3 id="llm-evaluation">Evaluation: knowing if a change made things better or worse</h3>
+      <p>Production AI systems need the same change-management discipline as any other critical system, adapted
+      for non-deterministic output: <strong>golden datasets</strong> (a curated, versioned set of representative
+      inputs with known-good expected outputs or scoring rubrics) that every prompt, model, or pipeline change
+      gets evaluated against before shipping; <strong>LLM-as-judge</strong> scoring (a separate, often more
+      capable model scores outputs against a rubric — correctness, tone, safety, format compliance) for criteria
+      too nuanced for exact-match scoring; and <strong>online evaluation</strong> (real production metrics —
+      thumbs up/down, task completion/abandonment rate, escalation-to-human rate, regenerate-click rate) that
+      catches what the offline golden set didn't anticipate. The discipline that actually distinguishes mature
+      teams: running the full eval suite automatically on every prompt change via CI, exactly like a test suite,
+      rather than "the engineer who wrote the new prompt tried it on a few examples and it looked fine."</p>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>A production-grade AI request path, cost/safety/eval concerns included:</p>
+      <ol>
+        <li>Request arrives; an optional cheap classifier/router decides which model tier this request needs
+        (routing) or whether to attempt a cheap model first (cascading).</li>
+        <li><strong>Input guardrail</strong>: a fast check (classifier or moderation endpoint) screens for
+        injection/jailbreak/disallowed-content patterns before any expensive model call runs; flagged requests
+        are rejected or routed to a stricter handling path.</li>
+        <li>Prompt is assembled with static, cacheable content (system prompt, reference docs, tool defs) placed
+        first, variable per-request content last, to maximize prompt-cache hit rate.</li>
+        <li>Semantic cache is checked for a near-duplicate prior request (for cacheable, non-personalized,
+        non-time-sensitive query types only); a hit returns immediately, skipping the model call.</li>
+        <li>Model call executes (streamed to the client for perceived latency — see chapter 7); cost and latency
+        for this call are logged per request, tagged with model tier and cache-hit status.</li>
+        <li><strong>Output guardrail</strong>: structural/content validation runs on the completed (or
+        incrementally, on streamed chunks) response before it's considered final; failures trigger a retry,
+        regeneration, or a safe fallback response rather than silently passing through.</li>
+        <li>Response is returned to the user; async, the interaction is logged (anonymized/PII-redacted as
+        required) into the pipeline feeding both online metrics and future golden-dataset candidates.</li>
+        <li>Offline: on every prompt/model/pipeline change, the full golden-dataset eval suite (including
+        LLM-as-judge scoring and the red-team adversarial suite) runs in CI before the change ships.</li>
+      </ol>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+flowchart LR
+  R[Request] --> IG[Input guardrail: injection/jailbreak check]
+  IG -->|flagged| REJ[Reject / strict path]
+  IG -->|clean| ROUTE[Router: cheap vs frontier model]
+  ROUTE --> SC{Semantic cache hit?}
+  SC -->|yes| RET[Return cached response]
+  SC -->|no| CALL[Model call: cacheable prefix + variable suffix]
+  CALL --> OG[Output guardrail: validate/moderate]
+  OG -->|fail| FALLBACK[Retry / regenerate / safe fallback]
+  OG -->|pass| OUT[Stream response to user]
+  OUT --> LOG[Log cost, latency, cache status, outcome]
+      </div>
+      <div class="mermaid">
+flowchart TD
+  PC[Prompt or model change proposed] --> GOLD[Run golden dataset eval suite]
+  GOLD --> JUDGE[LLM-as-judge scoring: correctness, tone, safety, format]
+  GOLD --> RT[Red-team adversarial suite]
+  JUDGE --> GATE{All metrics within threshold vs baseline?}
+  RT --> GATE
+  GATE -->|no| BLOCK[Block ship, investigate regression]
+  GATE -->|yes| SHIP[Ship to production]
+  SHIP --> ONLINE[Monitor online metrics: thumbs, completion rate, escalation rate]
+  ONLINE -->|regression detected| PC
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-typescript">// Prompt structured for maximum prompt-cache hit rate: static content first
+// (system prompt, reference docs, tool defs), variable content last.
+interface CachedPromptParts {
+  systemPrompt: string;      // large, static, rarely changes
+  referenceDocs: string;     // large, static per-session or per-deployment
+  toolDefinitions: string;   // static per-deployment
+  userQuery: string;         // changes every request — must come last
+}
+
+function buildCacheFriendlyPrompt(parts: CachedPromptParts) {
+  return [
+    { role: "system", content: parts.systemPrompt, cache_control: { type: "ephemeral" } },
+    { role: "system", content: parts.referenceDocs, cache_control: { type: "ephemeral" } },
+    { role: "system", content: parts.toolDefinitions, cache_control: { type: "ephemeral" } },
+    { role: "user", content: parts.userQuery }, // variable — never mark this cacheable
+  ];
+}
+
+// BAD: interleaving variable content with static content defeats prefix caching —
+// any change earlier in the prompt invalidates the cache for everything after it.
+function badPromptOrdering(userQuery: string, systemPrompt: string, referenceDocs: string) {
+  return `${systemPrompt}\n\nUser asked: "${userQuery}"\n\nReference material:\n${referenceDocs}`;
+  // userQuery is sandwiched in the middle — every distinct query invalidates the
+  // entire cache, even though systemPrompt and referenceDocs never changed.
+}
+
+// Cascading: try a cheap/fast model first, escalate to the frontier model only
+// when the cheap model's output fails a confidence check.
+interface ModelTier { name: string; call: (prompt: string) => Promise<{ text: string; confidence?: number }>; }
+
+async function cascadingCall(prompt: string, cheap: ModelTier, frontier: ModelTier, confidenceThreshold = 0.7) {
+  const cheapResult = await cheap.call(prompt);
+  if (cheapResult.confidence !== undefined && cheapResult.confidence >= confidenceThreshold) {
+    return { ...cheapResult, tierUsed: cheap.name, escalated: false };
+  }
+  // Escalation path pays for both calls — only worth it if most traffic doesn't escalate.
+  const frontierResult = await frontier.call(prompt);
+  return { ...frontierResult, tierUsed: frontier.name, escalated: true };
+}
+
+// Output guardrail: structural + content validation before a response is considered final.
+interface GuardrailResult { pass: boolean; reason?: string; }
+
+async function validateOutput(text: string, expectedSchema?: object): Promise<GuardrailResult> {
+  if (expectedSchema && !matchesSchema(text, expectedSchema)) {
+    return { pass: false, reason: "output_schema_mismatch" };
+  }
+  const moderation = await moderationCheck(text); // e.g. provider moderation endpoint or classifier
+  if (moderation.flagged) {
+    return { pass: false, reason: `content_flagged:${moderation.category}` };
+  }
+  return { pass: true };
+}
+
+function matchesSchema(text: string, schema: object): boolean { return true; } // illustrative
+async function moderationCheck(text: string): Promise<{ flagged: boolean; category?: string }> {
+  return { flagged: false }; // illustrative — call a real moderation endpoint/classifier in production
+}
+</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4><p>An AI-powered support assistant launches using the frontier
+      model for every request, with a 3,000-token system prompt (product docs, tone guidelines, tool
+      definitions) sent fresh on every call. At 50,000 requests/day, the team notices two things: the bill is
+      dominated by that repeated 3,000-token system prompt rather than the actual variable user questions, and
+      p95 latency is worse than expected because every request pays the full model's generation speed even for
+      simple "what are your hours" questions. Two changes, shipped independently so their effects could be
+      measured separately: (1) restructuring the prompt so the static system content is a cacheable prefix,
+      cutting the effective input-token cost of that 3,000-token block by roughly 90% on cache hits since it's
+      identical across nearly every request within the cache TTL; (2) adding a lightweight router that classifies
+      incoming questions and sends simple FAQ-pattern queries to a smaller, faster model, escalating only when
+      that model's confidence score is low. Combined, these cut per-request cost by more than half and improved
+      p50 latency noticeably for the FAQ-pattern traffic — critically, both changes were validated against the
+      golden eval set before shipping to confirm neither degraded answer quality, not just cost.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Putting variable, per-request content anywhere before the
+      static content in a prompt "for readability" (e.g. restating the user's question near the top before the
+      reference material). This silently defeats prompt caching, because caching matches on an exact prefix —
+      any variation earlier in the prompt invalidates the cache for everything that follows, even if 95% of the
+      prompt's content never actually changes.</p></div>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Treating a model provider's built-in safety training as a
+      substitute for application-level guardrails. Provider safety tuning is a general-purpose baseline, not
+      aware of your specific product's risk surface (what counts as an unacceptable answer for your domain,
+      what PII patterns are sensitive for your users, what a successful prompt-injection payload would look like
+      against your specific tool set) — it reduces but does not remove the need for your own input/output
+      validation layer.</p></div>
+      <ul>
+        <li>Measure cascading/routing savings against real traffic distributions before claiming a win — if your
+        actual traffic is mostly complex queries, a cheap-first cascade just adds latency with no savings.</li>
+        <li>Never route personalized or time-sensitive queries through a semantic response cache; a
+        near-duplicate match there can silently serve a wrong or stale answer.</li>
+        <li>Re-run red-team adversarial suites on every meaningful prompt or model change, not just pre-launch —
+        both your attack surface and public jailbreak techniques evolve continuously.</li>
+        <li>Track cost and latency per request tagged by model tier and cache-hit status from day one; without
+        this breakdown you can't tell whether a cost spike is traffic growth, cache misses, or model drift.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>Prompt caching</td><td>Large, mostly-static prompt content repeated across requests</td><td>Prompt content changes meaningfully every request</td><td>Restructure prompt to isolate static prefix, or skip caching</td></tr>
+        <tr><td>Semantic response caching</td><td>High-repetition, non-personalized, non-time-sensitive queries</td><td>Personalized, time-sensitive, or safety-critical answers</td><td>Prompt caching only (still re-runs generation, but safely)</td></tr>
+        <tr><td>Model cascading</td><td>Traffic genuinely skews toward simple requests</td><td>Most traffic is complex and would escalate anyway</td><td>Static routing by request type, or single consistent model</td></tr>
+        <tr><td>LLM-as-judge eval</td><td>Nuanced criteria (tone, groundedness) hard to exact-match score</td><td>Objective, structured outputs with a clear ground truth</td><td>Exact-match / rule-based scoring</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+
+      <div class="qa-level basic">
+        <h4>Basic</h4>
+        <details class="qa"><summary>Why are output tokens typically priced higher than input tokens by frontier model APIs?</summary><div class="answer"><p>Output tokens are generated autoregressively and sequentially — each one requires a full forward pass conditioned on everything generated before it — while input tokens are processed in parallel during prompt encoding. The sequential nature of generation makes it more expensive and also the dominant contributor to response latency.</p></div><div class="followup">Follow-up: how does this asymmetry change how you'd design a prompt versus how you'd constrain a response?</div></details>
+        <details class="qa"><summary>What is prompt caching and what problem does it solve?</summary><div class="answer"><p>It lets you mark a prefix of your prompt (e.g. a long system prompt or reference docs) as cacheable so that repeated requests sharing that identical prefix skip re-processing it and are charged a small fraction of the normal input-token rate, within a short TTL. It solves the cost (and some latency) of repeatedly sending large, mostly-static context on every request.</p></div><div class="followup">Follow-up: why must the variable, per-request content go last in the prompt rather than first?</div></details>
+        <details class="qa"><summary>What's the difference between model routing and model cascading?</summary><div class="answer"><p>Routing classifies a request up front (by complexity or type) and sends it directly to the appropriately-sized model. Cascading always tries a cheap/fast model first and only escalates to a more expensive model if the cheap model's output fails a confidence or quality check — cascading pays for two calls on escalated requests, routing pays for exactly one.</p></div><div class="followup">Follow-up: which pattern risks wasted cost if most traffic turns out to be complex?</div></details>
+        <details class="qa"><summary>What is an input guardrail versus an output guardrail?</summary><div class="answer"><p>An input guardrail screens what reaches the model — detecting prompt injection, jailbreak attempts, or disallowed content before the main model call runs. An output guardrail screens what the model produced before it reaches the user — validating structure/format, moderating content, and checking factuality/groundedness.</p></div><div class="followup">Follow-up: why do you need both rather than just one?</div></details>
+        <details class="qa"><summary>What is a golden dataset in the context of LLM evaluation?</summary><div class="answer"><p>A curated, versioned set of representative inputs with known-good expected outputs or scoring rubrics, used to evaluate every prompt, model, or pipeline change before shipping, giving a repeatable basis for comparison instead of ad hoc manual spot-checking.</p></div><div class="followup">Follow-up: why does the dataset need to be versioned rather than freely edited over time?</div></details>
+        <details class="qa"><summary>Why is "the provider's model is already safety-trained" not a sufficient safety strategy for a product?</summary><div class="answer"><p>Provider-level safety training is general-purpose and not aware of your specific product's risk surface — what counts as an unacceptable answer in your domain, what PII patterns matter for your users, or what a successful attack against your specific tools would look like. It reduces but doesn't eliminate the need for application-level input/output guardrails.</p></div><div class="followup">Follow-up: give an example of a risk that's specific to your product but invisible to a general-purpose safety-trained model.</div></details>
+      </div>
+
+      <div class="qa-level medium">
+        <h4>Medium</h4>
+        <details class="qa"><summary>Why does restructuring a prompt to put variable content last (instead of first, for "readability") materially affect cost at scale?</summary><div class="answer"><p>Prompt caching matches on an exact prefix; if variable per-request content (like restating the user's question) appears before static content in the assembled prompt, every request effectively has a different prefix, so the cache never hits for the static content that follows it — even though that static content (system prompt, reference docs) might be identical across 95%+ of requests. Moving variable content to the very end lets the static prefix cache-hit on every request regardless of what the variable suffix is.</p></div><div class="followup">Follow-up: what's the TTL behavior of prompt caches, and why does that matter for low-traffic endpoints?</div></details>
+        <details class="qa"><summary>Design the confidence check a cascading system would use to decide whether to escalate from a cheap model to a frontier model.</summary><div class="answer"><p>Options include: the cheap model's own calibrated confidence/logprob score if available; a separate lightweight validator checking the cheap model's output against expected structure/content rules; or explicitly prompting the cheap model to self-report uncertainty and treating an "I'm not sure" response as an automatic escalation trigger. The choice matters because an uncalibrated or overly lenient check either escalates too often (erasing the cost savings, since you pay for both calls) or too rarely (serving wrong answers from the cheap model that should have escalated).</p></div><div class="followup">Follow-up: how would you validate, empirically, that your confidence check's threshold is well-calibrated rather than arbitrary?</div></details>
+        <details class="qa"><summary>Why is semantic response caching riskier than prompt caching, and what categories of query should never use it?</summary><div class="answer"><p>Prompt caching only skips re-processing identical static content — the model still generates a fresh, current response. Semantic caching skips the model call entirely and serves a stored past response for a "similar enough" query, which can silently serve a wrong or stale answer if the similarity threshold is too loose or if the underlying facts have changed since the cached response was generated. Personalized queries (answer depends on who's asking) and time-sensitive queries (answer depends on current state/data) should never use this cache layer, since "similar wording" doesn't imply "same correct answer" for either.</p></div><div class="followup">Follow-up: how would you set and validate a similarity threshold that balances cache hit rate against incorrect-cache-hit risk?</div></details>
+        <details class="qa"><summary>What's the purpose of running LLM-as-judge scoring in CI on every prompt change, rather than relying on the engineer who wrote the prompt change testing it manually?</summary><div class="answer"><p>Manual spot-checking is unsystematic, not reproducible, and biased toward the examples the engineer happens to think of, which tend to be the cases the new prompt was specifically designed to fix — it rarely surfaces regressions on cases the prompt wasn't targeting. Running the full golden dataset through LLM-as-judge scoring in CI gives a consistent, repeatable, comparable-to-baseline signal across the whole representative distribution, catching regressions a manual spot-check would miss, exactly like an automated test suite catches regressions a developer's manual click-through wouldn't.</p></div><div class="followup">Follow-up: what's a risk of using the same model as both the system under test and the judge?</div></details>
+        <details class="qa"><summary>How would you decide whether a red-teaming program is adequate, versus just theater?</summary><div class="answer"><p>Adequate red-teaming has a maintained, growing adversarial test suite (not a one-time pre-launch exercise), is re-run automatically on every meaningful prompt/model change as part of the same CI gate as the golden eval set, incorporates newly-discovered public jailbreak techniques over time, and has a clear escalation/fix process when a test fails (not just a report that gets filed away). Theater looks like a one-time pre-launch pentest-style exercise with a report nobody revisits once the system ships.</p></div><div class="followup">Follow-up: how would you prioritize which new jailbreak techniques to add to your suite as they're discovered publicly?</div></details>
+      </div>
+
+      <div class="qa-level advanced">
+        <h4>Advanced</h4>
+        <details class="qa"><summary>Design a full cost/latency/safety observability stack for a production AI feature serving real traffic at scale. What do you log, what do you alert on, and why?</summary><div class="answer"><p>Per request, log: model tier used, cache-hit status (prompt cache and semantic cache separately), input/output token counts, cost, end-to-end latency and TTFT, output-guardrail pass/fail and reason, and an anonymized/redacted copy of the interaction for later eval-set mining. Aggregate and alert on: cost-per-request trend (catches cache-rate regressions or unexpected traffic-mix shifts), p95/p99 latency (catches model-provider degradation or routing misconfiguration), guardrail trigger rate (a sudden spike suggests either an attack campaign or a prompt regression generating more flaggable content), and escalation rate for any cascading system (a spike suggests the cheap model's quality degraded, or traffic complexity shifted). Alert thresholds should be relative to a rolling baseline per metric, not fixed absolute numbers, since normal traffic patterns shift over time.</p></div><div class="followup">Follow-up: which of these signals would you want paged on immediately versus reviewed in a weekly dashboard?</div></details>
+        <details class="qa"><summary>A model provider ships a new version of the model your product uses. Design the rollout process that lets you catch a quality or safety regression before it reaches all users.</summary><div class="answer"><p>Run the new model version against the full golden eval set (correctness, tone, format via LLM-as-judge) and the red-team adversarial suite before any production traffic touches it, comparing scores against the current production model's baseline on the identical suite. If it passes, roll out via a canary/shadow pattern: route a small percentage of real traffic to the new version while comparing online metrics (thumbs up/down, escalation-to-human rate, regenerate-click rate) against the control group running the old version, for a long enough window to catch regressions that only show up on real traffic diversity the golden set didn't cover. Only ramp to 100% after both offline and canary online metrics clear threshold, and keep instant rollback capability to the previous model version throughout.</p></div><div class="followup">Follow-up: what would make you skip the canary stage and roll back immediately instead of gradually ramping down?</div></details>
+        <details class="qa"><summary>Your cascading system's cost savings look great in aggregate, but a subset of users are complaining about wrong answers. How would you investigate whether cascading is the cause, and what would you change?</summary><div class="answer"><p>Segment the escalation-rate and online-quality metrics (thumbs down, complaint rate) by whether each interaction was served by the cheap model or escalated to the frontier model — if complaints correlate heavily with cheap-model-served interactions, the confidence threshold is too lenient (letting wrong-but-confident cheap-model answers through without escalating). Also check whether complaints cluster by query type or topic, since the cheap model may be systematically weaker on specific categories the confidence check doesn't detect well (confidently wrong rather than uncertain). Fixes: tighten the confidence threshold (accepting some cost regression), add category-specific routing rules that force escalation for known-weak categories regardless of confidence score, or replace the confidence heuristic with a cheap independent validator that checks output quality rather than trusting the generating model's own self-reported confidence.</p></div><div class="followup">Follow-up: why might the cheap model's self-reported confidence be a particularly unreliable signal to cascade on?</div></details>
+        <details class="qa"><summary>How would you architect prompt-cache usage for a multi-tenant SaaS product where each tenant has custom system-prompt content (branding, tone, tenant-specific instructions), without losing most of the caching benefit?</summary><div class="answer"><p>Split the prompt into layers by volatility: a large, shared, product-wide static layer (common instructions, safety rules, shared tool definitions) cached once and reused across all tenants; a tenant-specific static layer (branding, tone, tenant instructions) that's static per tenant but differs across tenants, cached per-tenant since it's identical across that tenant's own requests; and the per-request variable content last. This nets most of the shared layer's caching benefit across the whole platform while still gaining tenant-level caching benefit within each tenant's own traffic, rather than either caching nothing (because "the prompt differs per tenant") or needlessly duplicating the shared layer's cache entry per tenant.</p></div><div class="followup">Follow-up: how would cache TTL and request volume per tenant interact — what happens to a low-traffic tenant's cache hit rate?</div></details>
+        <details class="qa"><summary>Critique a team's claim that "our eval suite passing means the new prompt is safe to ship" when the golden dataset was built entirely from historical production logs.</summary><div class="answer"><p>A golden set built only from historical logs reflects what users have already asked, not what a new prompt or capability might newly expose — it systematically under-represents novel attack vectors, edge cases introduced by the new change itself, and categories of query that didn't exist in historical traffic because the product didn't support them yet. Passing against a backward-looking dataset proves the change didn't regress known cases; it says nothing about new failure modes the change itself might introduce. A rigorous process supplements the historical golden set with adversarial/red-team cases specifically targeting the new change's surface area, and treats passing the historical set as necessary, not sufficient, for shipping.</p></div><div class="followup">Follow-up: how would you systematically grow the golden dataset over time to reduce this blind spot?</div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment">
+        <span class="level-tag">Beginner (30-60 min)</span>
+        <h4>Measure prompt-cache impact on cost</h4>
+        <p>Using a real LLM API that supports prompt caching, make 10 sequential calls with a large (1,000+
+        token) static system prompt and a varying short user query, once with caching enabled (cache_control
+        set correctly, static content first) and once with the same content but caching disabled or
+        misordered (variable content placed before the static block).</p>
+        <ul>
+          <li>Record actual reported token usage (cached vs. non-cached input tokens) and cost for both runs.</li>
+          <li>Produce a side-by-side cost comparison.</li>
+        </ul>
+        <p><strong>Acceptance criteria:</strong> a clear before/after cost table showing the caching benefit with
+        real numbers from the provider's usage reporting, not estimates.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>Check your provider's response metadata/usage object — it typically reports cached vs. non-cached input tokens separately, which is exactly what you need for the comparison.</p></div></details>
+        <p><strong>Bonus:</strong> wait past the cache TTL window and show a cache miss on the next call, then a
+        hit again on the one after that re-establishes the cache.</p>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Intermediate (2-4 hrs)</span>
+        <h4>Build a cascading router with a measured escalation rate</h4>
+        <p>Build a small service that routes requests between a cheap/fast model and a frontier model based on a
+        confidence check, over a set of at least 30 varied test queries (mix of simple factual and genuinely
+        complex ones).</p>
+        <ul>
+          <li>Implement at least one concrete confidence check (self-reported confidence, or an independent
+          validator checking output against expected structure/content).</li>
+          <li>Report, across your 30 queries: escalation rate, total cost with cascading vs. total cost if every
+          query had gone straight to the frontier model, and any cases where the cheap model's answer was wrong
+          but wasn't escalated (a false-negative on your confidence check).</li>
+        </ul>
+        <p><strong>Acceptance criteria:</strong> a report showing measured cost savings alongside at least one
+        honestly-identified false-negative case, not just the favorable numbers.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>Deliberately include a few queries designed to be "confidently wrong" for the cheap model (ambiguous phrasing, trick questions) specifically so you have real false-negative examples to analyze, not just a cherry-picked success story.</p></div></details>
+        <p><strong>Bonus:</strong> tune your confidence threshold and show the tradeoff curve between escalation
+        rate (cost) and false-negative rate (quality) at 3 different threshold values.</p>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Advanced (1-2 days)</span>
+        <h4>End-to-end eval + guardrail pipeline with CI-style regression gating</h4>
+        <p>Build a golden-dataset eval harness (20-30 labeled examples with rubrics) plus input and output
+        guardrails for a chosen AI feature (chatbot, classifier, or RAG-style Q&A), runnable as a single script
+        that gates a "ship" decision.</p>
+        <ul>
+          <li>Input guardrail: detect at least 3 distinct prompt-injection/jailbreak patterns in a test set of
+          adversarial inputs, with a measured catch rate.</li>
+          <li>Output guardrail: structural validation plus one content-moderation check.</li>
+          <li>LLM-as-judge scoring against your golden set, producing a baseline score.</li>
+          <li>Deliberately introduce one regression (a prompt change that degrades quality, or a guardrail
+          bypass) and show your harness's gate correctly blocking it with a specific failing metric identified.</li>
+        </ul>
+        <p><strong>Acceptance criteria:</strong> a baseline report, a regression demonstration with the specific
+        failing check identified, and the whole harness runnable as one command suitable for a CI pipeline.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>Keep your LLM-as-judge prompt strict and ask for structured JSON output (score + reason) so you can aggregate and threshold programmatically instead of eyeballing free-text judgments.</p></div></details>
+        <p><strong>Bonus:</strong> add a canary-style A/B comparison mode that runs both the old and new prompt
+        against the same golden set side by side and reports a diff, not just pass/fail.</p>
+      </div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet">
+        <ul>
+          <li>Output tokens cost more and dominate latency because generation is sequential/autoregressive;
+          input tokens are processed in parallel and are relatively cheap.</li>
+          <li>Prompt caching: static content first, variable content last — any earlier change invalidates the
+          cached prefix for everything after it.</li>
+          <li>Semantic/response caching skips the model call entirely — never use it for personalized or
+          time-sensitive queries.</li>
+          <li>Routing picks the model tier up front; cascading tries cheap-first and escalates on low
+          confidence — cascading pays for both calls on escalated requests.</li>
+          <li>Input guardrails screen what reaches the model; output guardrails screen what leaves it — you
+          need both, and neither replaces the other.</li>
+          <li>Provider safety training is a general baseline, not a substitute for product-specific
+          application-level guardrails.</li>
+          <li>Red-team continuously, re-run on every meaningful prompt/model change — not a one-time pre-launch
+          exercise.</li>
+          <li>Golden dataset + LLM-as-judge + online metrics = real evaluation; "it looked fine when I tried it"
+          is not evaluation.</li>
+          <li>Gate every prompt/model change through the eval suite in CI before shipping, exactly like a test
+          suite for deterministic code.</li>
+        </ul>
+      </div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://docs.anthropic.com/en/docs/build-with-claude/prompt-caching">Anthropic: Prompt caching documentation</a></li>
+        <li><a href="https://platform.openai.com/docs/guides/prompt-caching">OpenAI: Prompt caching guide</a></li>
+        <li><a href="https://docs.anthropic.com/en/docs/test-and-evaluate/strengthen-guardrails/reduce-latency">Anthropic: Reducing latency and strengthening guardrails</a></li>
+        <li><a href="https://docs.anthropic.com/en/docs/test-and-evaluate/develop-tests">Anthropic: Building and running evaluations</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="05-ai-agents.html"><span class="dir">← Previous</span>AI Agents & Workflows</a>
+        <a class="next" href="07-ai-features-react-node.html"><span class="dir">Next →</span>AI Features in React/Node</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · AI Integration</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-typescript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "09-ai-integration", chapterKey: "06-ai-in-production" });</script>
+</body>
+</html>

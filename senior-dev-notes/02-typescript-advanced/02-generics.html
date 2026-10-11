@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Generics In Depth — TypeScript Advanced — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">TypeScript Advanced</a><span class="sep">›</span>Generics In Depth</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>Generics In Depth</h1>
+      <p class="meta-line"><span>⏱ ~2.5 hrs</span><span>📍 Chapter 2 of 6</span></p>
+      <p><strong>One-line summary:</strong> Good generics are designed so types are <em>inferred</em> from real
+      arguments at the call site, not supplied manually — this chapter covers constraints, variance, inference sites,
+      and the design discipline that makes that happen.</p>
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <div class="box why">
+        <h4>Why</h4>
+        <p>Generic design is the clearest signal of TS seniority in a live coding interview. Junior code passes type
+        parameters explicitly everywhere (<code>fetchData&lt;User&gt;(url)</code>); senior code designs the function
+        signature so TS infers <code>User</code> from an argument automatically. Interviewers will hand you a vague,
+        loosely-typed helper and ask you to "make it properly generic" — this is exactly that skill.</p>
+      </div>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>Builds on <a href="01-type-system.html">Type System Deep Dive</a> (inference, narrowing). Related: <a href="03-utility-types.html">Utility Types</a>.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="basics">Basics: parameters, constraints, defaults</h3>
+      <pre><code class="language-typescript">// Unconstrained — T can be anything, so you can't access any members on it
+function identity&lt;T&gt;(x: T): T { return x; }
+
+// Constrained — T must have a `length` property
+function longest&lt;T extends { length: number }&gt;(a: T, b: T): T {
+  return a.length >= b.length ? a : b;
+}
+
+// Default type parameter — used when TS can't infer and caller doesn't supply one
+function createMap&lt;K = string, V = unknown&gt;(): Map&lt;K, V&gt; { return new Map(); }
+const m = createMap(); // Map&lt;string, unknown&gt;
+
+// Multiple constrained params referencing each other
+function pluck&lt;T, K extends keyof T&gt;(obj: T, key: K): T[K] {
+  return obj[key];
+}
+const user = { id: 1, name: "Ana" };
+pluck(user, "name"); // string, inferred; pluck(user, "nope") is a compile error</code></pre>
+      <p>The <code>pluck</code> pattern — <code>&lt;T, K extends keyof T&gt;</code> — is the single most common
+      "write a type-safe getter" interview exercise. Internalize it.</p>
+
+      <h3 id="inference-sites">Inference sites: where TS actually infers from</h3>
+      <p>TypeScript infers generic type parameters from <strong>argument positions</strong> (and a few other spots:
+      contextual typing from the expected return type, and from the type of a variable a generic function result is
+      assigned to). Parameters that appear only in the return type, or inside positions TS can't observe a concrete
+      value for, can't be inferred and will fall back to the constraint or <code>unknown</code>.</p>
+      <pre><code class="language-typescript">// T is inferable — it appears in a parameter position
+function wrap&lt;T&gt;(value: T): { value: T } { return { value }; }
+wrap(42); // T = number, inferred from the argument
+
+// T is NOT inferable from any argument — caller must specify it explicitly
+function parse&lt;T&gt;(json: string): T { return JSON.parse(json); }
+const user = parse&lt;{ id: number }&gt;('{"id":1}'); // must annotate; T can't be inferred
+
+// Design fix: make it inferable by accepting a "shape hint" value instead
+function parseAs&lt;T&gt;(json: string, _shape: T): T { return JSON.parse(json); }
+// still contrived — better fix is a runtime validator (see ch.5), which both
+// infers AND actually checks the shape at runtime.</code></pre>
+      <p>This is the core design lesson: <strong>a generic parameter that only appears in the return type is a design
+      smell</strong> — it forces callers to annotate manually, which is exactly the ergonomics problem senior generic
+      design avoids.</p>
+
+      <h3 id="variance">Variance: covariance, contravariance, bivariance</h3>
+      <p>Variance describes how subtyping of a compound type (arrays, functions, generics) relates to subtyping of
+      its type parameters.</p>
+      <ul>
+        <li><strong>Covariant</strong>: if <code>Dog</code> is a subtype of <code>Animal</code>, then
+        <code>Container&lt;Dog&gt;</code> is a subtype of <code>Container&lt;Animal&gt;</code>. TS arrays and
+        "output position" generics (return types) behave this way.</li>
+        <li><strong>Contravariant</strong>: the relationship flips for function <em>parameter</em> positions — a
+        function accepting <code>Animal</code> can be used where one accepting <code>Dog</code> is expected (it
+        handles at least as much), not the other way around.</li>
+        <li><strong>Bivariant</strong>: TS checks method-shorthand parameters in both directions (unsoundly) for
+        legacy compatibility — see chapter 1.</li>
+      </ul>
+      <pre><code class="language-typescript">type Animal = { name: string };
+type Dog = { name: string; breed: string };
+
+// Covariant position — fine, narrower return is safely substitutable
+type AnimalFactory = () => Animal;
+const dogFactory: AnimalFactory = (): Dog => ({ name: "Rex", breed: "Lab" }); // OK
+
+// Contravariant position — handler accepting the WIDER type is substitutable
+type DogHandler = (d: Dog) => void;
+const animalHandler: DogHandler = (a: Animal) => console.log(a.name); // OK — handles any Animal, Dog included
+
+// This direction is unsafe and correctly rejected under strictFunctionTypes:
+// const dogOnlyHandler: (a: Animal) => void = (d: Dog) => d.breed.toUpperCase(); // Error</code></pre>
+
+      <h3 id="conditional-inference">Generic + conditional types: inferring nested shapes</h3>
+      <p>Combining generics with conditional types lets you destructure types, not just values, at the type level —
+      this is the gateway to chapter 4's territory but belongs here conceptually:</p>
+      <pre><code class="language-typescript">// Extract the resolved type from a Promise
+type Awaited2&lt;T&gt; = T extends Promise&lt;infer U&gt; ? U : T;
+type A = Awaited2&lt;Promise&lt;string&gt;&gt;; // string
+type B = Awaited2&lt;number&gt;;            // number (not a promise, falls through)
+
+// Extract function return type (this is literally lib.d.ts's ReturnType)
+type MyReturnType&lt;F&gt; = F extends (...args: any[]) => infer R ? R : never;
+
+// Generic class with a constrained, defaulted parameter — a typed cache
+class Cache&lt;T, K extends string | number = string&gt; {
+  private store = new Map&lt;K, T&gt;();
+  get(key: K): T | undefined { return this.store.get(key); }
+  set(key: K, value: T): void { this.store.set(key, value); }
+}
+const userCache = new Cache&lt;{ id: number; name: string }&gt;(); // K defaults to string</code></pre>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>During a generic call, the checker collects "inference candidates" for each type parameter by structurally
+      comparing each argument's type against the corresponding declared parameter type, recording what each type
+      parameter would need to be for that position to type-check. After scanning all arguments, it reconciles the
+      candidates per type parameter into a single inferred type — generally the best common supertype of covariant
+      candidates, and the most specific (intersection-like) type for contravariant candidates (parameters of callback
+      arguments). If no candidates were collected for a parameter, TS falls back to its constraint, or to
+      <code>unknown</code>, or the parameter's default.</p>
+      <p>Variance checking happens in a second pass: once two generic instantiations need to be compared for
+      compatibility (e.g. assigning one callback type to another), TS recursively compares the structural positions,
+      flipping the comparison direction every time it crosses into a parameter position of a function type — that
+      flip is literally what contravariance means mechanically.</p>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+flowchart LR
+  A["Call site: pluck(user, 'name')"] --> B["Collect candidate for T from arg 1: typeof user"]
+  A --> C["Collect candidate for K from arg 2: literal 'name'"]
+  B --> D["T = { id: number; name: string }"]
+  C --> E["K extends keyof T → check 'name' in keyof T → OK"]
+  D --> F["Resolve return type T[K] → string"]
+  E --> F
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-typescript">// BAD: generic parameter not inferable, forces manual annotation at every call site,
+// and nothing stops a caller from lying about T.
+function unsafeGet&lt;T&gt;(obj: Record&lt;string, unknown&gt;, key: string): T {
+  return obj[key] as T; // unchecked cast — T is purely "trust me"
+}
+const x = unsafeGet&lt;number&gt;(data, "count"); // could actually be a string at runtime
+
+// GOOD: T is inferred from the object + constrained key, fully type-safe, zero casts
+function safeGet&lt;T, K extends keyof T&gt;(obj: T, key: K): T[K] {
+  return obj[key];
+}
+const data = { count: 42, label: "x" };
+const n = safeGet(data, "count"); // number, inferred, no annotation needed
+
+// Generic builder pattern — each call narrows the accumulated type
+class QueryBuilder&lt;T extends Record&lt;string, unknown&gt; = {}&gt; {
+  private filters: Partial&lt;T&gt; = {};
+  where&lt;K extends string, V&gt;(key: K, value: V): QueryBuilder&lt;T & Record&lt;K, V&gt;&gt; {
+    (this.filters as any)[key] = value;
+    return this as unknown as QueryBuilder&lt;T & Record&lt;K, V&gt;&gt;;
+  }
+  build(): T { return this.filters as T; }
+}
+const q = new QueryBuilder().where("status", "active").where("age", 30).build();
+// q: { status: string } & { age: number } — accumulated via chained generics</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod">
+        <h4>At scale</h4>
+        <p>A shared internal HTTP client library originally required every call site to manually annotate the
+        response type: <code>client.get&lt;User&gt;("/users/1")</code>. Across ~40 services this produced dozens of
+        mismatches where the annotation drifted from the actual API response after backend changes, because nothing
+        connected the annotation to anything real — it compiled regardless of correctness. Redesigning the client
+        around a typed route map (generic inferred from a route <em>key</em> rather than supplied manually, the same
+        idea as this topic's capstone) eliminated the annotation entirely: the response type became a structural
+        consequence of the route definition, so an API contract change that wasn't reflected in the route map now
+        fails to compile at every affected call site instead of silently drifting.</p>
+      </div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha">
+        <h4>Gotcha</h4>
+        <p>Generic parameters that appear in <em>multiple unrelated argument positions</em> (e.g. <code>function
+        merge&lt;T&gt;(a: T, b: T): T</code>) infer the union/best-common-supertype of both arguments, which is often
+        wider than intended — passing a <code>Dog</code> and a <code>Cat</code> infers <code>T</code> as something
+        like <code>{ name: string }</code> (their common shape) rather than erroring, silently discarding the more
+        specific fields from both. If arguments should genuinely be independent types, give them independent type
+        parameters.</p>
+      </div>
+      <ul>
+        <li>Design generics so the type parameter is inferred from a real argument, never supplied manually at call sites.</li>
+        <li>A type parameter that appears only in the return position is a smell — look for a way to connect it to an input.</li>
+        <li>Use <code>&lt;T, K extends keyof T&gt;</code> for "typed property access" style helpers.</li>
+        <li>Give genuinely independent values independent type parameters instead of reusing one for both.</li>
+        <li>Use defaults (<code>&lt;T = Foo&gt;</code>) to keep simple call sites simple while still allowing overrides.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>Fully inferred generics</td><td>Public library/API surface, called frequently</td><td>Internal one-off helper where annotation cost is trivial</td><td>Explicit type parameters</td></tr>
+        <tr><td>Constrained generic (<code>extends</code>)</td><td>Need to access members on T safely</td><td>T is genuinely unconstrained/opaque</td><td>Unconstrained <code>T</code> + narrowing inside</td></tr>
+        <tr><td>Builder pattern w/ accumulating generics</td><td>Fluent APIs building up a typed shape over chained calls</td><td>Simple flat config objects</td><td>Single object literal with optional fields</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic">
+        <h4>Basic</h4>
+        <details class="qa"><summary>What does <code>&lt;T extends U&gt;</code> mean in a generic declaration?</summary><div class="answer"><p>It constrains T to types assignable to U — T can be U or anything narrower/more specific, which lets you safely access U's members on a value of type T.</p></div></details>
+        <details class="qa"><summary>Why can't a generic parameter be inferred if it only appears in the return type?</summary><div class="answer"><p>Inference works by comparing argument types to parameter positions; if T never appears in a parameter, there's no argument value to derive it from, so the caller must supply it explicitly or it falls back to a default/constraint.</p></div></details>
+        <details class="qa"><summary>Write a generic <code>first&lt;T&gt;(arr: T[]): T | undefined</code> and explain why it's "properly generic".</summary><div class="answer"><p><code>function first&lt;T&gt;(arr: T[]) { return arr[0]; }</code> — it's properly generic because T is inferred automatically from the array argument's element type at every call site; callers never annotate it.</p></div></details>
+        <details class="qa"><summary>What's the difference between a default type parameter and a constraint?</summary><div class="answer"><p>A constraint (<code>extends</code>) restricts what types are legal for the parameter. A default (<code>= Foo</code>) supplies a fallback type used only when inference can't determine one and the caller didn't specify one — it doesn't restrict what's allowed.</p></div></details>
+        <details class="qa"><summary>What is the <code>keyof</code> operator and how is it typically combined with generics?</summary><div class="answer"><p><code>keyof T</code> produces a union of T's property name literal types. It's commonly paired as <code>&lt;T, K extends keyof T&gt;</code> to type-safely reference a dynamic property name on T.</p></div></details>
+        <details class="qa"><summary>Can a generic function have more than one type parameter depend on another, e.g. <code>&lt;T, K extends keyof T, V extends T[K]&gt;</code>?</summary><div class="answer"><p>Yes — type parameters can reference earlier ones in their constraints, letting you build up progressively more specific relationships between parameters.</p></div></details>
+      </div>
+      <div class="qa-level medium">
+        <h4>Medium</h4>
+        <details class="qa"><summary>Explain covariance vs contravariance with a concrete function-type example.</summary><div class="answer"><p>Covariance: a function returning a more specific type can substitute for one returning a more general type (narrower outputs are fine). Contravariance: a function accepting a more general parameter type can substitute for one accepting a more specific type (handling "more" is fine, handling "less" isn't) — this is why <code>(a: Animal) => void</code> is assignable to a <code>(d: Dog) => void</code>-typed slot but not vice versa.</p></div></details>
+        <details class="qa"><summary>Why does TypeScript check method-shorthand parameters bivariantly, and what unsafe pattern does it enable?</summary><div class="answer"><p>For backward compatibility with common pre-strict-function-types patterns (especially array method overriding in class hierarchies before strict variance checking existed). It enables assigning a method with a narrower, more specific parameter type where a wider one is expected, which can let incompatible values reach the override at runtime.</p></div></details>
+        <details class="qa"><summary>Given <code>function merge&lt;T&gt;(a: T, b: T): T</code>, what happens if you call it with two structurally different object types, and why might that be undesirable?</summary><div class="answer"><p>TS infers T as the best common supertype of both arguments' types — typically their shared shape — rather than erroring. This silently discards type information unique to each argument and can mask a bug where the two arguments were never meant to be treated as the same type.</p></div></details>
+        <details class="qa"><summary>How would you redesign a generic function so a caller can never pass a mismatched key/value pair, using two type parameters?</summary><div class="answer"><p>Use <code>&lt;T, K extends keyof T&gt;</code> for the key so it's restricted to T's actual property names, then type the value parameter as <code>T[K]</code> rather than a separate unconstrained generic — this connects the value's required type directly to whichever key was passed, so an invalid pair fails to compile.</p></div></details>
+        <details class="qa"><summary>What's the difference between inferring a generic from a parameter vs from a contextual return-type expectation (e.g. assigning to an explicitly typed variable)?</summary><div class="answer"><p>Parameter-based inference derives T directly from argument value types. Contextual inference instead propagates an expected type backward into the call (e.g. from a variable's declared type or a surrounding function's expected return) — TypeScript's "contextual typing," used e.g. when inferring callback parameter types from the expected function type.</p></div></details>
+      </div>
+      <div class="qa-level advanced">
+        <h4>Advanced</h4>
+        <details class="qa"><summary>Design a type-safe <code>pipe()</code> function that composes an arbitrary number of typed functions end-to-end, inferring each stage's input/output. What generic technique makes the variadic chain type-check?</summary><div class="answer"><p>Use a variadic tuple type parameter with constrained overloads (or a recursive conditional type) that checks each adjacent pair's output/input compatibility — commonly implemented as a tuple of function types `Fns extends [(a: any) => any, ...any[]]` combined with a recursive helper type that walks the tuple pairwise verifying `Fns[i]`'s return is assignable to `Fns[i+1]`'s parameter, with the overall pipe's input/output derived from the first function's parameter and the last function's return.</p></div></details>
+        <details class="qa"><summary>Explain precisely why TypeScript's variance checking for generic classes is "measured", not fully sound — what does the compiler actually verify?</summary><div class="answer"><p>TS performs structural, member-by-member comparisons rather than true nominal variance annotations (no `in`/`out` enforcement by default, though TS 4.7+ lets you declare `in`/`out` markers for stricter checking). Without explicit variance annotations, the checker infers "measured" variance by analyzing how the type parameter is actually used in the class's members, which can be more permissive than a hand-verified sound variance rule, especially with mutable fields that use the type parameter in both read and write positions.</p></div></details>
+        <details class="qa"><summary>Why might two independently-used generic type parameters still leak into each other's inferred type in certain overload resolutions, and how do you prevent it?</summary><div class="answer"><p>If overload signatures aren't mutually exclusive, or if a single implementation signature's inference scans all arguments together rather than per-overload, TS can unify type parameters across what should be unrelated positions. Prevent it by keeping overloads genuinely disjoint (non-overlapping argument shapes) or restructuring to a single signature using conditional types keyed off a discriminant argument instead of overloads.</p></div></details>
+        <details class="qa"><summary>How does TypeScript handle generic inference when an argument's type itself contains unresolved generic placeholders (higher-order generic inference), e.g. passing a generic function as an argument to another generic function?</summary><div class="answer"><p>This is a known weak spot: TS 5.x added partial support for "higher order function type inference" allowing a generic function passed as an argument to have its own type parameters correctly instantiated based on the outer call's context, but this support is limited to specific shapes (e.g. a generic callback directly in parameter position) — deeply nested or indirect cases still often require the caller to specify type arguments explicitly or restructure the API to avoid needing it.</p></div></details>
+        <details class="qa"><summary>You have a generic cache class whose `get` method's return type should narrow based on a runtime key registered via a separate typed `register()` call. How would you model this with generics, and what are the limits of what the type system can track across separate method calls?</summary><div class="answer"><p>You'd typically model the whole registered-keys-to-types mapping as a single type parameter (a lookup object type) on the class itself, updated via the builder-chaining pattern (each `register()` call returns a new class instance typed with an intersected mapping), since TypeScript cannot mutate a class instance's own generic type parameter in place after construction — there's no way to have a single stateful instance's type parameter change across separate method calls without re-assigning to a new statically-retyped reference.</p></div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment">
+        <span class="level-tag">Beginner (30-60 min)</span>
+        <h4>Type-safe <code>groupBy</code></h4>
+        <p>Implement <code>function groupBy&lt;T, K extends string | number&gt;(items: T[], keyFn: (item: T) =&gt; K): Record&lt;K, T[]&gt;</code>.</p>
+        <ul><li>Both T and K must be inferred, never explicitly annotated at call sites.</li><li>No <code>any</code>.</li></ul>
+        <p><strong>Acceptance criteria:</strong> calling it on an array of objects with a <code>keyFn</code> returning one of their literal-typed fields infers a precisely keyed record type.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>The implementation body will need one `as` or a loosely-typed accumulator internally — that's fine, since the public signature stays fully safe. Internal implementation-detail casts are acceptable; public API casts are not.</p></div></details>
+        <p><strong>Bonus:</strong> add an overload that also accepts a plain key string instead of a function.</p>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Intermediate (2-4 hrs)</span>
+        <h4>Generic fluent QueryBuilder</h4>
+        <p>Extend the <code>QueryBuilder</code> from the code examples into a working mini library: <code>.where()</code>,
+        <code>.orderBy()</code>, <code>.limit()</code>, <code>.build()</code> returning a fully-typed filter object
+        accumulated across the chain, with no two <code>.where()</code> calls on the same key allowed to conflict in type.</p>
+        <ul><li>Each chained call must narrow the builder's generic type parameter.</li><li>Calling <code>.build()</code> mid-chain returns the correctly accumulated type at that point.</li></ul>
+        <p><strong>Acceptance criteria:</strong> a <code>// @ts-expect-error</code> test proves re-using a key with an incompatible value type fails to compile.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>Use `Record&lt;K, V&gt;` intersections accumulated via `T & Record&lt;K, V&gt;` as the new generic parameter returned from each `.where()` call, same pattern as the chapter's code example.</p></div></details>
+        <p><strong>Bonus:</strong> make <code>.orderBy()</code> only accept keys that exist on the accumulated filter type so far.</p>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Advanced (1-2 days)</span>
+        <h4>Variadic type-safe <code>pipe()</code></h4>
+        <p>Implement a <code>pipe(...fns)</code> function that composes 2-6 functions end to end with full type
+        inference of intermediate stages, rejecting at compile time any pair of adjacent functions whose
+        output/input types don't match.</p>
+        <ul><li>Must work for at least 5 chained functions without manual type arguments.</li><li>A mismatched pair in the middle of the chain must produce a compile error pointing roughly at the right argument.</li></ul>
+        <p><strong>Acceptance criteria:</strong> a handful of valid and invalid chains (via <code>// @ts-expect-error</code>) all behave as expected under <code>tsc --strict</code>.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>Research "variadic tuple types" and recursive conditional types over tuples — you'll likely need an overload set for small fixed arities (2 through 6) rather than one fully generic recursive type, which is a legitimate, commonly-used real-world compromise.</p></div></details>
+      </div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet"><ul>
+        <li>Design generics so T is inferred from an argument — never require manual type arguments at call sites.</li>
+        <li>A type parameter appearing only in the return position is a design smell.</li>
+        <li><code>&lt;T, K extends keyof T&gt;</code> is the standard pattern for type-safe property access.</li>
+        <li>Covariant: output/return positions. Contravariant: function parameter positions. Bivariant: method shorthand (unsound, legacy).</li>
+        <li>Two unrelated values sharing one type parameter infer their best common supertype, often wider than intended.</li>
+        <li>Builder/fluent patterns accumulate type info via chained generic returns, each call re-typing the next instance.</li>
+        <li>Higher-order generic inference (generic callback passed into a generic function) is improving in TS 5.x but still has real limits.</li>
+      </ul></div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://www.typescriptlang.org/docs/handbook/2/generics.html">TS Handbook: Generics</a></li>
+        <li><a href="https://www.typescriptlang.org/docs/handbook/2/functions.html#variance">TS Handbook: Function Variance</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="01-type-system.html"><span class="dir">← Previous</span>Type System Deep Dive</a>
+        <a class="next" href="03-utility-types.html"><span class="dir">Next →</span>Utility Types</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · TypeScript Advanced</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-typescript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-jsx.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "02-typescript-advanced", chapterKey: "02-generics" });</script>
+</body>
+</html>

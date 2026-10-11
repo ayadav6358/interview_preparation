@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Deep Learning Fundamentals</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <input class="searchbox" placeholder="Search topics..." />
+    <a href="../index.html">← Home</a>
+    <h3>03-Deep-Learning</h3>
+    <a href="deep-learning-fundamentals.html">Deep Learning Fundamentals</a>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumbs"><a href="../index.html">Home</a> / 03-Deep-Learning / Fundamentals</div>
+      <button class="theme-toggle" onclick="toggleTheme()">🌓 Theme</button>
+    </div>
+    <h1>Deep Learning Fundamentals</h1>
+    <span class="tag good">Stable</span><span class="tag">Last verified: 2026-10-06</span>
+
+    <div class="toc">
+      <b>On this page</b>
+      <a href="#what">1. What is this?</a>
+      <a href="#whyexist">2. Why does it exist?</a>
+      <a href="#whyimportant">3. Why is it important?</a>
+      <a href="#whereused">4. Where is it used?</a>
+      <a href="#prereq">5. Prerequisites</a>
+      <a href="#core">6. Core concepts</a>
+      <a href="#terms">7. Terminology</a>
+      <a href="#arch">8. Architecture</a>
+      <a href="#internal">9. How it works internally (backprop)</a>
+      <a href="#steps">10. Step-by-step: training a neural net</a>
+      <a href="#simple">11. Simple example</a>
+      <a href="#real">12. Real-world example</a>
+      <a href="#code">13. Code example</a>
+      <a href="#advanced">14. Advanced example</a>
+      <a href="#mistakes">15. Common mistakes</a>
+      <a href="#best">16. Best practices</a>
+      <a href="#production">17. Production considerations</a>
+      <a href="#security">18. Security considerations</a>
+      <a href="#performance">19. Performance considerations</a>
+      <a href="#cost">20. Cost considerations</a>
+      <a href="#debug">21. Debugging/troubleshooting</a>
+      <a href="#related">22. Related concepts</a>
+      <a href="#comparison">23. Comparison with alternatives</a>
+      <a href="#exercise">24. Mini practical exercise</a>
+      <a href="#project">25. Practical project</a>
+      <a href="#projectarch">26. Project architecture</a>
+      <a href="#interview-b">27. Interview Questions — Beginner</a>
+      <a href="#interview-i">28. Interview Questions — Intermediate</a>
+      <a href="#interview-a">29. Interview Questions — Advanced</a>
+      <a href="#interview-s">30. Interview Questions — Senior/Architect</a>
+      <a href="#interview-sc">31. Scenario-Based Questions</a>
+      <a href="#revision">32. Quick revision notes</a>
+      <a href="#cheat">33. Cheat sheet</a>
+      <a href="#further">34. Further topics to learn</a>
+    </div>
+
+    <h2 id="what">1. What is this?</h2>
+    <p>Deep Learning uses multi-layer <b>neural networks</b> — built from <b>perceptrons</b>/neurons, <b>activation functions</b>, trained via <b>backpropagation</b> and <b>gradient descent</b> — to automatically learn hierarchical representations from raw data. Key architectures: CNNs (images), RNN/LSTM/GRU (sequences, now largely superseded for language), and Attention/Transformers (the basis of modern LLMs).</p>
+
+    <h2 id="whyexist">2. Why does it exist?</h2>
+    <p>Classic ML requires hand-engineered features; DL exists to let the model learn useful features automatically from raw pixels/audio/text given enough data and compute, removing the feature-engineering bottleneck for complex, unstructured data.</p>
+
+    <h2 id="whyimportant">3. Why is it important?</h2>
+    <p>Every modern GenAI capability (LLMs, image generation, speech) is built on deep learning foundations — understanding backpropagation, attention, and why Transformers won out over RNNs is essential context for reasoning about LLM behavior, costs, and limitations at a deeper level than just "calling an API."</p>
+
+    <h2 id="whereused">4. Where is it used?</h2>
+    <p>Image recognition, speech recognition, machine translation, embeddings, and — via the Transformer architecture — essentially all modern LLMs and GenAI systems.</p>
+
+    <h2 id="prereq">5. Prerequisites</h2>
+    <p><a href="../02-Machine-Learning-Basics/ml-basics-fundamentals.html">Machine Learning Basics</a>.</p>
+
+    <h2 id="core">6. Core concepts</h2>
+    <ul>
+      <li><b>Perceptron:</b> the basic unit — a weighted sum of inputs passed through an activation function.</li>
+      <li><b>Activation functions</b> (ReLU, sigmoid, GELU): introduce non-linearity, letting networks model complex functions.</li>
+      <li><b>Backpropagation:</b> the algorithm computing how much each weight contributed to the error, via the chain rule.</li>
+      <li><b>Gradient descent:</b> iteratively adjusting weights in the direction that reduces loss.</li>
+      <li><b>CNN (Convolutional Neural Network):</b> uses shared, local filters — ideal for images/spatial data.</li>
+      <li><b>RNN/LSTM/GRU:</b> process sequences step by step, maintaining a hidden state — historically used for language/time-series before Transformers.</li>
+      <li><b>Attention:</b> lets a model weigh the relevance of all positions in a sequence to each other, regardless of distance — the mechanism Transformers are built on.</li>
+    </ul>
+
+    <h2 id="terms">7. Terminology</h2>
+    <table>
+      <tr><th>Term</th><th>Meaning</th></tr>
+      <tr><td>Neuron/Perceptron</td><td>Basic computational unit: weighted sum + activation function.</td></tr>
+      <tr><td>Layer</td><td>A set of neurons processing the same input level; stacking layers = "deep."</td></tr>
+      <tr><td>Activation function</td><td>A non-linear function (ReLU, sigmoid, GELU) applied after the weighted sum.</td></tr>
+      <tr><td>Backpropagation</td><td>Algorithm computing gradients of the loss with respect to every weight via the chain rule.</td></tr>
+      <tr><td>Gradient descent</td><td>Optimization algorithm adjusting weights opposite to the gradient to reduce loss.</td></tr>
+      <tr><td>CNN</td><td>Convolutional Neural Network — uses local, shared filters; strong for images.</td></tr>
+      <tr><td>RNN/LSTM/GRU</td><td>Recurrent architectures processing sequences step by step with a hidden state.</td></tr>
+      <tr><td>Attention</td><td>Mechanism letting a model weigh relevance between all pairs of sequence positions.</td></tr>
+      <tr><td>Vanishing gradient</td><td>Gradients shrinking to near-zero across many layers/steps, stalling learning — a major RNN limitation Transformers largely avoid.</td></tr>
+    </table>
+
+    <h2 id="arch">8. Architecture</h2>
+    <pre><code>Input
+ → Layer 1 (weights, bias, activation)
+ → Layer 2 (weights, bias, activation)
+ → ... N layers ...
+ → Output layer (task-specific: softmax for classification, linear for regression)
+ → Loss computed against true label
+ → Backpropagation computes gradients
+ → Optimizer updates all weights</code></pre>
+
+    <h2 id="internal">9. How it works internally (backprop)</h2>
+    <p>Forward pass: input flows through layers producing a prediction. Loss: compare prediction to true label. Backward pass (backpropagation): using the chain rule, compute the gradient of the loss with respect to every weight in every layer, working backward from the output. Update: the optimizer (e.g., Adam) nudges each weight opposite its gradient, scaled by the learning rate. Repeat over many batches/epochs until convergence.</p>
+
+    <h2 id="steps">10. Step-by-step: training a neural net</h2>
+    <ol>
+      <li>Define the architecture (layers, activation functions, output head).</li>
+      <li>Initialize weights (typically random, with careful scaling).</li>
+      <li>Forward pass a batch of data; compute the loss.</li>
+      <li>Backpropagate to compute gradients for all weights.</li>
+      <li>Update weights via the optimizer.</li>
+      <li>Repeat over many batches (one full pass = one epoch) until validation loss plateaus.</li>
+    </ol>
+
+    <h2 id="simple">11. Simple example</h2>
+    <p>A single-layer perceptron with a sigmoid activation can learn a simple linearly-separable decision boundary (e.g., AND/OR logic gates) but cannot learn XOR — this limitation is exactly why multi-layer ("deep") networks were needed to model more complex, non-linearly-separable patterns.</p>
+
+    <h2 id="real">12. Real-world example</h2>
+    <p>Modern LLMs are deep Transformer decoders — dozens of stacked attention+feed-forward layers — trained via the same backpropagation + gradient descent loop described above, just at a vastly larger scale (billions of parameters, trillions of training tokens) with specialized infrastructure (distributed training, mixed precision).</p>
+
+    <h2 id="code">13. Code example</h2>
+    <pre><code class="language-python">import torch
+import torch.nn as nn
+
+class SimpleNet(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.layer1 = nn.Linear(10, 32)
+        self.layer2 = nn.Linear(32, 1)
+
+    def forward(self, x):
+        x = torch.relu(self.layer1(x))
+        return self.layer2(x)
+
+model = SimpleNet()
+optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+loss_fn = nn.MSELoss()
+
+for epoch in range(100):
+    pred = model(X_train)
+    loss = loss_fn(pred, y_train)
+    optimizer.zero_grad()
+    loss.backward()     # backpropagation
+    optimizer.step()    # gradient descent update
+</code></pre>
+
+    <h2 id="advanced">14. Advanced example</h2>
+    <p>A minimal self-attention computation, the core building block of Transformers (see <a href="../04-Transformers/">Transformers</a> for the full deep dive):</p>
+    <pre><code class="language-python">import torch, torch.nn.functional as F
+
+def self_attention(Q, K, V):
+    d_k = Q.size(-1)
+    scores = Q @ K.transpose(-2, -1) / d_k**0.5   # attention scores
+    weights = F.softmax(scores, dim=-1)           # normalize
+    return weights @ V                             # weighted sum of values
+</code></pre>
+
+    <h2 id="mistakes">15. Common mistakes</h2>
+    <ul>
+      <li>Using too few training examples for a deep model, leading to severe overfitting.</li>
+      <li>Not normalizing/scaling inputs, causing unstable training.</li>
+      <li>Choosing a learning rate too high (diverges) or too low (painfully slow convergence).</li>
+      <li>Ignoring vanishing/exploding gradients in very deep or recurrent architectures.</li>
+    </ul>
+
+    <h2 id="best">16. Best practices</h2>
+    <ul>
+      <li>Normalize/standardize inputs before training.</li>
+      <li>Use established architectures (CNN for images, Transformer for sequences) rather than reinventing from scratch.</li>
+      <li>Monitor training/validation loss curves to catch overfitting early.</li>
+      <li>Use modern optimizers (Adam/AdamW) with learning rate scheduling.</li>
+    </ul>
+
+    <h2 id="production">17. Production considerations</h2>
+    <p>DL training requires GPU/accelerator infrastructure and is far more compute-intensive than classic ML; inference, while cheaper than training, still typically needs GPU acceleration for throughput at scale (unlike classic ML's CPU-friendly inference).</p>
+
+    <h2 id="security">18. Security considerations</h2>
+    <p>Deep models are vulnerable to adversarial examples (small, often imperceptible input perturbations causing misclassification) and model extraction/inversion attacks — relevant for any DL model exposed via a public API.</p>
+
+    <h2 id="performance">19. Performance considerations</h2>
+    <p>Training throughput depends on batch size, hardware (GPU/TPU), and mixed-precision training; inference latency depends on model depth/width and whether specialized serving optimizations (quantization, batching) are applied.</p>
+
+    <h2 id="cost">20. Cost considerations</h2>
+    <p>Training large deep models from scratch is extremely expensive (GPU-hours at scale); most practitioners fine-tune or use pretrained models rather than training from scratch, dramatically reducing cost.</p>
+
+    <h2 id="debug">21. Debugging/troubleshooting</h2>
+    <ul>
+      <li><b>Loss not decreasing:</b> check learning rate, data normalization, or a bug in the loss/label computation.</li>
+      <li><b>Loss becomes NaN:</b> learning rate too high, or numerical instability (unscaled inputs, exploding gradients) — add gradient clipping.</li>
+      <li><b>Training loss low, validation loss high:</b> overfitting — add regularization (dropout, weight decay) or more data.</li>
+    </ul>
+
+    <h2 id="related">22. Related concepts</h2>
+    <p><a href="../04-Transformers/">Transformers</a> · <a href="../02-Machine-Learning-Basics/ml-basics-fundamentals.html">ML Basics</a> · <a href="../05-LLM-Fundamentals/what-is-llm.html">What is an LLM</a></p>
+
+    <h2 id="comparison">23. Comparison with alternatives</h2>
+    <table>
+      <tr><th>Architecture</th><th>Best for</th><th>Limitation</th></tr>
+      <tr><td>CNN</td><td>Images, spatial/local patterns</td><td>Not naturally suited to long-range sequence dependencies</td></tr>
+      <tr><td>RNN/LSTM/GRU</td><td>Sequential data, historically used for language</td><td>Sequential processing (slow to train), vanishing gradients on long sequences</td></tr>
+      <tr><td>Transformer (Attention)</td><td>Language, long-range dependencies, parallelizable training</td><td>Attention cost grows with sequence length</td></tr>
+    </table>
+
+    <h2 id="exercise">24. Mini practical exercise</h2>
+    <p>Train the SimpleNet example above on a toy regression dataset, then intentionally set the learning rate 100x too high and observe the loss diverge/become NaN — building intuition for hyperparameter sensitivity.</p>
+
+    <h2 id="project">25. Practical project</h2>
+    <p><b>Image Classifier from Scratch:</b> build a small CNN in PyTorch to classify a simple image dataset (e.g., MNIST), tracking training/validation loss curves and visualizing misclassified examples.</p>
+
+    <h2 id="projectarch">26. Project architecture</h2>
+    <pre><code>Dataset (MNIST) → DataLoader (batching)
+ → CNN model (conv layers → pooling → fully connected → softmax)
+ → training loop (forward → loss → backward → optimizer step)
+ → validation loop (track accuracy per epoch)
+ → visualize misclassified examples</code></pre>
+
+    <h2 id="interview-b">27. Interview Questions — Beginner</h2>
+    <div class="qa"><b>Q1.</b> What makes a neural network "deep"?<br><b>A.</b> Having multiple stacked layers between input and output, enabling hierarchical feature learning.</div>
+    <div class="qa"><b>Q2.</b> What does an activation function do?<br><b>A.</b> Introduces non-linearity after a layer's weighted sum, allowing the network to model complex, non-linear relationships.</div>
+    <div class="qa"><b>Q3.</b> What is backpropagation?<br><b>A.</b> The algorithm that computes the gradient of the loss with respect to every weight in the network, using the chain rule, working backward from the output.</div>
+    <div class="qa"><b>Q4.</b> What is gradient descent?<br><b>A.</b> An optimization algorithm that iteratively adjusts weights in the direction that reduces the loss.</div>
+    <div class="qa"><b>Q5.</b> What is a CNN best suited for?<br><b>A.</b> Image/spatial data, using local, shared filters to detect patterns like edges and textures.</div>
+    <div class="qa"><b>Q6.</b> What is an RNN?<br><b>A.</b> A recurrent neural network that processes sequences step by step, maintaining a hidden state carrying information forward.</div>
+    <div class="qa"><b>Q7.</b> What is attention, in simple terms?<br><b>A.</b> A mechanism letting a model weigh how relevant every other position in a sequence is to the current position, regardless of distance.</div>
+    <div class="qa"><b>Q8.</b> Why did Transformers largely replace RNNs for language tasks?<br><b>A.</b> Transformers process sequences in parallel (faster training) and handle long-range dependencies better via attention, avoiding RNNs' sequential bottleneck and vanishing-gradient issues.</div>
+    <div class="qa"><b>Q9.</b> What is the vanishing gradient problem?<br><b>A.</b> Gradients shrinking to near-zero as they propagate backward through many layers/steps, stalling learning in earlier layers — especially problematic in deep RNNs.</div>
+    <div class="qa"><b>Q10.</b> What's the difference between a forward pass and a backward pass?<br><b>A.</b> The forward pass computes predictions from input; the backward pass (backpropagation) computes gradients of the loss with respect to the weights.</div>
+
+    <h2 id="interview-i">28. Interview Questions — Intermediate</h2>
+    <div class="qa"><b>Q1.</b> Why do deep networks need non-linear activation functions at all?<br><b>A.</b> Without non-linearity, stacking any number of linear layers collapses mathematically into a single linear transformation, eliminating any benefit of depth — non-linear activations are what let depth actually increase the model's representational power.</div>
+    <div class="qa"><b>Q2.</b> How does the chain rule enable backpropagation to scale to networks with millions/billions of parameters?<br><b>A.</b> The chain rule lets the gradient of the loss with respect to any weight be computed as a product of local derivatives along the path from that weight to the output, reusing intermediate computations layer by layer (rather than recomputing from scratch per weight), making it computationally tractable even for huge networks.</div>
+    <div class="qa"><b>Q3.</b> Why are LSTMs/GRUs an improvement over vanilla RNNs?<br><b>A.</b> They introduce gating mechanisms that control what information is retained or forgotten in the hidden state, mitigating the vanishing gradient problem and allowing the network to learn longer-range dependencies than vanilla RNNs.</div>
+    <div class="qa"><b>Q4.</b> Why is attention described as solving RNNs' long-range dependency problem more directly than LSTMs do?<br><b>A.</b> Attention lets any position directly connect to any other position in a single step (via a learned weighting), rather than relying on information being carried forward incrementally through a sequential hidden state, which fundamentally avoids the distance-dependent information decay RNNs/LSTMs still suffer from on very long sequences.</div>
+    <div class="qa"><b>Q5.</b> What's the role of the learning rate, and what happens at extremes?<br><b>A.</b> It scales how big a step gradient descent takes per update; too high causes divergence/instability (loss oscillates or becomes NaN), too low causes painfully slow convergence or getting stuck in poor local regions.</div>
+    <div class="qa"><b>Q6.</b> Why is parallelizability during training a major practical advantage of Transformers over RNNs, beyond raw speed?<br><b>A.</b> It enables training at the massive scale (data and model size) that underlies modern LLMs — RNNs' inherently sequential processing per training step makes equivalent scale-up impractically slow, which is a key reason the field moved to attention-based architectures for large-scale language modeling.</div>
+    <div class="qa"><b>Q7.</b> What is dropout and why does it help generalization?<br><b>A.</b> A regularization technique that randomly zeroes out a fraction of neurons during training, preventing the network from over-relying on specific neurons/pathways and encouraging more robust, distributed representations that generalize better.</div>
+    <div class="qa"><b>Q8.</b> Why might a CNN be a poor choice for a long text sequence task compared to a Transformer?<br><b>A.</b> CNNs' local receptive fields are naturally suited to spatial/local patterns (like image regions); capturing long-range dependencies in text would require stacking many layers or very large kernels, whereas attention directly models long-range relationships in a single layer.</div>
+    <div class="qa"><b>Q9.</b> What's the practical difference between training from scratch and fine-tuning a pretrained deep model?<br><b>A.</b> Training from scratch requires learning all weights from random initialization on your full dataset (expensive, needs lots of data); fine-tuning starts from a pretrained model's learned representations and adapts them with a much smaller dataset and far less compute.</div>
+    <div class="qa"><b>Q10.</b> Why does batch size affect both training stability and hardware utilization?<br><b>A.</b> Larger batches give more stable gradient estimates and better utilize parallel hardware (GPUs), but require more memory and can sometimes generalize slightly worse or require learning rate adjustments; smaller batches are noisier but can escape poor local regions and use less memory.</div>
+
+    <h2 id="interview-a">29. Interview Questions — Advanced</h2>
+    <div class="qa"><b>Q1.</b> Explain why self-attention's computational cost grows quadratically with sequence length, and what architectural innovations address this.<br><b>A.</b> Standard self-attention computes a full pairwise N×N interaction matrix for a sequence of length N, so cost scales quadratically; innovations like sparse attention, linear attention approximations, and efficient KV-cache/paged-attention serving techniques reduce the practical impact of this scaling for long sequences.</div>
+    <div class="qa"><b>Q2.</b> Why might a very deep network suffer from both vanishing and exploding gradients depending on weight initialization, and how is this mitigated?<br><b>A.</b> Repeated multiplication of gradients across many layers can shrink them toward zero (vanishing) or grow them unboundedly (exploding) depending on whether the typical gradient magnitude at each layer is below or above 1; mitigations include careful weight initialization schemes (e.g., Xavier/He initialization), normalization layers (batch/layer norm), residual/skip connections, and gradient clipping.</div>
+    <div class="qa"><b>Q3.</b> How do residual (skip) connections help train very deep networks?<br><b>A.</b> They let gradients flow directly backward through an identity shortcut path in addition to the transformed path, mitigating vanishing gradients and letting networks be trained far deeper than would otherwise be stable — this is a key architectural element in both deep CNNs and Transformers.</div>
+
+    <h2 id="interview-s">30. Interview Questions — Senior/Architect</h2>
+    <div class="qa"><b>Q1.</b> You're deciding whether a new unstructured-data product feature needs a custom-trained deep learning model or can use a pretrained foundation model via API. How do you decide?<br><b>A.</b> Default to a pretrained foundation model (via API or open-weights) first — evaluate its zero-shot/few-shot performance on your task; only invest in custom DL training/fine-tuning if the foundation model's performance ceiling is insufficient and you have enough quality labeled data and compute budget to justify the added complexity and maintenance burden of an in-house model.</div>
+    <div class="qa"><b>Q2.</b> How would you explain to a non-technical stakeholder why training a large deep learning model is expensive, in terms they'd understand for budgeting purposes?<br><b>A.</b> Frame it as needing many passes over a large dataset through a very large network, each pass requiring substantial specialized hardware (GPUs) running for extended periods — cost scales with data size, model size, and training duration, which is why most teams reuse pretrained models (fine-tuning) rather than training from zero.</div>
+
+    <h2 id="interview-sc">31. Scenario-Based Questions</h2>
+    <div class="qa"><b>Scenario 1.</b> Your team's custom neural network's training loss suddenly becomes NaN partway through training. What's your debugging process?<br><b>A.</b> Check for unnormalized inputs causing numerically unstable activations, an excessively high learning rate, or a data bug producing invalid labels/values; add gradient clipping and input normalization, and reduce the learning rate as a first fix.</div>
+    <div class="qa"><b>Scenario 2.</b> A teammate proposes building a custom RNN-based model for a new text classification feature in 2026. What do you recommend instead and why?<br><b>A.</b> Recommend using a pretrained Transformer-based embedding/encoder (or even a zero-shot LLM prompt) instead — RNNs are largely obsolete for language tasks given Transformers' superior parallelizability, long-range dependency handling, and the availability of strong pretrained alternatives requiring far less training investment.</div>
+
+    <h2 id="revision">32. Quick revision notes</h2>
+    <ul>
+      <li>Neuron → layer → network; activation functions add non-linearity.</li>
+      <li>Backprop computes gradients via chain rule; gradient descent updates weights.</li>
+      <li>CNN = images/spatial; RNN/LSTM/GRU = sequences (largely superseded); Attention/Transformer = modern standard for language.</li>
+      <li>Transformers won out due to parallelizable training and better long-range dependency handling.</li>
+    </ul>
+
+    <h2 id="cheat">33. Cheat sheet</h2>
+    <div class="callout">Forward pass → loss → backprop (chain rule) → gradient descent update, repeated. CNN for images, RNN/LSTM historically for sequences, Attention/Transformer now standard for language due to parallelizable training + long-range dependency handling.</div>
+
+    <h2 id="further">34. Further topics to learn</h2>
+    <p><a href="../04-Transformers/">Transformers (deep dive)</a> → <a href="../05-LLM-Fundamentals/what-is-llm.html">What is an LLM</a> → <a href="../29-Fine-Tuning/">Fine-Tuning</a></p>
+
+    <div class="prevnext">
+      <a href="../02-Machine-Learning-Basics/ml-basics-fundamentals.html">← ML Basics</a>
+      <a href="../04-Transformers/transformers-deep-dive.html">Next: Transformers →</a>
+    </div>
+  </main>
+</div>
+<script src="../assets/app.js"></script>
+</body>
+</html>

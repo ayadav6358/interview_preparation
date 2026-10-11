@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Type-Safe Patterns for React &amp; Node — TypeScript Advanced — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">TypeScript Advanced</a><span class="sep">›</span>Type-Safe Patterns for React &amp; Node</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>Type-Safe Patterns for React &amp; Node</h1>
+      <p class="meta-line"><span>⏱ ~2.5 hrs</span><span>📍 Chapter 5 of 6</span></p>
+      <p><strong>One-line summary:</strong> This chapter applies everything from chapters 1-4 to the two domains you
+      actually work in daily — discriminated unions and polymorphic components in React, branded types and
+      schema-inferred types in Node APIs — plus the patterns that keep static types and runtime validation from drifting apart.</p>
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <div class="box why">
+        <h4>Why</h4>
+        <p>Interviewers testing "real" TS seniority (as opposed to type-theory trivia) ask you to design a component
+        prop API or an Express/Fastify route handler that's impossible to misuse at compile time. This is where
+        generics, discriminated unions, and branded types earn their keep in code you'd actually ship — and it's the
+        chapter most directly reusable in your day job tomorrow.</p>
+      </div>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>Builds on all of <a href="01-type-system.html">Type System</a>, <a href="02-generics.html">Generics</a>, <a href="03-utility-types.html">Utility Types</a>, and <a href="04-conditional-mapped-template.html">Conditional/Mapped/Template Literal Types</a>.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="react-discriminated-props">React: discriminated union props and exhaustive variant rendering</h3>
+      <pre><code class="language-typescript">type ButtonProps =
+  | { variant: "link"; href: string; onClick?: never }
+  | { variant: "action"; onClick: () => void; href?: never };
+
+function Button(props: ButtonProps) {
+  if (props.variant === "link") {
+    return &lt;a href={props.href}&gt;Click&lt;/a&gt;; // props.onClick not accessible — correctly absent
+  }
+  return &lt;button onClick={props.onClick}&gt;Click&lt;/button&gt;;
+}
+// &lt;Button variant="link" onClick={fn} /&gt; is now a compile error —
+// the `onClick?: never` in the link branch rejects it even though it's "optional"</code></pre>
+      <p>The <code>onClick?: never</code> trick is the standard way to make mutually exclusive prop sets actually
+      mutually exclusive — without it, TS's structural typing would happily accept extra unrelated props from the
+      other union branch on a fresh object literal in some circumstances.</p>
+
+      <h3 id="react-polymorphic">React: polymorphic "as" components</h3>
+      <pre><code class="language-typescript">type PolymorphicProps&lt;E extends React.ElementType&gt; = {
+  as?: E;
+} & Omit&lt;React.ComponentPropsWithoutRef&lt;E&gt;, "as"&gt;;
+
+function Box&lt;E extends React.ElementType = "div"&gt;({ as, ...rest }: PolymorphicProps&lt;E&gt;) {
+  const Component = as || "div";
+  return &lt;Component {...rest} /&gt;;
+}
+// &lt;Box as="a" href="/x" /&gt;  — href is correctly typed/required because E="a"
+// &lt;Box as="button" type="submit" /&gt; — type is correctly the button's type, not a generic string</code></pre>
+      <p>This is the pattern behind most design systems' <code>as</code> prop (Chakra, Radix-adjacent libraries). The
+      generic default <code>E = "div"</code> plus <code>ComponentPropsWithoutRef&lt;E&gt;</code> is what makes the
+      prop set change correctly based on which tag/component is passed.</p>
+
+      <h3 id="react-generic-hooks">React: generic hooks with correctly inferred return tuples</h3>
+      <pre><code class="language-typescript">function useToggle(initial = false): [boolean, () => void] {
+  const [state, setState] = React.useState(initial);
+  const toggle = React.useCallback(() => setState(s => !s), []);
+  return [state, toggle]; // tuple return type, NOT (boolean | (() => void))[]
+}
+// Without an explicit return type annotation, TS would infer the WIDER array type
+// (boolean | (() => void))[] by default, losing positional typing —
+// always annotate tuple-returning hooks explicitly, or use `as const` on the return.
+
+function useToggleConst(initial = false) {
+  const [state, setState] = React.useState(initial);
+  const toggle = React.useCallback(() => setState(s => !s), []);
+  return [state, toggle] as const; // readonly tuple inferred, positions preserved
+}</code></pre>
+
+      <h3 id="node-branded-types">Node/APIs: branded (nominal) types for IDs</h3>
+      <pre><code class="language-typescript">type Brand&lt;T, B extends string&gt; = T & { readonly __brand: B };
+type UserId = Brand&lt;string, "UserId"&gt;;
+type OrderId = Brand&lt;string, "OrderId"&gt;;
+
+function toUserId(raw: string): UserId { return raw as UserId; } // the ONE allowed cast
+function toOrderId(raw: string): OrderId { return raw as OrderId; }
+
+function getUser(id: UserId) { /* ... */ }
+
+const uid = toUserId("u_123");
+const oid = toOrderId("o_456");
+getUser(uid);  // OK
+// getUser(oid);  // Error — OrderId is not assignable to UserId, despite both being `string` at runtime
+// getUser("u_123");  // Error — a raw string isn't a UserId either; must go through toUserId()</code></pre>
+      <p>Branded types cost nothing at runtime (the <code>__brand</code> property never actually exists on the
+      object — it's purely a compile-time marker via intersection) but prevent an entire bug class: passing the wrong
+      ID type to a function, which structurally-typed <code>string</code> params can never catch on their own.</p>
+
+      <h3 id="node-schema-inference">Node/APIs: schema-driven type inference (no drift between runtime and static types)</h3>
+      <pre><code class="language-typescript">// A minimal hand-rolled schema + inferred-type pattern (the same shape Zod/Valibot use)
+type Schema&lt;T&gt; = { parse(input: unknown): T; readonly _type?: T };
+type Infer&lt;S&gt; = S extends Schema&lt;infer T&gt; ? T : never;
+
+function string(): Schema&lt;string&gt; {
+  return { parse(input) { if (typeof input !== "string") throw new Error("expected string"); return input; } };
+}
+function object&lt;Shape extends Record&lt;string, Schema&lt;any&gt;&gt;&gt;(shape: Shape): Schema&lt;{ [K in keyof Shape]: Infer&lt;Shape[K]&gt; }&gt; {
+  return {
+    parse(input) {
+      if (typeof input !== "object" || input === null) throw new Error("expected object");
+      const result: any = {};
+      for (const key in shape) result[key] = shape[key].parse((input as any)[key]);
+      return result;
+    }
+  };
+}
+
+const UserSchema = object({ id: string(), name: string() });
+type User = Infer&lt;typeof UserSchema&gt;; // { id: string; name: string } — derived, never hand-written
+
+function handler(body: unknown) {
+  const user = UserSchema.parse(body); // runtime-validated AND statically typed as User
+  return user.name; // fully typed, and guaranteed to have actually been validated
+}</code></pre>
+      <p>This is the exact mechanism libraries like Zod use: the static type is <em>derived</em> from the runtime
+      validator definition via <code>infer</code>, so the two can never drift — there's only one source of truth.
+      This is the core idea the capstone project's validation layer is built around.</p>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>The branded type trick works because TS structural typing checks assignability by shape — intersecting with
+      a property typed as a specific string literal (<code>{ __brand: "UserId" }</code>) makes that shape
+      structurally incompatible with any type lacking a matching literal-typed <code>__brand</code>, even though the
+      property is erased entirely at compile time (it's never actually assigned, only asserted via <code>as</code>).
+      Schema-driven inference works because <code>infer</code> operating over a generic <code>Schema&lt;T&gt;</code>
+      interface lets the checker read back whichever concrete <code>T</code> was threaded through at schema-construction
+      time — the "phantom" <code>_type?: T</code> field (never actually populated at runtime) exists purely so T has
+      somewhere to be recorded for <code>infer</code> to extract later; without it, T would never appear anywhere in
+      the schema object's actual type and couldn't be recovered.</p>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+flowchart LR
+  A["object({ id: string(), name: string() })"] --> B["Infer each field's Schema&lt;T&gt; via mapped type"]
+  B --> C["{ id: Infer&lt;Schema&lt;string&gt;&gt;; name: Infer&lt;Schema&lt;string&gt;&gt; }"]
+  C --> D["Resolves to { id: string; name: string }"]
+  D --> E["type User = Infer&lt;typeof UserSchema&gt;"]
+  E --> F["Static type always matches runtime validator — zero drift"]
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-typescript">// BAD: Express handler typed loosely, params/body are `any`, nothing stops a typo
+app.post("/users/:id", (req, res) => {
+  const id = req.params.id;          // any
+  const name = req.body.name;         // any, could be anything at runtime
+  res.json({ id, nmae: name });        // typo ships silently
+});
+
+// GOOD: typed request helper + schema validation, typo becomes a compile error
+interface TypedRequest&lt;Params = {}, Body = unknown&gt; {
+  params: Params;
+  body: Body;
+}
+function postUser(req: TypedRequest&lt;{ id: string }, { name: string }&gt;, res: Response) {
+  const { id } = req.params;  // string, typed
+  const { name } = UserBodySchema.parse(req.body); // runtime-checked AND typed
+  res.json({ id, name }); // typo here is now a compile error against the response DTO type
+}
+
+// Generic, reusable typed-route wrapper combining both ideas
+function route&lt;P, B&gt;(
+  schema: Schema&lt;B&gt;,
+  handler: (req: TypedRequest&lt;P, B&gt;, res: Response) => void
+) {
+  return (req: Request, res: Response) => {
+    const body = schema.parse(req.body); // throws (caught by error middleware) if invalid
+    handler({ params: req.params as P, body }, res);
+  };
+}</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod">
+        <h4>At scale</h4>
+        <p>A fintech API had a recurring class of incidents where a <code>customerId</code> was accidentally passed
+        where a <code>merchantId</code> was expected — both were plain <code>string</code>, so TS never caught it,
+        and three separate production incidents over a year traced back to exactly this swap in different services.
+        Introducing branded types for every domain ID (<code>CustomerId</code>, <code>MerchantId</code>,
+        <code>TransactionId</code>, ~12 total) across the shared types package, with a single conversion function per
+        ID type at the data-access boundary, converted this entire bug class into compile errors. The migration took
+        about a week across 40 services (mostly mechanical: add brand, fix resulting compile errors) and the team
+        reported zero ID-confusion incidents in the following year — a strong, quantifiable story for "why would you
+        add this complexity."</p>
+      </div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha">
+        <h4>Gotcha</h4>
+        <p>Branded types are a <em>compile-time-only</em> guarantee — if a branded <code>UserId</code> gets
+        serialized to JSON (e.g. in an API response) and deserialized on another service's boundary without going
+        back through the brand's conversion function, nothing at runtime stops a caller from constructing a fake
+        branded value via <code>as</code>. Brands prevent accidental misuse within type-checked code; they are not a
+        security boundary and don't replace runtime validation at trust boundaries.</p>
+      </div>
+      <ul>
+        <li>Use discriminated union props with <code>?: never</code> on the excluded branch's fields for truly mutually-exclusive component APIs.</li>
+        <li>Annotate tuple-returning custom hooks explicitly, or use <code>as const</code>, or inference will widen to an array type.</li>
+        <li>Derive static types from runtime validators (<code>Infer&lt;typeof schema&gt;</code>), never hand-maintain both separately.</li>
+        <li>Brand IDs and other primitive-but-semantically-distinct values at the data layer boundary, convert once, pass branded values everywhere internally.</li>
+        <li>Keep the polymorphic <code>as</code> component pattern's generic default sensible (usually the most common tag) so simple usage doesn't require annotation.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>Branded types</td><td>Multiple primitive-typed domain concepts that must never be confused (IDs, currency units)</td><td>Single ID type in a small app with low confusion risk</td><td>Plain <code>string</code>/<code>number</code> + code review discipline</td></tr>
+        <tr><td>Schema-derived types (Zod-style)</td><td>Runtime validation is needed anyway (API boundaries, forms)</td><td>Purely internal, already-trusted data with no validation need</td><td>Hand-written interfaces + manual sync discipline</td></tr>
+        <tr><td>Polymorphic <code>as</code> component</td><td>Shared design-system primitives rendered as different tags</td><td>One-off component that's always one tag</td><td>Separate components per tag</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic">
+        <h4>Basic</h4>
+        <details class="qa"><summary>What problem do branded types solve that plain type aliases (<code>type UserId = string</code>) don't?</summary><div class="answer"><p>A plain alias is still structurally just <code>string</code> — any string is assignable to it, so mixing up two ID types compiles fine. A branded type adds a compile-time-only marker that makes two otherwise-identical primitive types structurally incompatible with each other.</p></div></details>
+        <details class="qa"><summary>Why does a custom hook returning <code>[value, setter]</code> sometimes get typed as an array instead of a tuple?</summary><div class="answer"><p>Without an explicit tuple return type annotation or `as const`, TS infers array literal returns by taking the union of element types and producing a plain array type, losing positional/tuple information.</p></div></details>
+        <details class="qa"><summary>How do you make two component prop variants truly mutually exclusive in a discriminated union?</summary><div class="answer"><p>Add the other variant's unique props typed as `?: never` in each branch, so structurally providing a prop that belongs to the other branch becomes a type error instead of being silently accepted.</p></div></details>
+        <details class="qa"><summary>What is schema-derived typing and name one library that uses this pattern?</summary><div class="answer"><p>Deriving the static TypeScript type directly from a runtime validator definition via `infer`/a generic `Infer&lt;typeof schema&gt;` helper, so the static and runtime types can never drift apart. Zod is the most common example.</p></div></details>
+      </div>
+      <div class="qa-level medium">
+        <h4>Medium</h4>
+        <details class="qa"><summary>Walk through how the polymorphic <code>as</code> prop pattern correctly types `href` only when `as="a"` and `type` only when `as="button"`.</summary><div class="answer"><p>The component is generic over `E extends React.ElementType`, and its props type is `{ as?: E } & Omit&lt;ComponentPropsWithoutRef&lt;E&gt;, "as"&gt;`. Because `E` is inferred from the actual `as` value passed at the call site, `ComponentPropsWithoutRef&lt;E&gt;` resolves to that specific element/component's real prop type, so `href` only appears when E resolves to `"a"` and `type` only when E resolves to `"button"`.</p></div></details>
+        <details class="qa"><summary>Why are branded types "free" at runtime, and what's the one place a cast to the branded type is acceptable?</summary><div class="answer"><p>The `__brand` property is never actually assigned to any object — intersecting with `{ __brand: "X" }` only exists in the type system, erased completely on compile. The one acceptable cast is inside the dedicated conversion/constructor function (e.g. `toUserId`) at the trust boundary where the raw value has just been validated as genuinely a valid UserId; everywhere else should receive already-branded values.</p></div></details>
+        <details class="qa"><summary>What happens if a Zod-style schema's inferred type and its actual parse() implementation diverge (e.g. the parse function forgets to validate a field declared in the shape)?</summary><div class="answer"><p>The static type is trusted by the type checker regardless of what the runtime implementation actually does — if `parse()` has a bug and returns an object missing a declared field, TypeScript still believes the full inferred type is correct, since type inference only reads the *declared* schema shape, not the implementation's actual runtime behavior. This is why schema libraries need their own test suites validating `parse()` against the schema definition.</p></div></details>
+        <details class="qa"><summary>Design a generic `TypedRequest&lt;Params, Body, Query&gt;` helper for Express/Fastify-style handlers and explain why `req.params`/`req.body` are typed `any` by default in these frameworks.</summary><div class="answer"><p>Express types route params/body generically but defaults the generics to `any`/`ParamsDictionary` because the framework has no way to know your route's actual shape at the type level — it's runtime string-matched routing. A `TypedRequest&lt;Params, Body, Query&gt;` interface overrides those fields with your own generics, threaded through a typed `route()` wrapper function (as shown in the code examples) that both validates and casts.</p></div></details>
+      </div>
+      <div class="qa-level advanced">
+        <h4>Advanced</h4>
+        <details class="qa"><summary>Design a fully type-safe `useReducer`-based state machine where dispatching an action with an invalid payload for the current state is a compile error, not just a runtime no-op.</summary><div class="answer"><p>Model state and actions as parallel discriminated unions keyed by the same tag values. Instead of a single flat reducer type, type the reducer as a mapped type over each state's tag, where each entry's handler only accepts the subset of actions valid for that state (expressed via a lookup type like `ValidActions&lt;StateTag&gt;`). Enforcing this generally requires the dispatch function itself to be generic over the current state's tag (inferred from the current state value at the call site), with the action parameter's type conditionally narrowed based on that inferred tag, rather than a single flat `Action` union accepted unconditionally.</p></div></details>
+        <details class="qa"><summary>Explain the actual runtime risk of branded types when a branded value crosses a serialization boundary (e.g. JSON over HTTP between two TypeScript services), and how you'd mitigate it.</summary><div class="answer"><p>JSON serialization has no concept of TypeScript's type-level brand — a `UserId` becomes a plain string over the wire, and the receiving service's deserialization code typically re-brands it via the same unchecked `as` cast used at construction, meaning a malformed or wrong-domain string could be smuggled through as if freshly validated. Mitigate by pairing brands with actual runtime validation at every trust boundary (e.g. a schema's `parse()` that checks format, not just casts) rather than relying on the brand alone to imply validity.</p></div></details>
+        <details class="qa"><summary>How would you type a generic `createSlice`-style Redux Toolkit-like API where action creators' payload types are inferred per-reducer-case, and reducers can "mutate" an Immer-drafted state?</summary><div class="answer"><p>Each reducer case function's second parameter type (the action) is derived via a mapped type over the `reducers` object passed in, extracting each function's second parameter type (commonly via a `Parameters&lt;F&gt;[1]` pattern) to build a per-case action type; the returned `actions` object is itself a mapped type converting each reducer key into an action-creator function whose parameter matches that extracted payload type. Modeling "mutation" over an Immer draft requires typing the state parameter as `Draft&lt;State&gt;` (Immer's own branded/structural draft type) rather than plain `State`, so property mutation type-checks even though the actual reducer may return nothing (relying on in-place draft mutation).</p></div></details>
+        <details class="qa"><summary>What's the fundamental limitation of schema-derived static types when the runtime validator includes logic TypeScript's type system can't express (e.g. "field B is required only if field A equals 'x'")?</summary><div class="answer"><p>TypeScript's static type system can express conditional requiredness across fields using discriminated unions (modeling each valid combination as a separate union member), but a schema library's `infer` typically only reads the declared shape, not arbitrary custom refinement logic (e.g. a `.refine()` callback) — so cross-field conditional validation needs to be modeled as an explicit discriminated union in the schema's own type (if the library supports union schemas) for the static type to actually reflect the constraint, rather than relying on a generic refinement to "just work" at the type level.</p></div></details>
+        <details class="qa"><summary>Design the type signature for a generic `withQuery` Next.js/React hook-like data-fetching wrapper that infers both the response type AND a typed error union from a single typed fetcher function, usable across dozens of different API calls.</summary><div class="answer"><p>Type the fetcher as `() => Promise&lt;Result&lt;T, E&gt;&gt;` (a discriminated success/error union, as in chapter 1), and make the hook generic over the fetcher function itself: `function useQuery&lt;F extends () => Promise&lt;Result&lt;any, any&gt;&gt;&gt;(fetcher: F)`, then extract `T`/`E` via nested `infer` over the `Awaited&lt;ReturnType&lt;F&gt;&gt;` shape. This lets every call site's specific fetcher drive both the returned data's type and the specific error union, without the hook itself needing explicit type arguments at any call site.</p></div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment">
+        <span class="level-tag">Beginner (30-60 min)</span>
+        <h4>Mutually exclusive component props</h4>
+        <p>Build a <code>Alert</code> component with two variants: <code>{ variant: "dismissible"; onDismiss: () =&gt; void }</code>
+        and <code>{ variant: "persistent" }</code>, using the <code>?: never</code> trick so passing <code>onDismiss</code>
+        on a persistent alert is a compile error.</p>
+        <ul><li>Must use a discriminated union, not optional-everything props.</li><li>Verify the invalid combination actually fails via <code>// @ts-expect-error</code>.</li></ul>
+        <p><strong>Acceptance criteria:</strong> both valid variants render correctly; the invalid combination is caught at compile time.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>Add `onDismiss?: never` to the persistent branch, not just omitting the field — omitting alone doesn't block excess props on non-literal-assigned values in every case.</p></div></details>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Intermediate (2-4 hrs)</span>
+        <h4>Branded IDs across a mini Node service</h4>
+        <p>Build a tiny in-memory "users" and "orders" service with branded <code>UserId</code>/<code>OrderId</code>
+        types, conversion functions, and at least 3 functions per entity that would be easy to misuse with raw
+        strings (e.g. <code>getOrdersForUser(userId)</code>, <code>refundOrder(orderId)</code>).</p>
+        <ul><li>No function should accept a raw, unbranded string for an ID parameter.</li><li>Include at least 2 `// @ts-expect-error` tests proving ID confusion is caught.</li></ul>
+        <p><strong>Acceptance criteria:</strong> swapping a UserId and OrderId at any call site fails to compile.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>Keep the `Brand&lt;T, B&gt;` generic utility in a shared file and reuse it for every branded type, rather than redefining the branding mechanism per type.</p></div></details>
+        <p><strong>Bonus:</strong> add a lightweight runtime format check inside each conversion function (e.g. `UserId`s must start with `u_`).</p>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Advanced (1-2 days)</span>
+        <h4>Hand-rolled schema library with full type inference</h4>
+        <p>Extend the chapter's minimal <code>Schema&lt;T&gt;</code>/<code>Infer&lt;S&gt;</code> pattern into a small
+        library supporting <code>string()</code>, <code>number()</code>, <code>boolean()</code>, <code>object()</code>,
+        <code>array()</code>, and <code>.optional()</code>, with correct nested type inference throughout.</p>
+        <ul><li><code>array(string())</code> must infer <code>string[]</code>.</li><li><code>.optional()</code> wrapping any schema must correctly make that field optional AND <code>| undefined</code> in the inferred type.</li><li>Nested <code>object({ a: object({ b: string() }) })</code> must infer the correctly nested shape.</li></ul>
+        <p><strong>Acceptance criteria:</strong> a battery of <code>Equal</code>-based type tests covering at least 8 schema combinations, plus runtime tests proving <code>parse()</code> actually validates.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>`.optional()` is naturally implemented as a function that takes a `Schema&lt;T&gt;` and returns a `Schema&lt;T | undefined&gt;` wrapping the original's parse with an undefined-check short-circuit — no new generic machinery needed beyond what you already have.</p></div></details>
+      </div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet"><ul>
+        <li>Discriminated union props + <code>?: never</code> on excluded branches = truly mutually exclusive component APIs.</li>
+        <li>Annotate tuple-returning hooks explicitly (or <code>as const</code>) or inference widens to a plain array.</li>
+        <li>Polymorphic <code>as</code> components: generic over <code>E extends ElementType</code>, props = <code>{ as?: E } & Omit&lt;ComponentPropsWithoutRef&lt;E&gt;, "as"&gt;</code>.</li>
+        <li>Branded types = <code>T & { readonly __brand: "X" }</code>, zero runtime cost, prevents primitive-type confusion.</li>
+        <li>Brands are compile-time only — they are not a substitute for runtime validation at trust boundaries.</li>
+        <li>Derive static types from runtime validators via <code>infer</code> (<code>Infer&lt;typeof schema&gt;</code>) to eliminate drift.</li>
+        <li>A "phantom" unused type field (<code>_type?: T</code>) on a schema interface exists purely so <code>infer</code> has somewhere to read T from.</li>
+      </ul></div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://www.typescriptlang.org/docs/handbook/2/everyday-types.html">TS Handbook: Everyday Types</a></li>
+        <li><a href="https://zod.dev/">Zod documentation (schema-derived typing in practice)</a></li>
+        <li><a href="https://react-typescript-cheatsheet.netlify.app/">React TypeScript Cheatsheet</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="04-conditional-mapped-template.html"><span class="dir">← Previous</span>Conditional / Mapped / Template Literal Types</a>
+        <a class="next" href="06-tsconfig-monorepo.html"><span class="dir">Next →</span>tsconfig, Strict Mode, Monorepos</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · TypeScript Advanced</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-typescript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-jsx.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "02-typescript-advanced", chapterKey: "05-type-safe-patterns" });</script>
+</body>
+</html>

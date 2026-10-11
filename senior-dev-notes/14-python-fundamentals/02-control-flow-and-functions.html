@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Control Flow &amp; Functions — Python Fundamentals — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">Python Fundamentals</a><span class="sep">›</span>Control Flow &amp; Functions</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>Control Flow &amp; Functions</h1>
+      <p class="meta-line"><span>⏱ ~2 hrs</span><span>📍 Chapter 2 of 6</span></p>
+      <p><strong>One-line summary:</strong> Python's <code>if</code>/<code>for</code>/<code>while</code> do
+      the same job as JS's, but functions carry real differences that bite JS developers specifically —
+      default argument evaluation timing, <code>*args</code>/<code>**kwargs</code> instead of
+      <code>arguments</code>/rest+spread, and scope rules that don't match closures the way you expect.</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>Control flow syntax is the easy 20% — you'll pick it up by pattern matching within an hour. The
+      part that actually causes production bugs and interview stumbles is function semantics: mutable
+      default arguments are a real, recurring source of bugs in production Python codebases (including
+      ones written by experienced engineers who know better but typed it on autopilot), and
+      <code>*args</code>/<code>**kwargs</code> show up constantly in any framework code (Flask, FastAPI,
+      Django) you'll read. Getting this chapter solid is what lets you read decorator-heavy framework code
+      without flinching.</p>
+      <div class="box why"><h4>Why</h4><p>Nearly every "gotcha" Python interview question about functions
+      exists because Python evaluates default arguments once, at definition time, not per call — this single
+      fact explains a disproportionate number of real bugs and interview questions, so understanding
+      <em>why</em> it works that way (not just memorizing "don't use mutable defaults") pays off repeatedly.</p></div>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>Requires <a href="01-python-syntax-and-basics.html">Python Syntax &amp; Basics</a> (indentation,
+      variable binding, no block scope). Feeds directly into
+      <a href="03-data-types-and-collections.html">Data Types &amp; Collections</a> (comprehensions are a
+      control-flow concept in disguise). See also <a href="../08-python-intermediate/index.html">Python
+      Intermediate</a> for generators and async functions, which build on everything here.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="conditionals-loops">if/elif/else and for/while loops</h3>
+      <p>Structurally identical to JS in spirit, syntactically different. There's no <code>switch</code>
+      statement built in before 3.10 — <code>match</code> (structural pattern matching, added in 3.10) is
+      the closest equivalent and is more powerful than a JS <code>switch</code>.</p>
+      <pre><code class="language-python">
+score = 85
+if score >= 90:
+    grade = "A"
+elif score >= 80:          # elif, not "else if"
+    grade = "B"
+else:
+    grade = "C"
+
+# for loop iterates over an iterable directly -- there is no classic C-style for(;;)
+for i in range(5):          # range(5) -- like [...Array(5).keys()] in JS, but lazy
+    print(i)
+
+fruits = ["apple", "banana", "cherry"]
+for fruit in fruits:        # like `for (const fruit of fruits)` in JS
+    print(fruit)
+
+for index, fruit in enumerate(fruits):   # like `fruits.forEach((fruit, index) => ...)`
+    print(index, fruit)
+
+count = 0
+while count < 3:
+    print(count)
+    count += 1               # no ++ operator in Python -- must write += 1
+
+# match statement (3.10+) -- structural pattern matching, richer than JS switch
+match grade:
+    case "A" | "B":
+        print("Good job")
+    case "C":
+        print("Needs improvement")
+    case _:                  # `_` is the wildcard/default case
+        print("Unknown grade")
+</code></pre>
+      <div class="box gotcha"><h4>Gotcha</h4><p>There is no <code>++</code> or <code>--</code> operator in
+      Python at all — not even as an alternative spelling. Always write <code>count += 1</code>. Typing
+      <code>count++</code> is a silent no-op on some edge cases or a flat <code>SyntaxError</code> in most —
+      either way it's not what you meant.</p></div>
+
+      <h3 id="functions">Function definitions, default/keyword args, *args/**kwargs</h3>
+      <p>Python functions are defined with <code>def</code>, support default parameter values (like JS
+      default params), and go further than JS with explicit keyword-only arguments and the
+      <code>*args</code>/<code>**kwargs</code> convention for variadic parameters.</p>
+      <table>
+        <tr><th>Concept</th><th>JS/TS</th><th>Python</th></tr>
+        <tr><td>Default parameter</td><td><code>function f(x = 5) {}</code></td><td><code>def f(x=5):</code></td></tr>
+        <tr><td>Rest parameters</td><td><code>function f(...args) {}</code></td><td><code>def f(*args):</code></td></tr>
+        <tr><td>Object spread as named args</td><td><code>f({a: 1, b: 2})</code> then destructure</td><td><code>def f(**kwargs):</code> collects into a dict</td></tr>
+        <tr><td>Calling with named args</td><td>Destructured object param only</td><td>Real keyword arguments: <code>f(a=1, b=2)</code>, order-independent</td></tr>
+        <tr><td>Arrow / anonymous function</td><td><code>(x) =&gt; x * 2</code></td><td><code>lambda x: x * 2</code> (single expression only)</td></tr>
+      </table>
+      <pre><code class="language-python">
+def greet(name, greeting="Hello"):     # default arg, same idea as JS default params
+    return f"{greeting}, {name}!"
+
+print(greet("Alice"))                   # "Hello, Alice!"
+print(greet("Bob", greeting="Hi"))      # keyword arg -- order-independent, explicit
+
+def sum_all(*args):                      # *args collects positional extras into a tuple
+    return sum(args)
+
+print(sum_all(1, 2, 3, 4))               # 10
+# JS: function sumAll(...args) { return args.reduce((a,b) => a+b, 0); }
+
+def make_request(url, **kwargs):         # **kwargs collects keyword extras into a dict
+    print(f"GET {url} with options: {kwargs}")
+
+make_request("/users", timeout=30, retries=3)
+# JS-ish equivalent: makeRequest('/users', { timeout: 30, retries: 3 })
+
+double = lambda x: x * 2                 # lambda -- single expression only, no statements
+# JS: const double = x => x * 2;         -- JS arrows can have full bodies; lambdas cannot
+</code></pre>
+
+      <h3 id="scope">Scope basics: local, enclosing, global, built-in (LEGB)</h3>
+      <p>Python resolves names using the LEGB rule: Local → Enclosing → Global → Built-in. The critical
+      JS-breaking detail: if you <em>assign</em> to a name anywhere inside a function body, Python treats
+      that name as local for the <em>entire</em> function, even on lines before the assignment — unlike JS,
+      where reading an outer-scope variable before reassigning it later in the function just works via the
+      scope chain.</p>
+      <pre><code class="language-python">
+counter = 0
+
+def increment_broken():
+    counter += 1   # UnboundLocalError! Python sees the assignment and treats `counter`
+                    # as local for the whole function -- so reading it here fails,
+                    # it never falls back to the global one like JS would.
+    return counter
+
+def increment_fixed():
+    global counter   # explicitly declare we mean the module-level name
+    counter += 1
+    return counter
+
+# JS has no equivalent keyword needed:
+# let counter = 0;
+# function increment() { counter += 1; return counter; }  // just works
+</code></pre>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>CPython determines variable scope statically at <em>compile time</em>, not at runtime. When the
+      bytecode compiler processes a function body, it scans every name for assignment — any name assigned
+      anywhere in the function is marked as a local variable slot in that function's compiled code object,
+      and the compiler emits <code>LOAD_FAST</code>/<code>STORE_FAST</code> bytecode for it instead of
+      <code>LOAD_GLOBAL</code>. This is why <code>UnboundLocalError</code> happens: the bytecode was already
+      compiled to treat the name as local before the function ever runs, so reading it before the local
+      assignment executes finds an empty slot, not the outer value. JS engines, by contrast, resolve free
+      variables through a live scope chain lookup at access time — there's no equivalent "this name is
+      local for the whole function because it's assigned somewhere in it" compile-time rule.</p>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+flowchart TD
+  A["Name lookup inside a function"] --> B{"Assigned anywhere\nin this function body?"}
+  B -->|Yes| C["Local scope (L)\ncompiled as LOAD_FAST"]
+  B -->|No| D{"Found in an\nenclosing function?"}
+  D -->|Yes| E["Enclosing scope (E)\nneeds nonlocal to mutate"]
+  D -->|No| F{"Found at\nmodule level?"}
+  F -->|Yes| G["Global scope (G)\nneeds global to mutate"]
+  F -->|No| H["Built-in scope (B)\nlen, print, range, ..."]
+      </div>
+      <div class="mermaid">
+sequenceDiagram
+  participant Caller
+  participant make_request as make_request(url, **kwargs)
+  Caller->>make_request: make_request("/users", timeout=30, retries=3)
+  Note over make_request: url = "/users"
+  Note over make_request: kwargs = {"timeout": 30, "retries": 3}
+  make_request-->>Caller: uses kwargs.get("timeout") etc.
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-python">
+# ---- BAD: the classic mutable default argument trap ----
+def add_item(item, basket=[]):     # basket=[] is created ONCE at def time
+    basket.append(item)
+    return basket
+
+print(add_item("apple"))            # ['apple']
+print(add_item("banana"))           # ['apple', 'banana'] -- SURPRISE, not a fresh list!
+
+# ---- GOOD: use None as sentinel, create fresh default inside the function ----
+def add_item_fixed(item, basket=None):
+    if basket is None:
+        basket = []
+    basket.append(item)
+    return basket
+
+print(add_item_fixed("apple"))      # ['apple']
+print(add_item_fixed("banana"))     # ['banana'] -- fresh list every call, as expected
+
+# ---- *args and **kwargs together, matching a typical framework handler signature ----
+def route_handler(request_path, *args, method="GET", **kwargs):
+    print(f"{method} {request_path} args={args} kwargs={kwargs}")
+
+route_handler("/users/42", "extra", method="POST", auth=True)
+
+# ---- keyword-only arguments: the `*` forces everything after it to be keyword-only ----
+def create_user(name, *, email, is_admin=False):
+    return {"name": name, "email": email, "is_admin": is_admin}
+
+create_user("Alice", email="a@example.com")       # OK
+# create_user("Alice", "a@example.com")           # TypeError -- email must be passed by keyword
+</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4><p>A team building an internal caching decorator wrote
+      <code>def cached(fn, _cache={}):</code> intending <code>_cache</code> as a private per-decorated-function
+      store. Because the default dict is created once at function-definition time and the decorator function
+      itself is only defined once at import time, every single function decorated with <code>@cached</code>
+      across the entire codebase ended up sharing <em>the same dict</em> — cache key collisions silently
+      returned wrong cached results for unrelated functions whenever two functions happened to produce the
+      same cache key shape. The fix mirrored the general rule: never rely on a mutable default for storage
+      that should be fresh or scoped per use; the cache was moved to a <code>functools.lru_cache</code>-backed
+      implementation (or a closure-created dict per decoration) instead.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Mutable default arguments (<code>def f(x=[])</code> or
+      <code>def f(x={})</code>) are evaluated exactly once, when the function is defined, and that same
+      object is reused and mutated across every call that doesn't supply its own. Always default to
+      <code>None</code> and create the real mutable value inside the function body.</p></div>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Forgetting <code>global</code> or <code>nonlocal</code> when
+      you intend to <em>reassign</em> (not just read) an outer-scope name inside a function. Reading an outer
+      value without assigning to that name works fine without any keyword; the keyword is only required the
+      moment you assign to that same name inside the function.</p></div>
+      <ul>
+        <li>Prefer keyword-only arguments (<code>def f(a, *, b)</code>) for functions with many boolean/options params — it prevents positional mix-ups that are easy to make in both Python and JS.</li>
+        <li>Lambdas are expressions only — if you need more than one statement or a docstring, write a real <code>def</code> instead; don't fight the lambda syntax.</li>
+        <li>Use <code>match</code>/<code>case</code> (3.10+) over long <code>if/elif</code> chains when branching on the shape/value of one variable — it reads closer to a JS <code>switch</code> but supports pattern destructuring JS switch can't.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td><code>lambda</code></td><td>A tiny single-expression callback (sort key, filter predicate)</td><td>Anything needing multiple statements, a docstring, or reuse by name</td><td>A regular named <code>def</code></td></tr>
+        <tr><td><code>*args</code>/<code>**kwargs</code></td><td>Wrapping/forwarding calls generically (decorators, middleware-style code)</td><td>A fixed, well-known parameter list — explicit params are more readable and type-checkable</td><td>Explicit named parameters</td></tr>
+        <tr><td><code>match</code>/<code>case</code></td><td>Branching on the shape or value of one variable, 3+ cases</td><td>Simple 1-2 condition branching</td><td><code>if</code>/<code>elif</code></td></tr>
+        <tr><td><code>global</code> to mutate module state</td><td>Rare, deliberate module-level counters/singletons</td><td>General state management — fragile and hard to test</td><td>A class instance or passing state explicitly</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic">
+        <h4>Basic</h4>
+        <details class="qa"><summary>What's the Python equivalent of JS's <code>...args</code> rest parameter?</summary><div class="answer"><p>
+        <code>*args</code> — it collects any extra positional arguments into a tuple inside the function.</p></div><div class="followup">Follow-up: what collects extra keyword arguments, and into what data type?</div></details>
+        <details class="qa"><summary>Why is <code>def f(items=[])</code> considered a bug risk?</summary><div class="answer"><p>
+        The default list is created once, at function-definition time, and shared/mutated across every call
+        that relies on the default — not recreated fresh per call like you'd expect from JS default
+        parameters.</p></div><div class="followup">Follow-up: does this apply to default arguments that are tuples? Why or why not?</div></details>
+        <details class="qa"><summary>Does Python have a <code>++</code> increment operator?</summary><div class="answer"><p>
+        No. You must write <code>x += 1</code>. There is no <code>++</code> or <code>--</code> in the
+        language at all.</p></div><div class="followup">Follow-up: why do you think Python's designers omitted it when C-family languages have it?</div></details>
+        <details class="qa"><summary>What does <code>*</code> alone in a parameter list mean, as in <code>def f(a, *, b):</code>?</summary><div class="answer"><p>
+        It marks everything after it as keyword-only — callers must pass <code>b</code> as <code>b=value</code>,
+        not positionally.</p></div><div class="followup">Follow-up: what does a bare <code>/</code> in a parameter list mean (3.8+)?</div></details>
+        <details class="qa"><summary>Can a Python lambda contain an if/else?</summary><div class="answer"><p>
+        Only as a conditional expression: <code>lambda x: "even" if x % 2 == 0 else "odd"</code>. It cannot
+        contain statements (assignments, loops, multiple lines) — it must be a single expression.</p></div><div class="followup">Follow-up: when would you refactor a lambda into a regular function?</div></details>
+        <details class="qa"><summary>What is the LEGB rule?</summary><div class="answer"><p>
+        The order Python searches for a name: Local, Enclosing (closures), Global (module), Built-in
+        (len, print, etc.) — first match wins.</p></div><div class="followup">Follow-up: where does a class body's namespace fit into LEGB?</div></details>
+        <details class="qa"><summary>Is <code>switch</code> available in Python?</summary><div class="answer"><p>
+        Not as a <code>switch</code> keyword. Python 3.10+ added <code>match</code>/<code>case</code>, which
+        is structurally similar but supports pattern matching/destructuring, not just value equality.</p></div><div class="followup">Follow-up: what Python versions would you need to support to safely avoid match/case?</div></details>
+      </div>
+      <div class="qa-level medium">
+        <h4>Medium</h4>
+        <details class="qa"><summary>Why does <code>counter += 1</code> inside a function raise <code>UnboundLocalError</code> instead of just reading the outer <code>counter</code>?</summary><div class="answer"><p>
+        Because Python's compiler statically scans the function body and marks any assigned name as local
+        for the entire function — the assignment on that line means the compiler never emits a lookup of the
+        outer <code>counter</code> at all; it compiled the function expecting a local slot that doesn't yet
+        hold a value when read.</p></div><div class="followup">Follow-up: what's the fix, and what are its downsides for testability?</div></details>
+        <details class="qa"><summary>Explain exactly when the mutable-default-argument object gets created and how many times, across many calls.</summary><div class="answer"><p>
+        Exactly once — when the <code>def</code> statement itself executes (typically at module import time),
+        not on each call. The same object reference is stored in the function's <code>__defaults__</code>
+        tuple and reused as the parameter's value on every call that doesn't override it.</p></div><div class="followup">Follow-up: how would you inspect a function's current defaults from outside it, to debug this?</div></details>
+        <details class="qa"><summary>Compare Python keyword-only arguments to a JS pattern that approximates the same safety.</summary><div class="answer"><p>
+        Python's <code>def f(a, *, b, c)</code> forces callers to name <code>b</code> and <code>c</code>
+        explicitly, preventing accidental positional swaps. JS has no native equivalent for positional
+        functions, so the idiomatic approximation is accepting a single destructured object parameter:
+        <code>function f(a, {b, c}) {}</code>, called as <code>f(a, {b: 1, c: 2})</code> — similar safety,
+        different mechanism (one param object vs real multiple keyword args).</p></div><div class="followup">Follow-up: can you mix positional-only, normal, and keyword-only parameters in one Python signature? What's the ordering rule?</div></details>
+        <details class="qa"><summary>When would you reach for <code>*args, **kwargs</code> in a wrapper function, and what's the real cost of overusing it?</summary><div class="answer"><p>
+        It's the right tool for generic forwarding — decorators, middleware-style wrappers, adapters that
+        don't know or care about the wrapped function's exact signature. Overusing it in regular business
+        logic functions destroys readability and defeats static type checking/autocomplete, since callers
+        and readers can no longer see what parameters actually exist without reading the implementation.</p></div><div class="followup">Follow-up: how do type checkers like mypy handle *args/**kwargs typing, and what's lost compared to explicit params?</div></details>
+        <details class="qa"><summary>What does <code>match</code>/<code>case</code> support that a JS <code>switch</code> fundamentally cannot?</summary><div class="answer"><p>
+        Structural pattern matching: destructuring into sub-patterns (matching a dict's keys, a list's
+        length/elements, a class's attributes), guard clauses (<code>case x if x > 0:</code>), and OR-patterns
+        (<code>case "A" | "B":</code>). JS <code>switch</code> only does value equality on a single expression
+        per case.</p></div><div class="followup">Follow-up: show a case pattern that destructures a dict with a specific key present.</div></details>
+      </div>
+      <div class="qa-level advanced">
+        <h4>Advanced</h4>
+        <details class="qa"><summary>Explain the compiled bytecode difference between a name treated as local vs global in a CPython function, and why this matters for performance, not just correctness.</summary><div class="answer"><p>
+        Local variable access compiles to <code>LOAD_FAST</code>/<code>STORE_FAST</code>, which indexes
+        directly into a fixed-size array on the frame — O(1), no dict lookup. Global access compiles to
+        <code>LOAD_GLOBAL</code>, which does a dictionary lookup (with caching optimizations in 3.11+'s
+        adaptive specializing interpreter, but still fundamentally different). This is part of why tight
+        loops that reference a global repeatedly are measurably slower than the equivalent with a local
+        alias — a known micro-optimization technique in performance-sensitive Python code.</p></div><div class="followup">Follow-up: what did PEP 659 (specializing adaptive interpreter, 3.11+) change about global lookup cost?</div></details>
+        <details class="qa"><summary>Design a decorator that needs genuinely private, per-decoration mutable state (like a counter per decorated function), and explain why a naive mutable default argument on the decorator itself is the wrong tool.</summary><div class="answer"><p>
+        The naive <code>def decorator(fn, _state={}):</code> shares one dict across every use of the
+        decorator across the whole codebase — not per-decorated-function. The correct pattern creates the
+        mutable state inside the decorator's closure, fresh per decoration: <code>def decorator(fn): state = {}; def wrapper(*a, **kw): ...; return wrapper</code>
+        — each call to <code>decorator</code> creates a new closure cell, giving true per-function isolation,
+        the same principle as a JS factory function creating isolated closures per call.</p></div><div class="followup">Follow-up: how would functools.wraps interact with this, and why is it needed at all?</div></details>
+        <details class="qa"><summary>Why can keyword-only and positional-only markers (<code>*</code> and <code>/</code>) both appear in the same signature, and what ordering rule governs them?</summary><div class="answer"><p>
+        A full signature can look like <code>def f(a, b, /, c, d, *, e, f):</code> — parameters before
+        <code>/</code> are positional-only, between <code>/</code> and <code>*</code> are normal
+        (positional-or-keyword), after <code>*</code> are keyword-only. This exists so library authors can
+        lock down call-site API shape precisely (e.g. <code>dict.get(key, default, /)</code> style stdlib
+        signatures use positional-only to reserve the right to rename parameters without breaking callers).</p></div><div class="followup">Follow-up: why does the standard library itself use positional-only parameters in many built-in function signatures?</div></details>
+        <details class="qa"><summary>A teammate argues "mutable default arguments are just a footgun Python should have fixed." Steelman why the current behavior is actually a deliberate, defensible design rather than an oversight.</summary><div class="answer"><p>
+        Default values are part of the function object itself (<code>__defaults__</code>), evaluated once at
+        definition time — this is consistent with Python's broader model where <code>def</code> is itself a
+        runtime statement that constructs a function object, and the defaults are just attributes computed
+        then, same as any other expression evaluated at def time (e.g. a default of <code>time.time()</code>
+        would also be "frozen" at def time, which is arguably correct behavior, not a bug). The real fix isn't
+        changing the semantics — it's a well-known idiom (default to <code>None</code>) that's cheap to apply
+        once understood; changing the language semantics would be a much larger breaking change for a
+        learnable convention.</p></div><div class="followup">Follow-up: can you think of a case where "evaluated once at def time" is actually exactly the behavior you want?</div></details>
+        <details class="qa"><summary>How would you use <code>match</code>/<code>case</code> to parse a heterogeneous list of event dicts coming from a webhook, dispatching on event "type"?</summary><div class="answer"><p>
+        <code>match event: case {"type": "created", "id": id}: ...; case {"type": "updated", **rest}: ...; case _: ...</code>
+        — destructuring directly on dict shape avoids a chain of <code>if event["type"] == "..."</code>
+        checks with manual key extraction, and the wildcard case gives you an explicit, impossible-to-forget
+        default branch, unlike a JS switch's often-forgotten default.</p></div><div class="followup">Follow-up: what happens if the "type" key is missing entirely — does match raise, or fall through to the wildcard?</div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment">
+        <span class="level-tag">Beginner (30-60 min)</span>
+        <h4>Function signature translation drill</h4>
+        <p>Take five JS function signatures (default param, rest param, a destructured-object "options"
+        param, an arrow function, a function calling another with spread) and write the idiomatic Python
+        equivalent for each, with a one-line comment on the key syntactic difference.</p>
+        <ul><li>At least one must use <code>*args</code> and one must use <code>**kwargs</code>.</li>
+        <li>The lambda translation must demonstrate the single-expression limitation (pick a JS arrow with a one-liner body).</li></ul>
+        <p><strong>Acceptance criteria:</strong> All five run standalone and produce output demonstrating correct behavior with at least two different call shapes each.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>For the destructured-object param, Python's closest idiom is often just named keyword arguments rather than literally passing a dict, unless the JS code specifically needs an arbitrary bag of options (then **kwargs is closer).</p></div></details>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Intermediate (2-4 hrs)</span>
+        <h4>Build a tiny "command dispatcher" using *args/**kwargs and match</h4>
+        <p>Build a CLI-style dispatcher: a dict mapping command names to handler functions, each handler
+        accepting <code>*args, **kwargs</code>, plus a separate <code>match</code>-based dispatcher for a
+        second set of commands that branch on a dict-shaped "action" payload (e.g. <code>{"action": "move", "dx": 1, "dy": 0}</code>).</p>
+        <ul><li>At least 4 distinct commands across the two dispatchers.</li>
+        <li>Demonstrate and deliberately trigger the mutable-default-argument bug in one early draft, then fix it, keeping both versions with comments.</li>
+        <li>Write a short README-style docstring at the top of the file explaining when you'd pick dict-dispatch vs match/case in real code.</li></ul>
+        <p><strong>Acceptance criteria:</strong> All commands execute correctly through both dispatch mechanisms; the buggy-vs-fixed mutable default comparison clearly shows the difference when run.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>For the deliberate bug demo, call the buggy handler 3 times and print its "memory" each time before showing the fixed version staying clean.</p></div></details>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Advanced (1-2 days)</span>
+        <h4>Build a signature-inspecting decorator</h4>
+        <p>Build a decorator <code>@log_calls</code> that, when applied to any function, logs the function
+        name, the actual argument values it was called with (matching them to parameter names using
+        <code>inspect.signature</code>), and the return value — working correctly regardless of whether the
+        wrapped function uses positional args, keyword args, defaults, or <code>*args</code>/<code>**kwargs</code>.</p>
+        <ul><li>Must use <code>functools.wraps</code> so the wrapped function's name/docstring are preserved.</li>
+        <li>Must correctly bind and display argument names even when called positionally, using <code>inspect.signature(fn).bind(*args, **kwargs)</code>.</li>
+        <li>Include a pytest suite testing it against at least 3 differently-shaped function signatures.</li></ul>
+        <p><strong>Acceptance criteria:</strong> The decorator works transparently (wrapped functions behave identically, just with logging) across all 3+ signature shapes in your test suite. No full solution here.</p>
+      </div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet"><ul>
+        <li>No <code>++</code>/<code>--</code> — always <code>x += 1</code> / <code>x -= 1</code>.</li>
+        <li><code>elif</code>, not "else if"; <code>match</code>/<code>case</code> (3.10+) for structural branching.</li>
+        <li><code>*args</code> collects extra positional args into a tuple; <code>**kwargs</code> collects extra keyword args into a dict.</li>
+        <li>Mutable default arguments are evaluated once at def time — default to <code>None</code> and build the real value inside the function.</li>
+        <li>Assigning to an outer-scope name inside a function requires <code>global</code> or <code>nonlocal</code>; just reading it doesn't.</li>
+        <li><code>lambda</code> is a single expression only — no statements, no multi-line bodies.</li>
+        <li><code>*</code> alone in a parameter list forces everything after it to be keyword-only.</li>
+        <li>LEGB scope resolution order: Local → Enclosing → Global → Built-in.</li>
+        <li>Local variable access (<code>LOAD_FAST</code>) is faster than global access (<code>LOAD_GLOBAL</code>) — matters in hot loops.</li>
+      </ul></div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://docs.python.org/3/tutorial/controlflow.html">Python docs: More Control Flow Tools</a></li>
+        <li><a href="https://docs.python.org/3/reference/compound_stmts.html#the-match-statement">Python docs: The match statement</a></li>
+        <li><a href="https://docs.python.org/3/faq/programming.html#why-are-default-values-shared-between-objects">Python FAQ: Why are default values shared between objects?</a></li>
+        <li><a href="https://docs.python.org/3/library/inspect.html#inspect.signature">Python docs: inspect.signature</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="01-python-syntax-and-basics.html"><span class="dir">← Previous</span>Python Syntax &amp; Basics</a>
+        <a class="next" href="03-data-types-and-collections.html"><span class="dir">Next →</span>Data Types &amp; Collections</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · Python Fundamentals</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "14-python-fundamentals", chapterKey: "02-control-flow-and-functions" });</script>
+</body>
+</html>

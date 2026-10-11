@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI System Design Overview</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <input class="searchbox" placeholder="Search topics..." />
+    <a href="../index.html">← Home</a>
+    <h3>45-AI-System-Design</h3>
+    <a href="ai-system-design-overview.html">AI System Design Overview</a>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumbs"><a href="../index.html">Home</a> / 45-AI-System-Design</div>
+      <button class="theme-toggle" onclick="toggleTheme()">🌓 Theme</button>
+    </div>
+    <h1>AI System Design: ChatGPT-like App, Enterprise RAG, Coding Assistant, Multi-Agent Platform</h1>
+    <span class="tag good">Stable</span><span class="tag">Last verified: 2026-10-06</span>
+
+    <div class="toc">
+      <b>On this page</b>
+      <a href="#what">1. What is this?</a>
+      <a href="#whyexist">2. Why does it exist?</a>
+      <a href="#whyimportant">3. Why is it important?</a>
+      <a href="#whereused">4. Where is it used?</a>
+      <a href="#prereq">5. Prerequisites</a>
+      <a href="#core">6. The standard AI system design framework</a>
+      <a href="#terms">7. Terminology</a>
+      <a href="#arch">8. Architecture: ChatGPT-like application</a>
+      <a href="#internal">9. Architecture: Enterprise RAG</a>
+      <a href="#steps">10. Architecture: AI Coding Assistant</a>
+      <a href="#simple">11. Architecture: Multi-Agent Platform</a>
+      <a href="#real">12. Real-world example</a>
+      <a href="#code">13. Code example (capacity estimation)</a>
+      <a href="#advanced">14. Advanced example (failure handling)</a>
+      <a href="#mistakes">15. Common mistakes</a>
+      <a href="#best">16. Best practices</a>
+      <a href="#production">17. Production considerations</a>
+      <a href="#security">18. Security considerations</a>
+      <a href="#performance">19. Performance considerations</a>
+      <a href="#cost">20. Cost considerations & trade-offs</a>
+      <a href="#debug">21. Debugging/troubleshooting</a>
+      <a href="#related">22. Related concepts</a>
+      <a href="#comparison">23. Remaining system designs (quick reference)</a>
+      <a href="#exercise">24. Mini practical exercise</a>
+      <a href="#project">25. Practical project</a>
+      <a href="#projectarch">26. Project architecture</a>
+      <a href="#interview-b">27. Interview Questions — Beginner</a>
+      <a href="#interview-i">28. Interview Questions — Intermediate</a>
+      <a href="#interview-a">29. Interview Questions — Advanced</a>
+      <a href="#interview-s">30. Interview Questions — Senior/Architect</a>
+      <a href="#interview-sc">31. Scenario-Based Questions</a>
+      <a href="#revision">32. Quick revision notes</a>
+      <a href="#cheat">33. Cheat sheet</a>
+      <a href="#further">34. Further topics to learn</a>
+    </div>
+
+    <h2 id="what">1. What is this?</h2>
+    <p>AI system design applies classic system-design methodology (requirements → architecture → data flow → scaling → trade-offs) to AI-specific systems: ChatGPT-like applications, enterprise RAG, AI customer support, AI coding assistants, research agents, multi-agent platforms, MCP platforms, voice AI, multimodal RAG, and agentic workflow platforms.</p>
+
+    <h2 id="whyexist">2. Why does it exist?</h2>
+    <p>AI systems introduce new architectural concerns (LLM latency/cost, retrieval pipelines, agent loops, hallucination mitigation) on top of standard distributed-systems concerns — this discipline exists to extend proven system-design thinking to these new building blocks.</p>
+
+    <h2 id="whyimportant">3. Why is it important?</h2>
+    <p>AI system design interviews are now standard for senior AI engineering roles — this page synthesizes nearly every other topic in this knowledge base (RAG, agents, LLM APIs, observability, security, cost) into the integrated architectural thinking those interviews test.</p>
+
+    <h2 id="whereused">4. Where is it used?</h2>
+    <p>Senior/staff AI engineering interviews, real architectural planning for new AI products.</p>
+
+    <h2 id="prereq">5. Prerequisites</h2>
+    <p>Most of this knowledge base — especially <a href="../12-RAG/rag-fundamentals.html">RAG</a>, <a href="../17-AI-Agents/ai-agents-fundamentals.html">AI Agents</a>, <a href="../41-AI-Performance-and-Scaling/performance-and-scaling-fundamentals.html">Performance and Scaling</a>, <a href="../44-Enterprise-AI/enterprise-ai-fundamentals.html">Enterprise AI</a>.</p>
+
+    <h2 id="core">6. The standard AI system design framework</h2>
+    <ol>
+      <li><b>Requirements:</b> functional (what must it do) and non-functional (latency, scale, availability, compliance).</li>
+      <li><b>Architecture:</b> major components and how they connect.</li>
+      <li><b>Data flow:</b> trace a request end-to-end through the system.</li>
+      <li><b>Data stores:</b> database, cache, vector DB, queue — what each holds and why.</li>
+      <li><b>LLM/model choices:</b> which models, why, and the routing/fallback strategy.</li>
+      <li><b>Security:</b> tenant isolation, injection defense, access control.</li>
+      <li><b>Observability:</b> tracing, evaluation, monitoring.</li>
+      <li><b>Scaling:</b> how the system handles growth in users/data/traffic.</li>
+      <li><b>Failure handling:</b> what happens when any component fails.</li>
+      <li><b>Cost:</b> major cost drivers and optimization levers.</li>
+      <li><b>Trade-offs:</b> what was sacrificed for what, and why.</li>
+    </ol>
+
+    <h2 id="terms">7. Terminology</h2>
+    <table>
+      <tr><th>Term</th><th>Meaning</th></tr>
+      <tr><td>Functional requirement</td><td>What the system must do (features/capabilities).</td></tr>
+      <tr><td>Non-functional requirement</td><td>How well it must do it (latency, availability, scale, compliance).</td></tr>
+      <tr><td>Data flow</td><td>The end-to-end path a request takes through the system's components.</td></tr>
+      <tr><td>Trade-off</td><td>A deliberate choice sacrificing one quality (e.g., cost) for another (e.g., latency).</td></tr>
+    </table>
+
+    <h2 id="arch">8. Architecture: ChatGPT-like application</h2>
+    <p><b>Requirements:</b> multi-turn conversation, streaming responses, conversation history, millions of concurrent users.</p>
+    <pre><code>Client (web/mobile) → API Gateway → Auth
+ → Conversation Service (loads/saves history from DB)
+ → LLM Gateway (routing, fallback, rate limiting)
+ → LLM Provider(s) (streaming response)
+ → Response streamed back to client
+ → Async: usage/cost logging, content moderation check</code></pre>
+    <p><b>Data stores:</b> relational/NoSQL DB for conversation history, cache for active sessions, object storage for any uploaded files.
+    <b>Scaling:</b> horizontally scale the stateless API/conversation service layer; conversation history sharded by user ID.
+    <b>Failure handling:</b> fallback LLM provider; graceful degradation (cached "service busy" message) rather than hard failure.</p>
+
+    <h2 id="internal">9. Architecture: Enterprise RAG</h2>
+    <p><b>Requirements:</b> multi-tenant document Q&A, strict access control, citations, compliance/audit.</p>
+    <pre><code>Document sources (SharePoint, Confluence, uploads)
+ → Ingestion pipeline (loader → parser → chunker → embed) — per-tenant scoped
+ → Vector DB (tenant_id + permission metadata on every chunk)
+ → Query: Auth/RBAC check → retrieve (tenant+permission filtered) → rerank
+ → LLM generates answer with citations
+ → Audit log every query + retrieval + answer</code></pre>
+    <p>See <a href="../44-Enterprise-AI/enterprise-ai-fundamentals.html">Enterprise AI</a> for the full tenant-isolation and compliance treatment this design relies on.</p>
+
+    <h2 id="steps">10. Architecture: AI Coding Assistant</h2>
+    <p><b>Requirements:</b> repo-aware code understanding, multi-file edits, test execution, human review gate.</p>
+    <pre><code>IDE/CLI (user request)
+ → Agent orchestrator (plan → search/read repo → edit → test loop)
+ → Tool layer: file I/O, code search (grep/semantic), shell execution (sandboxed)
+ → MCP servers (optional: external tool/data access — issue trackers, DBs)
+ → LLM (with repo context, tool definitions)
+ → Diff presented for human review → commit on approval</code></pre>
+    <p>See <a href="../34-Coding-Agents/coding-agents-fundamentals.html">Coding Agents</a> for the detailed loop this design implements.</p>
+
+    <h2 id="simple">11. Architecture: Multi-Agent Platform</h2>
+    <p><b>Requirements:</b> route tasks to specialist agents, parallel/sequential coordination, observability across agents.</p>
+    <pre><code>Task → Supervisor agent (classify + route)
+ → Specialist agents (parallel or sequential, each scoped tools/prompts)
+ → Shared state (LangGraph-style) coordinating the workflow
+ → Synthesis/integration step → final output
+ → Full tracing across every agent's steps (see LLM Observability)</code></pre>
+    <p>See <a href="../21-Multi-Agent-Systems/multi-agent-systems.html">Multi-Agent Systems</a> for the underlying coordination patterns.</p>
+
+    <h2 id="real">12. Real-world example</h2>
+    <p>A real enterprise RAG deployment combines all of the above patterns: SSO-authenticated users, RBAC-scoped retrieval, a reranking step for precision, full LangSmith tracing, cost dashboards per department, and a nightly evaluation job gating any prompt/retrieval changes before they reach production — the synthesis of nearly every topic in this knowledge base into one running system.</p>
+
+    <h2 id="code">13. Code example (capacity estimation)</h2>
+    <pre><code class="language-python"># Back-of-envelope capacity estimation for a ChatGPT-like app
+daily_active_users = 1_000_000
+avg_messages_per_user_per_day = 10
+avg_tokens_per_message_pair = 500  # input + output combined
+
+daily_tokens = daily_active_users * avg_messages_per_user_per_day * avg_tokens_per_message_pair
+peak_qps = (daily_active_users * avg_messages_per_user_per_day) / (24 * 3600) * 3  # 3x peak factor
+
+print(f"Daily tokens: {daily_tokens:,}")
+print(f"Estimated peak QPS: {peak_qps:.1f}")
+# Use these numbers to size LLM provider rate-limit tier, gateway capacity, and DB throughput
+</code></pre>
+
+    <h2 id="advanced">14. Advanced example (failure handling)</h2>
+    <pre><code class="language-python"># Layered failure handling for the ChatGPT-like app's LLM call
+def get_response(messages):
+    try:
+        return primary_llm_gateway.stream(messages)
+    except CircuitOpenError:
+        try:
+            return fallback_llm_gateway.stream(messages)
+        except Exception:
+            return cached_degraded_response()  # "We're experiencing issues, please retry shortly"
+</code></pre>
+
+    <h2 id="mistakes">15. Common mistakes</h2>
+    <ul>
+      <li>Jumping straight to architecture diagrams without first clarifying functional/non-functional requirements.</li>
+      <li>Ignoring failure handling and security until explicitly asked — these should be designed in from the start.</li>
+      <li>Not quantifying scale (back-of-envelope estimates) before proposing a specific architecture.</li>
+      <li>Treating every AI system design the same, ignoring domain-specific needs (e.g., voice AI's latency budget vs. batch document processing's throughput focus).</li>
+    </ul>
+
+    <h2 id="best">16. Best practices</h2>
+    <ul>
+      <li>Always start with requirements clarification before architecture.</li>
+      <li>Quantify scale with back-of-envelope math to justify architectural choices.</li>
+      <li>Explicitly address security, observability, and failure handling, not just the happy path.</li>
+      <li>State trade-offs explicitly — system design is about justified choices, not a single "correct" answer.</li>
+    </ul>
+
+    <h2 id="production">17. Production considerations</h2>
+    <p>Every architecture sketched here assumes the supporting practices covered elsewhere in this knowledge base (observability, evaluation, security, cost monitoring) are actually implemented — a system design interview answer that mentions these briefly demonstrates more maturity than one that only describes the happy-path data flow.</p>
+
+    <h2 id="security">18. Security considerations</h2>
+    <p>Every design above needs tenant isolation (if multi-tenant), prompt-injection defense (if processing untrusted content), and least-privilege tool scoping (if agentic) — these aren't optional add-ons, they're core requirements for any production AI system design.</p>
+
+    <h2 id="performance">19. Performance considerations</h2>
+    <p>Identify the actual latency-critical path (e.g., for voice AI, the full STT→LLM→TTS loop; for batch document processing, throughput matters more than individual latency) and design around that specific bottleneck rather than generic "make it fast" statements.</p>
+
+    <h2 id="cost">20. Cost considerations & trade-offs</h2>
+    <p>Every design should identify its dominant cost driver (LLM generation tokens, embedding/retrieval calls, GPU infrastructure for self-hosting) and at least one lever to control it (model routing, caching, batch processing) — see <a href="../40-Cost-Optimization/cost-optimization-fundamentals.html">Cost Optimization</a>.</p>
+
+    <h2 id="debug">21. Debugging/troubleshooting</h2>
+    <ul>
+      <li><b>Interview answer feels too shallow:</b> go one level deeper on data flow — trace exactly what happens to one specific request end-to-end, including failure branches.</li>
+      <li><b>Can't decide on an architecture:</b> return to requirements — the "right" architecture should be derivable from stated functional/non-functional requirements, not chosen arbitrarily.</li>
+    </ul>
+
+    <h2 id="related">22. Related concepts</h2>
+    <p><a href="../47-AI-Design-Patterns/">AI Design Patterns</a> · <a href="../46-AI-Production-Deployment/">AI Production Deployment</a> · nearly every other section of this knowledge base.</p>
+
+    <h2 id="comparison">23. Remaining system designs (quick reference)</h2>
+    <table>
+      <tr><th>System</th><th>Key design focus</th></tr>
+      <tr><td>AI Customer Support</td><td>Intent routing, tool integration (order lookup), escalation to human</td></tr>
+      <tr><td>AI Research Agent</td><td>Multi-step search/synthesis, source citation, iterative refinement</td></tr>
+      <tr><td>MCP Platform</td><td>Server discovery/registry, auth per server, centralized tool governance</td></tr>
+      <tr><td>Voice AI System</td><td>Sub-second latency budget, streaming STT/TTS, barge-in handling</td></tr>
+      <tr><td>Multimodal RAG</td><td>Mixed text/image/table retrieval, shared embedding space</td></tr>
+      <tr><td>Agentic Workflow Platform</td><td>Durable execution, human-in-the-loop, multi-agent coordination at scale</td></tr>
+    </table>
+
+    <h2 id="exercise">24. Mini practical exercise</h2>
+    <p>Pick one system design above and write out its full requirements (functional + non-functional) before sketching architecture — practice the discipline of requirements-first design.</p>
+
+    <h2 id="project">25. Practical project</h2>
+    <p><b>Design Doc Practice:</b> write a one-page design doc for an "AI Customer Support" system following the 11-point framework in section 6, including a back-of-envelope capacity estimate and at least 3 explicit trade-offs.</p>
+
+    <h2 id="projectarch">26. Project architecture</h2>
+    <pre><code>design_doc.md:
+ 1. Requirements (functional + non-functional)
+ 2. Architecture diagram
+ 3. Data flow (happy path + failure path)
+ 4. Data stores
+ 5. LLM/model choice + routing
+ 6. Security (tenant isolation, injection defense)
+ 7. Observability
+ 8. Scaling plan
+ 9. Failure handling
+ 10. Cost drivers + levers
+ 11. Trade-offs (at least 3, explicit)</code></pre>
+
+    <h2 id="interview-b">27. Interview Questions — Beginner</h2>
+    <div class="qa"><b>Q1.</b> What's the difference between functional and non-functional requirements?<br><b>A.</b> Functional requirements define what the system must do (features); non-functional requirements define how well it must do it (latency, scale, availability, compliance).</div>
+    <div class="qa"><b>Q2.</b> Why start a system design with requirements before architecture?<br><b>A.</b> The right architecture should be derived from actual requirements, not chosen arbitrarily — skipping this step risks designing for the wrong constraints.</div>
+    <div class="qa"><b>Q3.</b> What's a data flow in system design?<br><b>A.</b> The end-to-end path a request takes through the system's components, from input to output.</div>
+    <div class="qa"><b>Q4.</b> Why include failure handling in an AI system design from the start?<br><b>A.</b> LLM APIs and other components can and will fail; designing graceful degradation from the start avoids a brittle happy-path-only system.</div>
+    <div class="qa"><b>Q5.</b> What's a back-of-envelope estimate used for?<br><b>A.</b> Quantifying expected scale (requests/sec, data volume) to justify and size architectural choices.</div>
+    <div class="qa"><b>Q6.</b> Why does a ChatGPT-like app need streaming?<br><b>A.</b> To improve perceived latency by showing partial output as it's generated, rather than waiting for the full response.</div>
+    <div class="qa"><b>Q7.</b> What's the core security requirement for an enterprise RAG system?<br><b>A.</b> Strict tenant/permission-scoped data isolation, ensuring users only retrieve data they're authorized to access.</div>
+    <div class="qa"><b>Q8.</b> Why does an AI coding assistant need a human review gate?<br><b>A.</b> To catch errors or unintended changes before they're committed to production code, regardless of how confident the agent is.</div>
+    <div class="qa"><b>Q9.</b> What's a trade-off in system design?<br><b>A.</b> A deliberate choice sacrificing one quality (e.g., cost) for another (e.g., latency or quality).</div>
+    <div class="qa"><b>Q10.</b> Why is observability a required component, not an optional add-on, for AI system designs?<br><b>A.</b> Without it, debugging production issues in a non-deterministic, multi-step AI system is nearly impossible.</div>
+
+    <h2 id="interview-i">28. Interview Questions — Intermediate</h2>
+    <div class="qa"><b>Q1.</b> How would you estimate the peak QPS and token throughput needed for a ChatGPT-like app with 1 million daily active users?<br><b>A.</b> Estimate average messages per user per day and average tokens per message pair, multiply to get daily token volume, then apply a peak-to-average traffic factor (e.g., 3x) divided across daily seconds to estimate peak QPS — using these numbers to size LLM provider rate-limit tiers and gateway/infrastructure capacity.</div>
+    <div class="qa"><b>Q2.</b> Why does an enterprise RAG system's ingestion pipeline need to be tenant-scoped, not just the query path?<br><b>A.</b> If ingestion isn't properly scoped, one tenant's documents could be mistakenly indexed as accessible to another tenant from the start — tenant isolation must be enforced at every stage data enters and is queried from the system, not just at query time.</div>
+    <div class="qa"><b>Q3.</b> How would you design the failure-handling path for an AI coding assistant if the sandboxed test-execution environment becomes unavailable?<br><b>A.</b> Detect the sandbox failure explicitly, inform the agent/user that verification couldn't be performed (rather than silently proceeding as if tests passed), and either retry with backoff or escalate to human review before presenting any change as "verified," since presenting an unverified change as tested would be worse than an honest failure.</div>
+    <div class="qa"><b>Q4.</b> Why might a multi-agent platform's observability requirements be more complex than a single-agent system's?<br><b>A.</b> Failures can originate in any specialist agent, the supervisor's routing logic, or the coordination/synthesis step — full tracing needs to capture the relationship between agents (which agent did what, in what order, with what result) to debug effectively, not just each agent's isolated behavior.</div>
+    <div class="qa"><b>Q5.</b> What's a key trade-off between using a single large frontier model versus a model-routing architecture for a ChatGPT-like app?<br><b>A.</b> A single frontier model simplifies the architecture and guarantees consistent quality but costs more at scale; model routing reduces average cost significantly but adds complexity (classifier accuracy risk, more testing surface) and risks quality inconsistency if routing misclassifies a complex query as simple.</div>
+
+    <h2 id="interview-a">29. Interview Questions — Advanced</h2>
+    <div class="qa"><b>Q1.</b> How would you design an AI research agent system to balance thoroughness (more searches/sources) against latency and cost for a user-facing product?<br><b>A.</b> Implement an adaptive stopping criterion (e.g., diminishing new-information returns across successive searches, or a confidence threshold on synthesized findings) rather than a fixed search count, expose a "quick" vs "thorough" mode to let users explicitly choose their latency/thoroughness trade-off, and cap worst-case cost/time with a hard limit regardless of mode.</div>
+    <div class="qa"><b>Q2.</b> What's a subtle architectural challenge in designing an MCP platform that serves as a central registry/gateway for many internal MCP servers across an organization?<br><b>A.</b> Balancing centralized governance (consistent auth, logging, discoverability) against the autonomy individual teams need to iterate quickly on their own servers — an overly centralized gatekeeping process can become a bottleneck, while too little governance risks inconsistent security practices across servers; the right balance often involves self-service registration with automated compliance checks (schema validation, required auth) rather than fully manual central review for every server.</div>
+
+    <h2 id="interview-s">30. Interview Questions — Senior/Architect</h2>
+    <div class="qa"><b>Q1.</b> Walk through how you would lead a system design discussion for a "ChatGPT-like application," covering what you'd clarify, propose, and defend.<br><b>A.</b> Start by clarifying scale (DAU, message volume), latency expectations, multi-turn/history requirements, and any compliance needs; propose an architecture (API gateway → conversation service → LLM gateway with routing/fallback → streaming response, with conversation history in a sharded DB and full observability); quantify capacity with back-of-envelope math; explicitly address security (rate limiting, content moderation, tenant isolation if multi-tenant), failure handling (circuit breakers, fallback providers, graceful degradation), and cost (token usage monitoring, model routing); and conclude with explicit trade-offs (e.g., "we chose model routing for cost at the expense of added classification complexity and a small quality-consistency risk, mitigated by continuous evaluation").</div>
+
+    <h2 id="interview-sc">31. Scenario-Based Questions</h2>
+    <div class="qa"><b>Scenario 1.</b> In a system design interview, you're asked to design an "AI customer support" system but given no scale numbers. How do you proceed?<br><b>A.</b> Explicitly ask clarifying questions (expected ticket volume, SLA requirements, integration needs) rather than assuming; if the interviewer wants you to proceed with assumptions, state them explicitly and reasonably (e.g., "assuming 10K tickets/day") so your architecture can be evaluated against stated assumptions rather than silently guessing.</div>
+    <div class="qa"><b>Scenario 2.</b> Partway through presenting your multi-agent platform design, the interviewer asks "what happens if the supervisor agent itself fails?" How do you respond?<br><b>A.</b> Treat the supervisor as a critical-path component needing its own resilience: health checks, a defined timeout/fallback behavior (e.g., route to a default specialist or return a graceful "unable to process" response), and consider whether a stateless, horizontally-scaled supervisor design avoids a single point of failure — demonstrating that failure handling was considered for every component, not just the "main" happy path.</div>
+
+    <h2 id="revision">32. Quick revision notes</h2>
+    <ul>
+      <li>Framework: requirements → architecture → data flow → stores → models → security → observability → scaling → failure handling → cost → trade-offs.</li>
+      <li>Always quantify scale with back-of-envelope estimates.</li>
+      <li>Security, observability, failure handling are required, not optional extras.</li>
+      <li>State trade-offs explicitly — there's no single "correct" architecture.</li>
+    </ul>
+
+    <h2 id="cheat">33. Cheat sheet</h2>
+    <div class="callout">Requirements → Architecture → Data flow → Stores → Models → Security → Observability → Scaling → Failure handling → Cost → Trade-offs. Quantify scale. Address security/observability/failure handling always. State trade-offs explicitly.</div>
+
+    <h2 id="further">34. Further topics to learn</h2>
+    <p><a href="../47-AI-Design-Patterns/">AI Design Patterns</a> → <a href="../46-AI-Production-Deployment/">AI Production Deployment</a> → <a href="../48-AI-Interview-Preparation/">AI Interview Preparation</a></p>
+
+    <div class="prevnext">
+      <a href="../44-Enterprise-AI/enterprise-ai-fundamentals.html">← Enterprise AI</a>
+      <a href="../46-AI-Production-Deployment/ai-production-deployment.html">Next: AI Production Deployment →</a>
+    </div>
+  </main>
+</div>
+<script src="../assets/app.js"></script>
+</body>
+</html>

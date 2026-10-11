@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>React Basics: JSX &amp; Components — React Fundamentals — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">React Fundamentals</a><span class="sep">›</span>React Basics: JSX &amp; Components</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>React Basics: What React Actually Is, and JSX &amp; Components Precisely</h1>
+      <p class="meta-line"><span>⏱ 1.5 hrs</span><span>📍 Chapter 1 of 6</span></p>
+      <p><strong>One-line summary:</strong> React is a library for building UI as a tree of pure(-ish) functions
+      that return a description of what should be on screen; JSX is sugar over <code>React.createElement</code>
+      calls, and "component" means exactly one thing — a function that takes props and returns elements —
+      everything else (hooks, state, context) is built on top of that one abstraction.</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>This is the chapter interviewers skip fastest and candidates get wrong most subtly. "React is a library,
+      not a framework" sounds memorized until you can explain exactly what that implies (no built-in routing,
+      no built-in data fetching, no opinion on file structure — all bolted on by the ecosystem, including the
+      very topics in this site's <a href="../03-react-nextjs-advanced/index.html">advanced topic</a>). Getting
+      JSX-to-<code>createElement</code> compilation precisely right is also the foundation for every later
+      explanation of reconciliation, keys, and fragments — if you're fuzzy here, every later answer gets fuzzy
+      too.</p>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>You should be comfortable with modern JS (ES2020+: destructuring, modules, arrow functions, template
+      literals) and basic DOM/browser concepts — see
+      <a href="../11-web-fundamentals/index.html">Web Fundamentals</a> if any of that feels shaky. This chapter
+      is the on-ramp for the rest of this topic — <a href="02-props-state-events.html">Props, State &amp; Events</a>
+      next — and the eventual on-ramp for <a href="../03-react-nextjs-advanced/01-react-internals.html">React
+      Internals: Fiber &amp; Reconciliation</a>, which assumes everything here is second nature.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="what-is-react">What React actually is (and isn't)</h3>
+      <p>React is a UI library whose one real job is: given a tree of "what should be on screen" described as
+      plain JS objects (React elements), compute the minimal set of changes needed to make the real DOM match,
+      and do it again every time that description changes. That's it. It deliberately does not ship routing,
+      HTTP/data-fetching, global state, CSS handling, or a file structure convention — which is why "React vs.
+      Next.js" is a category error (Next.js is a framework built on React, not a competitor to it) and why a
+      fundamentals-level app doesn't need any of them to be correct.</p>
+
+      <h3 id="jsx-compilation">JSX is syntax sugar, not a template language</h3>
+      <p>JSX is not HTML and not interpolated at runtime like a template engine — it's compiled at build time
+      (by Babel, esbuild, or SWC, depending on your toolchain) into function calls. This:</p>
+      <pre><code class="language-jsx">const el = &lt;Greeting name={name}&gt;Hello&lt;/Greeting&gt;;</code></pre>
+      <p>compiles (with the modern automatic JSX runtime used by Vite/CRA/Next by default since React 17) to:</p>
+      <pre><code class="language-jsx">import { jsx as _jsx } from "react/jsx-runtime";
+const el = _jsx(Greeting, { name: name, children: "Hello" });</code></pre>
+      <p>Older toolchains/the classic runtime instead emit <code>React.createElement(Greeting, { name, children: "Hello" })</code>.
+      Either way, the result is a <strong>plain JS object</strong> — <code>{ type, props, key, ref }</code>
+      roughly — not a DOM node, not a string. Nothing is rendered yet; this object just describes intent.
+      This is why you can store JSX in a variable, pass it as a prop (<code>children</code> is just a prop),
+      return it conditionally, or map over an array to produce an array of elements.</p>
+
+      <h3 id="components-are-functions">A component is a function from props to elements — nothing more</h3>
+      <p>A function component's entire contract: receive one argument (the props object), return something
+      renderable (an element, a string/number, an array/fragment of elements, or <code>null</code>). It must be
+      callable multiple times with the same props and return equivalent output (purity) — React calls it
+      whenever it decides a re-render is needed, and it may call it more than once per commit in development
+      (Strict Mode) specifically to catch impurity bugs.</p>
+      <pre><code class="language-jsx">function Greeting({ name, children }) {
+  return (
+    &lt;div className="greeting"&gt;
+      &lt;h2&gt;{children}, {name}!&lt;/h2&gt;
+    &lt;/div&gt;
+  );
+}</code></pre>
+      <p>Naming must start with an uppercase letter — this isn't a style preference, it's how JSX's compiler
+      decides whether <code>&lt;Foo /&gt;</code> means "call the variable <code>Foo</code> as a component" vs.
+      <code>&lt;foo /&gt;</code> meaning "create a host DOM element literally named <code>foo</code>."</p>
+
+      <h3 id="composition-not-inheritance">Composition is the only extension mechanism — there is no component inheritance</h3>
+      <p>React explicitly has no supported pattern for one component class extending another to share behavior.
+      Instead, you compose: nest components as children, pass render-affecting data via props, and share
+      cross-cutting logic via custom hooks (Chapter 3) rather than base classes. This single decision is why
+      "container/presentational," "render props," "higher-order components," and eventually hooks all exist —
+      they're successive answers to "how do I share behavior without inheritance."</p>
+
+      <h3 id="fragments-and-keys">Fragments, keys, and why a component must return one thing</h3>
+      <p>A component must return a single value, so returning two sibling elements requires wrapping them —
+      either in a real DOM element or a <code>&lt;&gt;...&lt;/&gt;</code> fragment (sugar for
+      <code>&lt;React.Fragment&gt;</code>), which produces no extra DOM node. When rendering a list via
+      <code>.map()</code>, each resulting element needs a stable <code>key</code> prop so React can track
+      identity across re-renders — covered in depth (and why it matters for the diff algorithm) in the
+      Internals chapter; for now, the fundamentals-level rule is: <strong>use a stable, unique ID from your
+      data, never the array index, unless the list is truly static.</strong></p>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>End-to-end for a simple render, at the fundamentals level (the full Fiber mechanics are in topic 03):</p>
+      <ol>
+        <li>Your JSX compiles to <code>_jsx()</code>/<code>createElement()</code> calls, producing a tree of
+        plain element objects — no DOM involved yet.</li>
+        <li><code>createRoot(domNode).render(&lt;App /&gt;)</code> hands that root element to React.</li>
+        <li>React walks the element tree, calling each function component with its props, recursively
+        resolving children until it reaches host elements (<code>div</code>, <code>span</code>, etc.).</li>
+        <li>React creates real DOM nodes for the host elements and inserts them into the container — the
+        actual browser paint happens after this JS work completes.</li>
+        <li>On a later update, React re-runs this process for the parts of the tree that changed and patches
+        only the differences into the existing DOM (instead of tearing everything down and rebuilding).</li>
+      </ol>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+flowchart TD
+  A[JSX source] --> B[Compiler: Babel/esbuild/SWC]
+  B --> C["_jsx() / createElement() calls"]
+  C --> D[Tree of plain element objects]
+  D --> E[React walks tree, calls component functions]
+  E --> F[Resolves down to host elements]
+  F --> G[Real DOM nodes created/patched]
+  G --> H[Browser paints]
+      </div>
+      <div class="mermaid">
+graph TD
+  App --> Header
+  App --> Main
+  App --> Footer
+  Main --> RecipeList
+  RecipeList --> RecipeCard1["RecipeCard (key=1)"]
+  RecipeList --> RecipeCard2["RecipeCard (key=2)"]
+  RecipeCard1 --> Image
+  RecipeCard1 --> Title
+  RecipeCard1 --> FavoriteButton
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-jsx">// BAD: component defined inside another component — a new function identity
+// every render, which breaks memoization and causes unnecessary remounts.
+function Parent() {
+  function Child() { return &lt;p&gt;hi&lt;/p&gt;; } // new reference every Parent render
+  return &lt;Child /&gt;;
+}
+
+// GOOD: components defined at module scope, stable identity across renders.
+function Child() {
+  return &lt;p&gt;hi&lt;/p&gt;;
+}
+function Parent() {
+  return &lt;Child /&gt;;
+}
+
+// Fragments avoid an unnecessary wrapper div in the DOM output.
+function RecipeMeta({ prepTime, servings }) {
+  return (
+    &lt;&gt;
+      &lt;span&gt;⏱ {prepTime} min&lt;/span&gt;
+      &lt;span&gt;🍽 {servings} servings&lt;/span&gt;
+    &lt;/&gt;
+  );
+}
+
+// `children` is just a prop -- composition in action.
+function Card({ children, title }) {
+  return (
+    &lt;div className="card"&gt;
+      &lt;h3&gt;{title}&lt;/h3&gt;
+      {children}
+    &lt;/div&gt;
+  );
+}
+function App() {
+  return (
+    &lt;Card title="Pasta"&gt;
+      &lt;RecipeMeta prepTime={20} servings={2} /&gt;
+    &lt;/Card&gt;
+  );
+}</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4>
+      <p>A team's component library had every component defined as a nested function inside a parent
+      "feature" component "for organization." As the app grew, this meant every parent re-render created brand
+      new child function references, which silently defeated every <code>memo()</code> wrapper the team had
+      added for performance — React saw a "new" component type each render and remounted instead of reusing.
+      The bug was invisible in code review (it looks fine) and only surfaced as a profiler showing unexpected
+      full remounts and lost focus/animation state on every keystroke in an unrelated sibling input. The fix was
+      a lint rule (<code>react/no-unstable-nested-components</code>) plus moving all component definitions to
+      module scope — a pure fundamentals-level fix for what looked like an "internals" bug.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4>
+      <p>Thinking JSX "is" HTML leads to real bugs: <code>class</code> is <code>className</code>,
+      <code>for</code> is <code>htmlFor</code>, inline styles are objects with camelCase keys
+      (<code>{{ backgroundColor: 'red' }}</code>), and self-closing tags are mandatory for void-like elements
+      (<code>&lt;img /&gt;</code>, not <code>&lt;img&gt;</code>). These aren't arbitrary — JSX attributes become
+      JS object properties, and <code>class</code>/<code>for</code> are reserved words in JS.</p></div>
+      <ul>
+        <li>Defining components inside other components (see production scenario above) — always hoist to module scope.</li>
+        <li>Forgetting that JSX expressions (<code>{...}</code>) can hold any JS expression but NOT statements —
+        <code>{if (x) {...}}</code> is invalid; use a ternary, <code>&amp;&amp;</code>, or an early return instead.</li>
+        <li>Returning <code>undefined</code> from a component by accident (e.g. an arrow function with a body block
+        and no explicit <code>return</code>) — React throws, since <code>undefined</code> isn't a valid render result
+        (unlike <code>null</code>, which is explicitly "render nothing").</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>Function components (the only kind in modern React)</td><td>Always, in new code</td><td>Maintaining legacy class-component codebases</td><td>N/A — classes are legacy, not removed but not recommended</td></tr>
+        <tr><td>Fragments (<code>&lt;&gt;&lt;/&gt;</code>)</td><td>Grouping siblings with no semantic wrapper needed</td><td>You actually need a styling/semantic container element</td><td>A real wrapper element (<code>div</code>, <code>section</code>)</td></tr>
+        <tr><td>Automatic JSX runtime (default in Vite/modern CRA)</td><td>Any modern project</td><td>Legacy tooling that can't be upgraded</td><td>Classic runtime with explicit <code>import React</code></td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic"><h4>Basic</h4>
+      <details class="qa"><summary>What is JSX and is it required to use React?</summary><div class="answer"><p>JSX is syntax sugar that compiles to <code>createElement</code>/<code>_jsx()</code> calls producing plain JS objects. It's not required — you can call those functions directly — but virtually all real codebases use it for readability.</p></div><div class="followup">Follow-up: What does JSX compile to under the automatic runtime vs. the classic runtime?</div></details>
+      <details class="qa"><summary>What is a React component, precisely?</summary><div class="answer"><p>A function that takes a props object and returns a renderable value (elements, string/number, array/fragment, or null). Function identity and naming (capitalized) matter to how JSX and React treat it.</p></div><div class="followup">Follow-up: Why must component names be capitalized?</div></details>
+      <details class="qa"><summary>Why `className` instead of `class` in JSX?</summary><div class="answer"><p>JSX attributes compile to JS object properties, and `class` is a reserved word in JavaScript, so React uses the DOM property name `className` instead.</p></div><div class="followup">Follow-up: What other HTML attributes get renamed in JSX, and why?</div></details>
+      <details class="qa"><summary>What is React, and what is it explicitly NOT (i.e. what doesn't it ship with)?</summary><div class="answer"><p>React is a UI-rendering library: elements, components, reconciliation. It ships with no router, no data fetching, no global state, no CSS solution, no file-structure convention -- all of those are separate libraries/frameworks layered on top.</p></div><div class="followup">Follow-up: What does a framework like Next.js add on top of React?</div></details>
+      <details class="qa"><summary>Can a component return multiple sibling elements directly?</summary><div class="answer"><p>No -- a component must return a single value. Multiple siblings must be wrapped, typically in a Fragment (`&lt;&gt;&lt;/&gt;`) to avoid adding an extra DOM node, or in a real wrapper element.</p></div><div class="followup">Follow-up: When would you choose a real element over a Fragment?</div></details>
+      <details class="qa"><summary>What does `children` represent in props?</summary><div class="answer"><p>Whatever was nested between a component's opening and closing JSX tags, passed automatically as the `children` prop -- it's not special syntax, just a regular prop with a reserved name.</p></div><div class="followup">Follow-up: How would you type `children` in TypeScript?</div></details>
+      </div>
+      <div class="qa-level medium"><h4>Medium</h4>
+      <details class="qa"><summary>Why does defining a component inside another component's function body cause bugs?</summary><div class="answer"><p>Every time the parent re-renders, a brand-new function (new identity) is created for the nested component. React treats a changed component type/identity as "different component" at that position, so memoization breaks and the subtree can remount/lose state unnecessarily even though the code "looks" the same each render.</p></div><div class="followup">Follow-up: What lint rule catches this, and what's its exact check?</div></details>
+      <details class="qa"><summary>Explain exactly what a JSX expression `{...}` can and cannot contain.</summary><div class="answer"><p>It can contain any JS expression (ternaries, function calls, logical `&amp;&amp;`/`||`, arithmetic, array literals) because it's evaluated and the result spliced into the element tree. It cannot contain statements (`if`, `for`, variable declarations) because those don't produce a value -- you must move that logic outside the JSX or use expression-based equivalents.</p></div><div class="followup">Follow-up: How would you conditionally render three different branches inside JSX cleanly?</div></details>
+      <details class="qa"><summary>Why is composition preferred over inheritance in React, concretely?</summary><div class="answer"><p>React components don't share a class hierarchy mechanism designed for reuse -- there's no supported "extends" pattern for behavior sharing between components. Composition (nesting via children/props, and later custom hooks) keeps behavior sharing explicit and avoids the classic OOP pitfalls (fragile base classes, tight coupling) that inheritance-based UI frameworks ran into.</p></div><div class="followup">Follow-up: Name three composition patterns used historically before hooks existed.</div></details>
+      <details class="qa"><summary>What's the actual difference between `null` and `undefined` as a component's return value?</summary><div class="answer"><p>`null` is a valid, explicit "render nothing" signal React understands. `undefined` is not a supported render return value and React throws an error -- it's almost always an accidental missing `return` statement, not an intentional choice.</p></div><div class="followup">Follow-up: What's a common code pattern that accidentally returns undefined?</div></details>
+      <details class="qa"><summary>Does the choice of key in a list affect anything if the list never reorders or filters?</summary><div class="answer"><p>At a purely fundamentals level, no -- a static, never-mutated list's index-based keys behave identically to stable ID keys, since item identity-to-position never changes. The risk is purely about lists that can reorder/insert/delete, which is the common real-world case, so stable IDs are the universally-safe default.</p></div><div class="followup">Follow-up: What's the actual mechanism that breaks when a filtered list uses index keys? (Covered in topic 03.)</div></details>
+      </div>
+      <div class="qa-level advanced"><h4>Advanced</h4>
+      <details class="qa"><summary>Why does React's automatic JSX runtime remove the need to `import React` in every file, and what changed at the language/tooling level to make that possible?</summary><div class="answer"><p>Before React 17, JSX always compiled to `React.createElement(...)`, requiring `React` to be in scope in every file that used JSX. The automatic runtime instead has the compiler auto-import dedicated `jsx`/`jsxs` functions from `react/jsx-runtime` based on whether an element has a static vs. dynamic number of children, decoupling "using JSX" from "having the React object in scope" -- a build-tooling change (Babel/SWC plugin config), not a language change.</p></div><div class="followup">Follow-up: What's the difference between the `jsx` and `jsxs` runtime functions?</div></details>
+      <details class="qa"><summary>Is a React element object (the output of createElement) mutable, and why does that matter?</summary><div class="answer"><p>React elements are treated as immutable snapshots -- you're not meant to mutate `element.props` after creation. This matters because React may reuse/compare these objects (and the objects derived from them during reconciliation) assuming they describe a fixed point in time; mutating one after passing it to React produces undefined behavior since React's diffing assumes referential snapshots it controls the lifecycle of.</p></div><div class="followup">Follow-up: How does this immutability assumption relate to why you can't mutate props inside a component?</div></details>
+      <details class="qa"><summary>Why must a function component be "pure" with respect to render, and what specifically is allowed vs. disallowed during the render call itself?</summary><div class="answer"><p>Disallowed during render: mutating existing variables/objects created before render, DOM mutations, starting timers/subscriptions, making non-idempotent calls (e.g., random values or timestamps that should be stable per commit) without intentional memoization. Allowed: creating new local variables/objects, calling other pure functions, deriving values from props/state. The purity requirement exists because render can be called multiple times for the same eventual commit (Strict Mode double-invoke, interrupted/retried renders in concurrent features) -- side effects there would run redundantly or at the wrong time.</p></div><div class="followup">Follow-up: Where do legitimate side effects belong instead, and why does that API exist?</div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment"><span class="level-tag">Beginner (30-60 min)</span><h4>Decompile JSX by hand</h4>
+      <p>Take 5 JSX snippets of increasing complexity (plain element, element with props, element with children,
+      a fragment, a conditional expression) and write out, by hand, the equivalent <code>createElement</code>
+      calls. Then verify using the Babel REPL (babeljs.io/repl) with the React preset.</p>
+      <p><strong>Acceptance criteria:</strong> All 5 match the compiler output exactly, including prop ordering
+      concerns and how children are passed.</p>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>Pay attention to how a fragment compiles — it uses a special `Fragment` symbol as the "type," not a string.</p></div></details>
+      <p><strong>Bonus:</strong> Compare the classic vs. automatic runtime output for the same snippet.</p></div>
+
+      <div class="assignment"><span class="level-tag">Intermediate (2-4 hrs)</span><h4>Build a component library with pure composition</h4>
+      <p>Build 5 reusable, composable UI primitives (Card, Button, Modal, Tabs, Badge) with zero component
+      nesting inside other component bodies, using only props and <code>children</code> for composition — no
+      state yet (that's Chapter 2). Each must be usable standalone and composed together in at least one
+      example screen.</p>
+      <p><strong>Acceptance criteria:</strong> ESLint with <code>eslint-plugin-react</code>'s
+      <code>no-unstable-nested-components</code> rule passes with zero violations.</p>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>Modal and Tabs are the components most tempted to be defined inline for "scoping" reasons — resist it.</p></div></details>
+      <p><strong>Bonus:</strong> Add TypeScript prop types for all 5 and ensure `children` is correctly typed per component.</p></div>
+
+      <div class="assignment"><span class="level-tag">Advanced (1-2 days)</span><h4>Build the start of the capstone's component shell</h4>
+      <p>Using Vite, scaffold the recipe-book capstone app's static shell: layout (Header/Main/Footer),
+      <code>RecipeCard</code> and <code>RecipeList</code> rendering hard-coded mock data (no fetching yet),
+      with correct, stable keys. No state, no routing yet — pure composition and JSX precision only.</p>
+      <ul><li>No full solution provided — this sets up Chapters 2–6 of the capstone.</li></ul>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>Design your mock data shape now the way you'll want it from the real API later — it'll save rework in Chapter 3.</p></div></details>
+      </div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet"><ul>
+        <li>React = a UI-rendering library only; no router/data-fetching/state/CSS opinion built in.</li>
+        <li>JSX compiles to <code>createElement</code>/<code>_jsx()</code> calls → plain JS objects, not DOM nodes.</li>
+        <li>A component = a function(props) → renderable value; must be capitalized; should be pure.</li>
+        <li>Never define a component inside another component's render — kills identity stability and memoization.</li>
+        <li><code>children</code> is just a prop populated from nested JSX content.</li>
+        <li>JSX <code>{...}</code> holds expressions only, never statements.</li>
+        <li>Returning <code>undefined</code> throws; returning <code>null</code> means "render nothing" — know the difference.</li>
+        <li>Fragments group siblings without adding a DOM node.</li>
+        <li>Composition (props + children + hooks), not inheritance, is React's only extension mechanism.</li>
+      </ul></div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://react.dev/learn/writing-markup-with-jsx">react.dev — Writing Markup with JSX</a></li>
+        <li><a href="https://react.dev/learn/your-first-component">react.dev — Your First Component</a></li>
+        <li><a href="https://react.dev/learn/passing-props-to-a-component">react.dev — Passing Props to a Component</a></li>
+        <li><a href="https://react.dev/learn/keeping-components-pure">react.dev — Keeping Components Pure</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="../11-web-fundamentals/06-bash-and-terminal-basics.html"><span class="dir">← Previous</span>Web Fundamentals</a>
+        <a class="next" href="02-props-state-events.html"><span class="dir">Next →</span>Props, State &amp; Events</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · React Fundamentals</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-jsx.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-typescript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-tsx.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "12-react-fundamentals", chapterKey: "01-react-basics-jsx-components" });</script>
+</body>
+</html>

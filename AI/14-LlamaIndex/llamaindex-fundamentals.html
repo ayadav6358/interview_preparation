@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LlamaIndex Fundamentals</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <input class="searchbox" placeholder="Search topics..." />
+    <a href="../index.html">← Home</a>
+    <h3>14-LlamaIndex</h3>
+    <a href="llamaindex-fundamentals.html">LlamaIndex Fundamentals</a>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumbs"><a href="../index.html">Home</a> / 14-LlamaIndex</div>
+      <button class="theme-toggle" onclick="toggleTheme()">🌓 Theme</button>
+    </div>
+    <h1>LlamaIndex Fundamentals</h1>
+    <span class="tag good">Stable</span><span class="tag">Last verified: 2026-10-06</span>
+
+    <div class="toc">
+      <b>On this page</b>
+      <a href="#what">1. What is this?</a>
+      <a href="#whyexist">2. Why does it exist?</a>
+      <a href="#whyimportant">3. Why is it important?</a>
+      <a href="#whereused">4. Where is it used?</a>
+      <a href="#prereq">5. Prerequisites</a>
+      <a href="#core">6. Core concepts</a>
+      <a href="#terms">7. Terminology</a>
+      <a href="#arch">8. Architecture</a>
+      <a href="#internal">9. How it works internally</a>
+      <a href="#steps">10. Step-by-step: building a basic index</a>
+      <a href="#simple">11. Simple example</a>
+      <a href="#real">12. Real-world example</a>
+      <a href="#code">13. Code example</a>
+      <a href="#advanced">14. Advanced example (Workflows)</a>
+      <a href="#mistakes">15. Common mistakes</a>
+      <a href="#best">16. Best practices</a>
+      <a href="#production">17. Production considerations</a>
+      <a href="#security">18. Security considerations</a>
+      <a href="#performance">19. Performance considerations</a>
+      <a href="#cost">20. Cost considerations</a>
+      <a href="#debug">21. Debugging/troubleshooting</a>
+      <a href="#related">22. Related concepts</a>
+      <a href="#comparison">23. LangChain vs LlamaIndex</a>
+      <a href="#exercise">24. Mini practical exercise</a>
+      <a href="#project">25. Practical project</a>
+      <a href="#projectarch">26. Project architecture</a>
+      <a href="#interview-b">27. Interview Questions — Beginner</a>
+      <a href="#interview-i">28. Interview Questions — Intermediate</a>
+      <a href="#interview-a">29. Interview Questions — Advanced</a>
+      <a href="#interview-s">30. Interview Questions — Senior/Architect</a>
+      <a href="#interview-sc">31. Scenario-Based Questions</a>
+      <a href="#revision">32. Quick revision notes</a>
+      <a href="#cheat">33. Cheat sheet</a>
+      <a href="#further">34. Further topics to learn</a>
+    </div>
+
+    <h2 id="what">1. What is this?</h2>
+    <p>LlamaIndex is a framework specifically focused on data ingestion, indexing, and retrieval for LLM applications — it provides Documents, Nodes, Indexes, Retrievers, Query Engines, Agents, and Workflows as composable building blocks optimized around the RAG problem space.</p>
+
+    <h2 id="whyexist">2. Why does it exist?</h2>
+    <p>While general-purpose orchestration frameworks like LangChain cover broad LLM application needs, LlamaIndex exists specifically to make the data-ingestion-to-retrieval pipeline (connectors, parsing, chunking, indexing strategies) as frictionless and well-abstracted as possible — its original and still-core focus.</p>
+
+    <h2 id="whyimportant">3. Why is it important?</h2>
+    <p>For RAG-heavy applications, LlamaIndex's purpose-built abstractions (especially its wide range of data connectors and indexing strategies) can save significant integration effort compared to building retrieval pipelines from scratch.</p>
+
+    <h2 id="whereused">4. Where is it used?</h2>
+    <p>Document Q&A systems, enterprise search, knowledge-base chatbots — any application centered on retrieval over structured/unstructured data sources.</p>
+
+    <h2 id="prereq">5. Prerequisites</h2>
+    <p><a href="../12-RAG/rag-fundamentals.html">RAG Fundamentals</a>.</p>
+
+    <h2 id="core">6. Core concepts</h2>
+    <ul>
+      <li><b>Document:</b> a raw piece of source content (a file, a database row, a web page).</li>
+      <li><b>Node:</b> a chunk of a Document with associated metadata — LlamaIndex's unit of retrieval.</li>
+      <li><b>Index:</b> a data structure (vector index, list index, tree index, keyword index) organizing Nodes for efficient retrieval.</li>
+      <li><b>Retriever:</b> queries an Index to fetch relevant Nodes.</li>
+      <li><b>Query Engine:</b> combines a Retriever with a response-synthesis step to answer a query end-to-end.</li>
+      <li><b>Workflows:</b> LlamaIndex's mechanism for building more complex, multi-step, agentic pipelines beyond simple query engines.</li>
+    </ul>
+
+    <h2 id="terms">7. Terminology</h2>
+    <table>
+      <tr><th>Term</th><th>Meaning</th></tr>
+      <tr><td>Document</td><td>Raw source content before chunking.</td></tr>
+      <tr><td>Node</td><td>A chunked unit of a Document, the actual retrieval granularity.</td></tr>
+      <tr><td>VectorStoreIndex</td><td>The most common index type, backing similarity search over embedded Nodes.</td></tr>
+      <tr><td>Query Engine</td><td>A retriever + response synthesizer combined into a single query interface.</td></tr>
+      <tr><td>Workflow</td><td>A composable, event-driven pipeline for building more complex multi-step applications.</td></tr>
+    </table>
+
+    <h2 id="arch">8. Architecture</h2>
+    <pre><code>Data Connectors (PDF, Notion, DB, web, etc.)
+ → Documents
+ → Node Parser (chunking) → Nodes
+ → Index (VectorStoreIndex, etc.) → stores embeddings
+ → Retriever → top Nodes for a query
+ → Query Engine → Retriever + Response Synthesizer → Answer</code></pre>
+
+    <h2 id="internal">9. How it works internally</h2>
+    <p>LlamaIndex's Query Engine abstracts the full RAG loop: it calls the Retriever to get relevant Nodes, then passes them to a response-synthesis strategy (e.g., "compact" — stuff as many Nodes as fit into one LLM call, or "refine" — iteratively update an answer across Nodes one at a time) depending on how much retrieved content there is relative to the context window.</p>
+
+    <h2 id="steps">10. Step-by-step: building a basic index</h2>
+    <ol>
+      <li>Load documents via a data connector/loader.</li>
+      <li>Parse documents into Nodes (chunks).</li>
+      <li>Build a VectorStoreIndex from the Nodes (embeds and stores them).</li>
+      <li>Create a Query Engine from the index.</li>
+      <li>Call `.query()` with a natural-language question.</li>
+    </ol>
+
+    <h2 id="simple">11. Simple example</h2>
+    <pre><code class="language-python">from llama_index.core import VectorStoreIndex, SimpleDirectoryReader
+
+documents = SimpleDirectoryReader("data/").load_data()
+index = VectorStoreIndex.from_documents(documents)
+query_engine = index.as_query_engine()
+response = query_engine.query("What is our refund policy?")
+print(response)
+</code></pre>
+
+    <h2 id="real">12. Real-world example</h2>
+    <p>A company connects LlamaIndex to its Notion workspace via a built-in data connector, automatically syncing and indexing documentation changes, letting employees query internal docs in natural language without a custom ingestion pipeline.</p>
+
+    <h2 id="code">13. Code example</h2>
+    <pre><code class="language-python">from llama_index.core import VectorStoreIndex, Settings
+from llama_index.vector_stores.postgres import PGVectorStore
+from llama_index.embeddings.openai import OpenAIEmbedding
+
+Settings.embed_model = OpenAIEmbedding(model="text-embedding-3-small")
+
+vector_store = PGVectorStore.from_params(
+    database="ragdb", host="localhost", table_name="llamaindex_nodes",
+)
+index = VectorStoreIndex.from_vector_store(vector_store)
+query_engine = index.as_query_engine(similarity_top_k=5)
+response = query_engine.query("How long do refunds take?")
+print(response.response)
+for node in response.source_nodes:
+    print(node.node.text[:100], node.score)
+</code></pre>
+
+    <h2 id="advanced">14. Advanced example (Workflows)</h2>
+    <pre><code class="language-python">from llama_index.core.workflow import Workflow, step, StartEvent, StopEvent
+
+class RAGWorkflow(Workflow):
+    @step
+    async def retrieve(self, ev: StartEvent) -> "RetrievedEvent":
+        nodes = query_engine.retriever.retrieve(ev.query)
+        return RetrievedEvent(nodes=nodes, query=ev.query)
+
+    @step
+    async def synthesize(self, ev: "RetrievedEvent") -> StopEvent:
+        answer = synthesize_response(ev.query, ev.nodes)
+        return StopEvent(result=answer)
+</code></pre>
+
+    <h2 id="mistakes">15. Common mistakes</h2>
+    <ul>
+      <li>Using the default chunking/node-parsing settings without tuning for your specific document types.</li>
+      <li>Not configuring a persistent vector store (defaults to in-memory, lost on restart) for production use.</li>
+      <li>Treating Query Engine's default response synthesis as sufficient without evaluating against your actual use case's accuracy needs.</li>
+    </ul>
+
+    <h2 id="best">16. Best practices</h2>
+    <ul>
+      <li>Use a persistent, production-grade vector store (pgvector, Pinecone, etc.) rather than defaults for anything beyond prototyping.</li>
+      <li>Tune node parser chunk size for your document types.</li>
+      <li>Evaluate response synthesis strategies (compact vs refine vs tree summarize) against your actual query patterns.</li>
+    </ul>
+
+    <h2 id="production">17. Production considerations</h2>
+    <p>Configure a durable vector store backend, monitor query latency and token usage per query engine call, and plan for incremental re-indexing as source data changes.</p>
+
+    <h2 id="security">18. Security considerations</h2>
+    <p>Apply the same metadata-filtering and access-control discipline as any RAG system — LlamaIndex supports metadata filters on retrieval, which must be wired to your actual authorization model.</p>
+
+    <h2 id="performance">19. Performance considerations</h2>
+    <p>Response synthesis strategy affects both latency and cost — "compact" (fewer LLM calls, more context per call) is typically faster/cheaper than "refine" (iterative, more LLM calls) for most use cases, but may lose precision on very large retrieved sets.</p>
+
+    <h2 id="cost">20. Cost considerations</h2>
+    <p>Each embedding call (ingestion and query) and LLM synthesis call incurs cost — monitor and tune `similarity_top_k` (how many nodes are retrieved) to avoid unnecessarily large synthesis prompts.</p>
+
+    <h2 id="debug">21. Debugging/troubleshooting</h2>
+    <ul>
+      <li><b>Query engine returns empty/irrelevant answers:</b> inspect `response.source_nodes` to see what was actually retrieved and debug from there.</li>
+      <li><b>Data not persisting across restarts:</b> check whether you're using the default in-memory store instead of a configured persistent vector store.</li>
+    </ul>
+
+    <h2 id="related">22. Related concepts</h2>
+    <p><a href="../12-RAG/rag-fundamentals.html">RAG Fundamentals</a> · <a href="../15-LangChain/">LangChain</a> · <a href="../11-Vector-Databases/vector-databases.html">Vector Databases</a></p>
+
+    <h2 id="comparison">23. LangChain vs LlamaIndex</h2>
+    <table>
+      <tr><th>Aspect</th><th>LlamaIndex</th><th>LangChain</th></tr>
+      <tr><td>Primary focus</td><td>Data ingestion, indexing, retrieval (RAG-centric)</td><td>General-purpose LLM app orchestration (chains, agents, tools)</td></tr>
+      <tr><td>Strength</td><td>Rich data connectors, indexing strategies</td><td>Broad ecosystem, agent/tool orchestration, LangGraph integration</td></tr>
+      <tr><td>Best for</td><td>Retrieval-heavy document Q&A systems</td><td>Complex multi-step agents/workflows beyond pure retrieval</td></tr>
+      <tr><td>Can they be combined?</td><td colspan="2">Yes — many teams use LlamaIndex for retrieval and LangChain/LangGraph for broader orchestration.</td></tr>
+    </table>
+
+    <h2 id="exercise">24. Mini practical exercise</h2>
+    <p>Build a VectorStoreIndex from 3 sample text files and query it, then inspect `response.source_nodes` to see which chunks were actually used.</p>
+
+    <h2 id="project">25. Practical project</h2>
+    <p><b>LlamaIndex Document Q&A with pgvector:</b> connect LlamaIndex's PGVectorStore to the same Postgres database from the RAG project, load a folder of documents, and build a query engine with a tuned `similarity_top_k` and response synthesis mode.</p>
+
+    <h2 id="projectarch">26. Project architecture</h2>
+    <pre><code>data/ → SimpleDirectoryReader → Documents
+ → Node Parser → Nodes
+ → PGVectorStore (same Postgres as before) → VectorStoreIndex
+ → Query Engine (similarity_top_k=5, response_mode="compact")
+ → query("...") → answer + source_nodes for citation display</code></pre>
+
+    <h2 id="interview-b">27. Interview Questions — Beginner</h2>
+    <div class="qa"><b>Q1.</b> What is LlamaIndex primarily focused on?<br><b>A.</b> Data ingestion, indexing, and retrieval for LLM applications — the RAG problem space specifically.</div>
+    <div class="qa"><b>Q2.</b> What's the difference between a Document and a Node in LlamaIndex?<br><b>A.</b> A Document is raw source content; a Node is a chunked unit of a Document, the actual granularity used for retrieval.</div>
+    <div class="qa"><b>Q3.</b> What is a Query Engine?<br><b>A.</b> A component combining a Retriever and a response synthesizer into a single end-to-end query interface.</div>
+    <div class="qa"><b>Q4.</b> What is a VectorStoreIndex?<br><b>A.</b> The most common LlamaIndex index type, backing similarity search over embedded Nodes.</div>
+    <div class="qa"><b>Q5.</b> How do you inspect what content was actually used to answer a query?<br><b>A.</b> Check the `source_nodes` attribute on the query response.</div>
+    <div class="qa"><b>Q6.</b> What's LlamaIndex's main strength compared to general orchestration frameworks?<br><b>A.</b> Rich, purpose-built data connectors and indexing strategies specifically for the retrieval/RAG problem.</div>
+    <div class="qa"><b>Q7.</b> What is a Workflow in LlamaIndex?<br><b>A.</b> A composable, event-driven mechanism for building more complex multi-step pipelines beyond simple query engines.</div>
+    <div class="qa"><b>Q8.</b> Can LlamaIndex be used alongside LangChain?<br><b>A.</b> Yes — many teams use LlamaIndex for retrieval and LangChain/LangGraph for broader orchestration.</div>
+    <div class="qa"><b>Q9.</b> Why shouldn't you rely on the default in-memory vector store in production?<br><b>A.</b> It doesn't persist across restarts; production needs a durable backend like pgvector or Pinecone.</div>
+    <div class="qa"><b>Q10.</b> What does `similarity_top_k` control?<br><b>A.</b> How many of the most similar nodes are retrieved for a query.</div>
+
+    <h2 id="interview-i">28. Interview Questions — Intermediate</h2>
+    <div class="qa"><b>Q1.</b> What's the difference between "compact" and "refine" response synthesis modes, and when would you choose each?<br><b>A.</b> "Compact" stuffs as many retrieved nodes as fit into a single LLM call for efficiency; "refine" iteratively updates an answer by processing nodes one at a time, useful when retrieved content exceeds context limits but adds more LLM calls (cost/latency). Choose compact for most cases; refine when you have many nodes that can't fit in one call and need incremental synthesis.</div>
+    <div class="qa"><b>Q2.</b> Why might you choose LlamaIndex specifically over building a custom retrieval pipeline from scratch?<br><b>A.</b> To leverage its built-in data connectors, node parsing strategies, and indexing abstractions, saving significant integration effort — especially valuable when ingesting from many heterogeneous data sources.</div>
+    <div class="qa"><b>Q3.</b> How would you combine LlamaIndex with LangGraph in a single application?<br><b>A.</b> Use LlamaIndex's Query Engine as a retrieval tool/node within a LangGraph agent graph, letting LangGraph handle broader multi-step orchestration (planning, other tools, state management) while LlamaIndex handles the specific retrieval sub-task it's optimized for.</div>
+    <div class="qa"><b>Q4.</b> Why is tuning the Node Parser's chunk size important even when using LlamaIndex's defaults?<br><b>A.</b> Default chunk sizes are generic and may not match your specific document structure (e.g., legal clauses vs. short FAQ entries), directly affecting retrieval precision — defaults are a starting point, not a guarantee of good performance for your corpus.</div>
+    <div class="qa"><b>Q5.</b> How would you debug a LlamaIndex query engine returning an answer that contradicts the source documents?<br><b>A.</b> Inspect `response.source_nodes` to verify what was actually retrieved, check if the response synthesis prompt properly constrains the model to use only that content, and verify the retrieved nodes themselves are correct before suspecting a generation-level hallucination issue.</div>
+
+    <h2 id="interview-a">29. Interview Questions — Advanced</h2>
+    <div class="qa"><b>Q1.</b> How would you architect a LlamaIndex-based system to support multiple, independently-updatable data sources with different ingestion cadences?<br><b>A.</b> Use separate indexes (or namespaces within one vector store) per data source, each with its own ingestion pipeline/schedule, and compose a router query engine that directs queries to the appropriate index(es) based on query classification or metadata, rather than one monolithic index for all sources.</div>
+    <div class="qa"><b>Q2.</b> What's a subtle issue with using LlamaIndex's default similarity-based retrieval for queries requiring exact structured filtering (e.g., "documents from Q3 2025 only")?<br><b>A.</b> Pure similarity search doesn't guarantee respecting structured constraints; you need metadata filters applied alongside vector search (LlamaIndex supports this), or a self-query retriever that translates the natural-language query into both a semantic query and explicit metadata filters.</div>
+
+    <h2 id="interview-s">30. Interview Questions — Senior/Architect</h2>
+    <div class="qa"><b>Q1.</b> When would you recommend LlamaIndex over LangChain (or vice versa) for a new enterprise RAG platform, and how would you justify combining both?<br><b>A.</b> Recommend LlamaIndex-first if the core challenge is ingesting/indexing diverse data sources with high retrieval quality; recommend LangChain/LangGraph-first if the core challenge is complex multi-step agent orchestration beyond retrieval. Justify combining both by using each for its strength: LlamaIndex as the retrieval layer, LangGraph as the orchestration layer coordinating retrieval with other tools/agents — avoiding forcing one framework to do a job the other is better suited for.</div>
+
+    <h2 id="interview-sc">31. Scenario-Based Questions</h2>
+    <div class="qa"><b>Scenario 1.</b> Your LlamaIndex-based Q&A tool works in development but returns nothing in production. What do you check first?<br><b>A.</b> Verify the production environment is configured with a persistent vector store (not the in-memory default that was fine for local testing) and that the index was actually built/populated against production data.</div>
+    <div class="qa"><b>Scenario 2.</b> Users complain that answers ignore recent document updates. What's the likely cause?<br><b>A.</b> The ingestion pipeline isn't re-indexing updated documents — check whether old Nodes for the updated Document are being properly removed/replaced in the vector store on re-ingestion.</div>
+
+    <h2 id="revision">32. Quick revision notes</h2>
+    <ul>
+      <li>LlamaIndex = RAG-focused: Documents → Nodes → Index → Retriever → Query Engine.</li>
+      <li>LlamaIndex excels at data connectors/indexing; LangChain/LangGraph excels at broader orchestration.</li>
+      <li>Use a persistent vector store backend for production, not the in-memory default.</li>
+      <li>Inspect `source_nodes` to debug retrieval/answer quality.</li>
+    </ul>
+
+    <h2 id="cheat">33. Cheat sheet</h2>
+    <div class="callout">LlamaIndex: Document → Node → Index (VectorStoreIndex) → Retriever → Query Engine (retriever + synthesizer). RAG-focused framework; combine with LangGraph for broader agentic orchestration if needed.</div>
+
+    <h2 id="further">34. Further topics to learn</h2>
+    <p><a href="../15-LangChain/">LangChain</a> → <a href="../18-LangGraph/">LangGraph</a> → <a href="../13-Advanced-RAG/advanced-rag-techniques.html">Advanced RAG</a></p>
+
+    <div class="prevnext">
+      <a href="../13-Advanced-RAG/advanced-rag-techniques.html">← Advanced RAG</a>
+      <a href="../15-LangChain/langchain-fundamentals.html">Next: LangChain →</a>
+    </div>
+  </main>
+</div>
+<script src="../assets/app.js"></script>
+</body>
+</html>

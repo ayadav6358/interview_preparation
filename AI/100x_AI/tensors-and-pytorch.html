@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tensors, Matrices & PyTorch — The Math & Tools of Deep Learning</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <input class="searchbox" placeholder="Search topics..." />
+    <a href="../index.html">← Home</a>
+    <h3>100x_AI</h3>
+    <a href="ai-ml-orientation.html">AI & ML Course Orientation</a>
+    <a href="fasttracking-ai-what-is-ai-to-how-chatgpt-works.html">Fast-Tracking AI: What is AI → How ChatGPT Works</a>
+    <a href="neural-networks-from-scratch.html">Neural Networks from Scratch</a>
+    <a href="transformers-part-1-tokenization-embeddings-positional-encoding.html">Transformers Part 1: Text → Attention</a>
+    <a href="tensors-and-pytorch.html">Tensors, Matrices & PyTorch</a>
+    <a href="transformers-part-2-self-attention-qkv-multihead.html">Transformers Part 2: Self-Attention, Q/K/V & Multi-Head</a>
+    <a href="what-changed-since-2017-modern-transformer-upgrades.html">What Changed Since 2017: The Four Upgrades</a>
+    <a href="building-training-modern-llm-from-scratch.html">Building & Training a Modern LLM from Scratch</a>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumbs"><a href="../index.html">Home</a> / 100x_AI</div>
+      <button class="theme-toggle" onclick="toggleTheme()">🌓 Theme</button>
+    </div>
+    <h1>Tensors, Matrices & PyTorch — The Math & Tools Behind Every Model</h1>
+    <span class="tag good">Stable</span><span class="tag">Last verified: 2026-10-07</span>
+    <p class="callout">Source: "The Math & Tools — Tensors, Matrices & PyTorch" slides. This reveals the single mathematical operation hiding behind every neural network and Transformer formula seen so far (<code>weights * inputs + bias</code>, <code>Q = X * Wq</code>, <code>attention = softmax(Q * K.T) * V</code>): matrix multiplication — and then covers PyTorch, the tool that makes tensors, matrix math, GPU acceleration, and automatic differentiation (autograd) practical to use.</p>
+
+    <div class="toc">
+      <b>On this page</b>
+      <a href="#what">1. What is this?</a>
+      <a href="#whyexist">2. Why does it exist?</a>
+      <a href="#whyimportant">3. Why is it important?</a>
+      <a href="#whereused">4. Where is it used?</a>
+      <a href="#prereq">5. Prerequisites</a>
+      <a href="#core">6. Core concepts</a>
+      <a href="#terms">7. Terminology</a>
+      <a href="#arch">8. Architecture</a>
+      <a href="#internal">9. How it works internally</a>
+      <a href="#steps">10. Step-by-step explanation</a>
+      <a href="#simple">11. Simple example</a>
+      <a href="#real">12. Real-world example</a>
+      <a href="#code">13. Code example</a>
+      <a href="#advanced">14. Advanced example</a>
+      <a href="#mistakes">15. Common mistakes</a>
+      <a href="#best">16. Best practices</a>
+      <a href="#production">17. Production considerations</a>
+      <a href="#security">18. Security considerations</a>
+      <a href="#performance">19. Performance considerations</a>
+      <a href="#cost">20. Cost considerations</a>
+      <a href="#debug">21. Debugging/troubleshooting</a>
+      <a href="#related">22. Related concepts</a>
+      <a href="#comparison">23. Comparison with alternatives</a>
+      <a href="#exercise">24. Mini practical exercise</a>
+      <a href="#project">25. Practical project</a>
+      <a href="#projectarch">26. Project architecture</a>
+      <a href="#interview-b">27. Interview Questions — Beginner</a>
+      <a href="#interview-i">28. Interview Questions — Intermediate</a>
+      <a href="#interview-a">29. Interview Questions — Advanced</a>
+      <a href="#interview-s">30. Interview Questions — Senior/Architect</a>
+      <a href="#interview-sc">31. Scenario-Based Questions</a>
+      <a href="#revision">32. Quick revision notes</a>
+      <a href="#cheat">33. Cheat sheet</a>
+      <a href="#further">34. Further topics to learn</a>
+    </div>
+
+    <h2 id="what">1. What is this?</h2>
+    <p>This is the mathematical and tooling foundation underneath everything covered so far: scalars, vectors, matrices, and tensors as a single generalizing concept (just "how many dimensions"); matrix multiplication as the one operation that secretly powers neural network forward passes, backpropagation, and Transformer attention; and PyTorch — the library that represents all of this as tensors, accelerates it on GPUs, and automatically computes gradients via autograd, so you never have to hand-derive calculus for a real model.</p>
+
+    <h2 id="whyexist">2. Why does it exist?</h2>
+    <p>Every formula seen in earlier material — <code>weights * inputs + bias</code>, <code>backprop(gradients)</code>, <code>Q = X * Wq</code>, <code>attention = softmax(Q * K.T) * V</code> — was secretly the same underlying operation (matrix multiplication) dressed up in different variable names. This material exists to pull back that curtain explicitly, and then to introduce PyTorch as the practical tool that makes working with these operations at scale (thousands to billions of numbers, differentiated automatically, run on GPUs) feasible without writing raw linear algebra and manual calculus by hand.</p>
+
+    <h2 id="whyimportant">3. Why is it important?</h2>
+    <p>Tensor shapes are the single most common source of real bugs when building or debugging any deep learning model — understanding shape notation (<code>[batch, heads, tokens, dim]</code>) lets you "read" any model's code or error messages. Understanding autograd specifically demystifies <code>.backward()</code>, <code>zero_grad()</code>, and <code>no_grad()</code> — calls every PyTorch training loop uses, that are otherwise easy to treat as unexplained incantations.</p>
+
+    <h2 id="whereused">4. Where is it used?</h2>
+    <ul>
+      <li>Every deep learning framework's internals (PyTorch, TensorFlow, JAX) — tensors and matrix multiplication are the universal substrate.</li>
+      <li>GPU/accelerator hardware design — matrix multiplication's "embarrassingly parallel" nature is literally why GPUs (and later, TPUs) became the standard hardware for AI.</li>
+      <li>Every from-scratch model build in this course, including <a href="building-training-modern-llm-from-scratch.html">Building & Training a Modern LLM from Scratch</a>, which is built entirely in PyTorch using <code>nn.Module</code>, tensors, and autograd.</li>
+      <li>Production ML engineering roles — reading/debugging tensor shape mismatches is one of the most common daily tasks for anyone implementing or fine-tuning models.</li>
+    </ul>
+
+    <h2 id="prereq">5. Prerequisites</h2>
+    <p><a href="neural-networks-from-scratch.html">Neural Networks from Scratch</a> (weights, bias, backpropagation, gradient descent) and <a href="transformers-part-1-tokenization-embeddings-positional-encoding.html">Transformers Part 1</a> (Q/K/V, attention formula) — this material explicitly reveals the shared math underneath both.</p>
+
+    <h2 id="core">6. Core concepts</h2>
+    <table>
+      <tr><th>Concept</th><th>One-line definition</th></tr>
+      <tr><td>Scalar</td><td>A single number — 0 dimensions (e.g., <code>temperature = 72</code>).</td></tr>
+      <tr><td>Vector</td><td>A list of numbers — 1 dimension (e.g., <code>[3, 4]</code>, a word embedding, neuron inputs).</td></tr>
+      <tr><td>Matrix</td><td>A grid of numbers arranged in rows and columns — 2 dimensions (e.g., a weight matrix).</td></tr>
+      <tr><td>Tensor</td><td>The generalization of all of the above — an N-dimensional array; scalar=0D tensor, vector=1D tensor, matrix=2D tensor, and 3D/4D/5D+ tensors handle batches, sequences, attention heads, etc.</td></tr>
+      <tr><td>Matrix as transformation</td><td>A matrix isn't just storage — multiplying a vector by a matrix produces a new, transformed vector (rotated, scaled, stretched, reflected, or more abstractly, "meaning-transformed").</td></tr>
+      <tr><td>Matrix multiplication (MatMul)</td><td>The core operation of deep learning — computes a new matrix/vector from two inputs; underlies forward passes, backpropagation, and attention.</td></tr>
+      <tr><td>Dot product</td><td>The atomic operation inside matrix multiplication — multiplies corresponding elements of two vectors and sums them; conceptually measures similarity/alignment between two vectors.</td></tr>
+      <tr><td>Shape</td><td>A tensor's dimensions and their sizes (e.g., <code>[8, 12, 3, 64]</code>) — tells you exactly how to interpret the data inside.</td></tr>
+      <tr><td>PyTorch</td><td>The standard deep learning framework (used by OpenAI, Anthropic, Google DeepMind, Tesla) providing GPU-accelerated tensors, automatic differentiation (autograd), and high-level model-building blocks (<code>nn.Module</code>).</td></tr>
+      <tr><td>Autograd</td><td>PyTorch's automatic differentiation engine — tracks every operation on tensors with <code>requires_grad=True</code> and computes all gradients automatically via <code>.backward()</code>.</td></tr>
+    </table>
+
+    <h2 id="terms">7. Terminology</h2>
+    <table>
+      <tr><th>Term</th><th>Meaning</th></tr>
+      <tr><td><code>torch.tensor()</code></td><td>Creates a PyTorch tensor from raw data (a number, list, or nested list).</td></tr>
+      <tr><td><code>.shape</code></td><td>A tensor attribute returning its dimensions/sizes, e.g., <code>torch.Size([2, 3, 4])</code>.</td></tr>
+      <tr><td><code>@</code> operator / <code>torch.matmul()</code></td><td>PyTorch's matrix multiplication operator — requires inner dimensions to match: <code>(a, b) @ (b, c) → (a, c)</code>.</td></tr>
+      <tr><td><code>.view()</code></td><td>Reinterprets a tensor's shape without changing its underlying data or total element count (e.g., flattening batch and token dimensions together).</td></tr>
+      <tr><td><code>.permute()</code></td><td>Reorders/swaps a tensor's axes (e.g., swapping the "heads" and "tokens" dimensions for attention computation).</td></tr>
+      <tr><td>Broadcasting</td><td>PyTorch's automatic "stretching" of a smaller tensor to match a larger tensor's shape during element-wise operations, when dimensions are equal or one of them is 1.</td></tr>
+      <tr><td><code>requires_grad=True</code></td><td>Tells PyTorch to track all operations performed on a tensor, so gradients can later be computed for it via <code>.backward()</code>.</td></tr>
+      <tr><td>Computation graph</td><td>The dynamic graph PyTorch builds as operations run, recording how each tensor was derived — traversed in reverse during <code>.backward()</code> to compute gradients via the chain rule.</td></tr>
+      <tr><td><code>torch.no_grad()</code></td><td>A context manager telling PyTorch to stop tracking operations (no graph building) — used during inference/evaluation to save memory and compute.</td></tr>
+      <tr><td><code>optimizer.zero_grad()</code></td><td>Clears accumulated gradients before a new backward pass — necessary because PyTorch accumulates (adds to) gradients by default across multiple <code>.backward()</code> calls.</td></tr>
+      <tr><td><code>nn.Module</code></td><td>PyTorch's base class for packaging a model — layers declared in <code>__init__</code>, data flow defined in <code>forward()</code>.</td></tr>
+      <tr><td><code>nn.Linear(in, out)</code></td><td>A fully-connected layer — internally stores a weight matrix (shape <code>[out, in]</code>) and bias vector, computing <code>output = input @ weight.T + bias</code>.</td></tr>
+    </table>
+
+    <h2 id="arch">8. Architecture</h2>
+    <pre><code>Scalar (0D)  →  Vector (1D)  →  Matrix (2D)  →  Tensor (3D, 4D, 5D...)
+   number         list            grid           cube / hypercube
+
+Deep learning tensor shapes, by example:
+  One sentence, 3 tokens, 768-dim embeddings → [3, 768]        (2D)
+  A batch of 8 such sentences                → [8, 3, 768]     (3D)
+  Multi-head attention, 12 heads, 64-dim/head → [8, 12, 3, 64]  (4D)
+
+Matrix multiplication is EVERYWHERE in a model:
+  Forward Pass:      X @ W                   (learned transformations)
+  Backpropagation:   dL/dY @ W.T              (computing gradients)
+  Attention:          Q @ K.T                  (measuring similarity)
+  Word Embeddings:    One-hot @ W_embed        (looking up meaning)
+
+PyTorch's 5-line training pattern (identical from MNIST to GPT-4):
+  1. Forward Pass    → y_pred = model(x_batch)
+  2. Compute Loss    → loss = criterion(y_pred, y_batch)
+  3. Clear Gradients → optimizer.zero_grad()
+  4. Backward Pass   → loss.backward()
+  5. Update Weights  → optimizer.step()</code></pre>
+
+    <h2 id="internal">9. How it works internally</h2>
+    <p>A <b>matrix multiplied by a vector</b> is not just data storage — it's a transformation machine. The matrix <code>[[0,-1],[1,0]]</code> applied to the vector <code>[1,0]</code> (pointing right) produces <code>[0,1]</code> (pointing up) — the matrix rotated the vector 90°. Other matrices scale, stretch/squish, reflect, or project vectors; in a neural network, the weight matrices the model "learns" during training are exactly this — the model is searching for the specific transformation matrices that map input data (e.g., image pixels) to correct outputs (e.g., digit labels). Matrix multiplication itself is built from repeated <b>dot products</b>: each output cell is the dot product of a row from the first matrix and a column from the second, and a dot product's value measures how aligned/similar two vectors are — which is exactly why <code>attention = softmax(Q @ K.T) * V</code> works: <code>Q @ K.T</code> computes a dot product (similarity score) between every pair of tokens' Query and Key vectors, and the learned <code>W</code> matrices (Wq, Wk, Wv) rotate raw embeddings into a space where "relevant" and "pointing in a similar direction" become mathematically the same thing.</p>
+    <p>Inside <b>PyTorch</b>, every tensor stores two things: the actual numbers, and metadata (shape, device, dtype) telling PyTorch how to interpret that data. When a tensor is created with <code>requires_grad=True</code>, PyTorch begins recording every operation performed on it into a dynamic computation graph. Calling <code>.backward()</code> on a final output traverses that graph in reverse, applying the chain rule at every step (exactly like the manual backpropagation from <a href="neural-networks-from-scratch.html">Neural Networks from Scratch</a>) to compute the gradient of every tensor that contributed to the output — this is <b>autograd</b>, and it is specifically why PyTorch exists: it replaces error-prone, hand-derived calculus with one reliable, automatic call.</p>
+
+    <h2 id="steps">10. Step-by-step explanation</h2>
+    <ol>
+      <li><b>Recognize the hidden pattern:</b> every formula from Neural Networks (<code>weights * inputs + bias</code>) and Transformers (<code>Q = X * Wq</code>, <code>attention = softmax(Q * K.T) * V</code>) is matrix multiplication.</li>
+      <li><b>Build up the tensor hierarchy:</b> scalar (0D) → vector (1D) → matrix (2D) → tensor (3D+), understanding each as "what if we keep adding dimensions?"</li>
+      <li><b>Understand matrices as transformations:</b> a matrix times a vector produces a new, transformed vector (rotation, scaling, etc.) — not just storage.</li>
+      <li><b>Learn matrix multiplication's rule:</b> inner dimensions must match: <code>(a, b) @ (b, c) → (a, c)</code>.</li>
+      <li><b>Understand the dot product as the atomic unit:</b> element-wise multiply then sum — conceptually measures similarity/alignment between two vectors.</li>
+      <li><b>Connect to GPUs:</b> matrix multiplication is "embarrassingly parallel" (every output cell can be computed independently and simultaneously), which is exactly what GPU architecture (thousands of simple cores) is built for.</li>
+      <li><b>Install the tool:</b> PyTorch represents all of this as tensors, moves them to GPU via <code>.to(device)</code>, and performs matrix multiplication via <code>@</code> or <code>torch.matmul()</code>.</li>
+      <li><b>Understand autograd:</b> set <code>requires_grad=True</code>, perform operations, call <code>.backward()</code> — PyTorch automatically computes every gradient via the chain rule, replacing manual backpropagation.</li>
+      <li><b>Build a model with <code>nn.Module</code>:</b> declare layers (each one a learned matrix transformation) in <code>__init__</code>, define the data flow in <code>forward()</code>.</li>
+      <li><b>Run the universal 5-line training loop:</b> forward pass → compute loss → <code>zero_grad()</code> → <code>backward()</code> → <code>optimizer.step()</code> — identical in structure whether training a toy MNIST classifier or a GPT-4-scale model.</li>
+    </ol>
+
+    <h2 id="simple">11. Simple example</h2>
+    <p>Rotating a vector 90° via matrix multiplication: the vector <code>[1, 0]</code> (pointing right) multiplied by the matrix <code>[[0, -1], [1, 0]]</code> produces <code>[0, 1]</code> (pointing up) — a concrete, visualizable demonstration that "a matrix is a transformation machine," not just a static grid of numbers.</p>
+
+    <h2 id="real">12. Real-world example</h2>
+    <p>Training an MNIST digit classifier (as in the deck's live-demo walkthrough) is literally four matrix transformations in sequence: a <code>[28,28]</code> image is flattened to <code>[784]</code>, transformed by a learned <code>[784,128]</code> weight matrix into <code>[128]</code> features, passed through ReLU, then transformed by a second learned <code>[128,10]</code> weight matrix into <code>[10]</code> digit scores — "training" is nothing more than search for the specific values inside those two weight matrices that correctly map pixel patterns to digit labels, achievable to ~98% accuracy in under 60 seconds on a GPU.</p>
+
+    <h2 id="code">13. Code example</h2>
+    <pre><code class="language-python">import torch
+
+# Scalars, vectors, matrices, and tensors — all the same underlying type
+x = torch.tensor(5.0)                       # 0D: scalar
+v = torch.tensor([1.0, 2.0, 3.0])            # 1D: vector
+m = torch.tensor([[1, 2], [3, 4]])           # 2D: matrix
+t = torch.zeros(2, 3, 4)                     # 3D+: tensor
+print(t.shape)                               # torch.Size([2, 3, 4])
+
+# Matrix multiplication — the @ operator
+A = torch.randn(3, 4)        # Shape: [3, 4]
+B = torch.randn(4, 5)        # Shape: [4, 5]
+C = A @ B                    # Shape: [3, 5]  (inner dims 4, 4 must match)
+C_alt = torch.matmul(A, B)   # equivalent explicit call
+
+# GPU acceleration — the one line that matters
+device = "cuda" if torch.cuda.is_available() else "cpu"
+A = A.to(device)
+B = B.to(device)
+C = A @ B                    # now runs on GPU, up to 100x faster
+</code></pre>
+
+    <h2 id="advanced">14. Advanced example</h2>
+    <p>Autograd in action — automatic differentiation computing a derivative with one call, then building a full trainable model with <code>nn.Module</code> and the universal 5-line training loop:</p>
+    <pre><code class="language-python">import torch
+import torch.nn as nn
+
+# --- Autograd basics ---
+x = torch.tensor(2.0, requires_grad=True)   # track this tensor
+y = x**2 + 5                                 # y = x^2 + 5
+y.backward()                                 # compute dy/dx automatically
+print(x.grad)                                # tensor(4.0)  (dy/dx = 2x = 2*2)
+
+# --- A real model with nn.Module ---
+class SimpleNet(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.layer1 = nn.Linear(784, 128)   # weight matrix: [128, 784]
+        self.relu = nn.ReLU()
+        self.layer2 = nn.Linear(128, 10)    # weight matrix: [10, 128]
+
+    def forward(self, x):
+        x = self.layer1(x)
+        x = self.relu(x)
+        x = self.layer2(x)
+        return x
+
+model = SimpleNet()
+optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+criterion = nn.CrossEntropyLoss()
+
+x_batch = torch.randn(32, 784)              # batch of 32 flattened 28x28 images
+y_batch = torch.randint(0, 10, (32,))       # batch of 32 digit labels
+
+for epoch in range(10):
+    y_pred = model(x_batch)                  # 1. Forward Pass
+    loss = criterion(y_pred, y_batch)        # 2. Compute Loss
+    optimizer.zero_grad()                    # 3. Clear Old Gradients
+    loss.backward()                          # 4. Backward Pass (autograd)
+    optimizer.step()                         # 5. Update Weights
+    print(f"epoch {epoch}, loss {loss.item():.4f}")
+</code></pre>
+
+    <h2 id="mistakes">15. Common mistakes</h2>
+    <ul>
+      <li>Forgetting <code>optimizer.zero_grad()</code> — PyTorch accumulates (adds to) gradients by default across <code>.backward()</code> calls, so skipping this makes gradients silently pile up and training diverge/"explode."</li>
+      <li>Confusing <code>.view()</code> with <code>.permute()</code> — <code>.view()</code> only reinterprets shape (total elements must stay the same, and the underlying memory layout must support it), while <code>.permute()</code> actually reorders axes; using the wrong one produces silently wrong (not erroring) results in some cases.</li>
+      <li>Mismatching matrix multiplication dimensions — <code>A @ B</code> requires A's last dimension to equal B's second-to-last dimension; shape mismatches here are among the most common PyTorch runtime errors.</li>
+      <li>Forgetting to move both the model and the data to the same device (<code>.to(device)</code>) — a model on GPU cannot operate on CPU tensors, and vice versa, producing a device-mismatch error.</li>
+      <li>Not wrapping inference/evaluation code in <code>torch.no_grad()</code> — this wastes memory and compute building an unnecessary computation graph when gradients won't be used.</li>
+      <li>Treating tensor shape as an afterthought rather than the primary thing to check first when debugging — nearly every cryptic PyTorch error traces back to a shape mismatch somewhere in the pipeline.</li>
+    </ul>
+
+    <h2 id="best">16. Best practices</h2>
+    <ul>
+      <li>Print and verify <code>.shape</code> liberally while building or debugging any model — shape is "everything," as the deck states, and understanding it lets you read any unfamiliar model's code.</li>
+      <li>Always pair <code>optimizer.zero_grad()</code>, <code>loss.backward()</code>, and <code>optimizer.step()</code> together in that order inside every training loop — this is the universal, non-negotiable pattern.</li>
+      <li>Use <code>torch.no_grad()</code> around any inference/evaluation code where gradients aren't needed, to save memory and compute.</li>
+      <li>Move both model and data to the same device early and consistently, rather than scattered <code>.to(device)</code> calls throughout the code.</li>
+      <li>Default to <code>nn.Module</code> + its standard <code>__init__</code>/<code>forward</code> pattern for any custom model — it's the idiomatic, expected structure across the entire PyTorch ecosystem.</li>
+    </ul>
+
+    <h2 id="production">17. Production considerations</h2>
+    <p>Production training pipelines run this exact 5-line pattern across many GPUs simultaneously (data/model parallelism), with mixed-precision tensors (fp16/bf16) to reduce memory and increase throughput, and gradient accumulation across multiple forward/backward passes before a single optimizer step when the desired batch size exceeds what fits in GPU memory — all built on the same fundamental autograd and matrix multiplication mechanics covered here.</p>
+
+    <h2 id="security">18. Security considerations</h2>
+    <p>Not directly covered in this conceptual material; a practical note: loading PyTorch model checkpoints with <code>torch.load()</code> can execute arbitrary code if the file is untrusted (it uses Python's pickle format by default) — always set <code>weights_only=True</code> or verify the source of any checkpoint file before loading it.</p>
+
+    <h2 id="performance">19. Performance considerations</h2>
+    <p>Matrix multiplication is "embarrassingly parallel" — every output cell can be computed independently and simultaneously — which is precisely why GPUs (thousands of simple cores optimized for parallel tasks) outperform CPUs (8–16 complex cores optimized for sequential tasks) by up to 100x for large matrix math; moving tensors to GPU via <code>.to(device)</code> is the single highest-leverage performance action available for most deep learning code.</p>
+
+    <h2 id="cost">20. Cost considerations</h2>
+    <p>GPU compute is the dominant cost driver in training and serving deep learning models — the 100x speedup from GPU-accelerated matrix multiplication directly translates to proportionally lower wall-clock training time and cloud compute cost versus running equivalent operations on CPU; efficient shape/memory management (avoiding unnecessary large intermediate tensors, using appropriate batch sizes) further reduces GPU memory and cost requirements.</p>
+
+    <h2 id="debug">21. Debugging/troubleshooting</h2>
+    <ul>
+      <li><b>"RuntimeError: size mismatch" during matrix multiplication:</b> check that inner dimensions actually match — <code>(a, b) @ (c, d)</code> requires <code>b == c</code>; print both tensors' <code>.shape</code> to diagnose.</li>
+      <li><b>Model loss explodes / becomes NaN after a few steps:</b> check first whether <code>optimizer.zero_grad()</code> is missing or misplaced — accumulated gradients from skipped zeroing is a very common cause.</li>
+      <li><b>"RuntimeError: expected all tensors to be on the same device":</b> ensure both the model (<code>model.to(device)</code>) and every input tensor (<code>x.to(device)</code>) are moved to the same device before any operation between them.</li>
+      <li><b>Unexpected/garbage values after <code>.view()</code>:</b> verify the tensor is contiguous in memory (use <code>.contiguous()</code> before <code>.view()</code> if it followed a <code>.permute()</code> or <code>.transpose()</code>) and that the total element count truly matches the target shape.</li>
+      <li><b>Out-of-memory (OOM) errors on GPU:</b> check for accidentally retaining the computation graph during inference (wrap in <code>torch.no_grad()</code>), reduce batch size, or verify intermediate tensors aren't unnecessarily large relative to available GPU memory.</li>
+    </ul>
+
+    <h2 id="related">22. Related concepts</h2>
+    <p><a href="neural-networks-from-scratch.html">Neural Networks from Scratch</a> · <a href="transformers-part-1-tokenization-embeddings-positional-encoding.html">Transformers Part 1</a> · <a href="building-training-modern-llm-from-scratch.html">Building & Training a Modern LLM from Scratch</a> · <a href="../03-Deep-Learning/">Deep Learning</a></p>
+
+    <h2 id="comparison">23. Comparison with alternatives</h2>
+    <table>
+      <tr><th>Approach</th><th>Strength</th><th>Weakness</th></tr>
+      <tr><td>Manual backpropagation (hand-derived calculus)</td><td>Full transparency into every gradient computation; no framework dependency.</td><td>Extremely error-prone at scale — a single mistake in the chain rule means the model never trains correctly; completely impractical for models with millions/billions of parameters.</td></tr>
+      <tr><td>PyTorch autograd</td><td>Automatic, reliable gradient computation via <code>.backward()</code>; scales to arbitrarily complex models without manual calculus.</td><td>Requires understanding the computation graph abstraction to debug effectively when something does go wrong.</td></tr>
+      <tr><td>CPU execution</td><td>Simpler programming model; no device-management code needed.</td><td>Orders of magnitude slower for matrix multiplication at scale (8–16 cores vs. 5,000+ on GPU).</td></tr>
+      <tr><td>GPU execution</td><td>Up to 100x speedup for large matrix math via massive parallelism.</td><td>Requires explicit device management (<code>.to(device)</code>), and GPU memory is a harder constraint than CPU RAM.</td></tr>
+    </table>
+
+    <h2 id="exercise">24. Mini practical exercise</h2>
+    <p>By hand, compute the matrix multiplication <code>[[2,0],[0,2]] @ [3,4]</code> and verify it equals <code>[6,8]</code> (uniform 2x scaling). Then compute <code>[[3,0],[0,0.5]] @ [3,4]</code> and verify it stretches the first component (3x) while squishing the second (0.5x) — confirming that different matrices perform genuinely different geometric transformations on the same input vector.</p>
+
+    <h2 id="project">25. Practical project</h2>
+    <p><b>Train SimpleNet on MNIST:</b> implement the exact <code>nn.Module</code> architecture from this deck (<code>Linear(784,128) → ReLU → Linear(128,10)</code>), load the MNIST dataset via <code>torchvision</code>, run the universal 5-line training loop for several epochs on GPU (if available), and verify you can reach ~98% test accuracy — directly reproducing the deck's live-demo goal.</p>
+
+    <h2 id="projectarch">26. Project architecture</h2>
+    <pre><code>MNIST dataset (torchvision.datasets.MNIST)
+   → DataLoader (batches of [batch, 1, 28, 28] images + labels)
+   → flatten each image: [batch, 1, 28, 28] → [batch, 784]
+   → SimpleNet(nn.Module): Linear(784,128) → ReLU → Linear(128,10)
+   → training loop (N epochs):
+       forward pass → CrossEntropyLoss → zero_grad → backward → optimizer.step
+   → evaluate on test set → accuracy
+   → move model + data to CUDA if available, compare wall-clock time vs CPU</code></pre>
+
+    <h2 id="interview-b">27. Interview Questions — Beginner</h2>
+    <div class="qa"><b>Q1.</b> What is a tensor, in relation to scalars, vectors, and matrices?<br><b>A.</b> A tensor is the generalization of all of them — a scalar is a 0D tensor (single number), a vector is a 1D tensor (list of numbers), a matrix is a 2D tensor (grid of numbers), and tensors extend this to 3D, 4D, or higher dimensions.</div>
+    <div class="qa"><b>Q2.</b> What does it mean to say "a matrix is a transformation"?<br><b>A.</b> Multiplying a vector by a matrix produces a different, transformed vector — the matrix can rotate, scale, stretch, reflect, or otherwise reshape the input, rather than just storing data passively.</div>
+    <div class="qa"><b>Q3.</b> What is the rule for matrix multiplication dimensions?<br><b>A.</b> The inner dimensions must match: a matrix of shape <code>(a, b)</code> can be multiplied by one of shape <code>(b, c)</code>, producing a result of shape <code>(a, c)</code>.</div>
+    <div class="qa"><b>Q4.</b> What is a dot product, conceptually?<br><b>A.</b> Multiplying corresponding elements of two vectors and summing the results — conceptually, it measures similarity/alignment: a high value means the vectors point in a similar direction, a low or zero value means they don't.</div>
+    <div class="qa"><b>Q5.</b> Why are GPUs so much faster than CPUs for deep learning?<br><b>A.</b> Matrix multiplication is "embarrassingly parallel" — every output cell can be computed independently at the same time — and GPUs have thousands of simple cores built exactly for this kind of parallel task, versus a CPU's 8–16 complex cores optimized for sequential logic.</div>
+    <div class="qa"><b>Q6.</b> What is PyTorch?<br><b>A.</b> The standard deep learning framework used by organizations like OpenAI, Anthropic, Google DeepMind, and Tesla — it provides GPU-accelerated tensors, automatic differentiation (autograd), and high-level model-building blocks (<code>nn.Module</code>).</div>
+    <div class="qa"><b>Q7.</b> What does <code>requires_grad=True</code> do?<br><b>A.</b> It tells PyTorch to start tracking every operation performed on that tensor, building a computation graph so gradients can later be computed automatically via <code>.backward()</code>.</div>
+    <div class="qa"><b>Q8.</b> Why must you call <code>optimizer.zero_grad()</code> before <code>loss.backward()</code> in a training loop?<br><b>A.</b> Because PyTorch accumulates (adds to) gradients by default across multiple <code>.backward()</code> calls — without clearing them first, gradients from previous steps would incorrectly pile up on top of the current step's gradients.</div>
+    <div class="qa"><b>Q9.</b> What is the purpose of <code>torch.no_grad()</code>?<br><b>A.</b> It tells PyTorch to stop tracking operations (no computation graph is built), which is used during inference/evaluation to save memory and compute since gradients aren't needed at that point.</div>
+    <div class="qa"><b>Q10.</b> What does <code>nn.Linear(784, 128)</code> actually store internally?<br><b>A.</b> A weight matrix of shape <code>[128, 784]</code> and a bias vector of shape <code>[128]</code> — passing data through it computes <code>input @ weight.T + bias</code>.</div>
+
+    <h2 id="interview-i">28. Interview Questions — Intermediate</h2>
+    <div class="qa"><b>Q1.</b> Explain how the Transformer attention formula <code>softmax(Q @ K.T) * V</code> is "just" matrix multiplication and dot products.<br><b>A.</b> <code>Q @ K.T</code> computes, for every pair of tokens, the dot product between that token's Query vector and every other token's Key vector — since a dot product measures directional similarity, this produces a matrix of "how relevant is token j to token i" scores; softmax normalizes these into attention weights, and multiplying by <code>V</code> computes a weighted sum (another matrix multiplication) of Value vectors according to those weights — the entire mechanism reduces to two matrix multiplications and a normalization, with the Q/K/V projection matrices (Wq, Wk, Wv) being the learned parameters that determine what "relevant" means for the model.</div>
+    <div class="qa"><b>Q2.</b> What's the practical difference between <code>.view()</code> and <code>.permute()</code>, and why does <code>.permute()</code> sometimes require <code>.contiguous()</code> before a subsequent <code>.view()</code>?<br><b>A.</b> <code>.view()</code> reinterprets a tensor's shape while keeping the same underlying linear memory layout and the same total number of elements (e.g., flattening <code>[8,3,768]</code> into <code>[24,768]</code>); <code>.permute()</code> actually reorders the tensor's axes (e.g., swapping heads and tokens), which changes how the data is conceptually laid out but does so via a view with different strides rather than physically moving memory — this can leave the tensor non-contiguous in memory, and <code>.view()</code> requires a contiguous memory layout to safely reinterpret shape, so <code>.contiguous()</code> is needed to physically reorder the underlying memory first.</div>
+    <div class="qa"><b>Q3.</b> Why does PyTorch build a "dynamic" computation graph rather than a static one?<br><b>A.</b> PyTorch builds the graph on the fly as operations actually execute in Python (define-by-run), rather than requiring the entire computation to be pre-defined/compiled ahead of time (define-and-run, as older TensorFlow 1.x did) — this lets you use ordinary Python control flow (if-statements, loops, debugging with print statements) directly inside model code, at some cost to the ahead-of-time optimization opportunities a static graph would allow.</div>
+    <div class="qa"><b>Q4.</b> How does broadcasting let you add a matrix and a vector of different shapes, and what's the rule governing when it's valid?<br><b>A.</b> PyTorch "stretches" the smaller tensor to match the larger one's shape without actually copying data in memory — e.g., adding a <code>[4]</code> vector to a <code>[3,4]</code> matrix conceptually adds that vector to every row; the rule is that, comparing shapes from the rightmost dimension inward, each pair of dimensions must either be equal or one of them must be 1 (or absent) for broadcasting to be valid.</div>
+    <div class="qa"><b>Q5.</b> Why is understanding tensor shape described as "if you understand shape, you can read any model"?<br><b>A.</b> A tensor's shape directly encodes the semantic structure of the data at that point in the model — e.g., <code>[8, 12, 3, 64]</code> immediately tells you batch size (8), number of attention heads (12), sequence length (3), and per-head dimension (64) — so tracing shapes through a model's forward pass reveals exactly what transformation is happening at each step, even without deep familiarity with that specific architecture's code.</div>
+
+    <h2 id="interview-a">29. Interview Questions — Advanced</h2>
+    <div class="qa"><b>Q1.</b> Why is the statement "every computation in a modern AI model is essentially a series of matrix multiplications" both true and an oversimplification? What else is actually involved?<br><b>A.</b> It's true in the sense that the dominant, most computationally expensive operations (linear layers, attention's Q@K.T and the weighted-sum-by-V, embedding lookups via one-hot@W_embed) are indeed matrix multiplications, and this is why GPU-style parallel hardware is the right fit for AI workloads. It's an oversimplification because non-matmul operations are also essential and non-trivial: non-linear activation functions (ReLU, GELU, softmax) are element-wise, not matrix operations, and are precisely what prevents a deep network from mathematically collapsing into a single linear layer (per the Neural Networks material); normalization layers (LayerNorm/RMSNorm) involve mean/variance computation, not matrix multiplication; and the overall architecture design (how layers are composed, residual connections, attention masking) is a separate design layer on top of the raw linear algebra. The matmul-centric framing is pedagogically useful and computationally accurate for where the FLOPs go, but the activations, normalization, and architecture choices are equally necessary for a model to actually learn anything useful.</div>
+    <div class="qa"><b>Q2.</b> Explain, mechanically, how autograd's reverse-mode automatic differentiation relates to the manual backpropagation math from the Neural Networks material, and why reverse mode specifically is efficient for deep learning.<br><b>A.</b> Autograd's <code>.backward()</code> performs exactly the same chain-rule-based gradient computation as manual backpropagation — PyTorch's computation graph records each operation (e.g., <code>**2</code>, then <code>+5</code>) as a node, and <code>.backward()</code> traverses this graph from the output back to each input, at each step multiplying the local derivative of that operation by the accumulated gradient from downstream (exactly the chain rule). Reverse-mode differentiation is specifically efficient for deep learning because a typical model has many inputs (millions/billions of parameters) but a single scalar output (the loss) — reverse mode computes the gradient of that one output with respect to all inputs in a single backward traversal, with cost roughly proportional to one additional forward pass, whereas forward-mode differentiation would require a separate pass per input parameter, making it computationally infeasible at the scale of modern neural networks.</div>
+
+    <h2 id="interview-s">30. Interview Questions — Senior/Architect</h2>
+    <div class="qa"><b>Q1.</b> You're onboarding a strong software engineer with no deep learning background onto an ML infrastructure team. How would you use this material's "it's all matrix multiplication" framing to accelerate their ramp-up, and where would you deliberately go beyond it?<br><b>A.</b> I'd start exactly where this material does: show them that the formulas in neural networks and Transformers they'll see in code (weight updates, attention) are all instances of one operation (matrix multiplication, built from dot products), and that PyTorch's tensor/autograd abstractions exist specifically to make that operation fast (GPU-parallel) and differentiable (automatic gradients) without hand-derived calculus — this framing gives an experienced engineer a fast, accurate mental model instead of treating ML code as unfamiliar magic. I'd deliberately go beyond it quickly into: (1) shape-debugging as a practical skill, since that's where most real bugs live day-to-day; (2) the role of non-linear activations and normalization, which the matmul framing can understate; (3) memory/performance considerations specific to infra work — mixed precision, gradient checkpointing, distributed training strategies — since an infra engineer needs these even though they're outside this introductory material's scope. The goal is using the matmul framing as a fast on-ramp to correct intuition, then layering in the practical, infra-specific depth their role actually requires.</div>
+
+    <h2 id="interview-sc">31. Scenario-Based Questions</h2>
+    <div class="qa"><b>Scenario 1.</b> A teammate's training script runs fine for one epoch, then the loss suddenly becomes NaN on epoch two. What's the first thing you check, based on this material?<br><b>A.</b> First check whether <code>optimizer.zero_grad()</code> is present and correctly placed before <code>loss.backward()</code> in the training loop — the deck explicitly flags this as the single most common cause of exploding/NaN losses, since gradients accumulate (add up) across steps by default if not cleared, compounding until the loss destabilizes.</div>
+    <div class="qa"><b>Scenario 2.</b> Your team's custom attention implementation throws a shape-mismatch error after a <code>.permute()</code> call that worked fine in isolation during testing. What's the likely issue?<br><b>A.</b> Likely issue: a subsequent <code>.view()</code> call after the <code>.permute()</code> without first calling <code>.contiguous()</code> — <code>.permute()</code> reorders axes via strides without physically rearranging memory, leaving the tensor non-contiguous, and <code>.view()</code> requires contiguous memory to safely reinterpret shape; the fix is inserting <code>.contiguous()</code> between the <code>.permute()</code> and the <code>.view()</code> call.</div>
+    <div class="qa"><b>Scenario 3.</b> A junior engineer asks why their model trains correctly on CPU but throws a device-mismatch error only after they tried to "speed it up" by moving the model to GPU. What's your diagnosis?<br><b>A.</b> Diagnosis: they moved the model to GPU (<code>model.to(device)</code>) but forgot to also move the input data/batches to the same device — PyTorch requires every tensor involved in an operation to be on the same device, so a GPU model receiving CPU tensors (or vice versa) throws a device-mismatch error; the fix is ensuring both the model and every batch of data are consistently moved to the same device before any forward pass.</div>
+
+    <h2 id="revision">32. Quick revision notes</h2>
+    <ul>
+      <li>Scalar=0D, Vector=1D, Matrix=2D, Tensor=generalization to N dimensions.</li>
+      <li>A matrix is a transformation (rotate/scale/stretch/reflect), not just storage.</li>
+      <li>Matrix multiplication rule: <code>(a,b) @ (b,c) → (a,c)</code> — inner dimensions must match.</li>
+      <li>Dot product = element-wise multiply + sum = similarity measure.</li>
+      <li>Forward pass, backprop, and attention are all fundamentally matrix multiplication.</li>
+      <li>GPUs beat CPUs here because matmul is "embarrassingly parallel" (every cell computed independently).</li>
+      <li>PyTorch tensors store data + metadata (shape, device); <code>.shape</code> tells you everything.</li>
+      <li><code>.view()</code> reinterprets shape (same memory); <code>.permute()</code> reorders axes; broadcasting auto-stretches compatible shapes.</li>
+      <li>Autograd: <code>requires_grad=True</code> → PyTorch tracks ops → <code>.backward()</code> computes all gradients via the chain rule, automatically.</li>
+      <li>Always: <code>zero_grad()</code> → <code>backward()</code> → <code>step()</code>, in that order, every training step.</li>
+      <li><code>torch.no_grad()</code> for inference (no graph, saves memory/compute).</li>
+      <li>Universal 5-line training loop: forward → loss → zero_grad → backward → step. Same from MNIST to GPT-4.</li>
+    </ul>
+
+    <h2 id="cheat">33. Cheat sheet</h2>
+    <div class="callout">Tensor hierarchy: scalar(0D)→vector(1D)→matrix(2D)→tensor(ND). Matrix = transformation machine. MatMul rule: (a,b)@(b,c)→(a,c). Dot product = similarity. GPU wins because matmul is parallel. PyTorch: tensor = data+metadata. requires_grad=True → track ops → .backward() = auto gradients. Always zero_grad() before backward(). no_grad() for inference. 5-line loop: forward→loss→zero_grad→backward→step.</div>
+
+    <h2 id="further">34. Further topics to learn</h2>
+    <p>Transformers Part 2 (Self-Attention mechanics) → <a href="building-training-modern-llm-from-scratch.html">Building & Training a Modern LLM from Scratch (RMSNorm, RoPE, GQA, SwiGLU)</a> → Week 6: What Changed Since 2017 → mixed-precision training, distributed training (data/model parallelism), <code>torch.compile</code>.</p>
+
+    <div class="prevnext">
+      <a href="transformers-part-1-tokenization-embeddings-positional-encoding.html">← Transformers Part 1</a>
+      <a href="transformers-part-2-self-attention-qkv-multihead.html">Next: Transformers Part 2 →</a>
+    </div>
+  </main>
+</div>
+<script src="../assets/app.js"></script>
+</body>
+</html>

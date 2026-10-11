@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Embeddings Fundamentals</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <input class="searchbox" placeholder="Search topics..." />
+    <a href="../index.html">← Home</a>
+    <h3>10-Embeddings</h3>
+    <a href="embeddings-fundamentals.html">Embeddings Fundamentals</a>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumbs"><a href="../index.html">Home</a> / 10-Embeddings</div>
+      <button class="theme-toggle" onclick="toggleTheme()">🌓 Theme</button>
+    </div>
+    <h1>Embeddings Fundamentals</h1>
+    <span class="tag good">Stable</span><span class="tag">Last verified: 2026-10-06</span>
+
+    <div class="toc">
+      <b>On this page</b>
+      <a href="#what">1. What is this?</a>
+      <a href="#whyexist">2. Why does it exist?</a>
+      <a href="#whyimportant">3. Why is it important?</a>
+      <a href="#whereused">4. Where is it used?</a>
+      <a href="#prereq">5. Prerequisites</a>
+      <a href="#core">6. Core concepts</a>
+      <a href="#terms">7. Terminology</a>
+      <a href="#arch">8. Architecture</a>
+      <a href="#internal">9. How it works internally</a>
+      <a href="#steps">10. Step-by-step: computing similarity</a>
+      <a href="#simple">11. Simple example</a>
+      <a href="#real">12. Real-world example</a>
+      <a href="#code">13. Code example</a>
+      <a href="#advanced">14. Advanced example</a>
+      <a href="#mistakes">15. Common mistakes</a>
+      <a href="#best">16. Best practices</a>
+      <a href="#production">17. Production considerations</a>
+      <a href="#security">18. Security considerations</a>
+      <a href="#performance">19. Performance considerations</a>
+      <a href="#cost">20. Cost considerations</a>
+      <a href="#debug">21. Debugging/troubleshooting</a>
+      <a href="#related">22. Related concepts</a>
+      <a href="#comparison">23. Comparison with alternatives</a>
+      <a href="#exercise">24. Mini practical exercise</a>
+      <a href="#project">25. Practical project</a>
+      <a href="#projectarch">26. Project architecture</a>
+      <a href="#interview-b">27. Interview Questions — Beginner</a>
+      <a href="#interview-i">28. Interview Questions — Intermediate</a>
+      <a href="#interview-a">29. Interview Questions — Advanced</a>
+      <a href="#interview-s">30. Interview Questions — Senior/Architect</a>
+      <a href="#interview-sc">31. Scenario-Based Questions</a>
+      <a href="#revision">32. Quick revision notes</a>
+      <a href="#cheat">33. Cheat sheet</a>
+      <a href="#further">34. Further topics to learn</a>
+    </div>
+
+    <h2 id="what">1. What is this?</h2>
+    <p>An embedding is a dense numeric vector representation of data (text, image, audio) such that semantically similar items end up close together in vector space. Embeddings are the foundation of semantic search, RAG retrieval, clustering, and recommendation systems.</p>
+
+    <h2 id="whyexist">2. Why does it exist?</h2>
+    <p>Keyword/exact-match search fails to capture meaning ("car" vs "automobile" vs "vehicle" are different strings but similar meaning); embeddings exist to let computers compare meaning numerically via vector distance/similarity rather than exact text matching.</p>
+
+    <h2 id="whyimportant">3. Why is it important?</h2>
+    <p>Embeddings are the retrieval backbone of every RAG system — understanding how they're generated, what "similarity" actually measures, and their limitations (they capture statistical semantic similarity, not guaranteed relevance or correctness) is essential for debugging retrieval quality issues.</p>
+
+    <h2 id="whereused">4. Where is it used?</h2>
+    <p>RAG retrieval, semantic search, recommendation systems, clustering/deduplication, anomaly detection, image/text similarity search (multimodal embeddings).</p>
+
+    <h2 id="prereq">5. Prerequisites</h2>
+    <p><a href="../03-Deep-Learning/deep-learning-fundamentals.html">Deep Learning Fundamentals</a>.</p>
+
+    <h2 id="core">6. Core concepts</h2>
+    <ul>
+      <li><b>Vector representation:</b> each item becomes a fixed-length array of floating-point numbers.</li>
+      <li><b>Semantic similarity:</b> the geometric closeness of two vectors approximates how semantically related their source content is.</li>
+      <li><b>Cosine similarity:</b> the most common similarity metric — measures the angle between two vectors, ignoring magnitude.</li>
+      <li><b>Dimensionality:</b> the length of the vector (e.g., 768, 1536, 3072 dimensions) — a trade-off between representational richness and storage/compute cost.</li>
+      <li><b>Multimodal embeddings:</b> models that map different modalities (text, image) into the same shared vector space, enabling cross-modal similarity search.</li>
+    </ul>
+
+    <h2 id="terms">7. Terminology</h2>
+    <table>
+      <tr><th>Term</th><th>Meaning</th></tr>
+      <tr><td>Embedding model</td><td>A model trained to produce dense vector representations of input data.</td></tr>
+      <tr><td>Cosine similarity</td><td>cos(θ) between two vectors; 1 = identical direction, 0 = unrelated, -1 = opposite.</td></tr>
+      <tr><td>Dot product</td><td>An alternative similarity measure; equivalent to cosine similarity when vectors are normalized.</td></tr>
+      <tr><td>Euclidean distance</td><td>Straight-line distance between two vectors; another similarity/distance metric option.</td></tr>
+      <tr><td>Dimensionality</td><td>The number of values in the embedding vector.</td></tr>
+      <tr><td>Text embedding</td><td>Vector representation of a piece of text.</td></tr>
+      <tr><td>Image/multimodal embedding</td><td>Vector representation of an image, or of text/images mapped into a shared space.</td></tr>
+    </table>
+
+    <h2 id="arch">8. Architecture</h2>
+    <pre><code>Text/Image Input
+ → Embedding Model (encoder, e.g., BERT-style or CLIP-style)
+ → Dense vector (e.g., 1536 floats)
+ → Store in Vector DB
+ → Query: embed the query the same way → compare via cosine similarity → return nearest neighbors</code></pre>
+
+    <h2 id="internal">9. How it works internally</h2>
+    <p>Embedding models are typically trained with a contrastive objective: pull semantically similar pairs (e.g., a question and its correct answer, or two paraphrases) close together in vector space, and push dissimilar pairs apart. The model learns to encode meaningful semantic structure into a fixed-size vector through this training signal, generalizing to new, unseen text at inference time.</p>
+
+    <h2 id="steps">10. Step-by-step: computing similarity</h2>
+    <ol>
+      <li>Embed both pieces of text through the same embedding model (critical — never compare embeddings from different models).</li>
+      <li>Normalize vectors (if not already unit-length).</li>
+      <li>Compute cosine similarity (or dot product, if normalized).</li>
+      <li>Interpret: higher similarity suggests higher semantic relatedness; apply a threshold or ranking as appropriate for the use case.</li>
+    </ol>
+
+    <h2 id="simple">11. Simple example</h2>
+    <p>Embedding "I love dogs" and "I adore puppies" will produce vectors with high cosine similarity despite sharing no exact words, because the embedding model learned these phrases are semantically related.</p>
+
+    <h2 id="real">12. Real-world example</h2>
+    <p>A customer-support search tool embeds all past support articles once (at ingestion time), and embeds each new user query at search time, retrieving the articles with highest cosine similarity — enabling "how do I get a refund" to match an article titled "Refund Policy" despite no exact word overlap.</p>
+
+    <h2 id="code">13. Code example</h2>
+    <pre><code class="language-python">from anthropic import Anthropic  # or a dedicated embeddings provider
+import numpy as np
+
+def cosine_similarity(a, b):
+    a, b = np.array(a), np.array(b)
+    return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
+
+# Using a typical embeddings API (provider-agnostic illustration)
+def embed(text: str) -> list[float]:
+    resp = embedding_client.embeddings.create(model="text-embedding-3", input=text)
+    return resp.data[0].embedding
+
+vec1 = embed("I love dogs")
+vec2 = embed("I adore puppies")
+vec3 = embed("The stock market crashed today")
+
+print("similar pair:", cosine_similarity(vec1, vec2))   # high
+print("unrelated pair:", cosine_similarity(vec1, vec3)) # low
+</code></pre>
+
+    <h2 id="advanced">14. Advanced example</h2>
+    <pre><code class="language-python"># Batch embedding + nearest-neighbor search (naive, in-memory)
+import numpy as np
+
+docs = ["Refund policy...", "Shipping times...", "Password reset..."]
+doc_vecs = np.array([embed(d) for d in docs])
+
+def search(query: str, k=2):
+    q_vec = np.array(embed(query))
+    sims = doc_vecs @ q_vec / (np.linalg.norm(doc_vecs, axis=1) * np.linalg.norm(q_vec))
+    top_k = np.argsort(sims)[::-1][:k]
+    return [(docs[i], sims[i]) for i in top_k]
+
+print(search("how do I get my money back"))
+</code></pre>
+
+    <h2 id="mistakes">15. Common mistakes</h2>
+    <ul>
+      <li>Comparing embeddings generated by two different models — their vector spaces are not compatible.</li>
+      <li>Forgetting to normalize vectors when using dot product as a similarity proxy for cosine similarity.</li>
+      <li>Assuming high similarity always means "relevant" — it means "semantically related," which isn't always the same as task-relevant.</li>
+      <li>Not re-embedding content after switching embedding model versions.</li>
+    </ul>
+
+    <h2 id="best">16. Best practices</h2>
+    <ul>
+      <li>Use the same embedding model version consistently for both indexed content and queries.</li>
+      <li>Choose dimensionality based on actual accuracy needs vs. storage/compute cost — higher isn't always meaningfully better.</li>
+      <li>Combine embedding similarity with a reranking step for better precision in RAG pipelines.</li>
+      <li>Version your embeddings alongside the model used to generate them for safe migration.</li>
+    </ul>
+
+    <h2 id="production">17. Production considerations</h2>
+    <p>Re-embedding a large corpus after an embedding model upgrade is a significant operation (cost + time) — plan migrations carefully, potentially running old and new embeddings in parallel during transition.</p>
+
+    <h2 id="security">18. Security considerations</h2>
+    <p>Embeddings can potentially leak information about the source text through inversion attacks in sensitive domains; treat embedding vectors of confidential data with the same access controls as the source data itself.</p>
+
+    <h2 id="performance">19. Performance considerations</h2>
+    <p>Embedding generation is typically much cheaper/faster than LLM text generation (single forward pass, no autoregressive loop); nearest-neighbor search at scale requires an approximate nearest neighbor (ANN) index (see <a href="../11-Vector-Databases/">Vector Databases</a>) rather than brute-force comparison.</p>
+
+    <h2 id="cost">20. Cost considerations</h2>
+    <p>Embedding API calls are typically priced much lower per token than generation calls; batch-embedding a large corpus upfront is usually far cheaper than repeated LLM calls for the same retrieval task.</p>
+
+    <h2 id="debug">21. Debugging/troubleshooting</h2>
+    <ul>
+      <li><b>Retrieval returns irrelevant results:</b> check embedding model consistency between indexing and querying, and consider adding a reranking step.</li>
+      <li><b>Similarity scores look wrong/inverted:</b> check for a normalization mismatch (dot product vs cosine) or a dimension mismatch between compared vectors.</li>
+    </ul>
+
+    <h2 id="related">22. Related concepts</h2>
+    <p><a href="../11-Vector-Databases/">Vector Databases</a> · <a href="../12-RAG/">RAG</a> · <a href="../13-Advanced-RAG/">Advanced RAG (reranking)</a></p>
+
+    <h2 id="comparison">23. Comparison with alternatives</h2>
+    <table>
+      <tr><th>Approach</th><th>Captures meaning?</th><th>Notes</th></tr>
+      <tr><td>Keyword/exact match</td><td>No</td><td>Fast, precise for exact terms, misses paraphrases/synonyms</td></tr>
+      <tr><td>BM25 (lexical ranking)</td><td>Partially</td><td>Statistically weighted keyword matching, still no true semantic understanding</td></tr>
+      <tr><td>Embeddings (semantic search)</td><td>Yes</td><td>Captures meaning/paraphrase similarity, needs a vector index</td></tr>
+      <tr><td>Hybrid (BM25 + embeddings)</td><td>Yes, best of both</td><td>Common production approach — combines lexical precision with semantic recall</td></tr>
+    </table>
+
+    <h2 id="exercise">24. Mini practical exercise</h2>
+    <p>Embed 5 sentences (some clearly related, some not) and compute all pairwise cosine similarities — verify the similarity scores match your intuition about which pairs are related.</p>
+
+    <h2 id="project">25. Practical project</h2>
+    <p><b>Semantic FAQ Search:</b> build a small tool that embeds a list of FAQ entries, accepts a user question, embeds it, and returns the top-3 most similar FAQ entries with their similarity scores.</p>
+
+    <h2 id="projectarch">26. Project architecture</h2>
+    <pre><code>faqs.json → embed each entry (batch) → store vectors in memory/array
+ → user_query → embed → cosine similarity against all stored vectors
+ → return top-3 ranked results</code></pre>
+
+    <h2 id="interview-b">27. Interview Questions — Beginner</h2>
+    <div class="qa"><b>Q1.</b> What is an embedding?<br><b>A.</b> A dense numeric vector representation of data such that semantically similar items are close together in vector space.</div>
+    <div class="qa"><b>Q2.</b> What is cosine similarity?<br><b>A.</b> A measure of the angle between two vectors; higher cosine similarity means the vectors point in a more similar direction (more semantically related).</div>
+    <div class="qa"><b>Q3.</b> Why can't you compare embeddings from two different models?<br><b>A.</b> Different models learn different, incompatible vector spaces — distances/similarities are only meaningful within the same model's embedding space.</div>
+    <div class="qa"><b>Q4.</b> What does "dimensionality" of an embedding mean?<br><b>A.</b> The number of values (length) in the embedding vector.</div>
+    <div class="qa"><b>Q5.</b> Why are embeddings useful for search compared to keyword matching?<br><b>A.</b> They capture semantic meaning, matching paraphrases and synonyms that exact keyword matching would miss.</div>
+    <div class="qa"><b>Q6.</b> What's a multimodal embedding?<br><b>A.</b> An embedding model that maps different modalities (e.g., text and images) into the same shared vector space for cross-modal comparison.</div>
+    <div class="qa"><b>Q7.</b> Is embedding generation typically cheaper or more expensive than LLM text generation?<br><b>A.</b> Cheaper — it's a single forward pass, not an autoregressive generation loop.</div>
+    <div class="qa"><b>Q8.</b> What's a common use case for embeddings besides search?<br><b>A.</b> Clustering, recommendation, deduplication, or anomaly detection.</div>
+    <div class="qa"><b>Q9.</b> Does high cosine similarity guarantee relevance for a task?<br><b>A.</b> No — it indicates semantic relatedness, which isn't always the same as being the correct or most useful answer for a specific task.</div>
+    <div class="qa"><b>Q10.</b> What's an embedding model trained to do, conceptually?<br><b>A.</b> Map inputs into a vector space where semantically similar items are close together and dissimilar items are far apart.</div>
+
+    <h2 id="interview-i">28. Interview Questions — Intermediate</h2>
+    <div class="qa"><b>Q1.</b> How are embedding models typically trained (contrastive learning)?<br><b>A.</b> By pulling embeddings of known similar pairs (e.g., paraphrases, question-answer pairs) closer together and pushing embeddings of dissimilar pairs apart, teaching the model to encode meaningful semantic structure into the vector space.</div>
+    <div class="qa"><b>Q2.</b> Why might higher-dimensional embeddings not always be better?<br><b>A.</b> Higher dimensions increase storage and compute cost for similarity search at scale, and beyond a certain point don't meaningfully improve retrieval quality for a given task — there's a cost/quality trade-off to evaluate empirically.</div>
+    <div class="qa"><b>Q3.</b> What's the difference between cosine similarity and dot product, and when are they equivalent?<br><b>A.</b> Dot product considers both vector direction and magnitude; cosine similarity normalizes out magnitude, considering only direction. They're equivalent when vectors are unit-normalized (magnitude = 1).</div>
+    <div class="qa"><b>Q4.</b> Why would you re-embed your entire corpus after switching embedding model versions, rather than mixing old and new embeddings?<br><b>A.</b> Different model versions produce incompatible vector spaces (even minor version updates can shift the learned representation); mixing them would produce meaningless or misleading similarity comparisons.</div>
+    <div class="qa"><b>Q5.</b> Why is embedding-based semantic search alone often insufficient for high-precision RAG retrieval?<br><b>A.</b> Pure embedding similarity can retrieve semantically related but not actually useful/relevant documents, and can miss documents with exact keyword matches that embeddings under-weight; combining with lexical search (BM25) and/or a reranking step typically improves precision.</div>
+
+    <h2 id="interview-a">29. Interview Questions — Advanced</h2>
+    <div class="qa"><b>Q1.</b> How would you design a zero-downtime migration strategy for upgrading your production embedding model version?<br><b>A.</b> Re-embed the full corpus into a new index using the new model in parallel with the existing live index, validate retrieval quality on the new index against an evaluation set, then cut over query traffic to the new index once validated, keeping the old index available briefly for rollback.</div>
+    <div class="qa"><b>Q2.</b> Why might domain-specific fine-tuned embeddings outperform general-purpose embeddings for a specialized retrieval task (e.g., legal or medical documents)?<br><b>A.</b> General-purpose embeddings are trained on broad web-scale text and may not capture fine-grained domain-specific semantic distinctions (e.g., specific legal term relationships); domain fine-tuning adapts the vector space to better reflect the similarity structure relevant to that specialized vocabulary and context.</div>
+
+    <h2 id="interview-s">30. Interview Questions — Senior/Architect</h2>
+    <div class="qa"><b>Q1.</b> Design an embedding pipeline architecture for a large enterprise knowledge base that's updated continuously, balancing freshness, cost, and retrieval quality.<br><b>A.</b> Implement incremental embedding (only re-embed new/changed documents, not the full corpus, on each update), batch new embeddings into the vector index asynchronously, periodically evaluate retrieval quality against a golden set to catch drift, and plan a defined (infrequent) full-corpus re-embedding cadence tied to embedding model version upgrades rather than continuous re-embedding of unchanged content.</div>
+
+    <h2 id="interview-sc">31. Scenario-Based Questions</h2>
+    <div class="qa"><b>Scenario 1.</b> After upgrading your embedding model, search quality degraded significantly. What's the most likely cause?<br><b>A.</b> Old documents are still indexed with embeddings from the previous model version while new queries are embedded with the new model — comparing incompatible vector spaces; the full corpus needs re-embedding with the new model.</div>
+    <div class="qa"><b>Scenario 2.</b> Your semantic search returns results that are "related" but not actually useful answers to user questions. How do you improve it?<br><b>A.</b> Add a reranking step (cross-encoder or LLM-based) on top of the initial embedding-based retrieval to better judge actual relevance, and/or combine with lexical (BM25) search for a hybrid approach that captures both semantic and exact-match signals.</div>
+
+    <h2 id="revision">32. Quick revision notes</h2>
+    <ul>
+      <li>Embeddings = dense vectors capturing semantic meaning.</li>
+      <li>Cosine similarity measures angle between vectors; never compare across different embedding models.</li>
+      <li>High similarity = semantically related, not necessarily "correct" or "relevant."</li>
+      <li>Combine with reranking/hybrid search for better RAG precision.</li>
+    </ul>
+
+    <h2 id="cheat">33. Cheat sheet</h2>
+    <div class="callout">Embeddings = dense vectors, semantically similar items close together. Cosine similarity = angle between vectors. Never mix embeddings from different models. High similarity ≠ guaranteed relevance — combine with reranking/hybrid search for precision.</div>
+
+    <h2 id="further">34. Further topics to learn</h2>
+    <p><a href="../11-Vector-Databases/">Vector Databases</a> → <a href="../12-RAG/">RAG</a> → <a href="../13-Advanced-RAG/">Advanced RAG</a></p>
+
+    <div class="prevnext">
+      <a href="../09-Structured-Output/structured-output.html">← Structured Output</a>
+      <a href="../11-Vector-Databases/vector-databases.html">Next: Vector Databases →</a>
+    </div>
+  </main>
+</div>
+<script src="../assets/app.js"></script>
+</body>
+</html>

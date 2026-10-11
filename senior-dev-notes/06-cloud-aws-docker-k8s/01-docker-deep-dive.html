@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Docker Deep Dive — Cloud, AWS, Docker &amp; K8s — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">Cloud, AWS, Docker &amp; K8s</a><span class="sep">›</span>Docker Deep Dive</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>Docker Deep Dive</h1>
+      <p class="meta-line"><span>⏱ 3 hrs</span><span>📍 Chapter 1 of 7</span></p>
+      <p><strong>One-line summary:</strong> Images are a stack of immutable, content-addressed layers over a
+      union filesystem — every build, cache, and size optimization decision follows directly from that one fact.</p>
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>You've written Dockerfiles for years. The gap at Staff/Lead level isn't "can you write one" — it's
+      whether you can explain <em>why</em> a build is slow, why an image is 1.2GB when it should be 80MB, why a
+      cache keeps busting on every CI run, and why a container that works on your laptop OOM-kills in prod. All
+      of those trace back to layer mechanics, the union filesystem, and how the daemon actually executes a
+      build. Interviewers at this level ask "walk me through what happens when you run <code>docker build</code>"
+      and expect you to talk about layer hashing and cache invalidation, not just syntax.</p>
+      <div class="box why"><h4>Why</h4><p>Image bloat and slow builds are one of the most common real-world
+      production pain points senior engineers are asked to fix — and the fix is almost always "restructure the
+      Dockerfile around how caching actually works," not "add more RAM to the build box."</p></div>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>Basic Dockerfile syntax and having run <code>docker build</code>/<code>docker run</code> before. Related:
+      <a href="02-docker-compose.html">Docker Compose</a>, <a href="03-kubernetes-core.html">Kubernetes Core</a>.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="images-layers">Images as layer stacks</h3>
+      <p>An image is a manifest (JSON) referencing an ordered list of layers, each a tarball diff, each addressed
+      by a SHA256 content hash. A running container adds one thin writable layer on top (the "container layer")
+      via a copy-on-write (CoW) filesystem driver — overlay2 on modern Linux. Reading a file walks down through
+      layers until found; writing a file that exists in a lower layer triggers a "copy-up" into the writable
+      layer first. This is why a container that writes a lot to a file that exists deep in the image (e.g. a
+      large log file baked into a base image) pays a one-time copy-up cost and why containers are not meant to
+      hold mutable state.</p>
+
+      <h3 id="layer-caching">Layer caching mechanics</h3>
+      <p>Each Dockerfile instruction produces a layer. The builder caches layers keyed by: (1) the instruction
+      text itself, (2) the hash of the parent layer, and for <code>COPY</code>/<code>ADD</code>, (3) a checksum
+      of the file contents being copied (not file timestamps). The moment one instruction's cache misses, every
+      subsequent instruction in the file also misses — cache validity is a chain, not independent per-line. This
+      is the single most important fact for Dockerfile ordering: put the least-frequently-changing instructions
+      first (OS packages, then dependency manifests + install, then app source last), because app source changes
+      on every commit and would otherwise invalidate everything below it.</p>
+      <div class="box gotcha"><h4>Gotcha</h4><p><code>COPY package.json package-lock.json ./</code> followed by
+      <code>RUN npm ci</code> <em>before</em> <code>COPY . .</code> is the classic trick — it means dependency
+      install is cache-hit on every build where only app code changed, which is most builds. Copying everything
+      first and installing after throws this away completely.</p></div>
+
+      <h3 id="multi-stage">Multi-stage builds and BuildKit internals</h3>
+      <p>A multi-stage Dockerfile has multiple <code>FROM</code> blocks; each is an independent build stage with
+      its own layer cache, and later stages can <code>COPY --from=&lt;stage&gt;</code> specific artifacts out of
+      earlier ones. The build toolchain (compilers, dev dependencies, source maps) lives only in the builder
+      stage and never reaches the final image — this is how a Go binary ships in a 10MB <code>scratch</code>
+      image despite a multi-GB build stage, and how a Node app ships without its devDependencies or TypeScript
+      compiler.</p>
+      <p>Modern Docker builds run on <strong>BuildKit</strong>, not the legacy builder. BuildKit builds a DAG of
+      the Dockerfile instead of executing linearly, so independent stages (e.g. building the frontend and the
+      backend in parallel stages) execute concurrently. It also supports cache mounts
+      (<code>RUN --mount=type=cache,target=/root/.npm</code>) which persist a cache directory across builds
+      without baking it into any layer — critical for package manager caches that would otherwise bloat every
+      layer that touches them. And it supports secret mounts
+      (<code>RUN --mount=type=secret,id=npmrc</code>) so a build-time credential never gets written into any
+      layer, unlike a naive <code>ARG</code> or <code>ENV</code> secret which persists in image history forever
+      and is extractable with <code>docker history</code>.</p>
+
+      <h3 id="union-fs-advanced">Union filesystem and storage drivers</h3>
+      <p>overlay2 merges layers by stacking directories: lowerdir (read-only image layers, applied bottom-up),
+      upperdir (the writable container layer), and a merged view the container actually sees. Deleting a file
+      that exists in a lower layer doesn't remove it from disk — overlay2 creates a "whiteout" marker in the
+      upper layer that hides it from the merged view. This means deleting a large file in a later Dockerfile
+      instruction does <em>not</em> shrink the image; the bytes are still in the lower layer and still shipped.
+      The fix is to never write the large file in the first place (multi-stage), or to delete it in the <em>same
+      instruction</em> that created it so it never becomes its own layer.</p>
+      <div class="box gotcha"><h4>Gotcha</h4><p><code>RUN wget big.tar.gz && tar xf big.tar.gz && rm big.tar.gz</code>
+      as one <code>RUN</code> never persists the tarball as a layer. Splitting that into three separate
+      <code>RUN</code> lines bakes the tarball into a layer permanently — the final <code>rm</code> only hides
+      it from the merged view, image size stays bloated.</p></div>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>End to end, <code>docker build</code>: the CLI sends the build context (everything not excluded by
+      <code>.dockerignore</code>) to the daemon/BuildKit; BuildKit parses the Dockerfile into a DAG of LLB
+      (low-level build) ops; for each op it computes a cache key from the op type + inputs + parent digest; it
+      walks the content-addressable local cache (and optionally a remote cache via <code>--cache-from</code>)
+      looking for a match; on a hit it reuses the existing layer blob with zero execution; on a miss it executes
+      the step in an ephemeral container, snapshots the resulting filesystem diff as a new layer, and computes
+      that layer's content hash for future cache lookups. The final image manifest is an ordered list of these
+      layer digests plus config (entrypoint, env, exposed ports) — pushing an image to a registry only needs to
+      push layers the registry doesn't already have, which is why registries dedupe shared base-image layers
+      across many images.</p>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+graph TD
+  A[Dockerfile instructions] --> B{Cache key match?}
+  B -- hit --> C[Reuse existing layer blob]
+  B -- miss --> D[Execute in ephemeral container]
+  D --> E[Snapshot FS diff as new layer]
+  E --> F[Hash layer -> content-addressed digest]
+  C --> G[Next instruction]
+  F --> G
+  G --> H[Final image manifest: ordered layer digests + config]
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-docker">## BAD: cache-hostile ordering — every code change reinstalls all deps
+FROM node:20-slim
+WORKDIR /app
+COPY . .
+RUN npm ci --omit=dev
+CMD ["node", "server.js"]
+
+## GOOD: multi-stage, cache-friendly, non-root, minimal final image
+# ---- deps stage: cached unless package*.json changes ----
+FROM node:20-slim AS deps
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci --omit=dev
+
+# ---- build stage: full toolchain, never shipped ----
+FROM node:20-slim AS build
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN --mount=type=cache,target=/root/.npm npm ci
+COPY . .
+RUN npm run build        # e.g. TypeScript -> dist/
+
+# ---- final stage: only runtime deps + compiled output ----
+FROM node:20-slim AS final
+WORKDIR /app
+ENV NODE_ENV=production
+RUN addgroup --system app && adduser --system --ingroup app app
+COPY --from=deps  /app/node_modules ./node_modules
+COPY --from=build /app/dist         ./dist
+USER app
+EXPOSE 3000
+HEALTHCHECK --interval=30s --timeout=3s CMD node dist/healthcheck.js || exit 1
+CMD ["node", "dist/server.js"]
+</code></pre>
+      <pre><code class="language-bash"># Inspect the layer history of an image and see which layers are large
+docker history --no-trunc myapp:latest
+
+# See the actual layer digests and base-image sharing
+docker inspect myapp:latest --format '{{json .RootFS.Layers}}'
+
+# Build with a remote cache so CI runners share cache across machines
+docker buildx build \
+  --cache-from type=registry,ref=myrepo/myapp:buildcache \
+  --cache-to   type=registry,ref=myrepo/myapp:buildcache,mode=max \
+  -t myrepo/myapp:latest --push .
+</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4><p>A CI pipeline building 40 microservice images per deploy was
+      taking 18 minutes total, mostly in <code>npm ci</code> steps that ran from scratch every time because the
+      self-hosted runners were ephemeral (fresh VM per job, no local Docker cache). The fix was two-layered:
+      switch to BuildKit with <code>--cache-from</code>/<code>--cache-to</code> against a registry-backed cache
+      (so cache survives across ephemeral runners), and restructure every Dockerfile to the deps/build/final
+      split above. Build time dropped to under 3 minutes aggregate because only services with actual dependency
+      changes paid the install cost; everything else hit registry cache. Image sizes also dropped ~70% on
+      average because devDependencies and build tooling stopped shipping to production.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Using <code>:latest</code> in production manifests. It's not
+      pinned, it's mutable, and a rollback that re-pulls <code>:latest</code> can silently pull a newer image
+      than the one you rolled back from. Always deploy by immutable digest or a specific semantic/commit-sha tag.</p></div>
+      <ul>
+        <li>Always add a <code>.dockerignore</code> — without it, <code>node_modules</code>, <code>.git</code>,
+        and build artifacts get sent as build context, slowing every build even on a full cache hit.</li>
+        <li>Run as a non-root <code>USER</code> — a container compromise with root inside often means root on
+        the host if there's a container-runtime escape; it's cheap defense-in-depth.</li>
+        <li>Prefer <code>COPY</code> over <code>ADD</code> — <code>ADD</code>'s auto-extract and URL-fetch
+        behavior are surprising and have been the source of supply-chain issues.</li>
+        <li>Pin base image digests (<code>FROM node:20-slim@sha256:...</code>) for anything security-sensitive —
+        tags can be repointed upstream.</li>
+        <li>Use <code>HEALTHCHECK</code> in the image, or rely on orchestrator-level probes (Kubernetes) —
+        don't assume "process is running" means "process is ready."</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>Alpine base images</td><td>Minimizing size matters most, app has few native deps</td>
+        <td>App needs glibc-specific native modules (musl incompatibilities cause subtle bugs)</td>
+        <td>Debian-slim base</td></tr>
+        <tr><td>Distroless final image</td><td>Max security surface reduction, static or simple runtime</td>
+        <td>You need a shell for debugging in the container</td><td>slim base + non-root user</td></tr>
+        <tr><td>Single-stage build</td><td>Tiny scripts/throwaway tooling images</td>
+        <td>Any production service image</td><td>Multi-stage build</td></tr>
+        <tr><td>BuildKit cache mounts</td><td>Package manager caches (npm/pip/go mod)</td>
+        <td>Content that must be reproducible byte-for-byte across builds</td>
+        <td>Lockfile-pinned deps without cache mount</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic"><h4>Basic</h4>
+        <details class="qa"><summary>What is a Docker image layer and why are they cached?</summary><div class="answer"><p>Each Dockerfile instruction produces an immutable, content-hashed filesystem diff (a layer). Layers are cached by content hash so unchanged instructions can reuse a previously built layer instead of re-executing, which is why Dockerfile instruction order matters.</p></div><div class="followup">Follow-up: what breaks the cache for a COPY instruction specifically?</div></details>
+        <details class="qa"><summary>What's the difference between CMD and ENTRYPOINT?</summary><div class="answer"><p>ENTRYPOINT defines the fixed executable that always runs; CMD supplies default arguments to it (or the full command if ENTRYPOINT isn't set). docker run args after the image name override CMD but are appended to ENTRYPOINT.</p></div><div class="followup">Follow-up: how would you make an image behave like a CLI tool with sane defaults?</div></details>
+        <details class="qa"><summary>Why use multi-stage builds?</summary><div class="answer"><p>To separate the build toolchain (compilers, dev deps) from the runtime image, so the final image only ships what's needed to run the app — smaller, fewer CVEs, no build secrets.</p></div><div class="followup">Follow-up: how do you copy an artifact from one stage to another?</div></details>
+        <details class="qa"><summary>What does .dockerignore do and why does it matter?</summary><div class="answer"><p>Excludes files from the build context sent to the daemon. Without it, large/irrelevant directories (node_modules, .git) slow every build and can leak files into COPY . . unintentionally.</p></div><div class="followup">Follow-up: what happens if .git is included and you COPY . . — what's the risk?</div></details>
+        <details class="qa"><summary>What is the difference between docker run and docker exec?</summary><div class="answer"><p>docker run creates and starts a new container from an image; docker exec runs an additional process inside an already-running container.</p></div><div class="followup">Follow-up: how would you debug a running production container without restarting it?</div></details>
+        <details class="qa"><summary>What's the purpose of EXPOSE in a Dockerfile?</summary><div class="answer"><p>It's documentation/metadata declaring which ports the container listens on; it does not actually publish the port. Publishing requires -p/--publish at run time or a Service in Kubernetes.</p></div><div class="followup">Follow-up: does removing EXPOSE break networking?</div></details>
+        <details class="qa"><summary>Why should containers run as non-root?</summary><div class="answer"><p>Defense in depth — if an attacker achieves code execution inside the container, root-in-container combined with certain runtime misconfigurations or escape vulnerabilities can mean root on the host.</p></div><div class="followup">Follow-up: how do you handle a process that needs to bind to port 80 as non-root?</div></details>
+      </div>
+      <div class="qa-level medium"><h4>Medium</h4>
+        <details class="qa"><summary>Walk through what happens, layer by layer, when docker build runs.</summary><div class="answer"><p>BuildKit parses the Dockerfile into a DAG, computes a cache key per instruction from instruction text + parent digest + (for COPY) file content checksums, checks local/remote cache, executes misses in ephemeral containers, snapshots the FS diff as a new content-addressed layer, and assembles the final manifest as an ordered list of layer digests plus image config.</p></div><div class="followup">Follow-up: why does a cache miss on one instruction invalidate everything after it?</div></details>
+        <details class="qa"><summary>Why doesn't deleting a file in a later RUN instruction shrink the image?</summary><div class="answer"><p>overlay2 is append-only across layers; a delete in a later layer is a whiteout marker hiding the file from the merged view, but the bytes remain in the lower layer and are still shipped/pulled. Only not creating the file in a persisted layer (or deleting it within the same RUN that created it) avoids shipping the bytes.</p></div><div class="followup">Follow-up: how would you verify this empirically on an existing image?</div></details>
+        <details class="qa"><summary>How do BuildKit cache mounts differ from a regular layer?</summary><div class="answer"><p>A cache mount (--mount=type=cache) persists a directory (e.g. ~/.npm) across builds in a side cache outside the image's layer chain, so repeated package-manager downloads are avoided without that cache data ever being committed into a shipped layer.</p></div><div class="followup">Follow-up: why would baking the same cache dir into a layer instead be a mistake?</div></details>
+        <details class="qa"><summary>Why is COPY package.json + npm ci before COPY . . a critical pattern?</summary><div class="answer"><p>It isolates the dependency-install layer so it's only cache-busted when package.json/lockfile changes, not on every source edit — since cache invalidation cascades downward, this ordering is what makes most CI builds cache-hit on the expensive step.</p></div><div class="followup">Follow-up: what happens if you use npm install instead of npm ci here?</div></details>
+        <details class="qa"><summary>How would you securely pass a build-time secret (e.g. private registry token) without it leaking into the image?</summary><div class="answer"><p>Use BuildKit's --mount=type=secret, which makes the secret available to a RUN step's filesystem only for that step's execution and never writes it into any layer or image history, unlike ARG/ENV which persist permanently and are extractable via docker history.</p></div><div class="followup">Follow-up: how would you detect if a secret was accidentally baked into an existing image?</div></details>
+        <details class="qa"><summary>Why can two services in the same registry share storage even with different image names?</summary><div class="answer"><p>Layers are content-addressed by hash; if two images share an identical base-image layer, the registry stores that blob once and both manifests reference the same digest — dedup happens naturally, not by name.</p></div><div class="followup">Follow-up: does this affect pull speed for a fleet of services sharing a base image?</div></details>
+        <details class="qa"><summary>What's the risk of ARG for secrets even though it's "build-time only"?</summary><div class="answer"><p>ARG values get baked into intermediate layer metadata/history and are visible via docker history or by inspecting layer diffs, even if the final stage doesn't reference them directly in a multi-stage build — they're not truly ephemeral.</p></div><div class="followup">Follow-up: how is this different in a single-stage vs multi-stage build?</div></details>
+      </div>
+      <div class="qa-level advanced"><h4>Advanced</h4>
+        <details class="qa"><summary>Design a Dockerfile + CI caching strategy for a monorepo with 40 services sharing a lockfile, running on ephemeral CI runners with no persistent local disk.</summary><div class="answer"><p>Use BuildKit with a registry-backed remote cache (--cache-from/--cache-to type=registry) so cache survives across ephemeral runners regardless of which machine builds next. Structure Dockerfiles with a shared deps stage keyed only on the lockfile hash so unrelated service changes don't bust it. Consider a shared base image layer for common runtime deps, built and cached once, referenced by all 40 service images via FROM, so registry-level layer dedup also saves pull bandwidth.</p></div><div class="followup">Follow-up: how does mode=max on --cache-to differ from the default and why does it matter here?</div></details>
+        <details class="qa"><summary>A security scan flags a CVE in a transitive OS package inside your final image, but your Dockerfile never installs it directly. How do you find and fix it?</summary><div class="answer"><p>Inspect docker history/manifest layers to find which base image or intermediate layer introduced it; it's likely inherited from the base image. Fix by bumping the base image tag/digest, or by adding a targeted apt upgrade/remove of that package in a layer, or switching to a distroless/minimal base that doesn't ship it. Also check whether it's a build-stage-only dependency that shouldn't even be in the final stage if multi-stage isn't being used correctly.</p></div><div class="followup">Follow-up: how would you prevent this regressing silently on every future build?</div></details>
+        <details class="qa"><summary>Explain copy-up cost in overlay2 and when it becomes a real production performance issue.</summary><div class="answer"><p>Writing to a file that exists in a lower read-only layer forces overlay2 to copy the entire file up into the writable layer first, then apply the write. For a small config file this is negligible; for a large file (e.g. a multi-GB dataset baked into the image that the app then modifies) the first write incurs a large one-time I/O cost, which under high container-churn (e.g. autoscaling spinning up many short-lived containers) can show up as CPU/I/O spikes cluster-wide.</p></div><div class="followup">Follow-up: what's the fix — mount it as a volume instead, or avoid baking it into the image?</div></details>
+        <details class="qa"><summary>Why can two builds of the "same" Dockerfile on different days produce different layer digests even with no code changes?</summary><div class="answer"><p>Non-determinism in the build: apt/npm resolving to newer transitive package versions if not fully lockfile-pinned, timestamps embedded by some package managers, or a FROM tag that moved to a new digest upstream. True reproducibility requires pinning the base image by digest, using lockfiles for all package managers, and avoiding any instruction that embeds wall-clock time.</p></div><div class="followup">Follow-up: why does this matter for supply-chain security audits?</div></details>
+        <details class="qa"><summary>How would you reduce a 1.2GB Node.js image to under 150MB, and what would you check first?</summary><div class="answer"><p>First check docker history for the largest layers — usually devDependencies, build tooling, or OS packages installed but never removed in the same layer. Fix: multi-stage build separating install/build from runtime, --omit=dev in the final npm ci, switch base to node:slim or distroless/nodejs, ensure no large files are deleted in a later layer instead of never persisted, and use a cache mount for npm's cache dir so it never lands in a layer at all.</p></div><div class="followup">Follow-up: how do you verify the size reduction didn't break anything at runtime?</div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment"><span class="level-tag">Beginner (30-60 min)</span><h4>Audit and fix a wasteful Dockerfile</h4>
+      <p>You're given a single-stage Node.js Dockerfile that COPYs the whole repo before installing deps and results in a 900MB image.</p>
+      <ul><li>Add a .dockerignore</li><li>Reorder COPY/RUN for cache efficiency</li><li>Convert to multi-stage with a slim final image</li></ul>
+      <p><strong>Acceptance criteria:</strong> Final image under 200MB; a source-only code change rebuilds in under 5 seconds from cache.</p>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>Check what npm ci actually needs (package.json + lockfile) before touching source. Use docker history to measure before/after.</p></div></details>
+      <p><strong>Bonus:</strong> Pin the base image by digest and justify the choice of base (alpine vs slim) for this app.</p>
+      </div>
+      <div class="assignment"><span class="level-tag">Intermediate (2-4 hrs)</span><h4>Set up registry-backed BuildKit caching in CI</h4>
+      <p>Configure a CI pipeline (GitHub Actions is fine locally simulated) that builds a multi-stage image using buildx with --cache-from/--cache-to against a registry, across two separate "runner" invocations (simulate ephemeral runners by clearing local Docker cache between builds).</p>
+      <ul><li>First build: no cache, record time</li><li>Second build with only source changed: should hit cache for deps layer</li><li>Second build with lockfile changed: should miss deps layer but still be faster than a cold build</li></ul>
+      <p><strong>Acceptance criteria:</strong> Measurable, documented time difference across the three scenarios with explanation of why each cache hit/miss occurred.</p>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>docker buildx create --use for a builder that supports cache export; mode=max on --cache-to to export all layers not just the final one.</p></div></details>
+      <p><strong>Bonus:</strong> Add a build-time secret mount for a fake npm registry token and prove via docker history that it never appears in any layer.</p>
+      </div>
+      <div class="assignment"><span class="level-tag">Advanced (1-2 days)</span><h4>Build a reproducible, minimal, multi-arch base image for your org</h4>
+      <p>Design a shared base image (used as FROM by multiple service Dockerfiles) that is pinned by digest, built for both amd64 and arm64 via buildx, scanned for CVEs as part of the build, and republished on a schedule.</p>
+      <ul><li>Multi-arch manifest list published to a registry</li><li>Automated CVE scan gate before publish</li><li>Documented upgrade/rollback process for consuming services</li></ul>
+      <p><strong>Acceptance criteria:</strong> left as an exercise — think through reproducibility, consumer impact of base image updates, and a rollback story if a new base image breaks a downstream service.</p>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>docker buildx build --platform linux/amd64,linux/arm64; consider how you'd pin consumers to a specific base digest vs a floating tag, and the operational tradeoff between the two.</p></div></details>
+      </div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet"><ul>
+        <li>Layers are content-hashed, immutable FS diffs; containers add one writable layer on top (CoW).</li>
+        <li>Cache invalidation cascades: one missed instruction busts every instruction after it.</li>
+        <li>Order Dockerfile instructions from least- to most-frequently-changing.</li>
+        <li>COPY package*.json + install before COPY . . is the single highest-leverage caching trick.</li>
+        <li>Multi-stage builds keep build toolchain and secrets out of the final image entirely.</li>
+        <li>Deleting a file in a later layer doesn't shrink the image — it only hides it (whiteout).</li>
+        <li>Use --mount=type=cache for package manager caches, --mount=type=secret for build secrets.</li>
+        <li>Pin base images by digest for anything security-sensitive; never deploy :latest.</li>
+        <li>Always run as non-root; always add a .dockerignore.</li>
+      </ul></div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://docs.docker.com/build/buildkit/">Docker BuildKit documentation</a></li>
+        <li><a href="https://docs.docker.com/build/cache/">Docker build cache documentation</a></li>
+        <li><a href="https://docs.docker.com/develop/develop-images/multistage-build/">Multi-stage builds</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="index.html"><span class="dir">← Previous</span>Topic Overview</a>
+        <a class="next" href="02-docker-compose.html"><span class="dir">Next →</span>Docker Compose</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · Cloud, AWS, Docker &amp; K8s</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-yaml.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-hcl.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-docker.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "06-cloud-aws-docker-k8s", chapterKey: "01-docker-deep-dive" });</script>
+</body>
+</html>

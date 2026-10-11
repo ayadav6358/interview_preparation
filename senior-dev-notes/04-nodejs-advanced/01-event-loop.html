@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Event Loop Internals & libuv — Node.js Advanced — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">Node.js Advanced</a><span class="sep">›</span>Event Loop Internals & libuv</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>Event Loop Internals &amp; libuv</h1>
+      <p class="meta-line"><span>⏱ 3 hrs</span><span>📍 Chapter 1 of 9</span></p>
+      <p><strong>One-line summary:</strong> Node's "single-threaded, non-blocking" story is a simplification over a
+      multi-phase C event loop (libuv) backed by a real OS thread pool — knowing the six phases and exactly when
+      microtasks drain is what separates "I've used async/await" from "I can debug event-loop starvation in prod."</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>Every "why is my API p99 latency spiking under load" and "why did this setInterval drift" and "why does
+      this Promise.then fire before this setTimeout(fn,0)" incident traces back to event loop mechanics. At senior
+      level you're expected to reason about <em>event loop lag</em> (the gap between when a callback should run and
+      when it actually runs) as a first-class production metric, not just know that Node is "async." Interviewers
+      use this topic to separate candidates who've memorized "Node is single-threaded" from those who understand
+      that I/O is handled by a real OS-level thread pool (libuv) and that a single slow synchronous call blocks
+      every request on the process, including ones that have nothing to do with it.</p>
+      <div class="box why"><h4>Why</h4><p>A CPU-bound JSON.parse on a 50MB payload, a synchronous bcrypt.hashSync,
+      or a poorly written regex (catastrophic backtracking) all block the single JS thread. Nothing else runs —
+      no other request, no timer, no I/O callback — until it returns. This is the single most common cause of
+      "random" latency spikes in Node services at scale, and senior engineers are expected to spot it from a flame
+      graph or an event-loop-lag metric within minutes.</p></div>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>Comfortable with async/await, Promises, and basic Node APIs (fs, http, setTimeout). Related:
+      <a href="02-streams-buffers.html">Streams &amp; Backpressure</a>, <a href="03-worker-threads.html">Worker Threads &amp; Clustering</a>.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="basics">The basics: call stack, heap, and the "non-blocking" illusion</h3>
+      <p>V8 runs JavaScript on a single thread with one call stack. "Non-blocking I/O" means: when you call
+      <code>fs.readFile</code>, Node doesn't block that thread waiting for disk — it hands the request to libuv,
+      which either issues an async syscall (on Linux: io_uring/epoll for network; for file I/O, historically no
+      universal async file API, so libuv uses its <strong>thread pool</strong>) and registers a callback. The JS
+      thread is immediately free to do other work. When the OS/thread pool reports completion, libuv queues your
+      callback to run on the next appropriate event loop phase.</p>
+
+      <h3 id="internals">The six libuv phases, in exact order</h3>
+      <p>Each iteration of the event loop ("a tick") runs these phases in this fixed order. After <em>every</em>
+      callback (and after every phase transition) Node drains the microtask queue (Promise callbacks,
+      <code>queueMicrotask</code>) and then <code>process.nextTick</code> queue (nextTick has even higher priority
+      than microtasks, draining first).</p>
+      <ol>
+        <li><strong>timers</strong> — runs callbacks scheduled by <code>setTimeout</code>/<code>setInterval</code> whose threshold has elapsed. Not exact: "after at least N ms," not "at exactly N ms" — the loop may be busy in another phase.</li>
+        <li><strong>pending callbacks</strong> (a.k.a. pending I/O callbacks) — some system errors (e.g. certain TCP errors) are deferred here to run just after timers.</li>
+        <li><strong>idle/prepare</strong> — internal libuv housekeeping, rarely user-visible.</li>
+        <li><strong>poll</strong> — the heart of the loop. Retrieves new I/O events (completed reads/writes, incoming connections) and executes their callbacks. If no timers are due, poll will <em>block here waiting for events</em> (this is how Node avoids busy-spinning the CPU when idle). If timers exist, poll computes how long it may block based on the next timer deadline.</li>
+        <li><strong>check</strong> — runs <code>setImmediate</code> callbacks. This phase exists specifically so you can schedule "run right after I/O, before the next timer phase" — this is why <code>setImmediate</code> inside an I/O callback always fires before a <code>setTimeout(fn,0)</code> scheduled at the same point, but the ordering between them at the top level (outside any I/O callback) is not guaranteed.</li>
+        <li><strong>close callbacks</strong> — <code>socket.on('close', ...)</code> and similar cleanup handlers.</li>
+      </ol>
+      <p>Between <strong>every single callback</strong> (not just between phases), Node checks and fully drains:
+      <code>process.nextTick</code> queue first, then the Promise microtask queue, until both are empty — including
+      any new nextTicks/microtasks scheduled by callbacks that ran during the drain. This is why a tight
+      recursive <code>process.nextTick</code> loop can starve the event loop entirely (I/O never gets a chance to
+      run) — a classic "senior" gotcha question.</p>
+
+      <h3 id="advanced">libuv's thread pool, and what actually goes through it</h3>
+      <p>libuv maintains a thread pool (default size 4, configurable via <code>UV_THREADPOOL_SIZE</code>, env var,
+      must be set before any thread-pool-using call) used for operations the OS has no good async primitive for, or
+      that Node chooses to offload: most <code>fs</code> module file operations, DNS lookups via
+      <code>dns.lookup</code> (but not <code>dns.resolve*</code>, which use c-ares async and don't touch the pool),
+      <code>crypto.pbkdf2</code>/<code>scrypt</code>/<code>randomBytes</code> (async variants), and zlib compression.
+      Network I/O (TCP/HTTP sockets) does <em>not</em> use the thread pool — it uses the OS's native async
+      mechanisms (epoll/kqueue/IOCP) directly via poll. This distinction matters: 4 slow <code>fs.readFile</code>
+      calls in flight will exhaust the thread pool and queue a 5th behind them, even though your HTTP server can
+      still accept new connections just fine — but if that 5th fs call is on the critical path of every request,
+      you still get a latency cliff.</p>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Increasing <code>UV_THREADPOOL_SIZE</code> is a legitimate, common
+      production tuning knob when you're bottlenecked on file I/O or bcrypt/crypto throughput — but it's capped
+      around 1024 and every thread costs memory; it does nothing for CPU-bound JS or network I/O bottlenecks.
+      Interviewers love asking "will raising the thread pool size fix slow API responses" — the answer is "only if
+      the slowness is from one of the specific thread-pool-backed APIs, which network-bound APIs usually aren't."</p></div>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>Microtasks vs macrotasks, precisely: a "macrotask" is any phase-scheduled callback (timer, I/O, setImmediate,
+      close). A "microtask" is a Promise reaction or <code>queueMicrotask</code> callback. The browser and Node agree
+      that microtasks drain fully before the next macrotask — but Node adds <code>process.nextTick</code> as a
+      <em>third, higher-priority</em> queue that drains before the Promise microtask queue, every single time, even
+      interleaved mid-drain. Practically: <code>nextTick(a); Promise.resolve().then(b); nextTick(c);</code> prints
+      a, c, b — both nextTicks fully drain (including any nextTick added by <em>a</em> itself) before the Promise
+      queue is touched at all.</p>
+      <p>Why does <code>setTimeout(fn, 0)</code> sometimes run before, sometimes after, an immediately-resolved
+      Promise chain relative to I/O? Because the engine clamps minimum timer delay (effectively ~1ms) and whether
+      the poll phase has anything pending changes how long the loop waits before reaching the timers phase again.
+      At the top of a fresh script (no pending I/O), <code>setImmediate</code> vs <code>setTimeout(fn,0)</code>
+      ordering is non-deterministic because it depends on process startup timing; inside an I/O callback it is
+      always deterministic (setImmediate wins, because check comes right after poll).</p>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+flowchart LR
+  A[timers] --> B[pending callbacks]
+  B --> C[idle/prepare]
+  C --> D[poll: I/O events]
+  D --> E[check: setImmediate]
+  E --> F[close callbacks]
+  F --> A
+  D -. "blocks here if no timers due & no I/O ready" .-> D
+      </div>
+      <div class="mermaid">
+sequenceDiagram
+  participant JS as JS callback
+  participant NT as nextTick queue
+  participant MT as microtask (Promise) queue
+  JS->>NT: schedule nextTick()
+  JS->>MT: schedule .then()
+  Note over NT,MT: callback returns
+  NT->>NT: drain fully (incl. new nextTicks)
+  MT->>MT: drain fully (incl. new .thens)
+  Note over NT,MT: only then does the loop move on
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-typescript">// 1) Ordering proof: nextTick > microtask > timers/setImmediate
+console.log('start');
+
+setTimeout(() => console.log('timeout'), 0);
+setImmediate(() => console.log('immediate'));
+
+Promise.resolve().then(() => console.log('promise'));
+process.nextTick(() => console.log('nextTick'));
+
+console.log('end');
+
+// Output (guaranteed): start, end, nextTick, promise, then timeout/immediate
+// (timeout vs immediate order is NOT guaranteed at top level)
+
+
+// 2) Inside an I/O callback, setImmediate ALWAYS wins over setTimeout(fn, 0)
+import { readFile } from 'node:fs';
+
+readFile(__filename, () => {
+  setTimeout(() => console.log('timeout inside I/O'), 0);
+  setImmediate(() => console.log('immediate inside I/O'));
+  // Deterministic: 'immediate inside I/O' always logs first here,
+  // because check phase runs immediately after poll, before the loop
+  // cycles back around to timers.
+});
+
+
+// 3) BAD: blocking the event loop with synchronous crypto
+import { createHash } from 'node:crypto';
+app.post('/hash', (req, res) => {
+  // Blocks the ENTIRE process for the duration — every other
+  // in-flight request stalls. On a busy API this is a p99 killer.
+  const hash = createHash('sha256').update(req.body.data).digest('hex');
+  res.json({ hash });
+});
+
+// GOOD: offload CPU-bound work to the thread pool or a worker thread
+import { pbkdf2 } from 'node:crypto';
+app.post('/hash', (req, res) => {
+  pbkdf2(req.body.data, 'salt', 100_000, 64, 'sha512', (err, derivedKey) => {
+    if (err) return res.status(500).end();
+    res.json({ hash: derivedKey.toString('hex') });
+  });
+  // Runs on libuv's thread pool — event loop stays free for other requests.
+});
+
+
+// 4) Measuring real event-loop lag in production (use this metric, not CPU%)
+import { monitorEventLoopDelay } from 'node:perf_hooks';
+
+const histogram = monitorEventLoopDelay({ resolution: 20 });
+histogram.enable();
+
+setInterval(() => {
+  // p50/p99 lag in milliseconds — alert if p99 > ~50-100ms sustained
+  console.log({ p50: histogram.mean / 1e6, p99: histogram.percentile(99) / 1e6 });
+  histogram.reset();
+}, 10_000).unref(); // unref() so this interval alone can't keep the process alive
+</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4><p>A payments API served ~3k req/s fine in staging, but in production
+      p99 latency periodically spiked to 2-4 seconds for a few seconds at a time, seemingly randomly, correlated
+      with no CPU or memory alert (CPU avg looked fine — 40%). The team added <code>monitorEventLoopDelay</code>
+      and found event-loop lag spiking to 1800ms exactly when the spikes happened. Root cause: a reporting endpoint,
+      hit a few times a minute by an internal dashboard, did a synchronous <code>JSON.parse</code> + in-memory
+      <code>.filter().map().sort()</code> over a multi-MB array pulled from Redis — fine at low traffic, catastrophic
+      under concurrent load because it blocked the <em>entire</em> process, including unrelated payment requests,
+      for the duration of that one slow request. Average CPU looked healthy because the blocking was bursty, not
+      sustained. Fix: moved the heavy transform to a worker thread (see Chapter 3) and added event-loop-lag as a
+      first-class dashboard metric and alert, not just CPU/memory.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Treating <code>async</code> functions as "non-blocking by magic."
+      An <code>async function</code> that does heavy synchronous work before its first <code>await</code> blocks
+      exactly as much as a non-async function — <code>async</code> only changes how the <em>return value</em> is
+      wrapped and scheduled, not whether the body runs synchronously up to the first await.</p></div>
+      <ul>
+        <li>Never use CPU-heavy synchronous APIs (`*Sync` variants, synchronous crypto/zlib, big JSON parses, naive regex) on the request path of a high-throughput service — offload to worker_threads or the thread pool.</li>
+        <li>Prefer `setImmediate` over `setTimeout(fn, 0)` when you mean "run after I/O, as soon as possible" — it communicates intent and has deterministic ordering relative to I/O callbacks.</li>
+        <li>Don't build unbounded `process.nextTick` recursion — it can starve I/O indefinitely since nextTick fully drains (including newly queued ones) before the loop can proceed.</li>
+        <li>Monitor event-loop lag (`monitorEventLoopDelay`) as a core production metric, not just CPU/memory — it's the direct signal for "is the loop currently responsive."</li>
+        <li>Remember `dns.lookup` uses the thread pool but `dns.resolve4`/`resolve6` don't — under thread-pool contention, swapping to `dns.resolve4` can unblock unrelated file I/O.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>Offload to libuv thread pool (async fs/crypto/dns.lookup/zlib)</td><td>Work is I/O-ish and already has an async API variant</td><td>Work is pure CPU (JSON transform, image processing) with no thread-pool API</td><td>worker_threads</td></tr>
+        <tr><td>worker_threads</td><td>CPU-bound JS work that must not block the loop; need shared memory (SharedArrayBuffer)</td><td>Simple I/O-bound work — overkill, has spin-up cost</td><td>Offload to native thread pool API, or child_process</td></tr>
+        <tr><td>Raise `UV_THREADPOOL_SIZE`</td><td>Bottlenecked specifically on fs/crypto/zlib/dns.lookup concurrency</td><td>Bottleneck is network I/O or raw CPU — this won't help</td><td>worker_threads, cluster, horizontal scale</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic"><h4>Basic</h4>
+      <details class="qa"><summary>Is Node.js single-threaded?</summary><div class="answer"><p>The JS execution thread is single-threaded, but Node itself is not — libuv runs a thread pool (default 4 threads) for certain blocking operations (file I/O, DNS lookup, some crypto, zlib), and the OS handles network I/O asynchronously via its own async primitives (epoll/kqueue/IOCP), not the JS thread. "Single-threaded" refers specifically to where your JS callbacks execute.</p></div><div class="followup">Follow-up: name three Node APIs that use the thread pool and one common API that does not.</div></details>
+      <details class="qa"><summary>What's the difference between setTimeout(fn, 0) and setImmediate(fn)?</summary><div class="answer"><p>setTimeout schedules into the timers phase (first phase); setImmediate schedules into the check phase (right after poll/I/O). Inside an I/O callback, setImmediate always fires first since check immediately follows poll. At the top level of a script, the order between them is not guaranteed.</p></div><div class="followup">Follow-up: why is the ordering guaranteed inside an I/O callback but not at the top level?</div></details>
+      <details class="qa"><summary>What is process.nextTick and how does it differ from a microtask?</summary><div class="answer"><p>process.nextTick is a Node-specific queue that runs before the Promise microtask queue, after the current operation completes, and is drained fully (including newly added nextTicks) before microtasks get a turn. It predates Promises in Node's history.</p></div><div class="followup">Follow-up: can you starve I/O with process.nextTick? How?</div></details>
+      <details class="qa"><summary>What does "blocking the event loop" mean and give an example.</summary><div class="answer"><p>It means running synchronous code that takes a long time on the single JS thread, preventing any other callback (timers, I/O, requests) from running until it finishes. Example: a synchronous bcrypt hash, a huge JSON.parse, or a catastrophic-backtracking regex on user input.</p></div><div class="followup">Follow-up: how would you detect this is happening in production right now?</div></details>
+      <details class="qa"><summary>What is the poll phase and why can it "block"?</summary><div class="answer"><p>Poll is where the loop retrieves and processes new I/O events. If there are no pending timers, the loop can sit blocked in poll waiting for I/O rather than busy-spinning, which is a deliberate efficiency design, not a bug.</p></div><div class="followup">Follow-up: how does the loop decide how long it's allowed to block in poll?</div></details>
+      <details class="qa"><summary>Does async/await make a function non-blocking?</summary><div class="answer"><p>No — async/await is sugar over Promises for control flow; code before the first await in an async function runs synchronously exactly like normal code and will block the loop if it's heavy.</p></div><div class="followup">Follow-up: show an async function that still blocks the event loop for 2 seconds.</div></details>
+      <details class="qa"><summary>What's UV_THREADPOOL_SIZE and what's its default?</summary><div class="answer"><p>An environment variable controlling libuv's internal thread pool size, default 4, used by certain fs, dns.lookup, crypto, and zlib operations. Must be set before those modules are first used (effectively before/at process start).</p></div><div class="followup">Follow-up: would raising it help a network-I/O-bound API? Why or why not?</div></details>
+      </div>
+      <div class="qa-level medium"><h4>Medium</h4>
+      <details class="qa"><summary>Walk through the exact output order of: nextTick, then(), setTimeout(0), setImmediate(), console.log, all scheduled at the top level.</summary><div class="answer"><p>Synchronous console.log statements run first (in source order), then process.nextTick queue drains fully, then the Promise microtask queue drains fully, then the loop proceeds to timers/check phases where setTimeout and setImmediate race — their relative order at the top level is not guaranteed because it depends on process startup/event-loop-entry timing.</p></div><div class="followup">Follow-up: how would the answer change if this code ran inside an fs.readFile callback instead of at the top level?</div></details>
+      <details class="qa"><summary>Why can dns.lookup cause unrelated file reads to slow down, but dns.resolve4 doesn't?</summary><div class="answer"><p>dns.lookup uses libuv's thread pool (it calls the OS's getaddrinfo via a worker thread), competing with fs operations for the same fixed-size pool. dns.resolve4/6 use the c-ares library's own async I/O directly, bypassing the thread pool entirely, so they don't contend with fs.* calls.</p></div><div class="followup">Follow-up: how would you prove this is the bottleneck in a live incident without guessing?</div></details>
+      <details class="qa"><summary>You observe CPU usage looks fine (40% avg) but p99 latency spikes periodically. What's your diagnostic approach?</summary><div class="answer"><p>Average CPU hides short, bursty blocking — a single slow synchronous call can max one core for 200-500ms, enough to spike p99, without moving the averaged CPU metric much. Add monitorEventLoopDelay as a metric, correlate spikes with specific endpoints/timestamps via APM traces, and look for synchronous CPU-heavy code (JSON parsing, crypto, regex, big array operations) on those endpoints' paths.</p></div><div class="followup">Follow-up: once found, what are your two main remediation options and their tradeoffs?</div></details>
+      <details class="qa"><summary>Explain why a recursive process.nextTick call can starve I/O but a recursive setImmediate call cannot.</summary><div class="answer"><p>process.nextTick's queue is drained completely — including nextTicks scheduled during that very drain — before the loop can proceed to any other phase, so infinite nextTick recursion never lets poll/timers run. setImmediate callbacks run once per check phase per loop iteration; each iteration still passes through poll, giving I/O a chance to run between setImmediate calls.</p></div><div class="followup">Follow-up: is the same true for recursive Promise.resolve().then() chains? Why or why not?</div></details>
+      <details class="qa"><summary>How would you offload a CPU-heavy JSON transform without an existing async API for it?</summary><div class="answer"><p>There's no thread-pool-backed API for arbitrary CPU work, so the correct tool is worker_threads — spin up a worker, pass the data (ideally via a transferable/SharedArrayBuffer to avoid copy cost for large payloads), do the transform there, and message the result back, keeping the main loop free.</p></div><div class="followup">Follow-up: when would you instead just accept the blocking and scale horizontally with cluster/K8s replicas?</div></details>
+      <details class="qa"><summary>Why does Promise microtask draining happen "between every callback," and what does that imply for a chain of 10,000 chained .then() calls?</summary><div class="answer"><p>Each .then() queues the next reaction as a microtask, and the engine drains the microtask queue to empty before returning control to the macrotask loop — so a long synchronous chain of resolved promises can run many microtask turns back-to-back without yielding to I/O or timers, effectively starving the loop temporarily even though no single callback looks "slow" in isolation.</p></div><div class="followup">Follow-up: how would you break up such a chain to let I/O interleave?</div></details>
+      </div>
+      <div class="qa-level advanced"><h4>Advanced</h4>
+      <details class="qa"><summary>Design an event-loop-lag-based auto-scaling or load-shedding strategy for a Node API fleet.</summary><div class="answer"><p>Expose monitorEventLoopDelay p99 as a /metrics endpoint consumed by your orchestrator/APM; set a threshold (e.g. sustained p99 > 100ms over a rolling window) that triggers either horizontal scale-out (K8s HPA on a custom metric) or local load-shedding (reject/503 new requests above a queue depth to protect latency for in-flight ones). Pair with per-route tracing to find the actual offending handler, not just a fleet-wide signal.</p></div><div class="followup">Follow-up: why is CPU utilization a poor signal to drive this specific scaling decision compared to event-loop lag?</div></details>
+      <details class="qa"><summary>A teammate proposes increasing UV_THREADPOOL_SIZE to 128 to fix API slowness under load. Walk through how you'd validate or reject this.</summary><div class="answer"><p>First confirm the slow calls are actually thread-pool-backed (fs, dns.lookup, crypto.pbkdf2/scrypt, zlib) via profiling/async_hooks, not network I/O or synchronous CPU work (which the thread pool can't help with at all). If confirmed, test incrementally — thread pool threads aren't free (each has a stack, context-switch cost), and over-provisioning can thrash the OS scheduler and add latency instead of reducing it. Benchmark before and after under realistic concurrency, not just the suspected bottleneck in isolation.</p></div><div class="followup">Follow-up: what's a scenario where raising this value makes p99 latency worse, not better?</div></details>
+      <details class="qa"><summary>Explain precisely why "Node handles 10k concurrent connections on one thread" is true for I/O-bound workloads but misleading for CPU-bound ones, with the libuv mechanism.</summary><div class="answer"><p>For I/O-bound work, the OS's async I/O primitives (epoll/kqueue/IOCP) let a single poll-phase call retrieve many ready events at once with near-zero per-connection CPU cost while waiting — so thousands of idle/slow-network connections cost almost nothing on the JS thread. For CPU-bound work, every request needs actual JS-thread execution time; there's no async primitive that makes computation itself concurrent on one thread, so CPU-bound concurrency is fundamentally bounded by single-core throughput, and queueing/latency degrades linearly (or worse) with load regardless of how good libuv's I/O model is.</p></div><div class="followup">Follow-up: how does this change your capacity planning math for a mixed I/O+CPU workload like image resizing + API serving on the same process?</div></details>
+      <details class="qa"><summary>How would you build a minimal async_hooks-based profiler to attribute event-loop lag to a specific async operation/route?</summary><div class="answer"><p>Use async_hooks to track init/before/after/destroy for async resources, tagging each with the triggering request's correlation ID (e.g., via AsyncLocalStorage), and combine with high-resolution timestamps at 'before'/'after' to measure how long each resource's callback actually ran; aggregate by route to find which handlers' callbacks consistently run long and correlate with lag spikes. In practice, most teams use battle-tested APM agents (which do exactly this) rather than hand-rolling it, but understanding the mechanism is what interviewers probe.</p></div><div class="followup">Follow-up: what's the performance overhead risk of enabling async_hooks broadly in production, and how do you mitigate it?</div></details>
+      <details class="qa"><summary>Why doesn't adding more worker_threads indefinitely improve throughput for a CPU-bound workload on an 8-core machine?</summary><div class="answer"><p>Each worker thread needs real CPU time to execute; beyond the number of physical/logical cores available, additional workers just add context-switching and scheduling overhead without additional parallel compute capacity, and each worker also carries its own V8 isolate memory overhead. The right worker count is typically close to os.cpus().length (minus headroom for the main thread and OS), not an arbitrarily large number.</p></div><div class="followup">Follow-up: how would cluster mode interact with worker_threads if you tried to use both for the same CPU-bound workload?</div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment"><span class="level-tag">Beginner (30-60 min)</span>
+      <h4>Predict and verify the ordering</h4>
+      <p>Write a script that schedules, in this order: a console.log, a setTimeout(fn, 0), a setImmediate, a
+      Promise.resolve().then(), and a process.nextTick. Predict the output order on paper first, then run it and
+      explain any part of the output that was non-deterministic.</p>
+      <ul><li>Must include all 5 scheduling mechanisms.</li><li>Must include a written prediction before running.</li></ul>
+      <p><strong>Acceptance criteria:</strong> Correctly identifies which parts of the ordering are guaranteed vs implementation-dependent, with the libuv phase reasoning for each.</p>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>Synchronous code first, then nextTick queue fully, then microtask queue fully, then the loop proceeds toward timers/check — their relative order at top level isn't guaranteed.</p></div></details>
+      <p><strong>Bonus:</strong> Wrap the same scheduling inside an fs.readFile callback and show how the setTimeout/setImmediate ordering becomes deterministic.</p>
+      </div>
+      <div class="assignment"><span class="level-tag">Intermediate (2-4 hrs)</span>
+      <h4>Build an event-loop-lag dashboard endpoint</h4>
+      <p>Build a small Express/Fastify server with a `/metrics` endpoint reporting live event-loop lag (p50/p99) using
+      `monitorEventLoopDelay`. Add a `/block?ms=500` endpoint that synchronously blocks for the given duration (e.g.
+      busy-wait loop), and a `/async-block?ms=500` endpoint that does the equivalent work via `setTimeout`/promises
+      without blocking. Hit `/block` with a load test tool while continuously polling `/metrics` and observe the lag spike.</p>
+      <ul><li>Metrics must be live (recent window), not cumulative since process start.</li><li>Must demonstrate the lag spike is visible and correlates with `/block` calls.</li></ul>
+      <p><strong>Acceptance criteria:</strong> Running autocannon against `/block` with concurrency 10 visibly spikes p99 lag on `/metrics`; the same load against `/async-block` does not.</p>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>Use `monitorEventLoopDelay({resolution: 20})`, call `.enable()` once at startup, and read `.percentile(99)` on each `/metrics` request, then `.reset()` periodically via a separate timer so the window stays recent.</p></div></details>
+      <p><strong>Bonus:</strong> Add a worker_thread-backed `/worker-block` endpoint and show it does NOT spike main-thread event-loop lag even though it does the same heavy work.</p>
+      </div>
+      <div class="assignment"><span class="level-tag">Advanced (1-2 days)</span>
+      <h4>Diagnose and fix a synthetic production incident</h4>
+      <p>Build an API with 5 endpoints, one of which has a hidden synchronous bottleneck (e.g., a naive regex with
+      catastrophic backtracking triggered by a specific crafted input, or a synchronous large-array sort on every
+      call). Under moderate concurrent load (autocannon, ~50 connections), the other 4 endpoints should show p99
+      latency spikes correlated with calls to the 5th. Your job: find it using only runtime signals (event-loop lag
+      metric, CPU profile / --prof, not reading the source first), then fix it, then prove the fix with before/after
+      load test numbers.</p>
+      <ul><li>Diagnosis must be evidence-based (profile/flame graph or lag correlation), not source inspection.</li><li>Must produce before/after p50/p99/throughput numbers.</li></ul>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>Use `node --prof` + `node --prof-process`, or `0x`/clinic.js for a flame graph, while running the mixed load test; look for a function consuming disproportionate "self time" on the main thread.</p></div></details>
+      <p><strong>Bonus:</strong> Compare three fixes (worker_thread offload, fixing the algorithm itself, horizontal scaling to absorb it) and write up the tradeoffs for each in this specific scenario.</p>
+      </div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet"><ul>
+        <li>Loop phases in order: timers → pending callbacks → idle/prepare → poll → check (setImmediate) → close callbacks.</li>
+        <li>Priority order between every callback: process.nextTick queue (full drain) → Promise microtask queue (full drain) → next phase.</li>
+        <li>Thread-pool-backed APIs: fs.* (most), dns.lookup, crypto.pbkdf2/scrypt/randomBytes (async), zlib. NOT network I/O, NOT dns.resolve*.</li>
+        <li>Network I/O uses OS-native async (epoll/kqueue/IOCP) directly, not the thread pool — scales to thousands of connections cheaply when I/O-bound.</li>
+        <li>async/await does not make code non-blocking by itself — only code after an actual await yields.</li>
+        <li>Inside an I/O callback, setImmediate always fires before setTimeout(fn, 0); at top level, order is unspecified.</li>
+        <li>monitorEventLoopDelay is the correct production metric for "is the loop responsive," not CPU% alone.</li>
+        <li>UV_THREADPOOL_SIZE (default 4) only helps thread-pool-backed bottlenecks — never CPU-bound JS or network I/O.</li>
+        <li>Recursive process.nextTick can starve I/O indefinitely; recursive setImmediate cannot (poll runs between iterations).</li>
+      </ul></div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://nodejs.org/en/learn/asynchronous-work/event-loop-timers-and-nexttick">Node.js official docs: The Event Loop, Timers, and process.nextTick()</a></li>
+        <li><a href="https://libuv.org/">libuv design overview</a></li>
+        <li><a href="https://nodejs.org/api/perf_hooks.html#perf_hooksmonitoreventloopdelayoptions">Node.js docs: perf_hooks.monitorEventLoopDelay</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="index.html"><span class="dir">← Previous</span>Topic Overview</a>
+        <a class="next" href="02-streams-buffers.html"><span class="dir">Next →</span>Streams, Buffers & Backpressure</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · Node.js Advanced</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-typescript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "04-nodejs-advanced", chapterKey: "01-event-loop" });</script>
+</body>
+</html>

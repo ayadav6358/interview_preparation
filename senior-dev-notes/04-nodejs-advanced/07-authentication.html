@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Authentication (JWT/OAuth2/SSO) — Node.js Advanced — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">Node.js Advanced</a><span class="sep">›</span>Authentication</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>Authentication: Sessions, JWT, OAuth2, Refresh Tokens, SSO</h1>
+      <p class="meta-line"><span>⏱ 3 hrs</span><span>📍 Chapter 7 of 9</span></p>
+      <p><strong>One-line summary:</strong> Most "JWT vs sessions" debates miss the actual senior-level question —
+      where does the token live, who can revoke it, and what happens the instant it's stolen — because getting
+      token storage and refresh-rotation wrong is how real companies ship session-hijacking vulnerabilities that
+      look fine in every demo and code review.</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>Authentication is one of the few areas where a subtly wrong implementation doesn't fail loudly in staging
+      — it fails silently in production as a security incident months later. Senior engineers are expected to
+      reason precisely about token storage tradeoffs (localStorage vs httpOnly cookies), revocation strategies for
+      stateless JWTs, refresh token rotation and theft detection, and how OAuth2/OIDC/SAML actually establish trust
+      between parties — not just wire up a library and move on. Interviewers probe this heavily because it's a
+      reliable signal of whether you've actually operated an auth system in production versus only read a tutorial.</p>
+      <div class="box why"><h4>Why</h4><p>A stateless JWT's core tradeoff is that revocation is hard by design — once
+      issued, it's valid until expiry unless you build out additional infrastructure (a denylist, short expiry +
+      refresh rotation) specifically to compensate. Teams that don't understand this ship JWTs with long expiries
+      and no revocation path, then discover during an incident that they have no way to immediately invalidate a
+      compromised token short of rotating the signing secret and logging out every user on earth.</p></div>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>Comfortable with HTTP, cookies, and basic cryptographic signing concepts. Related:
+      <a href="06-production-apis.html">Production APIs</a>, <a href="05-error-handling.html">Error Handling Strategy</a>,
+      <a href="09-scaling-node.html">Scaling Node in Production</a>.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="basics">Sessions vs JWTs: where state lives</h3>
+      <p><strong>Session-based auth</strong> keeps authoritative state server-side (in Redis or a DB), with the
+      client holding only an opaque session ID, usually in an httpOnly cookie. Revocation is trivial — delete the
+      session record — but it requires a shared session store across every server instance, adding infrastructure
+      and a lookup on every request. <strong>JWTs</strong> are self-contained and stateless: the server verifies a
+      signature and trusts the embedded claims without a DB lookup, which scales horizontally with zero shared
+      state — but this is exactly why revocation is hard: there's no record to delete, the token is valid until it
+      expires, full stop, unless you've built a denylist (which reintroduces the shared-state lookup you were
+      trying to avoid) or rely on short-lived tokens plus refresh rotation.</p>
+
+      <h3 id="internals">Token storage, CSRF, and XSS: where the real vulnerabilities live</h3>
+      <p>Storing a JWT in <code>localStorage</code> is readable by any JavaScript running on the page — meaning a
+      single XSS vulnerability anywhere in your app (a third-party script, an unsanitized render) lets an attacker
+      exfiltrate the token directly. Storing it in an <strong>httpOnly cookie</strong> prevents JS access entirely
+      (mitigating XSS token theft) but reintroduces CSRF risk, because the browser attaches cookies automatically
+      to cross-site requests — mitigated with <code>SameSite=Strict/Lax</code> plus a CSRF token for state-changing
+      requests. There is no storage location immune to both; the senior-level answer is defense in depth: httpOnly
+      + SameSite cookies as the primary mitigation, short token expiry to shrink the exploitation window, and a
+      strict Content-Security-Policy to reduce XSS surface in the first place.</p>
+
+      <h3 id="advanced">Refresh token rotation, OAuth2 flows, and SSO (OIDC/SAML)</h3>
+      <p><strong>Refresh token rotation</strong>: issue a short-lived access token (minutes) plus a longer-lived
+      refresh token (days). Every time the refresh token is used, issue a brand-new refresh token and invalidate
+      the old one — if a stolen, already-used refresh token is ever replayed, that's a detectable theft signal
+      (the legitimate client's next refresh attempt will fail because its token was already rotated out), letting
+      you invalidate the entire token family immediately. <strong>OAuth2</strong> is an authorization framework
+      (delegated access — "let app X act on my behalf with provider Y") with distinct flows: authorization code
+      (server-side apps, the only flow that should handle secrets), authorization code + PKCE (SPAs/mobile — no
+      client secret, instead a cryptographic code-verifier binds the token exchange to the originating request),
+      and client credentials (service-to-service, no user). <strong>OIDC</strong> (OpenID Connect) layers identity
+      (an ID token, a signed JWT asserting who the user is) on top of OAuth2's authorization mechanics —
+      conflating the two is a common interview mistake: OAuth2 alone proves nothing about identity, only that
+      access was delegated. <strong>SAML</strong> predates OIDC and is still common in enterprise SSO — XML-based
+      assertions exchanged via browser redirects between an identity provider (IdP) and service provider (SP); OIDC
+      is the modern, JSON/REST-friendly equivalent used by most consumer-facing SSO today.</p>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>A production-grade token flow: client authenticates (password, OAuth2 code exchange, or SAML assertion) →
+      server issues a short-lived signed access token (JWT, 5-15 min expiry) and a long-lived opaque refresh token
+      stored server-side (hashed, like a password) tied to a device/session record → access token is sent as a
+      Bearer header or httpOnly cookie on each request and verified via signature only (no DB hit, the scaling
+      win) → on expiry, the client calls a refresh endpoint with the refresh token → server validates it against
+      the stored hash, issues a new access + refresh token pair, and invalidates the old refresh token record →
+      if the old (already-rotated) refresh token is presented again, that's theft evidence, and the entire token
+      family for that device is revoked immediately, forcing re-authentication.</p>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+sequenceDiagram
+  participant C as Client
+  participant A as Auth Server
+  participant R as Resource API
+  C->>A: Login (credentials / OAuth2 code)
+  A->>C: Access token (JWT, short-lived) + Refresh token (opaque, long-lived)
+  C->>R: Request with access token
+  R->>R: Verify signature locally, no DB call
+  R->>C: Response
+  Note over C,A: Access token expires
+  C->>A: POST /refresh with refresh token
+  A->>A: Validate + rotate: invalidate old, issue new pair
+  A->>C: New access + refresh token
+  Note over A: Old refresh token reused later => theft detected, revoke family
+      </div>
+      <div class="mermaid">
+sequenceDiagram
+  participant U as User
+  participant SP as App (Service Provider)
+  participant IdP as Identity Provider
+  U->>SP: Access protected resource
+  SP->>U: Redirect to IdP (OIDC authorization request)
+  U->>IdP: Authenticate
+  IdP->>U: Redirect back with authorization code
+  U->>SP: Authorization code
+  SP->>IdP: Exchange code for tokens (server-to-server)
+  IdP->>SP: ID token (identity) + access token (authorization)
+  SP->>U: Session established
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-typescript">// --- Issuing access + refresh tokens ---
+import jwt from 'jsonwebtoken';
+import { randomBytes, createHash } from 'crypto';
+
+function issueTokenPair(userId: string) {
+  const accessToken = jwt.sign({ sub: userId }, process.env.JWT_SECRET!, { expiresIn: '10m' });
+  const refreshToken = randomBytes(40).toString('hex'); // opaque, not a JWT — nothing to decode
+  const refreshTokenHash = createHash('sha256').update(refreshToken).digest('hex');
+  // Store refreshTokenHash (never the raw token) + userId + deviceId + familyId in DB/Redis
+  return { accessToken, refreshToken };
+}
+
+// --- Refresh endpoint with rotation + theft detection ---
+async function handleRefresh(req: Request, res: Response) {
+  const presented = createHash('sha256').update(req.body.refreshToken).digest('hex');
+  const record = await refreshTokenStore.findByHash(presented);
+
+  if (!record) {
+    // Hash not found at all — could be a replayed, already-rotated token. Check the family.
+    const reusedFamily = await refreshTokenStore.findRevokedByToken(presented);
+    if (reusedFamily) {
+      await refreshTokenStore.revokeFamily(reusedFamily.familyId); // theft detected: kill the whole chain
+      return res.status(401).json({ error: 'Token reuse detected, re-authenticate' });
+    }
+    return res.status(401).json({ error: 'Invalid refresh token' });
+  }
+
+  await refreshTokenStore.revoke(record.id); // old token is now dead, one-time use enforced
+  const { accessToken, refreshToken } = issueTokenPair(record.userId);
+  await refreshTokenStore.save({ ...refreshToken, familyId: record.familyId }); // same family, new generation
+  res.json({ accessToken, refreshToken });
+}
+
+// --- BAD: storing JWT in localStorage and sending via Authorization header only ---
+// localStorage.setItem('token', jwt); // readable by ANY script on the page — one XSS = full token theft
+
+// --- GOOD: httpOnly, SameSite cookie + CSRF token for state-changing requests ---
+res.cookie('access_token', accessToken, {
+  httpOnly: true,      // not accessible to JS, mitigates XSS token theft
+  secure: true,        // HTTPS only
+  sameSite: 'strict',  // mitigates CSRF for most cases
+  maxAge: 10 * 60 * 1000,
+});
+</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4><p>A SaaS product issued JWTs with a 7-day expiry stored in
+      localStorage, with no refresh mechanism, "for simplicity." A customer's laptop was compromised via an
+      unrelated browser extension that scraped localStorage across sites; the stolen token remained valid for up
+      to 7 days with absolutely no way to revoke it short of rotating the global signing secret (logging out every
+      user on the platform). The fix: migrate to short-lived (10 min) access tokens in httpOnly cookies, backed by
+      rotated opaque refresh tokens stored server-side — now a stolen access token is useless within minutes, and
+      a stolen refresh token is both harder to exfiltrate (httpOnly) and immediately revocable per-device the
+      moment reuse is detected, without affecting any other user.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Treating "OAuth2" and "authentication" as synonyms — OAuth2 is an
+      authorization delegation protocol; it says nothing about user identity on its own. Using raw OAuth2 access
+      tokens to "log a user in" without OIDC's ID token (or your own session layer) is a well-known anti-pattern
+      that can let a token meant for one scope be misused to impersonate identity.</p></div>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Implementing refresh "rotation" by just issuing a new token without
+      actually invalidating the old one — this provides zero theft detection, since a stolen-and-reused old token
+      would still work. Rotation only has security value if the old token is hard-invalidated and reuse triggers
+      an alarm.</p></div>
+      <ul>
+        <li>Never put a long-lived JWT in localStorage without a very deliberate, documented threat-model justification.</li>
+        <li>Always hash refresh tokens at rest, exactly like passwords — a leaked DB shouldn't hand out usable tokens.</li>
+        <li>Use PKCE for any OAuth2 flow involving a public client (SPA, mobile) — never embed a client secret in frontend code.</li>
+        <li>Keep access token expiry short (minutes) specifically because you can't easily revoke it — the expiry window IS your revocation mechanism.</li>
+        <li>Don't conflate SAML and OIDC in enterprise SSO discussions — know which your org's IdP actually speaks before designing integration.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>Server-side sessions</td><td>Need instant revocation, single/few app servers, simpler security model</td><td>Need stateless horizontal scaling across many independent services</td><td>Short-lived JWT + refresh rotation</td></tr>
+        <tr><td>Stateless JWT, long expiry, no refresh</td><td>Never recommended for anything beyond a trivial prototype</td><td>Any production system handling real user data</td><td>Short-lived JWT + rotated opaque refresh tokens</td></tr>
+        <tr><td>OAuth2 + OIDC via managed IdP (Auth0, Okta, Cognito)</td><td>Need enterprise SSO/social login without building auth infra from scratch</td><td>Extremely simple internal tools where a managed IdP is overkill</td><td>Self-hosted session/JWT auth</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic"><h4>Basic</h4>
+      <details class="qa"><summary>What's the fundamental tradeoff between session-based auth and JWT-based auth?</summary><div class="answer"><p>Sessions keep state server-side (trivial revocation, needs a shared store, a DB lookup per request). JWTs are stateless and self-verifying (no DB lookup, scales horizontally) but hard to revoke before expiry since there's no server-side record to delete.</p></div><div class="followup">Follow-up: how do refresh tokens help bridge this gap?</div></details>
+      <details class="qa"><summary>Why is storing a JWT in localStorage considered risky?</summary><div class="answer"><p>Any JavaScript running on the page, including from an XSS vulnerability or a compromised third-party script, can read localStorage and exfiltrate the token directly.</p></div><div class="followup">Follow-up: what storage alternative mitigates this, and what new risk does it introduce?</div></details>
+      <details class="qa"><summary>What is OAuth2, in one sentence, and what is it NOT?</summary><div class="answer"><p>OAuth2 is a delegated authorization framework letting one application act on a user's behalf with another provider's resources; it is not an authentication protocol by itself and says nothing about user identity.</p></div><div class="followup">Follow-up: what protocol adds identity on top of OAuth2?</div></details>
+      <details class="qa"><summary>What is PKCE and why does it matter for SPAs/mobile apps?</summary><div class="answer"><p>PKCE (Proof Key for Code Exchange) adds a cryptographic code verifier/challenge pair to the OAuth2 authorization code flow, binding the token exchange to the client that initiated it, since public clients like SPAs can't safely hold a client secret.</p></div><div class="followup">Follow-up: what attack does PKCE specifically prevent?</div></details>
+      <details class="qa"><summary>What's the difference between an access token and a refresh token?</summary><div class="answer"><p>An access token is short-lived and used directly to authorize API requests. A refresh token is longer-lived, used only to obtain a new access (and refresh) token pair, and should be stored more securely since its compromise has a longer blast radius.</p></div><div class="followup">Follow-up: why should a refresh token typically be opaque rather than a JWT?</div></details>
+      <details class="qa"><summary>What does SameSite=Strict on a cookie protect against?</summary><div class="answer"><p>It prevents the browser from sending that cookie on cross-site requests, mitigating CSRF attacks where a malicious site tries to trigger authenticated requests against your app using the victim's existing session cookie.</p></div><div class="followup">Follow-up: when would SameSite=Lax be more appropriate than Strict?</div></details>
+      </div>
+      <div class="qa-level medium"><h4>Medium</h4>
+      <details class="qa"><summary>Design a refresh token rotation scheme that can detect token theft. What's the key mechanism?</summary><div class="answer"><p>Each refresh token is single-use: using it issues a new access+refresh pair and immediately invalidates the old refresh token record. If the old (already-invalidated) token is ever presented again, that's strong evidence of theft — a legitimate client would never reuse a token it already rotated out — so the entire token family tied to that device/session is revoked, forcing re-authentication.</p></div><div class="followup">Follow-up: what's a race condition risk in this scheme if a client retries a refresh request due to a network timeout?</div></details>
+      <details class="qa"><summary>Why is it a mistake to use a raw OAuth2 access token from a third-party provider as your own app's session credential?</summary><div class="answer"><p>An OAuth2 access token's scope and audience are defined by the resource provider (e.g., Google's API), not your app — it proves delegated access to that provider's resources, not verified identity for your app, and its claims/expiry are controlled by a party you don't fully control. The correct pattern is to use the OIDC ID token (or exchange the OAuth2 flow's result for your own app-issued session/JWT) as your actual authentication credential.</p></div><div class="followup">Follow-up: what could go wrong if the third-party token's scope changes unexpectedly?</div></details>
+      <details class="qa"><summary>How would you design token revocation for a stateless JWT system without reintroducing a full session store?</summary><div class="answer"><p>Keep access tokens very short-lived (minutes) so natural expiry is the primary revocation mechanism, and maintain a small, fast denylist (e.g., Redis set with TTL matching max token lifetime) only for the rare "revoke immediately" cases (logout-everywhere, detected compromise) — this is a much smaller, cheaper lookup than a full session store since it only needs entries for actively-revoked tokens, not every active session.</p></div><div class="followup">Follow-up: what's the tradeoff of checking this denylist on every request versus only on sensitive operations?</div></details>
+      <details class="qa"><summary>Explain the difference between SAML and OIDC for enterprise SSO, and when you'd still encounter SAML in 2026.</summary><div class="answer"><p>SAML uses XML assertions exchanged via browser redirects/POST bindings between IdP and SP, predating modern REST/JSON conventions; OIDC is JSON/REST-based, built on OAuth2, and is the default for new integrations. SAML remains common in large, older enterprises whose identity infrastructure (e.g., legacy Active Directory Federation Services deployments) was built around it and where migrating off it is a significant undertaking — so a B2B SaaS selling into enterprise customers often needs to support both.</p></div><div class="followup">Follow-up: what library/approach would you use in Node to support both SAML and OIDC SSO for different enterprise customers?</div></details>
+      <details class="qa"><summary>A team stores JWTs in httpOnly cookies and believes this fully solves their XSS risk. What's missing from this reasoning?</summary><div class="answer"><p>httpOnly cookies prevent direct JS read access to the token, but they don't prevent an XSS payload from making authenticated requests on the victim's behalf using the browser's automatic cookie attachment (the attacker doesn't need to read the token, just trigger requests while the victim is logged in) — this is where CSRF protections (SameSite, CSRF tokens) and a strict CSP to actually prevent the XSS injection in the first place both remain necessary.</p></div><div class="followup">Follow-up: why doesn't SameSite alone fully close this gap for all request types?</div></details>
+      </div>
+      <div class="qa-level advanced"><h4>Advanced</h4>
+      <details class="qa"><summary>Design a complete multi-service authentication architecture: a public API gateway, several internal microservices, and a requirement for SSO via an enterprise customer's SAML IdP. How do tokens flow between layers?</summary><div class="answer"><p>The gateway terminates the SAML SSO flow, exchanging the SAML assertion for your own app-issued short-lived JWT (don't propagate SAML internally — it's heavyweight and not what your services should need to parse). That JWT, signed with a key internal services can verify (via a shared secret or better, asymmetric keys + a JWKS endpoint so services never hold the signing secret), is passed to internal services as a standard Bearer token on service-to-service calls, carrying claims like userId, tenantId, and scopes. Internal services verify signature + claims locally (no central auth-server round trip per call, preserving the stateless scaling benefit), while the gateway alone handles refresh token rotation and session lifecycle with the end user.</p></div><div class="followup">Follow-up: how would you handle revoking access mid-session for a specific internal service only, without affecting others?</div></details>
+      <details class="qa"><summary>Critique: "Since JWTs are signed, they can't be tampered with, so it's safe to trust any claim inside one without further validation."</summary><div class="answer"><p>Signature verification only proves the token wasn't altered after signing and was issued by a holder of the signing key — it says nothing about whether the claims are still semantically valid (a user's role claim embedded at issuance may be stale if their permissions were revoked server-side minutes later, but the JWT still carries the old role until it expires). This is the core reason long-lived JWTs are dangerous for anything involving mutable authorization state: the token's claims are a snapshot, not a live query, and treating them as always-current is a common and serious bug.</p></div><div class="followup">Follow-up: how would you handle a permission downgrade that needs to take effect immediately, given this constraint?</div></details>
+      <details class="qa"><summary>Walk through exactly how refresh token theft detection can produce a false positive, and how you'd design around it.</summary><div class="answer"><p>If a client's refresh request times out on the network but actually succeeded server-side (rotation completed), the client may retry with the now-invalidated old token, looking identical to theft. Designing around it: use a short grace window where the immediately-previous token in a family is still accepted (idempotent retry) but flagged, rather than instantly revoking the whole family on first reuse — combined with device/IP fingerprinting heuristics to distinguish "same client retrying" from "different client replaying a stolen token," accepting that this is a probabilistic judgment, not a certainty.</p></div><div class="followup">Follow-up: what telemetry would you log to tune this heuristic over time?</div></details>
+      <details class="qa"><summary>How would you design an authentication system for a multi-tenant B2B SaaS where different enterprise customers require different IdPs (some SAML, some OIDC, some neither)?</summary><div class="answer"><p>Abstract identity resolution behind a tenant-configurable "auth strategy" layer: on login, resolve the tenant (by subdomain or email domain), look up its configured IdP type and metadata (SAML metadata XML / OIDC discovery document), run the appropriate protocol-specific flow, and normalize the result into your own internal identity claims (userId, tenantId, roles) before issuing your own app token — downstream code never needs to know whether the original login was SAML, OIDC, or password-based. This requires careful tenant isolation so one tenant's IdP misconfiguration can't affect another's users, and a fallback path for tenants without any SSO requirement.</p></div><div class="followup">Follow-up: how would you test this system's tenant isolation without needing real accounts with every enterprise IdP vendor?</div></details>
+      <details class="qa"><summary>Is it ever architecturally correct to skip refresh token rotation and just use long-lived refresh tokens with revocation-on-logout only? Justify.</summary><div class="answer"><p>Yes, in specific contexts: a low-risk internal tool with a small trusted user base, strong network-level protections (VPN-only access), and where the operational cost of rotation infrastructure outweighs its marginal security benefit given the actual threat model. The key senior-level point is that rotation isn't free — it adds complexity (race conditions on concurrent refresh, token family tracking) — and security decisions should be threat-model-driven, not reflexively maximal; the same choice would be clearly wrong for a public-facing consumer app handling financial data.</p></div><div class="followup">Follow-up: what compensating controls would you want in place before accepting this tradeoff?</div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment"><span class="level-tag">Beginner (30-60 min)</span>
+      <h4>Implement short-lived JWT access tokens in httpOnly cookies</h4>
+      <p>Build a login endpoint issuing a 10-minute JWT access token set as an httpOnly, SameSite=Strict cookie,
+      plus a protected endpoint that verifies it. Add a CSRF token mechanism for a state-changing POST endpoint.</p>
+      <ul><li>Must demonstrate the protected endpoint rejecting a request after the token's 10-minute expiry.</li><li>Must demonstrate the POST endpoint rejecting a request missing the CSRF token.</li></ul>
+      <p><strong>Acceptance criteria:</strong> No token is ever readable via `document.cookie` in a browser console (httpOnly verified), and the CSRF protection blocks a simulated cross-site POST.</p>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>Use the double-submit cookie pattern for CSRF: a non-httpOnly CSRF cookie whose value must also be sent as a custom header, compared server-side.</p></div></details>
+      <p><strong>Bonus:</strong> Add a CSP header and explain in a comment which specific XSS vector it mitigates.</p>
+      </div>
+      <div class="assignment"><span class="level-tag">Intermediate (2-4 hrs)</span>
+      <h4>Build refresh token rotation with theft detection</h4>
+      <p>Implement the full rotation flow: short-lived access token, opaque hashed refresh token stored server-side,
+      single-use rotation on each refresh, and family revocation when an already-rotated token is replayed.</p>
+      <ul><li>Must demonstrate a normal refresh flow issuing a new pair and invalidating the old refresh token.</li><li>Must demonstrate replaying the old (already-used) refresh token triggering full family revocation.</li></ul>
+      <p><strong>Acceptance criteria:</strong> After simulated theft detection, a subsequent request with any token from that family (even a previously valid one) is rejected.</p>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>Store a `familyId` alongside each refresh token record so you can revoke every generation in one query.</p></div></details>
+      <p><strong>Bonus:</strong> Add the grace-window heuristic discussed in the advanced interview questions to reduce false-positive theft detection on network retries.</p>
+      </div>
+      <div class="assignment"><span class="level-tag">Advanced (1-2 days)</span>
+      <h4>Implement OIDC login via a real identity provider</h4>
+      <p>Integrate "Sign in with Google" (or another real OIDC provider) using the authorization code + PKCE flow,
+      exchange the code for an ID token server-side, verify its signature against the provider's JWKS endpoint, and
+      issue your own app session (short-lived JWT + rotated refresh token) from the verified identity claims.</p>
+      <ul><li>Must use PKCE even though your example is a server-rendered app, to practice the full public-client-safe flow.</li><li>Must verify the ID token's signature and claims (iss, aud, exp) rather than trusting it blindly.</li></ul>
+      <p><strong>Acceptance criteria:</strong> A tampered/expired ID token is correctly rejected during verification before any session is created.</p>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>Most OIDC providers publish a `.well-known/openid-configuration` discovery document pointing to their JWKS endpoint — fetch and cache it rather than hardcoding keys.</p></div></details>
+      <p><strong>Bonus:</strong> Write a short design note on how you'd extend this to support a second enterprise customer's SAML IdP without duplicating your session-issuance logic.</p>
+      </div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet"><ul>
+        <li>Sessions: server-side state, trivial revocation, needs shared store. JWT: stateless, scales, hard to revoke before expiry.</li>
+        <li>localStorage JWT = readable by any XSS; httpOnly cookie = safe from JS read but needs CSRF mitigation (SameSite + CSRF token).</li>
+        <li>Short access-token expiry IS your revocation mechanism for stateless JWTs — keep it minutes, not days.</li>
+        <li>Refresh token rotation: single-use, hashed at rest, reuse of an already-rotated token = theft signal, revoke the whole family.</li>
+        <li>OAuth2 = delegated authorization, not identity. OIDC = OAuth2 + an ID token for identity. Don't conflate them.</li>
+        <li>Always use PKCE for public clients (SPA/mobile) in OAuth2 authorization code flow — no client secret in frontend code, ever.</li>
+        <li>SAML = XML/redirect-based enterprise SSO (legacy but still common); OIDC = JSON/REST-based modern equivalent.</li>
+        <li>A JWT's claims are a snapshot at issuance, not a live query — mutable authorization state (role/permission changes) can be stale until expiry.</li>
+        <li>Hash refresh tokens at rest exactly like passwords — a DB leak shouldn't hand out directly usable tokens.</li>
+      </ul></div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://datatracker.ietf.org/doc/html/rfc6749">RFC 6749: The OAuth 2.0 Authorization Framework</a></li>
+        <li><a href="https://openid.net/specs/openid-connect-core-1_0.html">OpenID Connect Core 1.0 specification</a></li>
+        <li><a href="https://datatracker.ietf.org/doc/html/rfc7636">RFC 7636: Proof Key for Code Exchange (PKCE)</a></li>
+        <li><a href="https://owasp.org/www-community/attacks/csrf">OWASP: Cross-Site Request Forgery (CSRF)</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="06-production-apis.html"><span class="dir">← Previous</span>Production APIs (Express/Fastify/Nest)</a>
+        <a class="next" href="08-background-jobs.html"><span class="dir">Next →</span>Background Jobs & Scheduling</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · Node.js Advanced</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-typescript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "04-nodejs-advanced", chapterKey: "07-authentication" });</script>
+</body>
+</html>

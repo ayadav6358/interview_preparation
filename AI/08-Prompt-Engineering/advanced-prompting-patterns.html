@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Advanced Prompting Patterns</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <input class="searchbox" placeholder="Search topics..." />
+    <a href="../index.html">← Home</a>
+    <h3>08-Prompt-Engineering</h3>
+    <a href="prompt-engineering-fundamentals.html">Fundamentals</a>
+    <a href="advanced-prompting-patterns.html">Advanced Prompting Patterns</a>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumbs"><a href="../index.html">Home</a> / 08-Prompt-Engineering / Advanced Patterns</div>
+      <button class="theme-toggle" onclick="toggleTheme()">🌓 Theme</button>
+    </div>
+    <h1>Advanced Prompting Patterns</h1>
+    <span class="tag good">Stable</span><span class="tag">Last verified: 2026-10-06</span>
+
+    <div class="toc">
+      <b>On this page</b>
+      <a href="#what">1. What is this?</a>
+      <a href="#whyexist">2. Why does it exist?</a>
+      <a href="#whyimportant">3. Why is it important?</a>
+      <a href="#whereused">4. Where is it used?</a>
+      <a href="#prereq">5. Prerequisites</a>
+      <a href="#core">6. Core patterns</a>
+      <a href="#terms">7. Terminology</a>
+      <a href="#arch">8. Architecture</a>
+      <a href="#internal">9. How it works internally</a>
+      <a href="#steps">10. Step-by-step: prompt optimization workflow</a>
+      <a href="#simple">11. Simple example</a>
+      <a href="#real">12. Real-world example</a>
+      <a href="#code">13. Code example</a>
+      <a href="#advanced">14. Advanced example</a>
+      <a href="#mistakes">15. Common mistakes</a>
+      <a href="#best">16. Best practices</a>
+      <a href="#production">17. Production considerations</a>
+      <a href="#security">18. Security considerations</a>
+      <a href="#performance">19. Performance considerations</a>
+      <a href="#cost">20. Cost considerations</a>
+      <a href="#debug">21. Debugging/troubleshooting</a>
+      <a href="#related">22. Related concepts</a>
+      <a href="#comparison">23. Comparison with alternatives</a>
+      <a href="#exercise">24. Mini practical exercise</a>
+      <a href="#project">25. Practical project</a>
+      <a href="#projectarch">26. Project architecture</a>
+      <a href="#interview-b">27. Interview Questions — Beginner</a>
+      <a href="#interview-i">28. Interview Questions — Intermediate</a>
+      <a href="#interview-a">29. Interview Questions — Advanced</a>
+      <a href="#interview-s">30. Interview Questions — Senior/Architect</a>
+      <a href="#interview-sc">31. Scenario-Based Questions</a>
+      <a href="#revision">32. Quick revision notes</a>
+      <a href="#cheat">33. Cheat sheet</a>
+      <a href="#further">34. Further topics to learn</a>
+    </div>
+
+    <h2 id="what">1. What is this?</h2>
+    <p>Beyond basic zero/few-shot prompting, advanced patterns — chain-of-thought (CoT), self-consistency, and task decomposition/prompt chaining — systematically improve reliability on complex reasoning, multi-step, and high-stakes tasks.</p>
+
+    <h2 id="whyexist">2. Why does it exist?</h2>
+    <p>Simple prompting plateaus on genuinely hard, multi-step problems: jumping straight to an answer gives the model no room to "work through" a problem the way allocating more computation would help. These patterns exist to deliberately give the model more inference-time compute and structure to apply to hard problems.</p>
+
+    <h2 id="whyimportant">3. Why is it important?</h2>
+    <p>These patterns are the difference between a prompt that works on easy demo cases and one that holds up on genuinely hard production edge cases — critical for any system doing real reasoning (math, planning, multi-step logic, agentic decision-making).</p>
+
+    <h2 id="whereused">4. Where is it used?</h2>
+    <p>Reasoning-heavy agents, coding assistants, complex data-extraction pipelines, research/analysis tools, and any high-stakes decision support system.</p>
+
+    <h2 id="prereq">5. Prerequisites</h2>
+    <p><a href="prompt-engineering-fundamentals.html">Prompt Engineering Fundamentals</a>.</p>
+
+    <h2 id="core">6. Core patterns</h2>
+    <ul>
+      <li><b>Chain-of-thought (CoT):</b> instructing the model to "think step by step" before giving a final answer.</li>
+      <li><b>Self-consistency:</b> sampling multiple independent CoT completions and taking the majority/most consistent final answer.</li>
+      <li><b>Task decomposition / prompt chaining:</b> splitting a complex task into an explicit pipeline of smaller, narrowly-scoped prompts.</li>
+    </ul>
+
+    <h2 id="terms">7. Terminology</h2>
+    <table>
+      <tr><th>Term</th><th>Meaning</th></tr>
+      <tr><td>Chain-of-thought (CoT)</td><td>Explicit step-by-step reasoning generated before the final answer.</td></tr>
+      <tr><td>Self-consistency</td><td>Majority-vote across multiple independently sampled reasoning paths.</td></tr>
+      <tr><td>Task decomposition</td><td>Breaking a complex task into smaller, independently verifiable sub-tasks/prompts.</td></tr>
+      <tr><td>Golden dataset</td><td>A curated set of example inputs with known-correct expected outputs, used for evaluation.</td></tr>
+      <tr><td>LLM-as-judge</td><td>Using a separate LLM call to score/evaluate the quality of another LLM's output.</td></tr>
+    </table>
+
+    <h2 id="arch">8. Architecture</h2>
+    <pre><code>Chain-of-thought:      Question → [reasoning tokens] → Final answer
+
+Self-consistency:      Question → sample N reasoning paths → majority vote → Final answer
+
+Task decomposition:    Complex task → Prompt 1 (extract) → Prompt 2 (classify) → Prompt 3 (format) → Result</code></pre>
+
+    <h2 id="internal">9. How it works internally</h2>
+    <p>CoT improves performance because it lets the model allocate more generated tokens (more computation) to work through a problem rather than jumping straight to a guess — autoregressive generation means each token conditions on everything generated so far, so intermediate reasoning tokens genuinely inform the final answer. Self-consistency exploits the fact that errors in individual sampled reasoning paths tend to be somewhat independent, so majority voting across several samples cancels out some of that noise. Modern reasoning models internalize CoT-like behavior by default via dedicated training.</p>
+
+    <h2 id="steps">10. Step-by-step: prompt optimization workflow</h2>
+    <ol>
+      <li>Write a baseline prompt and define a small evaluation set (golden examples with expected outputs).</li>
+      <li>Run the prompt against the eval set, score it (exact match, LLM-as-judge, or rule-based checks).</li>
+      <li>Iterate: add/adjust instructions, few-shot examples, formatting constraints, or CoT instructions.</li>
+      <li>Re-run evaluation after every change — never tune a prompt "by feel" in production.</li>
+      <li>Version prompts like code (e.g., in LangSmith, or just git) so regressions are traceable.</li>
+    </ol>
+
+    <h2 id="simple">11. Simple example</h2>
+    <p>Prompt: "A train leaves at 3:15pm and travels 180 miles at 60mph. What time does it arrive?" Adding "Think step by step" before asking for the final answer markedly improves accuracy on this kind of multi-step arithmetic compared to asking for the answer directly.</p>
+
+    <h2 id="real">12. Real-world example</h2>
+    <p>A legal-document review pipeline decomposes "review this contract for risks" into separate prompts: extract clauses → classify each clause's risk category → summarize risks per category → format final report — far more reliable than one giant "review this contract" prompt.</p>
+
+    <h2 id="code">13. Code example</h2>
+    <pre><code class="language-python">from anthropic import Anthropic
+client = Anthropic()
+
+prompt = """A train leaves at 3:15pm and travels 180 miles at 60mph.
+Think step by step, then give the final answer as JSON: {"arrival_time": "..."}"""
+
+response = client.messages.create(
+    model="claude-sonnet-5",
+    max_tokens=400,
+    messages=[{"role": "user", "content": prompt}],
+)
+print(response.content[0].text)
+</code></pre>
+
+    <h2 id="advanced">14. Advanced example</h2>
+    <p>Self-consistency sampling for a hard reasoning question, trading cost for reliability:</p>
+    <pre><code class="language-python">from collections import Counter
+
+def self_consistent_answer(question, n=5):
+    answers = []
+    for _ in range(n):
+        resp = client.messages.create(
+            model="claude-sonnet-5", max_tokens=400, temperature=0.7,
+            messages=[{"role": "user", "content": f"{question}\nThink step by step, then state FINAL ANSWER: <answer>"}]
+        )
+        answers.append(extract_final_answer(resp.content[0].text))
+    return Counter(answers).most_common(1)[0][0]
+</code></pre>
+
+    <h2 id="mistakes">15. Common mistakes</h2>
+    <ul>
+      <li>Using self-consistency on every request regardless of cost/latency budget.</li>
+      <li>Assuming chain-of-thought output is always faithful to the model's actual internal process — it's a generated explanation, not necessarily a transparent trace.</li>
+      <li>Decomposing tasks too finely, adding unnecessary latency/cost for simple cases.</li>
+      <li>Tuning a prompt against a tiny or unrepresentative "golden set," causing it to overfit to those specific examples.</li>
+    </ul>
+
+    <h2 id="best">16. Best practices</h2>
+    <ul>
+      <li>Use CoT for genuinely multi-step reasoning tasks; skip it for simple lookups (adds unnecessary tokens/latency).</li>
+      <li>Reserve self-consistency for high-stakes, lower-volume decisions.</li>
+      <li>Keep decomposed sub-prompts narrowly scoped and independently testable.</li>
+      <li>Maintain a representative, regularly-refreshed golden evaluation set.</li>
+    </ul>
+
+    <h2 id="production">17. Production considerations</h2>
+    <p>Treat prompts as code: store in version control, write an evaluation suite that runs in CI on prompt changes, track metrics over time, and gate deploys on eval regressions — not on someone feeling "this version sounds better."</p>
+
+    <h2 id="security">18. Security considerations</h2>
+    <p>Decomposed pipelines increase the number of context-injection surfaces (each sub-prompt's inputs); apply the same untrusted-content delimiting discipline at every stage, not just the first.</p>
+
+    <h2 id="performance">19. Performance considerations</h2>
+    <p>CoT increases output tokens (and thus latency) compared to direct answers. Self-consistency multiplies latency by the sample count unless run in parallel. Task decomposition adds round-trip latency per additional LLM call in the chain — balance granularity against cumulative latency.</p>
+
+    <h2 id="cost">20. Cost considerations</h2>
+    <p>Self-consistency multiplies token cost by N (sample count). Task decomposition multiplies the number of billed calls. Both should be reserved for cases where the quality/reliability gain clearly justifies the added spend — benchmark against a single-call baseline first.</p>
+
+    <h2 id="debug">21. Debugging/troubleshooting</h2>
+    <ul>
+      <li><b>CoT reasoning looks right but final answer is wrong:</b> check the answer-extraction step — the model may be stating the final answer inconsistently with its own reasoning (a parsing/formatting issue, or a genuine reasoning-to-answer transcription error).</li>
+      <li><b>Self-consistency majority vote ties:</b> increase sample count or add a tie-breaking criterion (e.g., shortest/most confident reasoning).</li>
+      <li><b>Decomposed pipeline produces inconsistent final output:</b> check for schema mismatches between consecutive prompt stages (step 2 expecting a different format than step 1 produces).</li>
+    </ul>
+
+    <h2 id="related">22. Related concepts</h2>
+    <p><a href="prompt-engineering-fundamentals.html">Prompt Engineering Fundamentals</a> · <a href="../35-AI-Evaluation/">AI Evaluation</a> · <a href="../17-AI-Agents/">AI Agents (ReAct uses similar reasoning patterns)</a></p>
+
+    <h2 id="comparison">23. Comparison with alternatives</h2>
+    <table>
+      <tr><th>Pattern</th><th>Cost</th><th>Best for</th></tr>
+      <tr><td>Direct answer</td><td>Lowest</td><td>Simple lookups, well-understood tasks</td></tr>
+      <tr><td>Chain-of-thought</td><td>Moderate (more output tokens)</td><td>Multi-step reasoning, math, planning</td></tr>
+      <tr><td>Self-consistency</td><td>High (N× calls)</td><td>High-stakes, low-volume hard reasoning</td></tr>
+      <tr><td>Task decomposition</td><td>Moderate–high (multiple calls)</td><td>Complex multi-part tasks needing verifiable intermediate steps</td></tr>
+    </table>
+
+    <h2 id="exercise">24. Mini practical exercise</h2>
+    <p>Take a multi-step math or logic question. Run it once with a direct-answer prompt and once with a "think step by step" prompt. Compare accuracy across 5 repeated trials of each.</p>
+
+    <h2 id="project">25. Practical project</h2>
+    <p><b>Self-Consistency Reasoning API:</b> build an endpoint that accepts a hard reasoning question, internally samples N chain-of-thought completions, extracts and majority-votes the final answer, and returns both the answer and the agreement rate across samples (as a confidence proxy).</p>
+
+    <h2 id="projectarch">26. Project architecture</h2>
+    <pre><code>POST /reason {question}
+ → sample N CoT completions (parallel calls, temperature > 0)
+ → extract final answer from each
+ → majority vote → answer + agreement_rate
+ → return {answer, agreement_rate, raw_samples}</code></pre>
+
+    <h2 id="interview-b">27. Interview Questions — Beginner</h2>
+    <div class="qa"><b>Q1.</b> What is chain-of-thought prompting?<br><b>A.</b> Asking the model to reason step by step before giving a final answer, which improves accuracy on multi-step problems.</div>
+    <div class="qa"><b>Q2.</b> What is self-consistency sampling?<br><b>A.</b> Sampling multiple independent reasoning attempts for the same question and taking the majority/most common final answer.</div>
+    <div class="qa"><b>Q3.</b> What is task decomposition in prompting?<br><b>A.</b> Breaking a complex task into a sequence of smaller, narrower prompts instead of one large prompt.</div>
+    <div class="qa"><b>Q4.</b> Why would chain-of-thought improve accuracy on a math problem?<br><b>A.</b> It gives the model more generated tokens (more computation) to work through intermediate steps rather than guessing the final answer directly.</div>
+    <div class="qa"><b>Q5.</b> Does self-consistency cost more than a single call?<br><b>A.</b> Yes — it multiplies cost and latency by the number of samples taken.</div>
+    <div class="qa"><b>Q6.</b> What's a golden dataset?<br><b>A.</b> A curated set of example inputs with known-correct expected outputs, used to evaluate prompt/model quality.</div>
+    <div class="qa"><b>Q7.</b> What is LLM-as-judge?<br><b>A.</b> Using a separate LLM call to score or evaluate the quality/correctness of another LLM's output.</div>
+    <div class="qa"><b>Q8.</b> Should you always use chain-of-thought, even for simple lookups?<br><b>A.</b> No — it adds unnecessary tokens/latency for simple, non-reasoning tasks where a direct answer is already reliable.</div>
+    <div class="qa"><b>Q9.</b> Why should you never tune a prompt "by feel"?<br><b>A.</b> Subjective impressions don't reliably indicate quality improvements across the full range of real inputs; only systematic evaluation against a representative test set does.</div>
+    <div class="qa"><b>Q10.</b> What should happen before deploying a prompt change to production?<br><b>A.</b> Running it against an evaluation suite/golden dataset to confirm it doesn't regress quality compared to the current version.</div>
+
+    <h2 id="interview-i">28. Interview Questions — Intermediate</h2>
+    <div class="qa"><b>Q1.</b> What's the trade-off of self-consistency sampling?<br><b>A.</b> It improves accuracy on hard reasoning tasks by sampling multiple reasoning paths and taking a majority answer, but multiplies cost and latency by the number of samples — only worth it for high-stakes, lower-volume calls.</div>
+    <div class="qa"><b>Q2.</b> How do you prevent prompt engineering from becoming "untested, unversioned magic strings" in a production codebase?<br><b>A.</b> Treat prompts as code: store them in version control, write an evaluation suite (golden dataset + scoring) that runs in CI on prompt changes, track metrics over time, and gate deploys on eval regressions.</div>
+    <div class="qa"><b>Q3.</b> Why might task decomposition improve reliability even if each sub-prompt individually isn't more "intelligent" than a combined prompt?<br><b>A.</b> Each sub-task is narrower and easier to specify/verify correctly, reducing the chance the model drops or conflates instructions the way it might in one large, multi-part prompt — reliability comes from reduced task complexity per call, not increased model capability.</div>
+    <div class="qa"><b>Q4.</b> How would you decide the right number of samples (N) for self-consistency?<br><b>A.</b> Start small (e.g., 3–5) and measure the marginal accuracy gain on your eval set as N increases; diminishing returns typically appear quickly, and N should be capped where additional cost no longer yields meaningful reliability improvement.</div>
+    <div class="qa"><b>Q5.</b> Why is "the reasoning looked plausible" not sufficient evidence that chain-of-thought improved correctness?<br><b>A.</b> Generated reasoning can be plausible-sounding but not faithfully reflect the actual computation that produced the final answer, and plausible reasoning can still arrive at a wrong conclusion — correctness must be measured against ground truth, not reasoning plausibility.</div>
+    <div class="qa"><b>Q6.</b> What's a practical failure mode of task decomposition pipelines in production?<br><b>A.</b> Schema/format mismatches between stages (step 2 expects a field format step 1 doesn't reliably produce), and compounding error/latency across many sequential calls — each stage needs its own validation, not just trust in the prior stage's output.</div>
+    <div class="qa"><b>Q7.</b> When would you choose LLM-as-judge over exact-match scoring for evaluation?<br><b>A.</b> When outputs are open-ended/free-text (e.g., summaries, explanations) where there's no single "correct" string, but a rubric-based quality judgment is meaningful — exact match only works for tasks with a well-defined, narrow correct answer.</div>
+    <div class="qa"><b>Q8.</b> How would you reduce the latency cost of self-consistency in a user-facing product?<br><b>A.</b> Run the N samples in parallel (concurrent API calls) rather than sequentially, so wall-clock latency approaches that of a single call rather than N times it, though billed cost still scales with N.</div>
+    <div class="qa"><b>Q9.</b> Why might a smaller golden evaluation set lead to a prompt that looks great in testing but underperforms on real traffic?<br><b>A.</b> A small/unrepresentative set risks the prompt being tuned (even unintentionally) to quirks of those specific examples rather than the true distribution of real inputs — essentially overfitting the prompt to the eval set.</div>
+    <div class="qa"><b>Q10.</b> What's the relationship between task decomposition and the agent design patterns covered later (planner/executor)?<br><b>A.</b> Task decomposition is the prompting-level foundation of agentic planning patterns — a planner/executor agent architecture is essentially task decomposition made dynamic and automated, with the model itself deciding how to split the work rather than a fixed, hand-designed pipeline.</div>
+
+    <h2 id="interview-a">29. Interview Questions — Advanced</h2>
+    <div class="qa"><b>Q1.</b> Why doesn't chain-of-thought guarantee faithful reasoning, and how would you test for unfaithfulness?<br><b>A.</b> The model generates reasoning text as just another sequence of plausible tokens — it can produce reasoning that sounds coherent but doesn't match the actual computation leading to the answer (post-hoc rationalization). Test by perturbing a problem's surface features while keeping the correct answer's logic intact and checking if the stated reasoning changes in ways inconsistent with genuine step-by-step derivation.</div>
+    <div class="qa"><b>Q2.</b> How would you architect an evaluation pipeline that catches prompt regressions across both exact-match and open-ended task types simultaneously?<br><b>A.</b> Maintain separate scoring strategies per task type within one unified eval harness — exact/schema match for structured extraction tasks, rubric-based LLM-as-judge (with human-reviewed judge calibration) for open-ended generation — and aggregate pass/fail or score deltas across both into a single CI gate.</div>
+    <div class="qa"><b>Q3.</b> What's the architectural reasoning behind why task decomposition sometimes outperforms a single larger, more capable model given the same prompt?<br><b>A.</b> Decomposition reduces each call's effective task complexity and instruction-following burden, which can matter more for reliability than raw model capability on a monolithic, multi-part task — a smaller model doing one narrow thing well per step can out-reliability a larger model trying to juggle everything in one pass, even if the larger model is "smarter" in aggregate.</div>
+
+    <h2 id="interview-s">30. Interview Questions — Senior/Architect</h2>
+    <div class="qa"><b>Q1.</b> How would you decide, for a new complex feature, whether to use a single well-crafted prompt, chain-of-thought, self-consistency, or full task decomposition?<br><b>A.</b> Start with the simplest (single prompt) and measure against an eval set; add CoT if the task is genuinely multi-step reasoning and simple prompting underperforms; add self-consistency only if the task is high-stakes/low-volume enough to justify N× cost; move to task decomposition when sub-tasks have meaningfully different, independently verifiable requirements — always justified by measured eval gaps, not by default complexity escalation.</div>
+    <div class="qa"><b>Q2.</b> Design a CI/CD pipeline for prompt changes across a team of 20 engineers building many LLM features.<br><b>A.</b> Require every prompt change to run against its feature's golden eval set automatically on PR; block merge on score regressions beyond a defined threshold; version prompts alongside code in the same repo; maintain a shared library of evaluated patterns (CoT templates, decomposition scaffolds) so teams reuse proven structures instead of reinventing them; track production quality metrics post-deploy to catch eval-blind-spot regressions.</div>
+    <div class="qa"><b>Q3.</b> A stakeholder wants near-perfect reliability on a high-stakes reasoning task and is willing to pay for it. Design the most reliable (not necessarily cheapest) prompting architecture.<br><b>A.</b> Combine task decomposition (narrow, verifiable sub-steps) with chain-of-thought at each reasoning-heavy step, self-consistency sampling (N≥5) on the final decision step, and a secondary LLM-as-judge verification pass cross-checking the final answer against the decomposed intermediate results — layering multiple reliability techniques since the budget constraint has been relaxed.</div>
+
+    <h2 id="interview-sc">31. Scenario-Based Questions</h2>
+    <div class="qa"><b>Scenario 1.</b> Your reasoning-heavy agent occasionally gives a wrong final answer despite seemingly correct-looking intermediate reasoning. How do you investigate?<br><b>A.</b> Check the answer-extraction/transcription step for a mismatch between the stated reasoning and the final answer, and consider that the reasoning itself may be plausible-but-flawed (post-hoc rationalization) rather than genuinely derived — validate by testing self-consistency across multiple samples to see if the error is consistent or sampling-driven.</div>
+    <div class="qa"><b>Scenario 2.</b> Leadership wants to apply self-consistency sampling to every request to "maximize quality." What do you push back on?<br><b>A.</b> Point out the N× cost/latency multiplier applies uniformly regardless of task difficulty — most requests likely don't need it; propose reserving self-consistency for a flagged subset of genuinely hard/high-stakes requests, informed by eval data on where it actually moves accuracy.</div>
+    <div class="qa"><b>Scenario 3.</b> A decomposed 4-step pipeline's final output quality is worse than the single-prompt version it replaced. How do you debug?<br><b>A.</b> Instrument and log each stage's output individually, compare against expected intermediate results, and look for compounding errors (small mistakes at an early stage propagating and amplifying through later stages) or schema mismatches between consecutive steps — decomposition isn't automatically better and needs its own evaluation per stage.</div>
+
+    <h2 id="revision">32. Quick revision notes</h2>
+    <ul>
+      <li>CoT = step-by-step reasoning improves multi-step accuracy.</li>
+      <li>Self-consistency = sample+vote for higher reliability at higher cost.</li>
+      <li>Decomposition = chain small, testable prompts instead of one mega-prompt.</li>
+      <li>Always evaluate prompt changes against a golden set, never by feel.</li>
+    </ul>
+
+    <h2 id="cheat">33. Cheat sheet</h2>
+    <div class="callout">CoT = step-by-step reasoning improves multi-step accuracy. Self-consistency = sample+vote for higher reliability at higher cost. Decomposition = chain small, testable prompts instead of one mega-prompt. Always evaluate prompt changes against a golden set, never by feel.</div>
+
+    <h2 id="further">34. Further topics to learn</h2>
+    <p><a href="../17-AI-Agents/">AI Agents (ReAct)</a> → <a href="../35-AI-Evaluation/">AI Evaluation</a> → <a href="../47-AI-Design-Patterns/">AI Design Patterns</a></p>
+
+    <div class="prevnext">
+      <a href="prompt-engineering-fundamentals.html">← Prompt Engineering Fundamentals</a>
+      <span></span>
+    </div>
+  </main>
+</div>
+<script src="../assets/app.js"></script>
+</body>
+</html>

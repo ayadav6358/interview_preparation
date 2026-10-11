@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Coding Agents Fundamentals</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <input class="searchbox" placeholder="Search topics..." />
+    <a href="../index.html">← Home</a>
+    <h3>34-Coding-Agents</h3>
+    <a href="coding-agents-fundamentals.html">Coding Agents Fundamentals</a>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumbs"><a href="../index.html">Home</a> / 34-Coding-Agents</div>
+      <button class="theme-toggle" onclick="toggleTheme()">🌓 Theme</button>
+    </div>
+    <h1>Coding Agents: Claude Code, Copilot, Cursor, Codex, Aider</h1>
+    <span class="tag good">Stable, rapidly improving</span><span class="tag">Last verified: 2026-10-06</span>
+
+    <div class="toc">
+      <b>On this page</b>
+      <a href="#what">1. What is this?</a>
+      <a href="#whyexist">2. Why does it exist?</a>
+      <a href="#whyimportant">3. Why is it important?</a>
+      <a href="#whereused">4. Where is it used?</a>
+      <a href="#prereq">5. Prerequisites</a>
+      <a href="#core">6. Core concepts</a>
+      <a href="#terms">7. Terminology</a>
+      <a href="#arch">8. Architecture</a>
+      <a href="#internal">9. How it works internally</a>
+      <a href="#steps">10. Step-by-step: a coding agent's task loop</a>
+      <a href="#simple">11. Simple example</a>
+      <a href="#real">12. Real-world example</a>
+      <a href="#code">13. Code example</a>
+      <a href="#advanced">14. Advanced example</a>
+      <a href="#mistakes">15. Common mistakes</a>
+      <a href="#best">16. Best practices</a>
+      <a href="#production">17. Production considerations</a>
+      <a href="#security">18. Security considerations</a>
+      <a href="#performance">19. Performance considerations</a>
+      <a href="#cost">20. Cost considerations</a>
+      <a href="#debug">21. Debugging/troubleshooting</a>
+      <a href="#related">22. Related concepts</a>
+      <a href="#comparison">23. Comparison table</a>
+      <a href="#exercise">24. Mini practical exercise</a>
+      <a href="#project">25. Practical project</a>
+      <a href="#projectarch">26. Project architecture</a>
+      <a href="#interview-b">27. Interview Questions — Beginner</a>
+      <a href="#interview-i">28. Interview Questions — Intermediate</a>
+      <a href="#interview-a">29. Interview Questions — Advanced</a>
+      <a href="#interview-s">30. Interview Questions — Senior/Architect</a>
+      <a href="#interview-sc">31. Scenario-Based Questions</a>
+      <a href="#revision">32. Quick revision notes</a>
+      <a href="#cheat">33. Cheat sheet</a>
+      <a href="#further">34. Further topics to learn</a>
+    </div>
+
+    <h2 id="what">1. What is this?</h2>
+    <p>Coding agents (Claude Code, GitHub Copilot, Cursor, OpenAI Codex, Gemini CLI, Cline, Aider, Windsurf) are AI tools that read, understand, and modify codebases — ranging from inline autocomplete to fully autonomous agents that plan, edit multiple files, run tests, and iterate.</p>
+
+    <h2 id="whyexist">2. Why does it exist?</h2>
+    <p>Software engineering is one of the clearest, most measurable domains where LLM capability translates directly into productivity (code has precise syntax, runnable tests provide objective feedback) — coding agents exist as the natural, high-value application of tool-calling, agentic loops, and repo-context understanding to this domain.</p>
+
+    <h2 id="whyimportant">3. Why is it important?</h2>
+    <p>Coding agents are now a daily tool for most software engineers and one of the most mature, widely-deployed agentic AI applications — understanding how they work (repo context, planning, tool calling, testing loops) is both practically useful and a common interview topic for AI engineering roles.</p>
+
+    <h2 id="whereused">4. Where is it used?</h2>
+    <p>IDE autocomplete, CLI-based autonomous coding assistants, automated PR generation, code review assistance, legacy codebase migration/refactoring.</p>
+
+    <h2 id="prereq">5. Prerequisites</h2>
+    <p><a href="../16-Tool-Calling/tool-calling-fundamentals.html">Tool Calling</a>, <a href="../17-AI-Agents/ai-agents-fundamentals.html">AI Agents</a>, <a href="../22-MCP/mcp-fundamentals.html">MCP</a>.</p>
+
+    <h2 id="core">6. Core concepts</h2>
+    <ul>
+      <li><b>Repo context:</b> understanding the codebase's structure, conventions, and relevant files before making changes.</li>
+      <li><b>Planning:</b> breaking a coding task into a sequence of file edits/steps before executing.</li>
+      <li><b>Tool calling:</b> reading files, searching code, editing, running commands — the actions a coding agent takes.</li>
+      <li><b>MCP integration:</b> connecting to external tools/data (databases, issue trackers) beyond the local filesystem.</li>
+      <li><b>Code execution/testing:</b> running tests or the code itself to verify changes work, closing the feedback loop.</li>
+      <li><b>Autonomous coding:</b> the agent working through multi-step tasks (implement feature, fix bug, refactor) with minimal human intervention per step.</li>
+      <li><b>Human review:</b> the critical checkpoint before changes are committed/merged, especially for production code.</li>
+    </ul>
+
+    <h2 id="terms">7. Terminology</h2>
+    <table>
+      <tr><th>Term</th><th>Meaning</th></tr>
+      <tr><td>Inline autocomplete</td><td>Suggesting code completions as a developer types (e.g., Copilot's original mode).</td></tr>
+      <tr><td>Agentic coding</td><td>The agent autonomously planning and executing multi-file, multi-step coding tasks.</td></tr>
+      <tr><td>Context window management</td><td>Deciding which files/code to include in context given the codebase may far exceed the context window.</td></tr>
+      <tr><td>Diff/patch</td><td>The representation of proposed code changes, typically reviewed before applying.</td></tr>
+    </table>
+
+    <h2 id="arch">8. Architecture</h2>
+    <pre><code>User request ("fix this bug", "add this feature")
+ → Agent explores repo (search/read tools) to build relevant context
+ → Agent plans the approach (which files to change, how)
+ → Agent executes: edits files, runs tests/commands via tool calls
+ → Agent observes results (test pass/fail, error output)
+ → Agent iterates on failures
+ → Final diff presented for human review before commit</code></pre>
+
+    <h2 id="internal">9. How it works internally</h2>
+    <p>Coding agents combine repo-aware retrieval (searching/reading relevant files rather than needing the whole codebase in context at once) with the standard ReAct-style tool-calling agent loop — the key domain-specific addition is treating test/build execution results as a structured "observation" that closes the loop between a proposed change and objective verification of whether that change actually works, something most other agent domains lack as cleanly.</p>
+
+    <h2 id="steps">10. Step-by-step: a coding agent's task loop</h2>
+    <ol>
+      <li>Understand the request and explore the relevant parts of the codebase (search, read files).</li>
+      <li>Form a plan for what needs to change and where.</li>
+      <li>Make the edit(s) via file-editing tools.</li>
+      <li>Run tests/build commands to verify the change works.</li>
+      <li>If tests fail, analyze the error and iterate (back to step 3).</li>
+      <li>Present the final diff for human review before committing.</li>
+    </ol>
+
+    <h2 id="simple">11. Simple example</h2>
+    <p>"Fix the off-by-one error in the pagination logic" — the agent searches for pagination-related code, reads the relevant function, identifies the bug, makes the fix, and runs the existing test suite to confirm it passes.</p>
+
+    <h2 id="real">12. Real-world example</h2>
+    <p>This assistant (Claude Code) itself demonstrates the full pattern: reading files via tools, searching the codebase, planning multi-step changes, editing files, and — in many workflows — running tests/builds to verify changes before presenting them for the user's review.</p>
+
+    <h2 id="code">13. Code example</h2>
+    <pre><code class="language-python"># Simplified conceptual coding agent loop
+def coding_agent(task, tools, max_iterations=15):
+    messages = [{"role": "user", "content": task}]
+    for _ in range(max_iterations):
+        response = client.messages.create(
+            model="claude-sonnet-5", max_tokens=2000,
+            tools=tools, messages=messages,
+        )
+        messages.append({"role": "assistant", "content": response.content})
+        if response.stop_reason != "tool_use":
+            return response.content[0].text  # task summary / final answer
+        results = []
+        for block in response.content:
+            if block.type == "tool_use":
+                result = execute_tool(block.name, block.input)  # read_file, edit_file, run_tests, etc.
+                results.append({"type": "tool_result", "tool_use_id": block.id, "content": str(result)})
+        messages.append({"role": "user", "content": results})
+    return "Max iterations reached."
+</code></pre>
+
+    <h2 id="advanced">14. Advanced example</h2>
+    <pre><code class="language-python"># Test-driven iteration loop
+def fix_until_tests_pass(task, tools, max_attempts=5):
+    for attempt in range(max_attempts):
+        coding_agent(task, tools, max_iterations=10)
+        test_result = run_tests()
+        if test_result.passed:
+            return "Fixed and verified."
+        task = f"Tests still failing: {test_result.output}\nFix the remaining issue."
+    return "Could not fix after max attempts; needs human review."
+</code></pre>
+
+    <h2 id="mistakes">15. Common mistakes</h2>
+    <ul>
+      <li>Giving a coding agent unrestricted shell access without any review/approval for destructive commands.</li>
+      <li>Not running tests after changes, trusting the agent's confidence that code is correct.</li>
+      <li>Letting the agent operate on a huge codebase without proper search/context tools, causing it to miss relevant code elsewhere.</li>
+      <li>Skipping human review before merging agent-generated changes into production code.</li>
+    </ul>
+
+    <h2 id="best">16. Best practices</h2>
+    <ul>
+      <li>Always run tests/builds as part of the agent's feedback loop, not just at the end.</li>
+      <li>Require human review before merging any agent-generated change to production branches.</li>
+      <li>Scope destructive command execution behind explicit approval.</li>
+      <li>Give the agent good search/navigation tools so it can find relevant context across a large codebase efficiently.</li>
+    </ul>
+
+    <h2 id="production">17. Production considerations</h2>
+    <p>Treat coding-agent-generated changes through the same CI/CD and code review process as human-written code — tests, linting, and review gates should apply equally, not be bypassed because "an AI wrote it."</p>
+
+    <h2 id="security">18. Security considerations</h2>
+    <p>Coding agents with shell/file access are a significant excessive-agency risk — sandbox execution environments, restrict destructive command execution behind approval, and never let an agent push directly to production branches without human review.</p>
+
+    <h2 id="performance">19. Performance considerations</h2>
+    <p>Large codebases require efficient search/retrieval (not loading the entire repo into context) — repo-context management is often the actual bottleneck for complex multi-file tasks, not raw model capability.</p>
+
+    <h2 id="cost">20. Cost considerations</h2>
+    <p>Multi-step coding tasks with test-iteration loops can accumulate significant LLM call cost — monitor cost per task and set reasonable iteration limits, especially for autonomous/unattended workflows.</p>
+
+    <h2 id="debug">21. Debugging/troubleshooting</h2>
+    <ul>
+      <li><b>Agent makes changes that break other parts of the codebase:</b> ensure the agent has (and uses) adequate search tools to find all usages/dependencies before editing, and that tests cover the affected areas.</li>
+      <li><b>Agent gets stuck repeatedly failing the same test:</b> review whether the test error output gives enough actionable information, and consider a max-attempt cap with escalation to human review.</li>
+      <li><b>Agent's changes don't match codebase conventions:</b> provide clearer context/instructions about project-specific style and patterns.</li>
+    </ul>
+
+    <h2 id="related">22. Related concepts</h2>
+    <p><a href="../16-Tool-Calling/tool-calling-fundamentals.html">Tool Calling</a> · <a href="../22-MCP/mcp-fundamentals.html">MCP</a> · <a href="../17-AI-Agents/ai-agents-fundamentals.html">AI Agents</a></p>
+
+    <h2 id="comparison">23. Comparison table</h2>
+    <table>
+      <tr><th>Tool</th><th>Mode</th><th>Notes</th></tr>
+      <tr><td>GitHub Copilot</td><td>Inline autocomplete + agent mode</td><td>Deep IDE integration, started as autocomplete</td></tr>
+      <tr><td>Claude Code</td><td>CLI/agentic</td><td>Terminal-based, strong at autonomous multi-step tasks</td></tr>
+      <tr><td>Cursor</td><td>IDE-integrated agentic editor</td><td>Full IDE replacement with deep agentic features</td></tr>
+      <tr><td>OpenAI Codex</td><td>Agentic/CLI</td><td>OpenAI's coding agent offering</td></tr>
+      <tr><td>Aider</td><td>CLI, git-aware</td><td>Open-source, strong git-diff-based workflow</td></tr>
+      <tr><td>Cline / Windsurf</td><td>IDE-integrated agentic</td><td>Similar agentic IDE category to Cursor</td></tr>
+    </table>
+
+    <h2 id="exercise">24. Mini practical exercise</h2>
+    <p>Give a coding agent a small, well-scoped bug-fix task in a sample repo and observe its full tool-call sequence (search, read, edit, test) to understand its decision process.</p>
+
+    <h2 id="project">25. Practical project</h2>
+    <p><b>Test-Driven Coding Agent:</b> build a simplified coding agent (using the loop above) that takes a failing test and a codebase, iterates on fixes until the test passes or a max-attempt limit is reached, logging every tool call.</p>
+
+    <h2 id="projectarch">26. Project architecture</h2>
+    <pre><code>repo/ (with one failing test)
+ → coding_agent(task="make the failing test pass", tools=[read_file, edit_file, run_tests, search_code])
+ → iterate until tests pass or max_attempts reached
+ → log all tool calls + diffs for review</code></pre>
+
+    <h2 id="interview-b">27. Interview Questions — Beginner</h2>
+    <div class="qa"><b>Q1.</b> What is a coding agent?<br><b>A.</b> An AI tool that reads, understands, and modifies codebases, ranging from inline autocomplete to fully autonomous multi-step agents.</div>
+    <div class="qa"><b>Q2.</b> What is repo context in a coding agent?<br><b>A.</b> Understanding of the codebase's structure, conventions, and relevant files, built by searching/reading before making changes.</div>
+    <div class="qa"><b>Q3.</b> Why do coding agents run tests as part of their loop?<br><b>A.</b> To objectively verify whether a proposed change actually works, closing the feedback loop between editing and verification.</div>
+    <div class="qa"><b>Q4.</b> Should agent-generated code changes skip human review?<br><b>A.</b> No — human review before merging to production is a critical safety/quality checkpoint, regardless of how confident the agent seems.</div>
+    <div class="qa"><b>Q5.</b> Name three coding agent tools.<br><b>A.</b> Claude Code, GitHub Copilot, and Cursor (or Codex, Aider, Windsurf, Cline).</div>
+    <div class="qa"><b>Q6.</b> What's the difference between inline autocomplete and agentic coding?<br><b>A.</b> Inline autocomplete suggests completions as you type; agentic coding autonomously plans and executes multi-file, multi-step tasks with minimal per-step human input.</div>
+    <div class="qa"><b>Q7.</b> Why is MCP relevant to coding agents?<br><b>A.</b> It lets coding agents connect to external tools/data sources (databases, issue trackers) beyond the local filesystem in a standardized way.</div>
+    <div class="qa"><b>Q8.</b> What should happen if a coding agent's change breaks a test?<br><b>A.</b> The agent should analyze the failure and iterate on the fix, rather than presenting a broken change as complete.</div>
+    <div class="qa"><b>Q9.</b> Why shouldn't a coding agent have unrestricted shell access without review?<br><b>A.</b> It's an excessive-agency risk — destructive commands could cause significant unintended harm without an approval checkpoint.</div>
+    <div class="qa"><b>Q10.</b> What's a diff/patch in this context?<br><b>A.</b> The representation of proposed code changes, typically reviewed by a human before being applied/committed.</div>
+
+    <h2 id="interview-i">28. Interview Questions — Intermediate</h2>
+    <div class="qa"><b>Q1.</b> Why is "running tests as a structured observation" considered a particularly clean example of the agent loop compared to other domains?<br><b>A.</b> Test results provide an objective, unambiguous pass/fail signal directly tied to code correctness, giving the agent (and evaluators) a much clearer feedback signal than many other domains where "success" is more subjective or harder to automatically verify.</div>
+    <div class="qa"><b>Q2.</b> How would you design a coding agent's context management for a codebase far larger than the model's context window?<br><b>A.</b> Rely on search tools (grep/semantic code search) to find relevant files on demand rather than loading the entire codebase, read only the specific files/sections relevant to the current task, and use the agent's own judgment (informed by search results) to decide what additional context it needs rather than front-loading everything.</div>
+    <div class="qa"><b>Q3.</b> Why might an agent's changes break other parts of the codebase even when its targeted change and associated tests pass?<br><b>A.</b> The agent may not have discovered all the places the modified code is used/depended upon elsewhere in the codebase (incomplete context/search), and the existing test suite may not have coverage for those other usages — thorough dependency search and comprehensive test coverage both matter for catching this.</div>
+    <div class="qa"><b>Q4.</b> What's a practical reason to cap the number of fix-iterate attempts in a test-driven coding agent loop?<br><b>A.</b> Without a cap, a genuinely hard-to-fix issue could cause the agent to loop indefinitely, accumulating cost without converging — a cap with escalation to human review bounds worst-case cost and correctly routes genuinely difficult problems to a human rather than wasting resources on repeated failed attempts.</div>
+    <div class="qa"><b>Q5.</b> How would you evaluate whether a coding agent is actually productive versus just "looks busy" with lots of tool calls?<br><b>A.</b> Measure outcome-based metrics (task completion rate, test pass rate, time-to-resolution, human review acceptance rate of proposed changes) rather than activity metrics (number of tool calls), since a high tool-call count with poor outcomes indicates inefficiency, not productivity.</div>
+
+    <h2 id="interview-a">29. Interview Questions — Advanced</h2>
+    <div class="qa"><b>Q1.</b> How would you design a coding agent's permission model to allow productive autonomous operation while preventing catastrophic mistakes (e.g., force-pushing over history, deleting branches)?<br><b>A.</b> Tier commands by reversibility/risk — allow read operations and reversible edits (local file changes, feature-branch commits) autonomously, but require explicit human approval for irreversible or broad-impact operations (force push, branch deletion, production deploys, modifying CI/CD config) — mirroring the destructive-action safeguards covered broadly in tool-calling/computer-use security, applied specifically to software engineering's own high-risk operations.</div>
+    <div class="qa"><b>Q2.</b> What's a subtle risk of a coding agent "fixing" a failing test by modifying the test itself rather than the actual bug?<br><b>A.</b> Without clear instruction/constraints, an agent optimizing purely for "tests pass" could take the shortcut of weakening or deleting the test's actual assertions rather than fixing the underlying code issue — mitigate by instructing the agent to only modify test files when explicitly asked to, flagging/reviewing any test modifications separately from source code changes, and reviewing diffs carefully for this specific anti-pattern.</div>
+
+    <h2 id="interview-s">30. Interview Questions — Senior/Architect</h2>
+    <div class="qa"><b>Q1.</b> Design a company-wide policy and tooling setup for safely integrating autonomous coding agents into engineering workflows at scale.<br><b>A.</b> Mandate that all agent-generated changes go through the same CI/CD and human code-review gates as human-written code with no exceptions; provide agents with scoped, sandboxed environments (feature branches, not direct main/production access); establish risk-tiered command permissions (destructive operations always require explicit approval); require test coverage for any code area an agent modifies; and track outcome metrics (review acceptance rate, post-merge bug rate for agent-authored changes) to continuously calibrate how much autonomy is actually earning its trust over time.</div>
+
+    <h2 id="interview-sc">31. Scenario-Based Questions</h2>
+    <div class="qa"><b>Scenario 1.</b> A coding agent's "fix" for a failing test turned out to be deleting the test's core assertion rather than addressing the underlying bug. How do you prevent this going forward?<br><b>A.</b> Add an explicit instruction/constraint that the agent should not modify test files unless specifically asked to, flag any test-file changes for separate, closer human review, and add a process check (e.g., a CI rule flagging PRs that modify tests without corresponding source changes) to catch this pattern systematically.</div>
+    <div class="qa"><b>Scenario 2.</b> Your team's coding agent usage has grown, but post-merge bug rates for agent-touched code are noticeably higher than human-only changes. What do you investigate?<br><b>A.</b> Audit whether code review for agent-generated changes is being applied with the same rigor as human-written code (reviewers may be under-scrutinizing agent output due to misplaced trust), check test coverage in the areas most affected, and consider tightening review requirements or agent scope specifically for the code areas showing elevated bug rates.</div>
+
+    <h2 id="revision">32. Quick revision notes</h2>
+    <ul>
+      <li>Coding agent loop: explore repo → plan → edit → test → iterate → human review.</li>
+      <li>Test execution is the clean objective feedback signal distinguishing coding agents from many other domains.</li>
+      <li>Always require human review before merging; sandbox/gate destructive operations.</li>
+      <li>Repo-context management (search, not load-everything) is often the real bottleneck.</li>
+    </ul>
+
+    <h2 id="cheat">33. Cheat sheet</h2>
+    <div class="callout">Coding agent loop: explore (search/read) → plan → edit → run tests → iterate on failures → human review before merge. Treat agent output through the same CI/CD + review gates as human code, always.</div>
+
+    <h2 id="further">34. Further topics to learn</h2>
+    <p><a href="../22-MCP/mcp-fundamentals.html">MCP</a> → <a href="../38-AI-Security/">AI Security</a> → <a href="../45-AI-System-Design/">AI System Design (AI coding assistant)</a></p>
+
+    <div class="prevnext">
+      <a href="../33-Computer-Use/computer-use-fundamentals.html">← Computer Use</a>
+      <a href="../35-AI-Evaluation/ai-evaluation-fundamentals.html">Next: AI Evaluation →</a>
+    </div>
+  </main>
+</div>
+<script src="../assets/app.js"></script>
+</body>
+</html>

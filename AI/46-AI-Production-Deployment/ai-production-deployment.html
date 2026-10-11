@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Production Deployment</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <input class="searchbox" placeholder="Search topics..." />
+    <a href="../index.html">← Home</a>
+    <h3>46-AI-Production-Deployment</h3>
+    <a href="ai-production-deployment.html">AI Production Deployment</a>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumbs"><a href="../index.html">Home</a> / 46-AI-Production-Deployment</div>
+      <button class="theme-toggle" onclick="toggleTheme()">🌓 Theme</button>
+    </div>
+    <h1>AI Production Deployment: Launch Checklist & Release Discipline</h1>
+    <span class="tag good">Stable</span><span class="tag">Last verified: 2026-10-06</span>
+
+    <div class="toc">
+      <b>On this page</b>
+      <a href="#what">1. What is this?</a>
+      <a href="#whyexist">2. Why does it exist?</a>
+      <a href="#whyimportant">3. Why is it important?</a>
+      <a href="#whereused">4. Where is it used?</a>
+      <a href="#prereq">5. Prerequisites</a>
+      <a href="#core">6. Core concepts (the launch checklist)</a>
+      <a href="#terms">7. Terminology</a>
+      <a href="#arch">8. Architecture</a>
+      <a href="#internal">9. How it works internally</a>
+      <a href="#steps">10. Step-by-step: a safe AI feature rollout</a>
+      <a href="#simple">11. Simple example</a>
+      <a href="#real">12. Real-world example</a>
+      <a href="#code">13. Code example (canary rollout)</a>
+      <a href="#advanced">14. Advanced example (automated rollback)</a>
+      <a href="#mistakes">15. Common mistakes</a>
+      <a href="#best">16. Best practices</a>
+      <a href="#production">17. Production considerations (meta)</a>
+      <a href="#security">18. Security considerations</a>
+      <a href="#performance">19. Performance considerations</a>
+      <a href="#cost">20. Cost considerations</a>
+      <a href="#debug">21. Debugging/troubleshooting</a>
+      <a href="#related">22. Related concepts</a>
+      <a href="#comparison">23. Comparison of rollout strategies</a>
+      <a href="#exercise">24. Mini practical exercise</a>
+      <a href="#project">25. Practical project</a>
+      <a href="#projectarch">26. Project architecture</a>
+      <a href="#interview-b">27. Interview Questions — Beginner</a>
+      <a href="#interview-i">28. Interview Questions — Intermediate</a>
+      <a href="#interview-a">29. Interview Questions — Advanced</a>
+      <a href="#interview-s">30. Interview Questions — Senior/Architect</a>
+      <a href="#interview-sc">31. Scenario-Based Questions</a>
+      <a href="#revision">32. Quick revision notes</a>
+      <a href="#cheat">33. Cheat sheet</a>
+      <a href="#further">34. Further topics to learn</a>
+    </div>
+
+    <h2 id="what">1. What is this?</h2>
+    <p>AI production deployment covers the release discipline specific to shipping LLM-based features safely: canary rollouts, evaluation gating, rollback plans, and the pre-launch checklist spanning every concern covered elsewhere in this knowledge base (evaluation, observability, security, cost, infrastructure).</p>
+
+    <h2 id="whyexist">2. Why does it exist?</h2>
+    <p>AI features fail in ways standard deployments don't fully anticipate (quality regression without a crash, silent hallucination increase, cost blowup) — this discipline exists to catch these AI-specific failure modes before/during rollout, not just after a user complaint.</p>
+
+    <h2 id="whyimportant">3. Why is it important?</h2>
+    <p>This is the synthesis checklist that ties together evaluation, observability, security, cost, and infrastructure into an actual "are we ready to ship" decision — the practical culmination of this entire knowledge base.</p>
+
+    <h2 id="whereused">4. Where is it used?</h2>
+    <p>Every production AI feature launch or significant update (new model version, prompt change, RAG pipeline change).</p>
+
+    <h2 id="prereq">5. Prerequisites</h2>
+    <p><a href="../35-AI-Evaluation/ai-evaluation-fundamentals.html">AI Evaluation</a>, <a href="../36-LLM-Observability/llm-observability-fundamentals.html">LLM Observability</a>, <a href="../42-AI-Infrastructure/ai-infrastructure-fundamentals.html">AI Infrastructure</a>.</p>
+
+    <h2 id="core">6. Core concepts (the launch checklist)</h2>
+    <ul>
+      <li><b>Evaluation gate:</b> the change doesn't regress golden-set evaluation scores beyond a defined threshold.</li>
+      <li><b>Observability in place:</b> tracing/logging covers the new/changed code path before it sees real traffic.</li>
+      <li><b>Security review:</b> tenant isolation, injection surface, tool permissions reviewed for any new capability.</li>
+      <li><b>Cost estimate:</b> projected cost at expected volume is known and budgeted.</li>
+      <li><b>Rollback plan:</b> a tested, fast path back to the previous known-good state.</li>
+      <li><b>Canary/staged rollout:</b> releasing to a small traffic percentage first, expanding gradually as confidence builds.</li>
+      <li><b>Monitoring/alerting:</b> thresholds defined for automatic alerting on quality, cost, or latency regression.</li>
+    </ul>
+
+    <h2 id="terms">7. Terminology</h2>
+    <table>
+      <tr><th>Term</th><th>Meaning</th></tr>
+      <tr><td>Canary release</td><td>Rolling out a change to a small subset of traffic/users first, monitoring before full rollout.</td></tr>
+      <tr><td>Feature flag</td><td>A toggle controlling whether a change is active, enabling fast rollback without a full redeploy.</td></tr>
+      <tr><td>Shadow deployment</td><td>Running a new version alongside the current one on live traffic, comparing outputs without affecting users.</td></tr>
+      <tr><td>Rollback</td><td>Reverting to the previous known-good version after detecting a problem.</td></tr>
+    </table>
+
+    <h2 id="arch">8. Architecture</h2>
+    <pre><code>Change (new prompt/model/RAG config)
+ → Offline evaluation gate (golden set, no regression)
+ → Security/cost review
+ → Shadow deployment (compare against current prod on live traffic, no user impact)
+ → Canary rollout (5% → 25% → 100% traffic, monitored at each stage)
+ → Full rollout, with rollback plan ready at every stage</code></pre>
+
+    <h2 id="internal">9. How it works internally</h2>
+    <p>A canary rollout works by routing a small, controlled percentage of real production traffic to the new version while the majority continues on the known-good version, allowing real-world validation (catching issues offline evaluation might miss) while limiting the blast radius of any problem to that small traffic percentage — monitoring dashboards compare the canary's quality/cost/latency metrics against the baseline in real time, with automated or manual gates deciding whether to expand or roll back at each stage.</p>
+
+    <h2 id="steps">10. Step-by-step: a safe AI feature rollout</h2>
+    <ol>
+      <li>Run the change against the offline evaluation golden set; confirm no regression.</li>
+      <li>Complete a security review for any new capability/data access.</li>
+      <li>Estimate cost impact at expected volume.</li>
+      <li>Deploy behind a feature flag; run a shadow deployment comparing against current production on live traffic.</li>
+      <li>Begin a canary rollout (e.g., 5% of traffic), monitoring quality/cost/latency closely.</li>
+      <li>Gradually expand traffic percentage as confidence builds, with a tested rollback plan ready at every stage.</li>
+      <li>Full rollout; continue monitoring via online evaluation.</li>
+    </ol>
+
+    <h2 id="simple">11. Simple example</h2>
+    <p>A team changing their RAG system's chunk size runs the new configuration through the evaluation suite first (catching a precision regression before it ever reaches users), rather than deploying directly to all traffic and discovering the regression via user complaints.</p>
+
+    <h2 id="real">12. Real-world example</h2>
+    <p>A company upgrading their underlying LLM model version runs a shadow deployment for a week (comparing the new model's responses against the current production model on live traffic without affecting users), then canaries at 5% traffic for several days while monitoring evaluation scores and cost, only reaching 100% rollout after two weeks of staged validation — treating a "simple model upgrade" with the same rigor as any other significant production change.</p>
+
+    <h2 id="code">13. Code example (canary rollout)</h2>
+    <pre><code class="language-python">import random
+
+def route_request(user_id, canary_percentage):
+    if hash(user_id) % 100 < canary_percentage:
+        return "canary_version"
+    return "stable_version"
+
+def handle_request(user_id, query, canary_percentage=5):
+    version = route_request(user_id, canary_percentage)
+    response = call_pipeline(version, query)
+    log_metrics(version=version, query=query, response=response)  # compare canary vs stable
+    return response
+</code></pre>
+
+    <h2 id="advanced">14. Advanced example (automated rollback)</h2>
+    <pre><code class="language-python">def monitor_canary_and_decide(canary_metrics, baseline_metrics, threshold=0.05):
+    quality_regression = baseline_metrics["quality"] - canary_metrics["quality"]
+    cost_increase = (canary_metrics["cost_per_request"] - baseline_metrics["cost_per_request"]) / baseline_metrics["cost_per_request"]
+
+    if quality_regression > threshold or cost_increase > 0.5:
+        trigger_rollback()
+        alert_team(f"Rollback triggered: quality_regression={quality_regression}, cost_increase={cost_increase}")
+        return "rolled_back"
+    return "continue_canary"
+</code></pre>
+
+    <h2 id="mistakes">15. Common mistakes</h2>
+    <ul>
+      <li>Deploying directly to 100% traffic without a canary stage, especially for model/prompt/RAG changes.</li>
+      <li>No rollback plan, or a rollback plan that's never been tested.</li>
+      <li>Treating "the tests passed" as sufficient without also running the AI-specific evaluation suite.</li>
+      <li>No defined threshold for what quality/cost regression triggers a rollback, leaving the decision ad hoc during an incident.</li>
+    </ul>
+
+    <h2 id="best">16. Best practices</h2>
+    <ul>
+      <li>Use shadow deployment and canary rollout for any meaningful model/prompt/RAG change.</li>
+      <li>Define rollback thresholds in advance, not during an active incident.</li>
+      <li>Test the rollback path itself before you need it in a real incident.</li>
+      <li>Treat the full launch checklist (evaluation, security, cost, observability, rollback) as mandatory, not optional for "small" changes.</li>
+    </ul>
+
+    <h2 id="production">17. Production considerations (meta)</h2>
+    <p>This entire page is itself a production consideration — the discipline of staged, monitored, reversible rollout is what separates mature AI engineering teams from those that repeatedly get surprised by production incidents.</p>
+
+    <h2 id="security">18. Security considerations</h2>
+    <p>Include security review (tenant isolation, injection surface, tool permissions) as a mandatory launch-checklist item for any change introducing new capabilities or data access — not an afterthought separate from the deployment process.</p>
+
+    <h2 id="performance">19. Performance considerations</h2>
+    <p>Monitor latency alongside quality and cost during canary stages — a change that improves quality but significantly degrades latency may still need to be rejected or iterated on before full rollout.</p>
+
+    <h2 id="cost">20. Cost considerations</h2>
+    <p>Canary rollouts limit the cost blast radius of an expensive regression (e.g., a prompt change that unexpectedly increases token usage) to a small traffic percentage rather than the full user base.</p>
+
+    <h2 id="debug">21. Debugging/troubleshooting</h2>
+    <ul>
+      <li><b>Canary shows a regression but it's unclear why:</b> use full tracing (LLM Observability) to compare canary vs. baseline traces for the same/similar queries.</li>
+      <li><b>Rollback doesn't fully resolve the issue:</b> verify the rollback actually reverted every changed component (model, prompt, RAG config) — partial rollbacks can leave inconsistent state.</li>
+      <li><b>Shadow deployment shows no issues but canary does:</b> investigate whether canary traffic differs meaningfully from the shadow comparison's sample (e.g., shadow ran during low-traffic hours missing a peak-load issue).</li>
+    </ul>
+
+    <h2 id="related">22. Related concepts</h2>
+    <p><a href="../35-AI-Evaluation/ai-evaluation-fundamentals.html">AI Evaluation</a> · <a href="../36-LLM-Observability/llm-observability-fundamentals.html">LLM Observability</a> · <a href="../45-AI-System-Design/ai-system-design-overview.html">AI System Design</a></p>
+
+    <h2 id="comparison">23. Comparison of rollout strategies</h2>
+    <table>
+      <tr><th>Strategy</th><th>Risk</th><th>Speed</th></tr>
+      <tr><td>Direct full rollout</td><td>Highest — no real-world validation before full exposure</td><td>Fastest</td></tr>
+      <tr><td>Shadow deployment</td><td>Low — no user impact, but doesn't test actual user-facing behavior</td><td>Slower, needs comparison period</td></tr>
+      <tr><td>Canary (staged)</td><td>Low-moderate — limited blast radius, real user-facing validation</td><td>Slower, staged</td></tr>
+    </table>
+
+    <h2 id="exercise">24. Mini practical exercise</h2>
+    <p>Write a launch checklist (using the core concepts list above) for a hypothetical change to your RAG project's chunking strategy, including specific rollback criteria.</p>
+
+    <h2 id="project">25. Practical project</h2>
+    <p><b>Canary Rollout Simulator:</b> build a simulated canary rollout system routing a percentage of mock traffic to a "new" vs "stable" version, logging comparative metrics, and automatically triggering a simulated rollback if quality/cost thresholds are breached.</p>
+
+    <h2 id="projectarch">26. Project architecture</h2>
+    <pre><code>route_request() → canary % split
+ → log_metrics(version, quality_score, cost, latency) per request
+ → monitor_canary_and_decide() runs periodically
+ → if thresholds breached: trigger_rollback() + alert
+ → dashboard: canary vs stable metrics side by side</code></pre>
+
+    <h2 id="interview-b">27. Interview Questions — Beginner</h2>
+    <div class="qa"><b>Q1.</b> What is a canary release?<br><b>A.</b> Rolling out a change to a small subset of traffic/users first, monitoring before expanding to full rollout.</div>
+    <div class="qa"><b>Q2.</b> What is a shadow deployment?<br><b>A.</b> Running a new version alongside the current one on live traffic, comparing outputs without affecting actual users.</div>
+    <div class="qa"><b>Q3.</b> Why do AI features need a different launch checklist than typical software deployments?<br><b>A.</b> They can fail in ways standard deployments don't fully anticipate, like quality regression without a crash, or silent cost increases.</div>
+    <div class="qa"><b>Q4.</b> What is a rollback plan?<br><b>A.</b> A tested, fast path back to the previous known-good state if a deployed change causes problems.</div>
+    <div class="qa"><b>Q5.</b> What's an evaluation gate?<br><b>A.</b> A check that a change doesn't regress golden-set evaluation scores beyond a defined threshold before being allowed to deploy.</div>
+    <div class="qa"><b>Q6.</b> Should rollback thresholds be decided during an active incident?<br><b>A.</b> No — they should be defined in advance, so the decision during an incident is fast and objective rather than ad hoc.</div>
+    <div class="qa"><b>Q7.</b> What's a feature flag used for in this context?<br><b>A.</b> A toggle controlling whether a change is active, enabling fast rollback without a full redeploy.</div>
+    <div class="qa"><b>Q8.</b> Why test the rollback path before you need it?<br><b>A.</b> An untested rollback plan might not actually work when needed during a real incident, compounding the original problem.</div>
+    <div class="qa"><b>Q9.</b> What should be monitored during a canary rollout?<br><b>A.</b> Quality, cost, and latency metrics, compared against the baseline/stable version.</div>
+    <div class="qa"><b>Q10.</b> Is "the tests passed" sufficient to greenlight an AI feature deployment?<br><b>A.</b> No — the AI-specific evaluation suite (quality/faithfulness/etc.) must also pass; standard code tests don't capture AI-specific quality regressions.</div>
+
+    <h2 id="interview-i">28. Interview Questions — Intermediate</h2>
+    <div class="qa"><b>Q1.</b> Why might shadow deployment alone be insufficient validation before a canary rollout?<br><b>A.</b> Shadow deployment compares outputs without affecting real users, so it can't validate actual user-facing behavior/experience (e.g., how users react to subtly different response styles) — canary rollout with real user exposure (at limited scale) catches issues shadow testing structurally can't.</div>
+    <div class="qa"><b>Q2.</b> How would you define objective rollback-trigger thresholds for quality and cost regression?<br><b>A.</b> Set specific, measurable thresholds in advance (e.g., "rollback if evaluation quality score drops more than 5% or cost per request increases more than 50%") based on acceptable risk tolerance, so the decision during a live canary is a fast, objective check against predefined criteria rather than a judgment call made under incident pressure.</div>
+    <div class="qa"><b>Q3.</b> Why is routing canary traffic by a consistent hash of user ID (rather than random per-request) often preferable?<br><b>A.</b> Consistent hashing ensures the same user always gets the same version throughout the canary period, avoiding a confusing inconsistent experience where a user sees different behavior across requests, and making it easier to correlate any user-reported issue with a specific version.</div>
+    <div class="qa"><b>Q4.</b> What's a practical reason to treat "small" prompt tweaks with the same rollout discipline as major model upgrades?<br><b>A.</b> Even small prompt changes can cause disproportionate, hard-to-predict quality or behavior shifts in an LLM's output (since prompting effects aren't always linear or intuitive) — treating all changes with consistent evaluation/canary discipline catches these surprises regardless of how "small" the change seemed.</div>
+    <div class="qa"><b>Q5.</b> How would you decide the canary traffic percentage and duration for a given change?<br><b>A.</b> Balance statistical significance (enough traffic/time to get a reliable signal on quality/cost/latency differences) against limiting exposure risk (smaller/shorter for higher-risk or higher-blast-radius changes) — higher-confidence, lower-risk changes can use a shorter/smaller canary, while significant model/architecture changes warrant a more conservative, longer staged rollout.</div>
+
+    <h2 id="interview-a">29. Interview Questions — Advanced</h2>
+    <div class="qa"><b>Q1.</b> How would you design an automated canary analysis system that doesn't require a human to manually review dashboards at every rollout stage?<br><b>A.</b> Define statistical significance tests comparing canary vs. baseline metrics (quality, cost, latency) with predefined thresholds, implement automated gating that only proceeds to the next rollout stage if the canary passes all defined checks with sufficient confidence, and route borderline/ambiguous results to human review rather than either auto-proceeding or auto-rejecting on insufficient signal.</div>
+    <div class="qa"><b>Q2.</b> What's a subtle risk of canary rollouts for agentic systems with multi-step, stateful interactions compared to simple request-response features?<br><b>A.</b> A user's multi-turn conversation or multi-step agent task could span the canary boundary (starting on one version, continuing on another if routing isn't consistent), creating inconsistent behavior mid-task; consistent session-based routing (not just per-request) is needed to avoid this, and even then, a version change mid-session (if a user returns later during a canary expansion) needs careful handling.</div>
+
+    <h2 id="interview-s">30. Interview Questions — Senior/Architect</h2>
+    <div class="qa"><b>Q1.</b> Design a comprehensive release-management process for a company shipping frequent prompt/model/RAG changes across many AI features, balancing shipping velocity with safety.<br><b>A.</b> Mandate an automated evaluation gate (golden set regression check) as a non-bypassable CI requirement for any change; require shadow deployment for significant changes (model upgrades, major prompt rewrites) and allow lighter-weight canary-only validation for smaller, lower-risk changes; define standard rollback thresholds and automate rollback triggering where possible; maintain a change log/registry tracking what's deployed where (useful for incident correlation); and build this process to scale with velocity — smaller teams/changes get lighter-weight gates, larger/riskier changes get the full staged process, rather than one-size-fits-all heavyweight process that would bottleneck shipping.</div>
+
+    <h2 id="interview-sc">31. Scenario-Based Questions</h2>
+    <div class="qa"><b>Scenario 1.</b> A canary rollout shows no quality regression, but after full rollout, users report a significant issue within days. What does this suggest about your canary process?<br><b>A.</b> The canary traffic/duration likely wasn't representative enough to catch this specific failure mode — consider whether the canary sample size, duration, or traffic segment (e.g., only tested during business hours, missing an off-hours usage pattern) needs adjustment, and add the discovered issue's pattern to your evaluation golden set for future coverage.</div>
+    <div class="qa"><b>Scenario 2.</b> During a canary rollout, cost per request on the canary version is double the baseline, but quality metrics look fine. What do you do?<br><b>A.</b> Trigger rollback per a predefined cost-regression threshold (don't let "quality looks fine" override a severe cost regression), investigate the root cause (likely increased context size or a routing misconfiguration sending more traffic to an expensive model tier), and only re-attempt the rollout after confirming the cost issue is resolved and re-validated.</div>
+
+    <h2 id="revision">32. Quick revision notes</h2>
+    <ul>
+      <li>Launch checklist: evaluation gate + security review + cost estimate + observability + rollback plan + canary/shadow rollout.</li>
+      <li>Define rollback thresholds in advance; test the rollback path itself.</li>
+      <li>Treat small prompt/model changes with the same rollout discipline as major ones.</li>
+      <li>Shadow deployment validates outputs; canary validates real user-facing behavior with limited blast radius.</li>
+    </ul>
+
+    <h2 id="cheat">33. Cheat sheet</h2>
+    <div class="callout">Launch checklist: eval gate → security review → cost estimate → observability ready → shadow deployment → canary rollout (staged %) → full rollout. Define rollback thresholds in advance; test rollback itself. No AI change is "too small" to skip this.</div>
+
+    <h2 id="further">34. Further topics to learn</h2>
+    <p><a href="../47-AI-Design-Patterns/">AI Design Patterns</a> → <a href="../48-AI-Interview-Preparation/">AI Interview Preparation</a></p>
+
+    <div class="prevnext">
+      <a href="../45-AI-System-Design/ai-system-design-overview.html">← AI System Design</a>
+      <a href="../47-AI-Design-Patterns/ai-design-patterns-overview.html">Next: AI Design Patterns →</a>
+    </div>
+  </main>
+</div>
+<script src="../assets/app.js"></script>
+</body>
+</html>

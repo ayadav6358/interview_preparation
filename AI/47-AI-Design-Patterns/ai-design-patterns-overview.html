@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Design Patterns</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <input class="searchbox" placeholder="Search topics..." />
+    <a href="../index.html">← Home</a>
+    <h3>47-AI-Design-Patterns</h3>
+    <a href="ai-design-patterns-overview.html">AI Design Patterns</a>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumbs"><a href="../index.html">Home</a> / 47-AI-Design-Patterns</div>
+      <button class="theme-toggle" onclick="toggleTheme()">🌓 Theme</button>
+    </div>
+    <h1>AI Design Patterns: RAG, Router, ReAct, Planner/Executor, Supervisor, Reflection</h1>
+    <span class="tag good">Stable</span><span class="tag">Last verified: 2026-10-06</span>
+
+    <div class="toc">
+      <b>On this page</b>
+      <a href="#what">1. What is this?</a>
+      <a href="#whyexist">2. Why does it exist?</a>
+      <a href="#whyimportant">3. Why is it important?</a>
+      <a href="#whereused">4. Where is it used?</a>
+      <a href="#prereq">5. Prerequisites</a>
+      <a href="#core">6. The pattern catalog</a>
+      <a href="#terms">7. Terminology</a>
+      <a href="#arch">8. Architecture per pattern</a>
+      <a href="#internal">9. How to choose a pattern</a>
+      <a href="#steps">10. Step-by-step: applying the catalog</a>
+      <a href="#simple">11. Simple example</a>
+      <a href="#real">12. Real-world example</a>
+      <a href="#code">13. Code example</a>
+      <a href="#advanced">14. Advanced example (combining patterns)</a>
+      <a href="#mistakes">15. Common mistakes</a>
+      <a href="#best">16. Best practices</a>
+      <a href="#production">17. Production considerations</a>
+      <a href="#security">18. Security considerations</a>
+      <a href="#performance">19. Performance considerations</a>
+      <a href="#cost">20. Cost considerations</a>
+      <a href="#debug">21. Debugging/troubleshooting</a>
+      <a href="#related">22. Related concepts</a>
+      <a href="#comparison">23. Pattern comparison table</a>
+      <a href="#exercise">24. Mini practical exercise</a>
+      <a href="#project">25. Practical project</a>
+      <a href="#projectarch">26. Project architecture</a>
+      <a href="#interview-b">27. Interview Questions — Beginner</a>
+      <a href="#interview-i">28. Interview Questions — Intermediate</a>
+      <a href="#interview-a">29. Interview Questions — Advanced</a>
+      <a href="#interview-s">30. Interview Questions — Senior/Architect</a>
+      <a href="#interview-sc">31. Scenario-Based Questions</a>
+      <a href="#revision">32. Quick revision notes</a>
+      <a href="#cheat">33. Cheat sheet</a>
+      <a href="#further">34. Further topics to learn</a>
+    </div>
+
+    <h2 id="what">1. What is this?</h2>
+    <p>AI design patterns are the named, recurring architectural solutions for common LLM application problems: RAG, Router, ReAct, Planner/Executor, Supervisor, Reflection, Critic, Human-in-the-loop, Multi-agent, Event-driven agent, Agentic RAG, Memory pattern, and Tool-use pattern — each already covered in depth elsewhere in this knowledge base, consolidated here as a quick-reference catalog.</p>
+
+    <h2 id="whyexist">2. Why does it exist?</h2>
+    <p>Having named patterns lets engineers communicate architecture quickly ("this is a Supervisor pattern with a Reflection step") instead of re-explaining from scratch every time — the same value proposition as the Gang of Four patterns in traditional software engineering, applied to LLM application architecture.</p>
+
+    <h2 id="whyimportant">3. Why is it important?</h2>
+    <p>Pattern fluency is directly tested in system design interviews ("which pattern would you use here and why") and speeds up real architecture discussions — this page is the single-page reference tying together agent/RAG patterns scattered across many earlier sections.</p>
+
+    <h2 id="whereused">4. Where is it used?</h2>
+    <p>Architecture discussions, system design interviews, any LLM application design decision.</p>
+
+    <h2 id="prereq">5. Prerequisites</h2>
+    <p><a href="../12-RAG/rag-fundamentals.html">RAG</a>, <a href="../17-AI-Agents/ai-agents-fundamentals.html">AI Agents</a>, <a href="../19-Agentic-AI/agentic-ai-architectures.html">Agentic AI Architectures</a>, <a href="../21-Multi-Agent-Systems/multi-agent-systems.html">Multi-Agent Systems</a>.</p>
+
+    <h2 id="core">6. The pattern catalog</h2>
+    <table>
+      <tr><th>Pattern</th><th>Problem → Solution</th></tr>
+      <tr><td>RAG</td><td>LLM lacks fresh/private knowledge → retrieve relevant context and inject into prompt</td></tr>
+      <tr><td>Router</td><td>Different requests need different handling → classify and direct to the right handler</td></tr>
+      <tr><td>ReAct</td><td>Complex tasks need dynamic multi-step action → interleave reasoning and tool-calling, observing results</td></tr>
+      <tr><td>Planner/Executor</td><td>Complex goals need upfront decomposition → separate planning from step-by-step execution</td></tr>
+      <tr><td>Supervisor</td><td>Different sub-tasks need different expertise → coordinate specialist agents and integrate results</td></tr>
+      <tr><td>Reflection/Critic</td><td>First-pass output may have errors → add a self-critique/revision pass</td></tr>
+      <tr><td>Human-in-the-loop</td><td>Some actions are too risky for full autonomy → pause for explicit human approval</td></tr>
+      <tr><td>Multi-agent</td><td>Task benefits from specialization/parallelism → decompose across multiple coordinated agents</td></tr>
+      <tr><td>Event-driven agent</td><td>Agent must react to external events, not just user requests → trigger agent runs from event streams/webhooks</td></tr>
+      <tr><td>Agentic RAG</td><td>Simple one-shot retrieval is insufficient → let an agent iteratively plan, retrieve, and refine</td></tr>
+      <tr><td>Memory pattern</td><td>Context window can't hold everything across sessions → externalize state to a persistent memory store</td></tr>
+      <tr><td>Tool-use pattern</td><td>LLM needs to take real-world actions → expose defined functions the model can request to call</td></tr>
+    </table>
+
+    <h2 id="terms">7. Terminology</h2>
+    <p>All terminology for these patterns is covered in depth in their dedicated sections: <a href="../12-RAG/rag-fundamentals.html">RAG</a>, <a href="../13-Advanced-RAG/advanced-rag-techniques.html">Advanced RAG (Agentic RAG)</a>, <a href="../16-Tool-Calling/tool-calling-fundamentals.html">Tool Calling</a>, <a href="../17-AI-Agents/ai-agents-fundamentals.html">AI Agents (ReAct)</a>, <a href="../19-Agentic-AI/agentic-ai-architectures.html">Agentic AI (Planner/Executor, Supervisor, Reflection)</a>, <a href="../20-Agent-Memory/agent-memory-fundamentals.html">Agent Memory</a>, <a href="../21-Multi-Agent-Systems/multi-agent-systems.html">Multi-Agent Systems</a>, <a href="../18-LangGraph/langgraph-fundamentals.html">LangGraph (human-in-the-loop)</a>.</p>
+
+    <h2 id="arch">8. Architecture per pattern</h2>
+    <pre><code>RAG:               Query → Retrieve → Augment prompt → Generate
+Router:            Query → Classify → Dispatch to handler A/B/C
+ReAct:              Goal → [Reason → Act → Observe] loop → Answer
+Planner/Executor:  Goal → Plan (steps) → Execute each step → (re-plan if needed)
+Supervisor:        Task → Supervisor → [Specialist A | B | C] → Integrate
+Reflection/Critic: Draft → Critique → Revise → (loop or finalize)
+Human-in-the-loop: Propose action → Interrupt (await human) → Execute on approval
+Event-driven:      External event → Trigger → Agent run → Action
+Agentic RAG:       Query → Agent loop: [retrieve → evaluate → refine query → retrieve again] → Answer
+Memory:            Session → Extract durable facts → Store → Retrieve in future sessions
+Tool-use:          LLM decides tool → App executes → Result → LLM continues</code></pre>
+
+    <h2 id="internal">9. How to choose a pattern</h2>
+    <p>Start from the actual problem symptom: need external knowledge → RAG; need to route varied requests → Router; need dynamic multi-step tool use → ReAct/Tool-use; need upfront decomposition of a complex goal → Planner/Executor; need distinct specialized expertise → Supervisor/Multi-agent; need higher output reliability → Reflection/Critic; need safety on risky actions → Human-in-the-loop; need cross-session continuity → Memory pattern. Patterns compose — a real system often combines several (e.g., Agentic RAG + Reflection + Human-in-the-loop for a high-stakes research assistant).</p>
+
+    <h2 id="steps">10. Step-by-step: applying the catalog</h2>
+    <ol>
+      <li>Identify the core problem symptom from the list above.</li>
+      <li>Select the matching pattern(s) as a starting architecture.</li>
+      <li>Check "when NOT to use" — confirm the added complexity is actually justified (see Agentic AI's "when not to use agents" guidance).</li>
+      <li>Implement the simplest version first; add further patterns only if evaluation shows a measurable need.</li>
+      <li>Document which patterns compose your final architecture for team communication.</li>
+    </ol>
+
+    <h2 id="simple">11. Simple example</h2>
+    <p>A customer-support bot combining Router (classify ticket type) + RAG (retrieve relevant docs per type) + Human-in-the-loop (escalate refunds over $100) — three patterns composed into one practical system.</p>
+
+    <h2 id="real">12. Real-world example</h2>
+    <p>A production research assistant combines Planner/Executor (decompose the research question), Agentic RAG (iterative retrieval per sub-question), Reflection (critique the draft synthesis), and Human-in-the-loop (require approval before publishing externally) — a four-pattern composition addressing complexity, knowledge-grounding, quality, and safety respectively.</p>
+
+    <h2 id="code">13. Code example</h2>
+    <pre><code class="language-python"># Router + RAG composition
+def route_and_answer(query):
+    category = classify(query)  # Router pattern
+    if category == "policy_question":
+        context = retrieve(query, index="policy_docs")  # RAG pattern
+        return generate(query, context)
+    elif category == "order_status":
+        return lookup_order_tool(query)  # Tool-use pattern
+    else:
+        return escalate_to_human(query)  # Human-in-the-loop pattern
+</code></pre>
+
+    <h2 id="advanced">14. Advanced example (combining patterns)</h2>
+    <pre><code class="language-python"># Agentic RAG + Reflection composed
+def agentic_rag_with_reflection(query, max_refine=3):
+    context = retrieve(query)
+    for _ in range(max_refine):
+        draft = generate(query, context)
+        critique = critique_draft(draft, context)
+        if "sufficient" in critique.lower():
+            return draft
+        query = refine_query(query, critique)  # iterate retrieval
+        context = retrieve(query)
+    return draft  # best effort after max refinements
+</code></pre>
+
+    <h2 id="mistakes">15. Common mistakes</h2>
+    <ul>
+      <li>Applying a pattern because it's trendy ("let's make it agentic") rather than because the actual problem symptom calls for it.</li>
+      <li>Combining too many patterns without evaluating whether each addition earns its added complexity/cost.</li>
+      <li>Not recognizing that many "complex agent" problems are actually solved by a simpler pattern (e.g., Router) once properly diagnosed.</li>
+    </ul>
+
+    <h2 id="best">16. Best practices</h2>
+    <ul>
+      <li>Diagnose the actual problem symptom before selecting a pattern.</li>
+      <li>Start with the simplest adequate pattern; add complexity only with measured justification.</li>
+      <li>Use pattern names in team communication for faster, clearer architecture discussions.</li>
+    </ul>
+
+    <h2 id="production">17. Production considerations</h2>
+    <p>Every pattern composition still needs the full production treatment covered elsewhere: evaluation, observability, security, cost monitoring — patterns describe structure, not operational readiness.</p>
+
+    <h2 id="security">18. Security considerations</h2>
+    <p>Tool-use and Human-in-the-loop patterns are your primary security control points — apply least-privilege scoping and approval gates consistently regardless of which other patterns surround them.</p>
+
+    <h2 id="performance">19. Performance considerations</h2>
+    <p>Each additional pattern layer (Reflection, Multi-agent, Agentic RAG's iteration) adds latency — budget accordingly and use Adaptive-style routing to apply expensive patterns only when needed.</p>
+
+    <h2 id="cost">20. Cost considerations</h2>
+    <p>Pattern composition directly multiplies LLM call count — estimate cost per composed pattern combination before committing to a complex multi-pattern architecture.</p>
+
+    <h2 id="debug">21. Debugging/troubleshooting</h2>
+    <ul>
+      <li><b>Unclear which pattern is causing a quality issue in a composed system:</b> trace each pattern's contribution separately (see LLM Observability) to isolate the failing stage.</li>
+      <li><b>System feels over-engineered:</b> revisit whether each composed pattern is still earning its complexity against a simpler baseline.</li>
+    </ul>
+
+    <h2 id="related">22. Related concepts</h2>
+    <p>Every pattern links to its full dedicated treatment above in section 7 — this page is a navigation hub, not a replacement for those deep-dives.</p>
+
+    <h2 id="comparison">23. Pattern comparison table</h2>
+    <table>
+      <tr><th>Pattern</th><th>Added latency/cost</th><th>Primary benefit</th></tr>
+      <tr><td>RAG</td><td>Low</td><td>Grounded, fresh knowledge</td></tr>
+      <tr><td>Router</td><td>Very low</td><td>Right handler per request type</td></tr>
+      <tr><td>ReAct / Tool-use</td><td>Moderate (multi-step)</td><td>Dynamic, real-world action-taking</td></tr>
+      <tr><td>Planner/Executor</td><td>Moderate</td><td>Reliable decomposition of complex goals</td></tr>
+      <tr><td>Supervisor/Multi-agent</td><td>High</td><td>Specialization, parallelism</td></tr>
+      <tr><td>Reflection/Critic</td><td>Moderate-High</td><td>Higher output reliability</td></tr>
+      <tr><td>Human-in-the-loop</td><td>UX cost (wait time)</td><td>Safety on high-risk actions</td></tr>
+    </table>
+
+    <h2 id="exercise">24. Mini practical exercise</h2>
+    <p>For a "legal contract review assistant" idea, identify which 3+ patterns from the catalog you'd compose, and justify each one's inclusion against the simpler alternative of omitting it.</p>
+
+    <h2 id="project">25. Practical project</h2>
+    <p><b>Pattern Composition Playground:</b> implement the Router + RAG + Human-in-the-loop example above as a working mini-system, then add a Reflection pass and measure the quality/cost/latency delta.</p>
+
+    <h2 id="projectarch">26. Project architecture</h2>
+    <pre><code>query → router (classify) → RAG branch | tool branch | escalate branch
+ → (optional) reflection pass on RAG branch output
+ → measure: quality (eval set), cost (tokens), latency, before/after reflection addition</code></pre>
+
+    <h2 id="interview-b">27. Interview Questions — Beginner</h2>
+    <div class="qa"><b>Q1.</b> What problem does the Router pattern solve?<br><b>A.</b> Different requests needing different handling — it classifies and directs each request to the right handler.</div>
+    <div class="qa"><b>Q2.</b> What problem does the Reflection/Critic pattern solve?<br><b>A.</b> First-pass output may have errors — it adds a self-critique/revision pass to improve reliability.</div>
+    <div class="qa"><b>Q3.</b> What problem does the Memory pattern solve?<br><b>A.</b> The context window can't hold everything across sessions — it externalizes state to a persistent memory store.</div>
+    <div class="qa"><b>Q4.</b> What's the difference between the RAG pattern and the Agentic RAG pattern?<br><b>A.</b> RAG is a single retrieve-then-generate pass; Agentic RAG lets an agent iteratively plan, retrieve, and refine across multiple steps.</div>
+    <div class="qa"><b>Q5.</b> Why are named design patterns useful for team communication?<br><b>A.</b> They let engineers quickly convey architecture ("this is a Supervisor pattern with Reflection") without re-explaining from scratch each time.</div>
+    <div class="qa"><b>Q6.</b> What problem does Human-in-the-loop solve?<br><b>A.</b> Some actions are too risky for full autonomy, so it pauses for explicit human approval before proceeding.</div>
+    <div class="qa"><b>Q7.</b> Can patterns be combined in one system?<br><b>A.</b> Yes — real systems often compose several patterns together (e.g., Router + RAG + Human-in-the-loop).</div>
+    <div class="qa"><b>Q8.</b> What problem does Planner/Executor solve?<br><b>A.</b> Complex goals needing upfront decomposition before execution — separating planning from step-by-step execution.</div>
+    <div class="qa"><b>Q9.</b> Should you adopt a pattern just because it's trendy?<br><b>A.</b> No — select patterns based on the actual problem symptom, not trends.</div>
+    <div class="qa"><b>Q10.</b> What does the Tool-use pattern enable?<br><b>A.</b> The LLM taking real-world actions by requesting defined functions the application executes.</div>
+
+    <h2 id="interview-i">28. Interview Questions — Intermediate</h2>
+    <div class="qa"><b>Q1.</b> How would you diagnose whether a complex problem actually needs the Supervisor/Multi-agent pattern versus a simpler Router pattern?<br><b>A.</b> Check whether sub-tasks genuinely need distinct specialized reasoning/tools that benefit from separate, independently-prompted agents (Supervisor), versus simply needing to be dispatched to different but otherwise simple handlers (Router) — if a single handler per category suffices without needing agent-level coordination, Router is the simpler, sufficient choice.</div>
+    <div class="qa"><b>Q2.</b> Why might composing Reflection with Agentic RAG be particularly effective for high-stakes research tasks?<br><b>A.</b> Agentic RAG improves retrieval thoroughness through iteration, while Reflection adds a quality check on the synthesized output itself — together they address both input quality (did we find the right information) and output quality (is the answer well-reasoned and consistent with that information), covering more failure modes than either alone.</div>
+    <div class="qa"><b>Q3.</b> What's a practical way to evaluate whether a pattern composition is "earning" its added complexity?<br><b>A.</b> Benchmark the composed system against progressively simpler versions (remove one pattern at a time) on your evaluation set, measuring quality/cost/latency at each level — if removing a pattern doesn't measurably hurt quality, it wasn't earning its complexity and should be removed.</div>
+    <div class="qa"><b>Q4.</b> Why is the Event-driven agent pattern architecturally different from the other patterns in this catalog?<br><b>A.</b> It's about the trigger mechanism (external events/webhooks initiating agent runs) rather than internal reasoning/coordination structure — it can be combined with any of the other patterns (RAG, ReAct, Supervisor) as the entry point, rather than being an alternative to them.</div>
+    <div class="qa"><b>Q5.</b> How would you explain the relationship between the Tool-use pattern and the ReAct pattern?<br><b>A.</b> Tool-use is the mechanism (LLM requests a function call, app executes it); ReAct is the loop structure that uses tool-use repeatedly, interleaved with reasoning steps, to accomplish a multi-step task — ReAct is built on top of the Tool-use pattern, not a separate, independent mechanism.</div>
+
+    <h2 id="interview-a">29. Interview Questions — Advanced</h2>
+    <div class="qa"><b>Q1.</b> How would you design a system that dynamically selects which pattern composition to apply based on request characteristics, rather than using a fixed composition for all traffic?<br><b>A.</b> Implement an upfront lightweight classification step (similar to Adaptive RAG) that assesses request complexity/risk/type, then routes to a progressively more complex pattern composition only as needed — simple requests get just RAG or a direct answer, moderately complex ones get Agentic RAG, and high-risk ones get the full Reflection + Human-in-the-loop treatment — avoiding uniform worst-case cost/latency for all traffic.</div>
+    <div class="qa"><b>Q2.</b> What's a subtle interaction risk when composing Multi-agent (Supervisor) with Human-in-the-loop?<br><b>A.</b> If approval gates are only applied at the Supervisor's final integration step but not within individual specialist agents' actions, a specialist could take an irreversible action before the human ever sees the Supervisor's summary — approval gating needs to be pushed down to wherever the actual risky action occurs, not just applied at the top-level coordination point.</div>
+
+    <h2 id="interview-s">30. Interview Questions — Senior/Architect</h2>
+    <div class="qa"><b>Q1.</b> How would you train/onboard a team of engineers new to agentic AI to use this pattern catalog effectively in their own architecture decisions?<br><b>A.</b> Teach the "diagnose symptom → select pattern" framework explicitly rather than pattern names in isolation, require a written justification (tied to measured evaluation results, not intuition) for every pattern added beyond the simplest baseline in design reviews, and maintain a few in-house reference implementations of key patterns (RAG, Router, Supervisor) that teams can study and adapt rather than each reinventing them from scratch.</div>
+
+    <h2 id="interview-sc">31. Scenario-Based Questions</h2>
+    <div class="qa"><b>Scenario 1.</b> A team proposes a 5-pattern composition (Router + Supervisor + Agentic RAG + Reflection + Multi-agent) for what turns out to be a simple FAQ-answering feature. What's your feedback?<br><b>A.</b> Recommend starting from the simplest adequate pattern (likely just RAG, possibly with Router if there are genuinely distinct FAQ categories) and only adding further patterns if evaluation on real FAQ traffic shows a measurable gap — a simple FAQ task almost certainly doesn't need Multi-agent or Supervisor-level specialization.</div>
+    <div class="qa"><b>Scenario 2.</b> Your composed Agentic RAG + Reflection system is accurate but takes 15 seconds per response, frustrating users. How do you address this while preserving quality where it matters?<br><b>A.</b> Add a complexity classifier (Adaptive-style routing) so simple queries skip the expensive Agentic RAG + Reflection path entirely (using plain RAG instead), reserving the slower, more thorough composition only for queries that actually need it — reducing average latency without sacrificing quality on the harder cases that justified the composition in the first place.</div>
+
+    <h2 id="revision">32. Quick revision notes</h2>
+    <ul>
+      <li>12 core patterns: RAG, Router, ReAct, Planner/Executor, Supervisor, Reflection/Critic, Human-in-the-loop, Multi-agent, Event-driven, Agentic RAG, Memory, Tool-use.</li>
+      <li>Diagnose the problem symptom first, then select pattern(s).</li>
+      <li>Patterns compose — but each addition must earn its complexity/cost.</li>
+      <li>Start simple; add complexity only with measured evaluation justification.</li>
+    </ul>
+
+    <h2 id="cheat">33. Cheat sheet</h2>
+    <div class="callout">RAG=knowledge, Router=dispatch, ReAct/Tool-use=dynamic action, Planner/Executor=decompose, Supervisor/Multi-agent=specialize, Reflection/Critic=quality pass, Human-in-the-loop=safety, Memory=cross-session state, Agentic RAG=iterative retrieval. Diagnose symptom → select → justify with evaluation.</div>
+
+    <h2 id="further">34. Further topics to learn</h2>
+    <p><a href="../48-AI-Interview-Preparation/">AI Interview Preparation</a> → <a href="../45-AI-System-Design/ai-system-design-overview.html">AI System Design</a></p>
+
+    <div class="prevnext">
+      <a href="../46-AI-Production-Deployment/ai-production-deployment.html">← AI Production Deployment</a>
+      <a href="../48-AI-Interview-Preparation/interview-prep-overview.html">Next: AI Interview Preparation →</a>
+    </div>
+  </main>
+</div>
+<script src="../assets/app.js"></script>
+</body>
+</html>

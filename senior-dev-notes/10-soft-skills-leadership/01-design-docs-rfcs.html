@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Writing Design Docs & RFCs — Soft Skills & Leadership — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">Soft Skills &amp; Leadership</a><span class="sep">›</span>Writing Design Docs &amp; RFCs</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>Writing Design Docs &amp; RFCs</h1>
+      <p class="meta-line"><span>⏱ ~2 hrs</span><span>📍 Chapter 1 of 7</span></p>
+      <p><strong>One-line summary:</strong> A good RFC gets a team to a decision in one review cycle; a bad one
+      generates three weeks of Slack threads that end nowhere — the difference is almost entirely structure, not
+      writing talent.</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>At senior level, you stop being judged only on code you write and start being judged on decisions you
+      cause to happen correctly without you being in the room. A design doc is the mechanism for that. If you
+      can't write one that a busy staff engineer can read in 10 minutes and either approve or push back on with
+      a specific objection, you can't scale your influence past your own keyboard — you'll be stuck re-explaining
+      the same context in every meeting, and decisions will drift to whoever talks the loudest in standup instead
+      of whoever has the best reasoning.</p>
+      <div class="box why"><h4>Why</h4><p>Writing forces you to notice the gaps in your own reasoning before a
+      reviewer does. Most "I didn't think of that" moments in a design review are moments the author would have
+      caught themselves if they'd been forced to write the alternative down instead of just gesturing at it
+      verbally.</p></div>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>No hard technical prerequisite. Related: <a href="06-decision-making.html">Technical Decision Making</a>
+      (for picking between the alternatives you document) and <a href="05-stakeholder-communication.html">Stakeholder Communication</a>
+      (for the executive-summary layer on top of a technical RFC).</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="basics">What an RFC is actually for</h3>
+      <p>An RFC (Request for Comments) or design doc is not documentation of a decision already made — it's the
+      artifact that <em>makes</em> the decision happen efficiently. It exists to:</p>
+      <ul>
+        <li>Force the author to commit to a specific proposal instead of hand-waving between options.</li>
+        <li>Let reviewers give feedback asynchronously, in parallel, instead of one meeting at a time.</li>
+        <li>Create a durable record of <em>why</em>, so six months later nobody re-litigates a decision from
+        scratch because they can't remember the reasoning.</li>
+        <li>Surface disagreement early — on paper, before code is written — when it's cheap to change course.</li>
+      </ul>
+      <p>The single biggest failure mode is writing an RFC that only presents one option and asks "thoughts?" —
+      that's not a design doc, that's an announcement. A real RFC names the alternatives you rejected and why,
+      because the alternatives are where the real engineering judgment lives.</p>
+
+      <h3 id="structure">The structure that works</h3>
+      <p>Length should match blast radius. A change affecting one team for two weeks might be half a page. A change
+      affecting five teams and a data migration for six months might be four pages — rarely more. If you can't fit
+      it in four pages, the scope is probably too large and should be split into phases with separate RFCs.</p>
+      <p>Sections, in order, and why each one exists:</p>
+      <ul>
+        <li><strong>Context / Problem statement</strong> — what's broken or missing, with a concrete symptom
+        (an incident, a metric, a blocked roadmap item), not "our architecture isn't scalable."</li>
+        <li><strong>Goals and non-goals</strong> — non-goals are the most skipped and most valuable section. They
+        stop reviewers from scope-creeping the discussion into a different problem.</li>
+        <li><strong>Proposed solution</strong> — the one you recommend, described concretely enough that someone
+        could start implementing it from this doc alone.</li>
+        <li><strong>Alternatives considered</strong> — at least one or two, each with a one-line reason it was
+        rejected. This is what proves you actually explored the space.</li>
+        <li><strong>Tradeoffs / risks</strong> — what gets worse under your proposal, and what you'll do about it.</li>
+        <li><strong>Rollout plan</strong> — phased, with a rollback path. "Big bang" rollouts are where senior
+        reviewers push back hardest.</li>
+        <li><strong>Open questions</strong> — things you genuinely don't know yet. Naming them builds trust;
+        pretending to have no open questions destroys it.</li>
+      </ul>
+
+      <h3 id="advanced">Running the review process, not just writing the doc</h3>
+      <p>The doc is half the job; getting it reviewed and <em>closed out</em> is the other half.</p>
+      <ul>
+        <li><strong>Pick reviewers deliberately.</strong> One domain expert who can poke real holes, one person
+        who'll be most affected operationally, one generalist senior/staff engineer for outside perspective.
+        Reviewing by "whoever happens to see the Slack link" produces noise, not signal.</li>
+        <li><strong>Set a deadline for comments</strong> and say what happens if nobody comments by then (you
+        proceed). Open-ended review cycles never close.</li>
+        <li><strong>Triage comments by type</strong>: blocking ("this will break X"), strong opinion ("I'd do Y
+        instead but won't block"), nit (naming, wording). Resolve blocking comments explicitly in the doc, don't
+        just reply in the thread — the next reader of the doc should see the resolution.</li>
+        <li><strong>Call a synchronous meeting only when text has stalled</strong> — i.e., the same point has gone
+        back and forth twice in comments with no convergence. Don't default to a meeting; it kills the efficiency
+        gain of writing async in the first place.</li>
+        <li><strong>Record the decision at the top of the doc</strong> once it's made: status (Draft / In Review /
+        Approved / Superseded), date, and who approved it. Future readers should not have to read the whole
+        comment thread to find out if this is even still the plan.</li>
+      </ul>
+
+      <h2 id="under-the-hood">How It Works in Practice</h2>
+      <p>A realistic timeline for a medium-sized RFC (affects 2-3 teams): draft over 1-2 days, share with the 3
+      chosen reviewers with a 3-business-day comment deadline, triage and resolve comments over the next 1-2 days,
+      final read-through, mark Approved. Total: about a week from first draft to decision. If it's taking three
+      weeks, usually one of: the doc didn't name a clear recommendation (too wishy-washy to agree or disagree
+      with), the wrong reviewers were picked (too many, or missing the one domain expert whose objection everyone
+      is waiting to hear), or disagreement went into a side Slack DM instead of being resolved in the doc where
+      the deadline pressure and public visibility actually work.</p>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+flowchart LR
+  A[Draft RFC v1] --> B[Share with 3 reviewers<br/>+ comment deadline]
+  B --> C{Comments by deadline?}
+  C -->|Blocking issues| D[Revise doc, resolve inline]
+  D --> B
+  C -->|No blockers / only nits| E[Mark Approved<br/>record decision + date]
+  E --> F[Implementation begins]
+  C -->|Stuck 2+ rounds, no convergence| G[Sync meeting<br/>with blocking reviewers only]
+  G --> D
+      </div>
+
+      <h2 id="code-examples">Templates / Example Scripts</h2>
+      <pre><code class="language-markdown"># RFC: [Short, specific title — not "Improve Payments"]
+
+**Status:** Draft | In Review | Approved | Superseded
+**Author:** Jane Doe   **Date:** 2026-10-03   **Reviewers:** @alex @priya @sam
+
+## Context / Problem
+Checkout latency p95 is 2.1s, SLA is 800ms. Root cause: payment-service calls
+three downstream providers synchronously per request. This blocks the
+Q4 "1-click checkout" roadmap item.
+
+## Goals
+- Get checkout p95 under 800ms without changing the provider contract.
+- No increase in failed-payment rate.
+
+## Non-goals
+- Not re-architecting the provider integrations themselves.
+- Not solving payment-service's unrelated memory leak (tracked in INFRA-412).
+
+## Proposed Solution
+Run the three provider calls concurrently with a 600ms timeout each and a
+circuit breaker per provider. Cache provider "health" status in Redis
+(30s TTL) to skip known-down providers immediately instead of waiting
+for their timeout.
+
+[architecture diagram / sequence diagram here]
+
+## Alternatives Considered
+1. **Async webhook-based confirmation** — rejected: requires provider
+   contract changes we can't get agreed before Q4.
+2. **Pre-warm all three providers on cart creation** — rejected: wastes
+   ~40% of calls (cart abandonment rate is 40%), raises our provider cost.
+
+## Tradeoffs / Risks
+- Concurrent calls raise peak outbound connection count ~3x. Mitigation:
+  connection pool sized for 3x current peak, load-tested before rollout.
+- Circuit breaker false-positives could skip a provider that's actually fine
+  during a network blip. Mitigation: 3-failure threshold, 30s half-open probe.
+
+## Rollout Plan
+1. Ship behind a feature flag, 1% of traffic, 48h bake.
+2. Ramp 1% -> 25% -> 100% over 5 business days, watch p95 + failure rate.
+3. Rollback: flip the flag off; old synchronous path stays in code for one
+   release cycle before removal.
+
+## Open Questions
+- Does provider C's rate limit allow 3x concurrent call volume at peak?
+  (Checking with their support, ETA answer by Fri.)
+</code></pre>
+      <p>Bad vs good framing of the same proposal section:</p>
+      <pre><code class="language-markdown"># Bad: vague, unreviewable
+We should probably make the payment calls faster, maybe parallel or
+caching or something. Let me know what you think!
+
+# Good: concrete, falsifiable, reviewable
+Run the 3 provider calls concurrently with a 600ms per-call timeout and
+a circuit breaker per provider (3-failure threshold, 30s half-open).
+Expected p95: ~650ms (longest of 3 parallel calls vs sum of 3 sequential).
+</code></pre>
+
+      <h2 id="production-scenario">Real-World Scenario at Scale (large team / org)</h2>
+      <div class="box prod"><h4>At scale</h4><p>At orgs with dozens of teams, RFCs that touch shared infrastructure
+      (a core API, a shared database, a platform library) need an explicit "affected teams" list and a
+      sign-off checkbox per team lead, not just open comments — otherwise a team finds out about a breaking
+      change the week it ships, not the week it was proposed. Many large orgs also run a lightweight RFC
+      index/registry (a wiki page or doc folder with status + owner) so a new hire can find "what's the current
+      plan for X" without archaeology through Slack history. The single biggest org-scale failure is RFC sprawl:
+      dozens of "Approved" docs that were never actually implemented and nobody marked Superseded — treat an
+      RFC's status field as a long-term promise to keep current, not a one-time label.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Writing the "Alternatives Considered" section after the fact, to
+      justify a decision you'd already made informally, instead of genuinely before. Reviewers can tell — the
+      rejected alternatives read as strawmen with no real tradeoff. Write this section honestly, including an
+      alternative that's actually tempting, and give the real reason you didn't pick it.</p></div>
+      <ul>
+        <li><strong>Mistake:</strong> no clear recommendation — presenting 3 options as equally weighted and
+        asking the room to pick. That's abdicating the judgment call you were asked to make. Recommend one,
+        and let reviewers argue you out of it if they disagree.</li>
+        <li><strong>Mistake:</strong> burying the problem statement under implementation detail. A reviewer should
+        understand <em>why this matters</em> in the first 30 seconds.</li>
+        <li><strong>Best practice:</strong> write the one-paragraph summary/TL;DR at the very top, even though
+        you'll write it last — busy senior reviewers often only read that paragraph plus the alternatives section.</li>
+        <li><strong>Best practice:</strong> timebox the writing itself. An RFC is a tool to get to a decision, not
+        a thesis. If you're on draft 5 and still polishing prose, you're avoiding sending it for feedback.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>Full RFC doc</td><td>Decision affects multiple teams, hard to reverse, or has real tradeoffs</td><td>Trivial, single-team, easily reversed change</td><td>Short Slack proposal + thumbs-up</td></tr>
+        <tr><td>Synchronous design meeting</td><td>Written discussion has genuinely stalled, or stakeholders are in very different timezones with urgency</td><td>As a default first step — it doesn't scale and excludes async contributors</td><td>Async comments with a deadline</td></tr>
+        <tr><td>One-pager</td><td>Small/medium scope, 1-2 teams</td><td>Decision has org-wide, multi-quarter impact</td><td>Full RFC with phased sub-RFCs</td></tr>
+        <tr><td>No doc at all</td><td>Truly trivial, fully reversible, single-owner change</td><td>Anything someone will ask "why did we do it this way" about in 6 months</td><td>A short one-pager or even just a well-written PR description</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic">
+        <h4>Basic</h4>
+        <details class="qa"><summary>What is the purpose of a design doc / RFC?</summary><div class="answer"><p>To
+        force a concrete proposal (not just vague discussion), surface alternatives and tradeoffs, let reviewers
+        give async feedback in parallel, and create a durable record of why a decision was made. It's the
+        mechanism that gets a team to a decision efficiently and records the reasoning for later.</p></div>
+        <div class="followup">Follow-up: why not just discuss it in a meeting?</div></details>
+        <details class="qa"><summary>What sections should every design doc have at minimum?</summary><div class="answer"><p>Context/problem, goals and non-goals, proposed solution, alternatives considered, risks/tradeoffs, and a rollout plan. Non-goals and alternatives are the two most commonly skipped but most valuable.</p></div>
+        <div class="followup">Follow-up: why are non-goals valuable?</div></details>
+        <details class="qa"><summary>Why should an RFC list alternatives it rejected?</summary><div class="answer"><p>It proves the author actually explored the solution space rather than anchoring on the first idea, and gives reviewers a concrete thing to disagree with if they think a rejected option was actually better.</p></div>
+        <div class="followup">Follow-up: what makes a rejected-alternative section weak?</div></details>
+        <details class="qa"><summary>How long should a design doc be?</summary><div class="answer"><p>Proportional to blast radius — half a page for a small single-team change, up to ~4 pages for something affecting several teams over months. If it's longer than that, the scope should probably be split into phases.</p></div>
+        <div class="followup">Follow-up: what do you do when a proposal doesn't fit in 4 pages?</div></details>
+        <details class="qa"><summary>Who should review an RFC?</summary><div class="answer"><p>A small, deliberately chosen set: a domain expert who can find real holes, someone most operationally affected, and a generalist senior/staff engineer for outside perspective — not "whoever sees the link in Slack."</p></div>
+        <div class="followup">Follow-up: what goes wrong if you pick too many reviewers?</div></details>
+        <details class="qa"><summary>What does "status: Approved" on a doc mean, and why record it?</summary><div class="answer"><p>It's a durable marker of the decision and date, so future readers don't have to read the whole comment thread to know if the plan is current. It should be updated to "Superseded" when a later decision replaces it.</p></div>
+        <div class="followup">Follow-up: what's RFC sprawl and why is it a problem?</div></details>
+        <details class="qa"><summary>When is it OK to skip writing a design doc entirely?</summary><div class="answer"><p>When the change is trivial, fully and cheaply reversible, and single-owner — nothing anyone would reasonably ask "why did we do it this way" about six months later.</p></div>
+        <div class="followup">Follow-up: give an example from your own recent work.</div></details>
+      </div>
+      <div class="qa-level medium">
+        <h4>Medium</h4>
+        <details class="qa"><summary>Your RFC has been in review for three weeks with no resolution. What do you do?</summary><div class="answer"><p>Diagnose why: no clear recommendation (too wishy-washy to agree/disagree with), wrong reviewer set, or disagreement happening in side DMs instead of in the doc. Fix the specific cause — add a clear recommendation, re-scope reviewers, pull disagreement back into the doc with a hard comment deadline — rather than just pinging "any updates?" again.</p></div>
+        <div class="followup">Follow-up: when do you escalate to a sync meeting?</div></details>
+        <details class="qa"><summary>A reviewer leaves a strong objection to your recommended approach after everyone else has already approved. How do you handle it?</summary><div class="answer"><p>Take it seriously regardless of timing — re-open the relevant section, ask for their specific concern in writing, and evaluate on merit. If it's a real blocking issue, revise the doc and re-notify all reviewers; don't just overrule it because "everyone else already said yes." If it's a preference not a blocker, note it as a considered-and-declined alternative.</p></div>
+        <div class="followup">Follow-up: how do you avoid this happening repeatedly from the same reviewer?</div></details>
+        <details class="qa"><summary>How do you write a design doc for a problem you don't yet have a strong recommendation for?</summary><div class="answer"><p>Still write it with a recommendation — pick the option you lean toward with your current information, flag your confidence level explicitly ("60% confident"), and put your real uncertainty in Open Questions with a plan to resolve it (a spike, a conversation with a specific team) rather than leaving the whole doc open-ended.</p></div>
+        <div class="followup">Follow-up: what's wrong with presenting 3 options with no recommendation at all?</div></details>
+        <details class="qa"><summary>How do design docs differ for a reversible vs an irreversible decision?</summary><div class="answer"><p>Reversible decisions (a config value, a feature flag default) need a lighter doc and faster review since the cost of being wrong is low. Irreversible ones (a public API contract, a data model that's hard to migrate, a vendor lock-in) need a fuller alternatives/risk section and more deliberate reviewer sign-off, because reversing course later is expensive.</p></div>
+        <div class="followup">Follow-up: how does this map to Amazon's one-way vs two-way door framing?</div></details>
+        <details class="qa"><summary>How do you write the rollout plan section for a change with a database migration involved?</summary><div class="answer"><p>Phase it: dual-write or backward-compatible schema change first, backfill, verify data consistency with a read-path comparison, then cut over reads, then remove the old path — each phase independently deployable and reversible. State the rollback path for each phase explicitly, not just "we'll roll back if needed."</p></div>
+        <div class="followup">Follow-up: why phase it instead of a single migration deploy?</div></details>
+        <details class="qa"><summary>How do you keep a design doc from becoming stale after it's approved?</summary><div class="answer"><p>Treat the status field as a living promise: update to Superseded when a later decision replaces it, link forward/backward between related docs, and periodically (e.g., during a related incident or retro) check whether "Approved" docs still reflect reality.</p></div>
+        <div class="followup">Follow-up: whose job is it to keep docs current — the author's, forever?</div></details>
+      </div>
+      <div class="qa-level advanced">
+        <h4>Advanced</h4>
+        <details class="qa"><summary>You're asked to write an RFC for a decision your manager has effectively already made informally. How do you handle the "Alternatives Considered" section honestly?</summary><div class="answer"><p>Write it as a genuine exploration anyway — list the alternative that's actually tempting (not a strawman) and give the real reason it was deprioritized. If you can't find a real reason beyond "leadership preference," say that explicitly rather than fabricating a technical justification; a fabricated justification will be spotted by any sharp reviewer and damages your credibility more than an honest "this was already directionally decided, here's the reasoning" would.</p></div>
+        <div class="followup">Follow-up: what if a reviewer then raises an objection to the "already decided" approach — what's your move?</div></details>
+        <details class="qa"><summary>How would you redesign your org's RFC process if docs were being approved but routinely not implemented as written?</summary><div class="answer"><p>Add a lightweight implementation-tracking step: link the RFC to the tracking ticket/epic, and require an "implementation diverged from doc" note (plus a doc update) if the shipped version differs materially. Also check whether approval is happening too easily/early — sometimes divergence during implementation reveals the doc wasn't detailed enough to be followed as written, which is itself a sign to require more concreteness before Approved status.</p></div>
+        <div class="followup">Follow-up: how do you avoid turning this into bureaucratic overhead that slows teams down?</div></details>
+        <details class="qa"><summary>Describe a time you had to write an RFC for a decision you personally disagreed with. How did you approach it?</summary><div class="answer"><p>(Scenario-based — strong answers describe presenting the recommended option fairly and completely even while personally preferring an alternative, documenting that alternative honestly in the Alternatives section with its real tradeoffs, and separating "what I'd personally choose" from "what the doc recommends based on the team's stated priorities" rather than silently sandbagging the option they disagree with.)</p></div>
+        <div class="followup">Follow-up: where's the line between advocating for your view and being a team player once a decision is made?</div></details>
+        <details class="qa"><summary>How do you scope an RFC review process differently for a proposal that changes a public API contract used by external customers versus an internal-only service?</summary><div class="answer"><p>External-facing changes need a much higher bar: explicit versioning/deprecation plan, a defined support window for the old contract, and often legal/support/docs team sign-off in addition to engineering — because the "blast radius" includes parties you can't coordinate a synchronized rollout with. Internal-only changes can move faster since all consumers are known and can be migrated in lockstep.</p></div>
+        <div class="followup">Follow-up: how would you handle a customer who's already built on a contract you're about to deprecate?</div></details>
+        <details class="qa"><summary>Your RFC proposes a technically superior solution that would take 3x longer than a "good enough" alternative, and leadership is pushing for speed. How do you write the doc?</summary><div class="answer"><p>Present both honestly with real numbers (cost of each, cost of technical debt incurred by the faster path, and a concrete plan/timeline for paying that debt down later), and let leadership make the business call explicitly and visibly in the doc rather than making it for them by only presenting the option you prefer. Record whichever is chosen along with the debt tradeoff accepted, so it's not relitigated later as if nobody saw it coming.</p></div>
+        <div class="followup">Follow-up: six months later the debt from the fast path caused an outage — how do you reference this RFC in the retro without it reading as "I told you so"?</div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment">
+        <span class="level-tag">Beginner (30-60 min)</span>
+        <h4>Rewrite a vague proposal</h4>
+        <p>Take this real-world-style vague proposal: "We should move our logging to a better system, the
+        current one is kind of a mess and hard to search." Rewrite it as a proper one-page RFC using the template
+        from this chapter.</p>
+        <ul>
+          <li>Include a concrete problem statement (invent realistic symptoms: search latency, missing fields, cost).</li>
+          <li>Include at least 2 alternatives with real rejection reasons.</li>
+          <li>Include a rollout plan with a rollback path.</li>
+        </ul>
+        <p><strong>Acceptance criteria:</strong> A reviewer with no other context could approve or raise one
+        specific objection after reading it in under 5 minutes.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>Pick one specific logging system as your recommendation (e.g., ELK vs a managed service) and commit to it — don't leave it open.</p></div></details>
+        <p><strong>Bonus:</strong> Write the "Open Questions" section with at least one question you genuinely
+        couldn't answer without more research.</p>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Intermediate (2-4 hrs)</span>
+        <h4>Write a real RFC for your own work</h4>
+        <p>Pick a real technical decision you've made (or are currently facing) at work or in a side project — a
+        library choice, a data model change, a service split. Write the full RFC.</p>
+        <ul>
+          <li>Must include a real, specific problem statement with a symptom or metric.</li>
+          <li>Must include at least one alternative you were genuinely tempted by.</li>
+          <li>Must include a phased rollout plan with rollback.</li>
+        </ul>
+        <p><strong>Acceptance criteria:</strong> Share it with one real colleague or mentor and get at least one
+        piece of substantive feedback (not just "looks good").</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>If you can't find a real alternative you were tempted by, you probably haven't explored the space enough yet — that's a sign to do 30 more minutes of research before writing the doc, not to fabricate one.</p></div></details>
+        <p><strong>Bonus:</strong> Have someone play a skeptical reviewer and give you one hard pushback question; write your response.</p>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Advanced (1-2 days)</span>
+        <h4>Design an RFC process for a 40-person engineering org</h4>
+        <p>Your company has grown from 8 engineers (where decisions happened by walking over to someone's desk) to
+        40 across 6 teams, and decisions are now getting made inconsistently — some teams write great docs, others
+        ship breaking changes with zero notice. Design the RFC process: templates, review SLAs, who approves what
+        tier of change, and how you avoid both "nothing ships because of process" and "nothing is documented."</p>
+        <ul>
+          <li>Define at least 2 tiers of change (e.g., team-local vs cross-team) with different review requirements.</li>
+          <li>Define what happens when a team ignores the process.</li>
+          <li>Define how you'll know in 3 months whether the process is working or just adding overhead.</li>
+        </ul>
+        <details class="qa"><summary>Hints (no full solution)</summary><div class="answer"><p>Think about what signal you'd actually measure — review cycle time, number of post-ship surprises/incidents tied to undocumented changes — rather than just "process compliance."</p></div></details>
+      </div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet">
+        <ul>
+          <li>RFC = decision-making tool, not after-the-fact documentation.</li>
+          <li>Required sections: context, goals/non-goals, proposal, alternatives, risks, rollout.</li>
+          <li>Length scales with blast radius — half a page to ~4 pages max.</li>
+          <li>Always name a clear recommendation, not just a menu of equal options.</li>
+          <li>Pick 2-3 deliberate reviewers, not "whoever sees the Slack link."</li>
+          <li>Set a comment deadline; default to proceeding if nobody objects by then.</li>
+          <li>Resolve blocking comments in the doc itself, not just in thread replies.</li>
+          <li>Record status (Draft/In Review/Approved/Superseded) + date at the top.</li>
+          <li>Reversible decisions get lighter docs; irreversible ones get fuller risk sections.</li>
+          <li>Keep approved docs current — mark Superseded, don't let RFC sprawl accumulate.</li>
+        </ul>
+      </div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://www.google.com/about/careers/applications/how-we-hire/interview-prep/">Google's writing culture on design docs (various public engineering blog posts)</a></li>
+        <li><a href="https://aws.amazon.com/executive-insights/content/amazon-leadership-principles/">Amazon's "one-way door vs two-way door" decision framing</a></li>
+        <li><a href="https://www.industrialempathy.com/posts/design-docs-at-google/">Design Docs at Google — Malte Ubl</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="index.html"><span class="dir">← Previous</span>Topic Overview</a>
+        <a class="next" href="02-code-reviews.html"><span class="dir">Next →</span>Code Reviews That Improve Teams</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · Soft Skills &amp; Leadership</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-markdown.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "10-soft-skills-leadership", chapterKey: "01-design-docs-rfcs" });</script>
+</body>
+</html>

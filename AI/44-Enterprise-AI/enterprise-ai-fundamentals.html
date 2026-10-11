@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Enterprise AI Fundamentals</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <input class="searchbox" placeholder="Search topics..." />
+    <a href="../index.html">← Home</a>
+    <h3>44-Enterprise-AI</h3>
+    <a href="enterprise-ai-fundamentals.html">Enterprise AI Fundamentals</a>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumbs"><a href="../index.html">Home</a> / 44-Enterprise-AI</div>
+      <button class="theme-toggle" onclick="toggleTheme()">🌓 Theme</button>
+    </div>
+    <h1>Enterprise AI: Multi-Tenancy, RBAC, Compliance, Governance</h1>
+    <span class="tag good">Stable</span><span class="tag">Last verified: 2026-10-06</span>
+
+    <div class="toc">
+      <b>On this page</b>
+      <a href="#what">1. What is this?</a>
+      <a href="#whyexist">2. Why does it exist?</a>
+      <a href="#whyimportant">3. Why is it important?</a>
+      <a href="#whereused">4. Where is it used?</a>
+      <a href="#prereq">5. Prerequisites</a>
+      <a href="#core">6. Core concepts</a>
+      <a href="#terms">7. Terminology</a>
+      <a href="#arch">8. Architecture</a>
+      <a href="#internal">9. How it works internally</a>
+      <a href="#steps">10. Step-by-step: hardening a RAG system for enterprise</a>
+      <a href="#simple">11. Simple example</a>
+      <a href="#real">12. Real-world example</a>
+      <a href="#code">13. Code example</a>
+      <a href="#advanced">14. Advanced example (audit logging)</a>
+      <a href="#mistakes">15. Common mistakes</a>
+      <a href="#best">16. Best practices</a>
+      <a href="#production">17. Production considerations</a>
+      <a href="#security">18. Security considerations</a>
+      <a href="#performance">19. Performance considerations</a>
+      <a href="#cost">20. Cost considerations</a>
+      <a href="#debug">21. Debugging/troubleshooting</a>
+      <a href="#related">22. Related concepts</a>
+      <a href="#comparison">23. Comparison with alternatives</a>
+      <a href="#exercise">24. Mini practical exercise</a>
+      <a href="#project">25. Practical project</a>
+      <a href="#projectarch">26. Project architecture</a>
+      <a href="#interview-b">27. Interview Questions — Beginner</a>
+      <a href="#interview-i">28. Interview Questions — Intermediate</a>
+      <a href="#interview-a">29. Interview Questions — Advanced</a>
+      <a href="#interview-s">30. Interview Questions — Senior/Architect</a>
+      <a href="#interview-sc">31. Scenario-Based Questions</a>
+      <a href="#revision">32. Quick revision notes</a>
+      <a href="#cheat">33. Cheat sheet</a>
+      <a href="#further">34. Further topics to learn</a>
+    </div>
+
+    <h2 id="what">1. What is this?</h2>
+    <p>Enterprise AI covers the organizational and compliance requirements layered on top of technical AI architecture: multi-tenancy, RBAC (role-based access control), SSO, data governance, PII handling, regulatory compliance, audit logs, data residency, and enterprise system connectors.</p>
+
+    <h2 id="whyexist">2. Why does it exist?</h2>
+    <p>Enterprise customers have requirements (compliance, access control, auditability) that a consumer-facing or prototype AI application typically doesn't need to address — this layer exists because selling/deploying AI into enterprises requires meeting these non-negotiable organizational requirements.</p>
+
+    <h2 id="whyimportant">3. Why is it important?</h2>
+    <p>Most high-value enterprise AI deals are won or lost on these requirements, not on model quality alone — an AI engineer who understands RBAC, tenant isolation, and compliance alongside the technical ML/LLM stack is far more valuable for enterprise-facing roles.</p>
+
+    <h2 id="whereused">4. Where is it used?</h2>
+    <p>Enterprise RAG/knowledge assistants, B2B SaaS AI features, any AI product sold to regulated industries (finance, healthcare, government).</p>
+
+    <h2 id="prereq">5. Prerequisites</h2>
+    <p><a href="../11-Vector-Databases/vector-databases.html">Vector Databases</a> (tenant filtering), <a href="../38-AI-Security/ai-security-fundamentals.html">AI Security</a>.</p>
+
+    <h2 id="core">6. Core concepts</h2>
+    <ul>
+      <li><b>Multi-tenancy:</b> serving multiple customer organizations from shared infrastructure while strictly isolating their data.</li>
+      <li><b>RBAC:</b> restricting what actions/data a user can access based on their role within their organization.</li>
+      <li><b>SSO:</b> integrating with the customer's existing identity provider (Okta, Azure AD) rather than managing separate credentials.</li>
+      <li><b>Data governance:</b> policies and controls over how data is collected, stored, used, and retained.</li>
+      <li><b>PII handling:</b> specific controls for personally identifiable information, often with legal/regulatory requirements.</li>
+      <li><b>Compliance:</b> meeting specific regulatory frameworks (GDPR, HIPAA, SOC 2) relevant to the customer's industry.</li>
+      <li><b>Audit logs:</b> comprehensive, tamper-resistant records of who did what, when.</li>
+      <li><b>Data residency:</b> ensuring data is stored/processed only in specific geographic/legal jurisdictions as required.</li>
+      <li><b>Enterprise connectors:</b> pre-built integrations with common enterprise systems (Salesforce, SharePoint, Slack).</li>
+    </ul>
+
+    <h2 id="terms">7. Terminology</h2>
+    <table>
+      <tr><th>Term</th><th>Meaning</th></tr>
+      <tr><td>Tenant</td><td>A distinct customer organization sharing the underlying platform infrastructure.</td></tr>
+      <tr><td>RBAC</td><td>Role-Based Access Control — permissions assigned based on user roles.</td></tr>
+      <tr><td>SSO/SAML/OIDC</td><td>Single Sign-On and the common protocols (SAML, OIDC) enabling enterprise identity integration.</td></tr>
+      <tr><td>SOC 2</td><td>A common compliance audit framework for SaaS security practices.</td></tr>
+      <tr><td>Data residency</td><td>Requirements that data be stored/processed within specific geographic/legal boundaries.</td></tr>
+    </table>
+
+    <h2 id="arch">8. Architecture</h2>
+    <pre><code>Enterprise customer's SSO (SAML/OIDC)
+ → Authentication → User identity + role
+ → RBAC check (what can this role access?)
+ → Tenant-scoped data layer (vector DB, SQL — all filtered by tenant_id)
+ → AI pipeline (RAG/agent, operating only within the authorized, tenant-scoped data)
+ → Audit log (every access/action recorded)</code></pre>
+
+    <h2 id="internal">9. How it works internally</h2>
+    <p>Enterprise-grade tenant isolation typically combines two layers: a strict data-layer filter (every query to the vector DB/SQL database includes a mandatory tenant_id condition, enforced at the query-construction level so it can't be accidentally omitted) and an application-layer RBAC check (verifying the authenticated user's role permits the requested action before even constructing the query) — redundant layers are deliberate, since a single point of failure in access control is an unacceptable risk at enterprise scale.</p>
+
+    <h2 id="steps">10. Step-by-step: hardening a RAG system for enterprise</h2>
+    <ol>
+      <li>Add tenant_id to every data record and enforce it in every query (see Vector Databases security section).</li>
+      <li>Integrate SSO for authentication instead of custom credential management.</li>
+      <li>Implement RBAC mapping roles to specific data/action permissions.</li>
+      <li>Add comprehensive audit logging of every data access and AI-driven action.</li>
+      <li>Document data flows and retention policies for compliance review.</li>
+      <li>Pursue relevant compliance certifications (SOC 2, etc.) as required by target customers.</li>
+    </ol>
+
+    <h2 id="simple">11. Simple example</h2>
+    <p>A B2B SaaS AI assistant integrates with the customer's Okta SSO, maps Okta groups to internal roles (e.g., "admin" can see all company documents, "contributor" sees only their team's), and logs every document access for the customer's own compliance audits.</p>
+
+    <h2 id="real">12. Real-world example</h2>
+    <p>An enterprise knowledge-assistant platform serving hundreds of customer organizations from shared infrastructure enforces tenant isolation at the database query layer (every query includes `WHERE tenant_id = $1`), integrates with each customer's own SSO provider, and provides each customer an audit-log export feature to satisfy their own internal compliance requirements — all while running on the same underlying RAG pipeline for every tenant.</p>
+
+    <h2 id="code">13. Code example</h2>
+    <pre><code class="language-python">ROLE_PERMISSIONS = {
+    "admin": {"read_all_docs", "manage_users", "export_data"},
+    "contributor": {"read_team_docs", "write_team_docs"},
+    "viewer": {"read_team_docs"},
+}
+
+def check_permission(user_role, action):
+    if action not in ROLE_PERMISSIONS.get(user_role, set()):
+        raise PermissionError(f"Role {user_role} cannot perform {action}")
+
+def rag_query(user, question):
+    check_permission(user.role, "read_team_docs")
+    results = vector_db.search(
+        embed(question), top_k=5,
+        filter={"tenant_id": user.tenant_id, "team_id": user.team_id if user.role != "admin" else None},
+    )
+    audit_log.record(user_id=user.id, action="rag_query", tenant_id=user.tenant_id, query=question)
+    return generate_answer(question, results)
+</code></pre>
+
+    <h2 id="advanced">14. Advanced example (audit logging)</h2>
+    <pre><code class="language-python">import hashlib, json, time
+
+def tamper_resistant_log(event: dict, previous_hash: str) -> dict:
+    event["timestamp"] = time.time()
+    event["previous_hash"] = previous_hash
+    event_json = json.dumps(event, sort_keys=True)
+    event["hash"] = hashlib.sha256((event_json + previous_hash).encode()).hexdigest()
+    return event
+# Chained hashing makes retroactive tampering with audit log entries detectable
+</code></pre>
+
+    <h2 id="mistakes">15. Common mistakes</h2>
+    <ul>
+      <li>Relying only on application-layer filtering for tenant isolation without enforcing it at the data-query level too.</li>
+      <li>Building custom authentication instead of integrating with enterprise SSO, creating friction for enterprise customers.</li>
+      <li>No audit logging, failing basic enterprise compliance requirements outright.</li>
+      <li>Treating compliance as a post-launch afterthought rather than a day-one architectural requirement.</li>
+    </ul>
+
+    <h2 id="best">16. Best practices</h2>
+    <ul>
+      <li>Enforce tenant isolation redundantly at both the data-query and application layers.</li>
+      <li>Integrate SSO (SAML/OIDC) from the start for enterprise-facing products.</li>
+      <li>Build comprehensive, tamper-resistant audit logging as a core feature, not an add-on.</li>
+      <li>Document data flows and involve compliance/legal early for regulated-industry customers.</li>
+    </ul>
+
+    <h2 id="production">17. Production considerations</h2>
+    <p>Treat tenant isolation bugs as the highest-severity class of incident (equivalent to a data breach); test tenant isolation explicitly and continuously, not just at initial implementation.</p>
+
+    <h2 id="security">18. Security considerations</h2>
+    <p>Enterprise AI security requirements compound everything in AI Security and AI Guardrails with organizational-scale access control — a single missed tenant filter or RBAC gap can affect every customer on the platform, far higher blast radius than a single-tenant application's security bug.</p>
+
+    <h2 id="performance">19. Performance considerations</h2>
+    <p>RBAC and tenant-filtering checks add minor overhead per request — generally negligible, but ensure database indexes support efficient tenant-scoped queries at scale (see Vector Databases performance guidance).</p>
+
+    <h2 id="cost">20. Cost considerations</h2>
+    <p>Compliance certifications (SOC 2, etc.) and enterprise-grade infrastructure (dedicated audit logging, SSO integration maintenance) have real ongoing cost — factor this into enterprise product pricing and resourcing.</p>
+
+    <h2 id="debug">21. Debugging/troubleshooting</h2>
+    <ul>
+      <li><b>Suspected cross-tenant data leak:</b> treat as a critical security incident immediately; audit every query path for missing tenant_id filtering.</li>
+      <li><b>SSO integration failing for a specific customer:</b> check their specific SAML/OIDC configuration against your platform's expected format — enterprise SSO configs vary significantly between identity providers.</li>
+      <li><b>Audit log gaps:</b> verify every data-access code path actually calls the logging function — a missed call point is a common gap.</li>
+    </ul>
+
+    <h2 id="related">22. Related concepts</h2>
+    <p><a href="../38-AI-Security/ai-security-fundamentals.html">AI Security</a> · <a href="../11-Vector-Databases/vector-databases.html">Vector Databases</a> · <a href="../20-Agent-Memory/agent-memory-fundamentals.html">Agent Memory (data governance)</a></p>
+
+    <h2 id="comparison">23. Comparison with alternatives</h2>
+    <table>
+      <tr><th>Approach</th><th>When to use</th></tr>
+      <tr><td>Single-tenant deployment per customer</td><td>Highest isolation guarantee, but highest infra cost/ops overhead at scale</td></tr>
+      <tr><td>Shared infrastructure, strict tenant_id filtering (this page)</td><td>Common SaaS approach, cost-efficient, requires rigorous isolation discipline</td></tr>
+      <tr><td>Hybrid (shared compute, isolated data stores per tenant)</td><td>Balances cost efficiency with stronger data isolation guarantees</td></tr>
+    </table>
+
+    <h2 id="exercise">24. Mini practical exercise</h2>
+    <p>Write an automated test that inserts data for two tenants and asserts that querying as tenant A never returns tenant B's data, for the RAG project from 12-RAG.</p>
+
+    <h2 id="project">25. Practical project</h2>
+    <p><b>Enterprise-Hardened RAG Platform:</b> extend the RAG project with RBAC (admin/contributor/viewer roles), mock SSO integration, comprehensive audit logging, and a tenant-isolation test suite run in CI.</p>
+
+    <h2 id="projectarch">26. Project architecture</h2>
+    <pre><code>RAG project (from 12-RAG) +
+ ├── auth.py (SSO/SAML mock integration)
+ ├── rbac.py (role → permission mapping)
+ ├── audit.py (tamper-resistant logging)
+ └── tests/test_tenant_isolation.py (CI-gated)</code></pre>
+
+    <h2 id="interview-b">27. Interview Questions — Beginner</h2>
+    <div class="qa"><b>Q1.</b> What is multi-tenancy?<br><b>A.</b> Serving multiple customer organizations from shared infrastructure while strictly isolating their data.</div>
+    <div class="qa"><b>Q2.</b> What is RBAC?<br><b>A.</b> Role-Based Access Control — restricting what actions/data a user can access based on their role.</div>
+    <div class="qa"><b>Q3.</b> What is SSO?<br><b>A.</b> Single Sign-On — integrating with a customer's existing identity provider rather than managing separate credentials.</div>
+    <div class="qa"><b>Q4.</b> What is data residency?<br><b>A.</b> Requirements that data be stored/processed only within specific geographic/legal jurisdictions.</div>
+    <div class="qa"><b>Q5.</b> What is an audit log used for?<br><b>A.</b> Recording comprehensive, tamper-resistant records of who did what and when, for compliance and security review.</div>
+    <div class="qa"><b>Q6.</b> Why is tenant isolation considered a critical security requirement, not just a feature?<br><b>A.</b> A failure can expose one customer's data to another, equivalent in severity to a data breach.</div>
+    <div class="qa"><b>Q7.</b> Why would an enterprise customer want SSO integration instead of a separate login?<br><b>A.</b> To manage access centrally through their existing identity provider rather than maintaining separate credentials/accounts.</div>
+    <div class="qa"><b>Q8.</b> What is SOC 2?<br><b>A.</b> A common compliance audit framework for SaaS security practices.</div>
+    <div class="qa"><b>Q9.</b> Should tenant isolation be enforced at only one layer of the system?<br><b>A.</b> No — it should be enforced redundantly at both the data-query and application layers for defense-in-depth.</div>
+    <div class="qa"><b>Q10.</b> What's an enterprise connector?<br><b>A.</b> A pre-built integration with a common enterprise system like Salesforce, SharePoint, or Slack.</div>
+
+    <h2 id="interview-i">28. Interview Questions — Intermediate</h2>
+    <div class="qa"><b>Q1.</b> Why is enforcing tenant isolation redundantly (both data-layer and application-layer) better than relying on a single enforcement point?<br><b>A.</b> A single point of failure (e.g., one missed filter in application code) could cause a serious data leak; redundant enforcement means a bug at one layer is still caught by the other, providing defense-in-depth for the highest-severity class of failure in a multi-tenant system.</div>
+    <div class="qa"><b>Q2.</b> How would you design RBAC to work cleanly alongside tenant isolation in a RAG system?<br><b>A.</b> Layer the checks: first filter all data access strictly by tenant_id (no cross-tenant access ever), then within that tenant's data, further filter/restrict based on the user's role-specific permissions (e.g., team-level or document-level access) — tenant isolation is the outer, non-negotiable boundary; RBAC is the finer-grained control within it.</div>
+    <div class="qa"><b>Q3.</b> Why might tamper-resistant (hash-chained) audit logging matter for enterprise compliance specifically?<br><b>A.</b> Some compliance frameworks and security-conscious customers require assurance that audit logs themselves haven't been retroactively altered to hide unauthorized access — hash-chaining makes any tampering detectable, providing a stronger guarantee than a simple append-only log without integrity verification.</div>
+    <div class="qa"><b>Q4.</b> What's a practical reason to test tenant isolation continuously (in CI) rather than just at initial implementation?<br><b>A.</b> Code changes/refactoring over time can accidentally introduce a missing tenant filter in a new code path; continuous automated testing catches this regression immediately rather than relying on it being caught in manual review or, worse, by an actual incident.</div>
+    <div class="qa"><b>Q5.</b> Why might data residency requirements complicate a straightforward multi-tenant cloud architecture?<br><b>A.</b> Some customers (especially in regulated industries or specific countries) require their data to never leave a specific geographic region; this can require region-specific deployments or careful data routing/storage architecture rather than a single global shared infrastructure, adding real architectural complexity.</div>
+
+    <h2 id="interview-a">29. Interview Questions — Advanced</h2>
+    <div class="qa"><b>Q1.</b> How would you architect a multi-tenant AI platform to support customers with conflicting data residency requirements (e.g., one requiring EU-only storage, another requiring US-only) on shared infrastructure?<br><b>A.</b> Use a regional sharding approach where each tenant's data is provisioned and processed only within their required region's infrastructure (separate regional deployments of the same platform codebase), with careful routing logic ensuring a tenant's requests are always directed to their compliant region, rather than attempting a single global deployment that can't satisfy divergent residency requirements simultaneously.</div>
+    <div class="qa"><b>Q2.</b> What's a subtle risk of RBAC permissions becoming stale or overly broad over time in a growing enterprise AI platform?<br><b>A.</b> As features/roles evolve, permission definitions can accumulate overly broad grants (e.g., a role originally meant for limited access gradually gaining more permissions through incremental, individually-reasonable-seeming changes) without anyone re-auditing the cumulative effect — periodic access reviews and the principle of least privilege need active maintenance, not just initial correct design.</div>
+
+    <h2 id="interview-s">30. Interview Questions — Senior/Architect</h2>
+    <div class="qa"><b>Q1.</b> Design the full enterprise-readiness architecture for a B2B AI platform preparing to sell into regulated industries (finance, healthcare).<br><b>A.</b> Implement redundant tenant isolation (data-layer + application-layer) with continuous automated testing; integrate SSO/SAML with major identity providers; build RBAC with periodic access-review processes; implement tamper-resistant, comprehensive audit logging with customer-facing export capability; support data residency requirements via regional deployment architecture; pursue relevant compliance certifications (SOC 2, HIPAA as applicable) with documented data flows and retention policies; and establish an incident response process specifically for tenant-isolation/compliance incidents given their severity and regulatory implications.</div>
+
+    <h2 id="interview-sc">31. Scenario-Based Questions</h2>
+    <div class="qa"><b>Scenario 1.</b> A customer's compliance team requests a full audit log export showing every access to their data over the past year, and you discover logging was incomplete for several months due to a code change that skipped the logging call. How do you handle this?<br><b>A.</b> Disclose the gap transparently to the customer rather than hiding it, investigate and fix the root cause (the code path that skipped logging) immediately, add automated tests verifying every data-access path includes audit logging to prevent recurrence, and work with the customer on what partial reconstruction or compensating evidence (e.g., from other system logs) might be possible for the gap period.</div>
+    <div class="qa"><b>Scenario 2.</b> During a sales process, an enterprise prospect requires data residency within a specific country your platform doesn't currently support. How do you respond architecturally and commercially?<br><b>A.</b> Assess the engineering cost/timeline of adding a regional deployment for that jurisdiction versus the deal's strategic value, and if pursuing it, design the regional deployment to be a repeatable pattern (not a one-off special case) so future customers with similar requirements in that or nearby regions can be supported without bespoke rework each time.</div>
+
+    <h2 id="revision">32. Quick revision notes</h2>
+    <ul>
+      <li>Multi-tenancy + RBAC + SSO + audit logging + data residency + compliance = enterprise readiness.</li>
+      <li>Enforce tenant isolation redundantly (data-layer + application-layer); test continuously.</li>
+      <li>Tamper-resistant audit logs matter for compliance trust.</li>
+      <li>Enterprise deals are often won/lost on these requirements, not model quality alone.</li>
+    </ul>
+
+    <h2 id="cheat">33. Cheat sheet</h2>
+    <div class="callout">Enterprise AI = multi-tenancy (redundant isolation) + RBAC + SSO + tamper-resistant audit logs + data residency + compliance certifications. Treat tenant-isolation bugs as critical-severity incidents. Test continuously, not just once.</div>
+
+    <h2 id="further">34. Further topics to learn</h2>
+    <p><a href="../45-AI-System-Design/">AI System Design</a> → <a href="../46-AI-Production-Deployment/">AI Production Deployment</a></p>
+
+    <div class="prevnext">
+      <a href="../43-AI-Protocols/ai-protocols-overview.html">← AI Protocols</a>
+      <a href="../45-AI-System-Design/ai-system-design-overview.html">Next: AI System Design →</a>
+    </div>
+  </main>
+</div>
+<script src="../assets/app.js"></script>
+</body>
+</html>

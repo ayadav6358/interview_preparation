@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Transformers Deep Dive</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <input class="searchbox" placeholder="Search topics..." />
+    <a href="../index.html">← Home</a>
+    <h3>04-Transformers</h3>
+    <a href="transformers-deep-dive.html">Transformers Deep Dive</a>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumbs"><a href="../index.html">Home</a> / 04-Transformers / Deep Dive</div>
+      <button class="theme-toggle" onclick="toggleTheme()">🌓 Theme</button>
+    </div>
+    <h1>Transformers Deep Dive</h1>
+    <span class="tag good">Stable</span><span class="tag">Last verified: 2026-10-06</span>
+
+    <div class="toc">
+      <b>On this page</b>
+      <a href="#what">1. What is this?</a>
+      <a href="#whyexist">2. Why does it exist?</a>
+      <a href="#whyimportant">3. Why is it important?</a>
+      <a href="#whereused">4. Where is it used?</a>
+      <a href="#prereq">5. Prerequisites</a>
+      <a href="#core">6. Core concepts</a>
+      <a href="#terms">7. Terminology</a>
+      <a href="#arch">8. Architecture</a>
+      <a href="#internal">9. How it works internally</a>
+      <a href="#steps">10. Step-by-step: a token's journey through the model</a>
+      <a href="#simple">11. Simple example</a>
+      <a href="#real">12. Real-world example</a>
+      <a href="#code">13. Code example (simplified attention)</a>
+      <a href="#advanced">14. Advanced example</a>
+      <a href="#mistakes">15. Common mistakes</a>
+      <a href="#best">16. Best practices</a>
+      <a href="#production">17. Production considerations</a>
+      <a href="#security">18. Security considerations</a>
+      <a href="#performance">19. Performance considerations</a>
+      <a href="#cost">20. Cost considerations</a>
+      <a href="#debug">21. Debugging/troubleshooting</a>
+      <a href="#related">22. Related concepts</a>
+      <a href="#comparison">23. Comparison with alternatives</a>
+      <a href="#exercise">24. Mini practical exercise</a>
+      <a href="#project">25. Practical project</a>
+      <a href="#projectarch">26. Project architecture</a>
+      <a href="#interview-b">27. Interview Questions — Beginner</a>
+      <a href="#interview-i">28. Interview Questions — Intermediate</a>
+      <a href="#interview-a">29. Interview Questions — Advanced</a>
+      <a href="#interview-s">30. Interview Questions — Senior/Architect</a>
+      <a href="#interview-sc">31. Scenario-Based Questions</a>
+      <a href="#revision">32. Quick revision notes</a>
+      <a href="#cheat">33. Cheat sheet</a>
+      <a href="#further">34. Further topics to learn</a>
+    </div>
+
+    <h2 id="what">1. What is this?</h2>
+    <p>The Transformer is the neural network architecture underlying virtually all modern LLMs. It processes sequences using <b>self-attention</b> (letting every token look at every other token) instead of recurrence, combined with <b>feed-forward networks</b>, <b>positional encoding</b>, <b>layer normalization</b>, and <b>residual connections</b>, stacked into many layers (encoder, decoder, or decoder-only).</p>
+
+    <h2 id="whyexist">2. Why does it exist?</h2>
+    <p>Introduced to solve RNNs' two biggest problems: sequential processing preventing training parallelization, and difficulty modeling long-range dependencies. Self-attention lets any token directly relate to any other token in one step and lets the entire sequence be processed in parallel during training.</p>
+
+    <h2 id="whyimportant">3. Why is it important?</h2>
+    <p>Understanding tokenization, attention, and KV caching explains concrete LLM behaviors you interact with daily: why context windows exist, why output generation is slower than input processing, why "attention dilution" degrades long-context quality, and why serving infrastructure (vLLM, etc.) optimizes specifically around KV cache and batching.</p>
+
+    <h2 id="whereused">4. Where is it used?</h2>
+    <p>Every modern LLM (GPT, Claude, Gemini, Llama), most modern embedding models, vision transformers (ViT), and increasingly multimodal models combining text/image/audio via the same attention mechanism.</p>
+
+    <h2 id="prereq">5. Prerequisites</h2>
+    <p><a href="../03-Deep-Learning/deep-learning-fundamentals.html">Deep Learning Fundamentals</a> (especially attention basics).</p>
+
+    <h2 id="core">6. Core concepts</h2>
+    <ul>
+      <li><b>Tokenization:</b> splitting text into sub-word units the model processes.</li>
+      <li><b>Embeddings:</b> mapping tokens to dense vectors capturing learned meaning.</li>
+      <li><b>Positional encoding:</b> injecting order/position information, since attention itself is order-agnostic.</li>
+      <li><b>Self-attention / Multi-head attention:</b> computing weighted relevance between all token pairs, across multiple parallel "heads" capturing different relationship types.</li>
+      <li><b>Query, Key, Value (Q, K, V):</b> learned projections of each token used to compute attention scores and weighted outputs.</li>
+      <li><b>Feed-forward network:</b> a per-token MLP applied after attention in each block.</li>
+      <li><b>Layer normalization & residual connections:</b> stabilize training and let gradients flow through very deep stacks.</li>
+      <li><b>Causal masking:</b> prevents a token from attending to future tokens, enabling autoregressive generation.</li>
+      <li><b>KV cache:</b> stores computed keys/values so generation doesn't recompute attention over the whole sequence at every step.</li>
+    </ul>
+
+    <h2 id="terms">7. Terminology</h2>
+    <table>
+      <tr><th>Term</th><th>Meaning</th></tr>
+      <tr><td>Query (Q)</td><td>A token's projection used to "ask" which other tokens are relevant.</td></tr>
+      <tr><td>Key (K)</td><td>A token's projection used to "advertise" what it offers when queried.</td></tr>
+      <tr><td>Value (V)</td><td>A token's projection carrying the actual content to be aggregated.</td></tr>
+      <tr><td>Attention score</td><td>Q·K similarity determining how much a token attends to another.</td></tr>
+      <tr><td>Multi-head attention</td><td>Running several attention computations in parallel with different learned projections, capturing different relationship types.</td></tr>
+      <tr><td>Encoder</td><td>Transformer variant processing full input bidirectionally (sees all tokens at once) — used in BERT-style models.</td></tr>
+      <tr><td>Decoder</td><td>Transformer variant using causal (masked) attention — generates one token at a time; the basis of GPT/Claude-style LLMs.</td></tr>
+      <tr><td>Encoder-decoder</td><td>Combines both — encoder processes input, decoder generates output attending to encoder output; used for translation-style tasks.</td></tr>
+      <tr><td>Causal language modeling</td><td>Training/inference objective where each token only attends to previous tokens, matching autoregressive generation.</td></tr>
+      <tr><td>KV cache</td><td>Cached keys/values from previous tokens, avoiding recomputation during autoregressive generation.</td></tr>
+    </table>
+
+    <h2 id="arch">8. Architecture</h2>
+    <pre><code>Tokens → Embedding + Positional Encoding
+ → [ Transformer Block × N ]:
+       Multi-head Self-Attention (causal mask for decoders)
+       → Add & LayerNorm (residual connection)
+       → Feed-Forward Network
+       → Add & LayerNorm (residual connection)
+ → Final linear layer → vocabulary probability distribution</code></pre>
+
+    <h2 id="internal">9. How it works internally</h2>
+    <p>For each token, the model computes Query, Key, and Value vectors via learned linear projections. Attention scores are Query·Key (scaled by √d_k) between the current token and all previous tokens (for decoders), passed through softmax to get attention weights, which then weight a sum over the Value vectors — producing a context-aware representation of that token informed by relevant previous tokens. Multi-head attention runs several such computations in parallel with different learned projections, letting the model capture different types of relationships (e.g., syntactic vs semantic) simultaneously, then concatenates and projects the results.</p>
+
+    <h2 id="steps">10. Step-by-step: a token's journey through the model</h2>
+    <ol>
+      <li>Token is converted to an embedding vector; positional encoding is added.</li>
+      <li>In each transformer block: compute Q, K, V; compute attention scores against all previous tokens (causal mask); weighted-sum the Values using softmax(scores).</li>
+      <li>Add the attention output to the original input (residual connection); apply layer normalization.</li>
+      <li>Pass through a feed-forward network (per-token MLP); add residual connection; normalize again.</li>
+      <li>Repeat through all N blocks.</li>
+      <li>Final layer projects the last block's output to a probability distribution over the vocabulary.</li>
+      <li>Sample the next token; append; repeat (reusing cached K/V for all previous tokens).</li>
+    </ol>
+
+    <h2 id="simple">11. Simple example</h2>
+    <p>In the sentence "The cat sat on the mat because it was tired," attention lets the model correctly connect "it" back to "cat" (not "mat") by learning that "it" should attend strongly to the semantically appropriate antecedent — a relationship RNNs struggle with over longer distances but attention handles directly regardless of distance.</p>
+
+    <h2 id="real">12. Real-world example</h2>
+    <p>Claude and GPT-family models are decoder-only Transformers: no encoder half, just a stack of causal self-attention + feed-forward blocks, trained end-to-end on next-token prediction — the architectural simplicity (one unified stack, one objective) is part of why decoder-only models scaled so effectively.</p>
+
+    <h2 id="code">13. Code example (simplified attention)</h2>
+    <pre><code class="language-python">import torch
+import torch.nn.functional as F
+
+def scaled_dot_product_attention(Q, K, V, causal_mask=None):
+    d_k = Q.size(-1)
+    scores = Q @ K.transpose(-2, -1) / d_k**0.5
+    if causal_mask is not None:
+        scores = scores.masked_fill(causal_mask == 0, float('-inf'))
+    weights = F.softmax(scores, dim=-1)
+    return weights @ V
+
+# Multi-head: run this in parallel across multiple (Q,K,V) projections, then concatenate
+</code></pre>
+
+    <h2 id="advanced">14. Advanced example</h2>
+    <p>A minimal illustration of KV caching's benefit during autoregressive generation — without caching, each new token recomputes attention over the full growing sequence; with caching, only the new token's Q/K/V need computing, reusing cached K/V for all prior tokens:</p>
+    <pre><code class="language-python">class KVCache:
+    def __init__(self):
+        self.keys, self.values = [], []
+
+    def append_and_attend(self, new_k, new_v, query):
+        self.keys.append(new_k)
+        self.values.append(new_v)
+        K = torch.cat(self.keys, dim=0)
+        V = torch.cat(self.values, dim=0)
+        return scaled_dot_product_attention(query, K, V)
+</code></pre>
+
+    <h2 id="mistakes">15. Common mistakes</h2>
+    <ul>
+      <li>Assuming attention is inherently order-aware — it isn't; positional encoding is what injects order information.</li>
+      <li>Confusing encoder-only (BERT-style, bidirectional, good for classification/embeddings) with decoder-only (GPT/Claude-style, causal, good for generation).</li>
+      <li>Underestimating how much KV-cache memory grows with context length and batch size in serving infrastructure.</li>
+    </ul>
+
+    <h2 id="best">16. Best practices</h2>
+    <ul>
+      <li>Use encoder-style models for embeddings/classification tasks; decoder-style for generation.</li>
+      <li>When building custom Transformer components, leverage existing, well-tested implementations (Hugging Face Transformers, PyTorch) rather than reimplementing attention from scratch for production use.</li>
+    </ul>
+
+    <h2 id="production">17. Production considerations</h2>
+    <p>Serving infrastructure (vLLM, TensorRT-LLM) exists specifically to optimize KV-cache memory management and batching across concurrent requests — understanding this architecture explains why these tools matter for cost/latency at scale (see <a href="../28-LLM-Inference/">LLM Inference</a>).</p>
+
+    <h2 id="security">18. Security considerations</h2>
+    <p>Attention patterns can, in principle, be probed/analyzed to extract information about training data or model internals (model inversion research); production systems should not assume internal representations are fully opaque to a sufficiently motivated adversary with API access.</p>
+
+    <h2 id="performance">19. Performance considerations</h2>
+    <p>Self-attention's cost grows quadratically with sequence length in its naive form — this directly explains why context window limits exist and why long-context inference is more expensive per token than short-context inference.</p>
+
+    <h2 id="cost">20. Cost considerations</h2>
+    <p>Model depth (number of layers) and width (hidden dimension size) both directly drive compute cost per token — larger, deeper models cost more per token processed, which is reflected in provider pricing tiers across model sizes.</p>
+
+    <h2 id="debug">21. Debugging/troubleshooting</h2>
+    <ul>
+      <li><b>Custom Transformer training diverges:</b> check layer normalization placement and residual connections — missing them is a common cause of unstable deep-network training.</li>
+      <li><b>Attention visualization looks uniform/unfocused:</b> may indicate undertrained attention heads or a need for more training data/steps.</li>
+    </ul>
+
+    <h2 id="related">22. Related concepts</h2>
+    <p><a href="../03-Deep-Learning/deep-learning-fundamentals.html">Deep Learning</a> · <a href="../05-LLM-Fundamentals/what-is-llm.html">What is an LLM</a> · <a href="../28-LLM-Inference/">LLM Inference</a></p>
+
+    <h2 id="comparison">23. Comparison with alternatives</h2>
+    <table>
+      <tr><th>Architecture</th><th>Encoder-only</th><th>Decoder-only</th><th>Encoder-decoder</th></tr>
+      <tr><td>Attention</td><td>Bidirectional</td><td>Causal (masked)</td><td>Bidirectional encoder + causal decoder</td></tr>
+      <tr><td>Best for</td><td>Classification, embeddings</td><td>Open-ended generation (modern LLMs)</td><td>Translation-style seq2seq tasks</td></tr>
+      <tr><td>Example</td><td>BERT</td><td>GPT, Claude, Llama</td><td>T5, original Transformer paper</td></tr>
+    </table>
+
+    <h2 id="exercise">24. Mini practical exercise</h2>
+    <p>Implement the scaled dot-product attention function above and run it on a toy 3-token sequence; print the attention weight matrix and verify each row sums to 1 (softmax property).</p>
+
+    <h2 id="project">25. Practical project</h2>
+    <p><b>Mini Transformer from Scratch:</b> implement a minimal decoder-only Transformer (embedding, positional encoding, 2 attention+FFN blocks, causal masking) in PyTorch, and train it on a tiny character-level text dataset to generate text.</p>
+
+    <h2 id="projectarch">26. Project architecture</h2>
+    <pre><code>Character dataset → tokenizer (char-level)
+ → embedding + positional encoding
+ → 2× [self-attention (causal) → FFN]
+ → output projection → softmax
+ → train via next-char prediction loss
+ → generate: sample character by character</code></pre>
+
+    <h2 id="interview-b">27. Interview Questions — Beginner</h2>
+    <div class="qa"><b>Q1.</b> What is self-attention?<br><b>A.</b> A mechanism letting each token compute a weighted relevance to every other token in the sequence, producing a context-aware representation.</div>
+    <div class="qa"><b>Q2.</b> What do Query, Key, and Value represent?<br><b>A.</b> Learned projections of each token: Query asks "what am I looking for," Key advertises "what do I offer," Value carries the actual content to be aggregated.</div>
+    <div class="qa"><b>Q3.</b> Why is positional encoding needed?<br><b>A.</b> Self-attention itself has no inherent sense of token order; positional encoding injects that information explicitly.</div>
+    <div class="qa"><b>Q4.</b> What is causal masking?<br><b>A.</b> Preventing a token from attending to future tokens, so generation only depends on past context — required for autoregressive generation.</div>
+    <div class="qa"><b>Q5.</b> What is a KV cache?<br><b>A.</b> Cached keys/values from previously processed tokens, avoiding recomputing attention over the whole sequence at every generation step.</div>
+    <div class="qa"><b>Q6.</b> What's the difference between an encoder and a decoder in the Transformer?<br><b>A.</b> An encoder processes input bidirectionally (sees all tokens); a decoder uses causal (masked) attention, generating one token at a time.</div>
+    <div class="qa"><b>Q7.</b> What type of Transformer are modern LLMs like Claude/GPT?<br><b>A.</b> Decoder-only Transformers.</div>
+    <div class="qa"><b>Q8.</b> What is multi-head attention?<br><b>A.</b> Running several attention computations in parallel with different learned projections, capturing different types of relationships simultaneously.</div>
+    <div class="qa"><b>Q9.</b> What does a residual (skip) connection do?<br><b>A.</b> Adds a layer's input directly to its output, helping gradients flow through deep stacks and stabilizing training.</div>
+    <div class="qa"><b>Q10.</b> Why did Transformers replace RNNs for most language tasks?<br><b>A.</b> They process sequences in parallel (faster training) and handle long-range dependencies better via direct attention, rather than RNNs' sequential, distance-decaying hidden state.</div>
+
+    <h2 id="interview-i">28. Interview Questions — Intermediate</h2>
+    <div class="qa"><b>Q1.</b> Walk through the computation of a single self-attention output for one token.<br><b>A.</b> Compute Q for the current token and K, V for all tokens it can attend to; compute attention scores as Q·K (scaled by √d_k); apply softmax to get normalized weights; compute a weighted sum of V vectors using those weights as the final output.</div>
+    <div class="qa"><b>Q2.</b> Why is the attention score scaled by √d_k?<br><b>A.</b> Without scaling, dot products grow large in magnitude as dimensionality increases, pushing softmax into regions with extremely small gradients; scaling keeps the scores in a numerically stable range for effective training.</div>
+    <div class="qa"><b>Q3.</b> Why does multi-head attention use multiple heads instead of one larger attention computation?<br><b>A.</b> Multiple smaller attention computations (heads) with independently learned projections can specialize in capturing different types of relationships (e.g., syntactic dependency vs. coreference) in parallel, which a single attention computation of the same total parameter budget empirically captures less effectively.</div>
+    <div class="qa"><b>Q4.</b> Why would you choose an encoder-only model like BERT over a decoder-only LLM for a text-classification task?<br><b>A.</b> Encoder-only models see the full input bidirectionally in one pass, which is well-suited to tasks needing a holistic understanding of fixed input (classification/embeddings), and they're typically smaller/cheaper to run than large decoder-only LLMs for narrow tasks.</div>
+    <div class="qa"><b>Q5.</b> What's the practical significance of KV cache memory growing with both sequence length and batch size?<br><b>A.</b> It directly limits how many concurrent requests (batch size) a serving system can handle at a given context length within fixed GPU memory, which is why serving infrastructure (vLLM, etc.) invests heavily in memory-efficient KV-cache management (e.g., paged attention).</div>
+    <div class="qa"><b>Q6.</b> Why does layer normalization help stabilize training in deep Transformer stacks?<br><b>A.</b> It normalizes activations within each layer to a consistent scale/distribution, preventing the internal covariate shift that would otherwise compound across many stacked layers and destabilize gradient-based training.</div>
+    <div class="qa"><b>Q7.</b> How does an encoder-decoder Transformer's decoder differ from a decoder-only LLM's decoder?<br><b>A.</b> An encoder-decoder's decoder has an additional cross-attention step attending to the encoder's output (the source sequence), in addition to its own causal self-attention over already-generated tokens; a decoder-only LLM has no separate encoder or cross-attention — it's purely causal self-attention over its own growing sequence.</div>
+    <div class="qa"><b>Q8.</b> Why is "attention is all you need" (the original Transformer paper's title) a meaningful claim architecturally?<br><b>A.</b> It demonstrated that a model built purely from attention and feed-forward layers — with no recurrence or convolution — could match or exceed RNN/CNN-based approaches on sequence tasks, while being far more parallelizable to train, fundamentally changing the field's default architecture choice.</div>
+    <div class="qa"><b>Q9.</b> Why would increasing the number of attention heads without increasing total model dimension potentially hurt performance?<br><b>A.</b> Each head's dimension (d_k) shrinks as more heads share the same total dimension, reducing the representational capacity per head — there's a trade-off between the number of specialized "views" and the richness each view can capture.</div>
+    <div class="qa"><b>Q10.</b> What's the relationship between model depth (number of layers) and the kinds of patterns a Transformer can learn?<br><b>A.</b> Earlier layers tend to capture more local/syntactic patterns, while later layers build increasingly abstract, context-integrated representations — depth lets the model compose simpler patterns into progressively more complex, task-relevant representations, similar to hierarchical feature learning in CNNs.</div>
+
+    <h2 id="interview-a">29. Interview Questions — Advanced</h2>
+    <div class="qa"><b>Q1.</b> Explain how rotary positional embeddings (RoPE) differ from the original sinusoidal positional encoding, and why modern LLMs favor RoPE-style approaches.<br><b>A.</b> Sinusoidal encoding adds a fixed positional signal to token embeddings before attention; RoPE instead rotates the Query/Key vectors as a function of position directly within the attention computation, which naturally encodes relative position information and empirically generalizes better to sequence lengths beyond those seen during training — a key enabler of modern long-context models.</div>
+    <div class="qa"><b>Q2.</b> Why does "lost in the middle" occur even though every token theoretically has direct attention access to every other token?<br><b>A.</b> Direct access doesn't guarantee uniform effective attention weighting — learned attention patterns during training are shaped by the training data's typical structure (e.g., important information often near the start/end of training examples), and positional encoding schemes can introduce subtle biases, resulting in empirically weaker recall for mid-sequence content despite the architecture's theoretical capability.</div>
+    <div class="qa"><b>Q3.</b> How does speculative decoding exploit the Transformer's architecture to speed up inference, and what's the correctness guarantee?<br><b>A.</b> A smaller draft model proposes several candidate tokens; the larger target model verifies them in a single parallel forward pass (since verifying is just computing probabilities for a fixed sequence, which parallelizes like a forward pass over input, not like sequential generation); accepted tokens match exactly what the target model would have generated with standard sampling, preserving output distribution correctness while reducing the number of expensive sequential forward passes needed.</div>
+
+    <h2 id="interview-s">30. Interview Questions — Senior/Architect</h2>
+    <div class="qa"><b>Q1.</b> How would you explain the trade-offs between encoder-only, decoder-only, and encoder-decoder architectures to a team deciding on a model for a new embedding-based search feature versus a new generative chatbot feature?<br><b>A.</b> For search/embeddings, recommend an encoder-only model (bidirectional context, optimized for producing fixed representations, typically smaller/cheaper); for the chatbot, a decoder-only LLM (built for open-ended autoregressive generation); explain encoder-decoder is mainly relevant for seq2seq-style tasks like translation, which is neither of these two use cases.</div>
+    <div class="qa"><b>Q2.</b> Your infra team wants to understand why serving longer-context requests is disproportionately more expensive than the token-count-based pricing alone suggests. How do you explain this using Transformer internals?<br><b>A.</b> Explain that attention's quadratic cost with sequence length and the linearly growing KV-cache memory footprint both increase per-request GPU resource consumption (compute and memory) faster than linearly with context length, which is why providers' effective serving costs — and sometimes pricing tiers — reflect super-linear scaling for very long contexts even if the headline $/token rate looks flat.</div>
+
+    <h2 id="interview-sc">31. Scenario-Based Questions</h2>
+    <div class="qa"><b>Scenario 1.</b> Your team is building embeddings for a semantic search feature and is debating whether to use a decoder-only LLM or a dedicated encoder-only embedding model. What do you recommend?<br><b>A.</b> Recommend a dedicated encoder-only embedding model — purpose-built for producing high-quality fixed-size representations bidirectionally, typically smaller, cheaper, and faster than extracting embeddings from a large decoder-only LLM, which wasn't primarily optimized for that task.</div>
+    <div class="qa"><b>Scenario 2.</b> Production latency for long-document summarization requests spikes disproportionately compared to short-document requests, even accounting for token-based pricing. How do you explain this to your team using what you know about Transformer internals?<br><b>A.</b> Point to the quadratic attention cost and growing KV-cache memory footprint as sequence length increases — both compute and memory pressure increase faster than linearly with context length, explaining the disproportionate latency/resource impact beyond simple token-count scaling.</div>
+
+    <h2 id="revision">32. Quick revision notes</h2>
+    <ul>
+      <li>Tokenize → embed + positional encode → N× (self-attention → FFN, with residuals+norm) → output projection.</li>
+      <li>Q/K/V: Query asks, Key advertises, Value carries content.</li>
+      <li>Causal masking enables autoregressive generation; KV cache avoids recomputation.</li>
+      <li>Decoder-only = modern LLMs; encoder-only = classification/embeddings; encoder-decoder = seq2seq.</li>
+    </ul>
+
+    <h2 id="cheat">33. Cheat sheet</h2>
+    <div class="callout">Self-attention: Q·K → softmax → weighted sum of V. Positional encoding injects order. Causal mask enables generation. KV cache avoids recomputation. Decoder-only = modern LLMs; encoder-only = embeddings/classification; encoder-decoder = seq2seq.</div>
+
+    <h2 id="further">34. Further topics to learn</h2>
+    <p><a href="../05-LLM-Fundamentals/what-is-llm.html">What is an LLM</a> → <a href="../28-LLM-Inference/">LLM Inference (KV cache at scale, quantization)</a> → <a href="../10-Embeddings/">Embeddings</a></p>
+
+    <div class="prevnext">
+      <a href="../03-Deep-Learning/deep-learning-fundamentals.html">← Deep Learning</a>
+      <a href="../05-LLM-Fundamentals/what-is-llm.html">Next: LLM Fundamentals →</a>
+    </div>
+  </main>
+</div>
+<script src="../assets/app.js"></script>
+</body>
+</html>

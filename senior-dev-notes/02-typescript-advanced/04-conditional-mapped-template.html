@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Conditional, Mapped &amp; Template Literal Types — TypeScript Advanced — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">TypeScript Advanced</a><span class="sep">›</span>Conditional / Mapped / Template Literal Types</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>Conditional, Mapped &amp; Template Literal Types</h1>
+      <p class="meta-line"><span>⏱ ~3 hrs</span><span>📍 Chapter 4 of 6</span></p>
+      <p><strong>One-line summary:</strong> This is the "type-level programming" toolkit — distributive conditional
+      types, <code>infer</code>, recursive mapped types, and template literal type parsing let you compute new types
+      from existing ones, which is the engine behind almost every advanced utility type and the whole capstone project.</p>
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <div class="box why">
+        <h4>Why</h4>
+        <p>This is the chapter interviewers use to separate "comfortable with TS" from "can design a type-safe
+        library." Distributive conditional types explain real bugs you'll hit in production (why
+        <code>Exclude&lt;T, never&gt;</code> behaves differently than expected on certain unions); template literal
+        types are exactly what makes typed routers, typed SQL-ish query builders, and typed CSS-in-JS APIs possible.
+        If you can't explain <em>why</em> a distributive conditional type distributes, you'll struggle the moment an
+        interview question goes one level deeper than a memorized utility type.</p>
+      </div>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>Builds directly on <a href="01-type-system.html">Type System Deep Dive</a>, <a href="02-generics.html">Generics In Depth</a>, and <a href="03-utility-types.html">Utility Types</a>.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="conditional-basics">Conditional types: the basics</h3>
+      <pre><code class="language-typescript">type IsString&lt;T&gt; = T extends string ? true : false;
+type A = IsString&lt;"hi"&gt;;   // true
+type B = IsString&lt;42&gt;;      // false
+
+// Conditional types can nest to build a chain of checks
+type TypeName&lt;T&gt; =
+  T extends string ? "string" :
+  T extends number ? "number" :
+  T extends boolean ? "boolean" :
+  T extends undefined ? "undefined" :
+  T extends Function ? "function" :
+  "object";</code></pre>
+
+      <h3 id="distributive">Distributive conditional types — the single trickiest mechanic in TS</h3>
+      <p>When the <strong>checked type</strong> of a conditional type is a <em>bare, unqualified type parameter</em>,
+      and you pass a union as that type parameter, TS doesn't evaluate the conditional once against the whole union —
+      it <strong>distributes</strong>: it evaluates the conditional separately for each member of the union, then
+      unions the results back together.</p>
+      <pre><code class="language-typescript">type ToArray&lt;T&gt; = T extends any ? T[] : never;
+type X = ToArray&lt;string | number&gt;;
+// NOT (string | number)[] — distributes to: string[] | number[]
+
+// This is EXACTLY how Exclude works:
+type MyExclude&lt;T, U&gt; = T extends U ? never : T;
+type Y = MyExclude&lt;"a" | "b" | "c", "a"&gt;;
+// distributes: ("a" extends "a" ? never : "a") | ("b" extends "a" ? never : "b") | ("c" extends "a" ? never : "c")
+// = never | "b" | "c" = "b" | "c"
+
+// Wrapping the checked type in a tuple SUPPRESSES distribution —
+// this is the standard trick when you want ONE evaluation against the whole union:
+type ToArrayNonDist&lt;T&gt; = [T] extends [any] ? T[] : never;
+type Z = ToArrayNonDist&lt;string | number&gt;;
+// (string | number)[] — evaluated once, not distributed</code></pre>
+      <p>The rule precisely: distribution only happens when the checked type position is a <strong>naked</strong>
+      type parameter (just <code>T</code>, nothing wrapping it). <code>T extends U ? X : Y</code> distributes over a
+      union passed as <code>T</code>; <code>[T] extends [U] ? X : Y</code> does not, because now the checked type is
+      a tuple containing T, not T itself. This single fact explains a huge fraction of "why doesn't my conditional
+      type do what I expected" bugs.</p>
+
+      <h3 id="infer">The <code>infer</code> keyword</h3>
+      <p><code>infer</code> introduces a new type variable inside the <code>extends</code> clause of a conditional
+      type, letting you "capture" a piece of the matched structure instead of just testing it.</p>
+      <pre><code class="language-typescript">type ElementType&lt;T&gt; = T extends (infer U)[] ? U : T;
+type E1 = ElementType&lt;string[]&gt;; // string
+
+type FirstArg&lt;F&gt; = F extends (first: infer A, ...rest: any[]) => any ? A : never;
+type F1 = FirstArg&lt;(a: string, b: number) => void&gt;; // string
+
+// infer with a constraint (TS 4.7+) — restricts what the inferred type can be
+type ArrayElementStringOnly&lt;T&gt; = T extends (infer U extends string)[] ? U : never;
+
+// Recursive infer — unwrap arbitrarily nested promises/arrays
+type DeepAwaited&lt;T&gt; = T extends Promise&lt;infer U&gt; ? DeepAwaited&lt;U&gt; : T;
+type D1 = DeepAwaited&lt;Promise&lt;Promise&lt;Promise&lt;string&gt;&gt;&gt;&gt;; // string</code></pre>
+      <p>When a conditional type has multiple matching candidates for the same inferred variable in <em>covariant</em>
+      positions (e.g. multiple array branches), TS infers a union; in <em>contravariant</em> positions (multiple
+      function parameter branches), it infers an intersection instead — same variance rule from chapter 2, now
+      applied inside <code>infer</code>.</p>
+
+      <h3 id="mapped-key-remapping">Mapped types: key remapping with <code>as</code> (TS 4.1+)</h3>
+      <p>Beyond adding/removing modifiers, mapped types can rename keys entirely using an <code>as</code> clause,
+      almost always combined with template literal types:</p>
+      <pre><code class="language-typescript">type Getters&lt;T&gt; = {
+  [K in keyof T as `get${Capitalize&lt;string & K&gt;}`]: () => T[K]
+};
+interface Person { name: string; age: number; }
+type PersonGetters = Getters&lt;Person&gt;;
+// { getName: () => string; getAge: () => number }
+
+// Filtering keys out entirely by mapping them to `never` in the `as` clause
+type OmitByValue&lt;T, V&gt; = {
+  [K in keyof T as T[K] extends V ? never : K]: T[K]
+};</code></pre>
+
+      <h3 id="template-literal-parsing">Template literal types: parsing strings at the type level</h3>
+      <p>Template literal types aren't just string concatenation — combined with <code>infer</code> in a conditional
+      type, they let you <strong>pattern-match and destructure string literal types</strong>, which is exactly how
+      typed routers extract path params.</p>
+      <pre><code class="language-typescript">// Extract a single :param segment
+type ExtractParam&lt;S extends string&gt; =
+  S extends `${string}:${infer Param}/${string}` ? Param :
+  S extends `${string}:${infer Param}` ? Param :
+  never;
+
+// Extract ALL :param segments from a full route into a union
+type ExtractParams&lt;S extends string&gt; =
+  S extends `${infer _Start}:${infer Param}/${infer Rest}`
+    ? Param | ExtractParams&lt;`/${Rest}`&gt;
+    : S extends `${infer _Start}:${infer Param}`
+      ? Param
+      : never;
+
+type Params1 = ExtractParams&lt;"/users/:userId/posts/:postId"&gt;; // "userId" | "postId"
+
+// Turn that union of param names into an actual typed object
+type RouteParams&lt;S extends string&gt; = { [K in ExtractParams&lt;S&gt;]: string };
+type P1 = RouteParams&lt;"/users/:userId/posts/:postId"&gt;;
+// { userId: string; postId: string }</code></pre>
+      <p>This exact pattern — parse a route string into a param union via recursive template literal matching, then
+      map that union into an object type — is the backbone of this topic's capstone project and of real typed
+      routing libraries.</p>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>Template literal types are compiled down to a pattern the checker can match against actual string literal
+      types, essentially treating <code>`${infer A}:${infer B}`</code> like a regex with capture groups over the
+      literal's characters — matching is attempted structurally against known literal unions (e.g. when matched
+      against <code>string</code> itself with no literal information, inference falls back to <code>string</code> for
+      each captured group, which is why this machinery requires literal types to be useful). Distributive conditional
+      type resolution is implemented by the checker literally iterating the union's constituents when it detects the
+      checked type position is a bare, unsubstituted type parameter at the time of evaluation — "bare" is checked
+      structurally on the conditional type's syntax, not on the runtime union value, which is exactly why wrapping in
+      a tuple (<code>[T]</code>) defeats it: the syntactic position checked is no longer a bare type parameter.</p>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+flowchart TD
+  A["ExtractParams&lt;'/users/:userId/posts/:postId'&gt;"] --> B{"Match ${infer _Start}:${infer Param}/${infer Rest}?"}
+  B -->|yes, Param='userId', Rest='posts/:postId'| C["Emit 'userId' | ExtractParams&lt;'/posts/:postId'&gt;"]
+  C --> D{"Recurse on '/posts/:postId'"}
+  D --> E{"Match again? Param='postId', no trailing segment"}
+  E -->|falls to single-param branch| F["Emit 'postId'"]
+  C --> G["Union so far: 'userId' | 'postId'"]
+  F --> G
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-typescript">// BAD: non-distributive conditional used where distribution was actually wanted,
+// silently producing a much wider/less useful type than intended.
+type Flatten&lt;T&gt; = [T] extends [Array&lt;infer U&gt;] ? U : T;
+type Bad = Flatten&lt;string[] | number[]&gt;;
+// [T] suppresses distribution, so T is the WHOLE union (string[] | number[]) at once,
+// which doesn't match `Array<infer U>` as a single literal pattern the way you'd hope;
+// here it actually still partially works by luck of structural matching, but the
+// INTENT (flatten each member separately) is obscured and breaks on mixed shapes.
+
+// GOOD: bare type parameter distributes correctly per-union-member
+type FlattenGood&lt;T&gt; = T extends Array&lt;infer U&gt; ? U : T;
+type Good = FlattenGood&lt;string[] | number[]&gt;;
+// string | number — each member flattened independently, then unioned. Correct.
+
+// Type-level test utilities — the Equal/Expect pattern used throughout this topic
+type Equal&lt;A, B&gt; =
+  (&lt;T&gt;() => T extends A ? 1 : 2) extends (&lt;T&gt;() => T extends B ? 1 : 2) ? true : false;
+type Expect&lt;T extends true&gt; = T;
+
+type test1 = Expect&lt;Equal&lt;FlattenGood&lt;string[] | number[]&gt;, string | number&gt;&gt;; // compiles
+// type test2 = Expect&lt;Equal&lt;FlattenGood&lt;string[] | number[]&gt;, (string | number)[]&gt;&gt;; // would fail</code></pre>
+      <p>That <code>Equal</code> type (comparing two generic function types rather than a naive
+      <code>A extends B ? B extends A ? true : false : false</code>) is intentionally written this way because the
+      naive version has known false positives around <code>any</code> and certain union edge cases — the "generic
+      function comparison" trick is the community-standard, battle-tested version and is worth memorizing as-is.</p>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod">
+        <h4>At scale</h4>
+        <p>A design-system team built a typed CSS-in-JS helper where <code>sx({ color: "red", "&amp;:hover": {...} })</code>
+        needed to validate pseudo-selector keys and nested property names at compile time across ~200 components.
+        The first version used a plain <code>Record&lt;string, unknown&gt;</code> for nested selectors, so any typo in
+        a pseudo-selector silently did nothing at runtime (a classic, hard-to-notice CSS bug). Rewriting the nested
+        key type as a template literal union of known selector patterns (<code>` &amp;:${PseudoState}` | `&amp;&gt; ${string}`</code>)
+        turned every typo'd selector into an immediate compile error across all 200 call sites, with zero runtime cost
+        — a good concrete story for "when did a type-level trick actually prevent a real bug class."</p>
+      </div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha">
+        <h4>Gotcha</h4>
+        <p>Recursive conditional types over unbounded string/array inputs can blow past the compiler's recursion
+        depth limit ("Type instantiation is excessively deep and possibly infinite"), especially on route strings
+        with many params or deeply nested template literal parsing. Production typed-router libraries almost always
+        cap recursion depth or restructure the recursive branch to be tail-position (TS 4.5+ has better tail-recursion
+        elimination for conditional types, which materially raised the practical depth limit, but it's not unlimited).</p>
+      </div>
+      <ul>
+        <li>Remember: distribution only happens on a <strong>bare</strong> type parameter in the checked position — wrap in <code>[T]</code> to opt out.</li>
+        <li>Use the generic-function-comparison <code>Equal</code> pattern for type-level tests, not naive mutual-extends checks.</li>
+        <li><code>infer</code> unions results from covariant positions, intersects from contravariant ones — know which you're in.</li>
+        <li>Template literal pattern matching needs literal types to be useful; matching against plain <code>string</code> degrades to <code>string</code>.</li>
+        <li>Cap recursion depth explicitly in recursive type utilities meant for arbitrary user input (route strings, deep objects).</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>Distributive conditional type</td><td>Want per-union-member transformation (most utility types)</td><td>Want one evaluation against the whole union</td><td>Non-distributive via <code>[T] extends [U]</code></td></tr>
+        <tr><td>Recursive template literal parsing</td><td>Typed router/query-string/CSS selector parsing</td><td>Input strings are truly unbounded/user-generated at scale</td><td>Runtime parser + a simpler static type (e.g. just <code>string</code>)</td></tr>
+        <tr><td>Mapped type with key remapping (<code>as</code>)</td><td>Deriving a new shape with systematically renamed keys</td><td>Keys need arbitrary, non-formulaic renaming</td><td>Hand-written interface</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic">
+        <h4>Basic</h4>
+        <details class="qa"><summary>What does <code>infer</code> do inside a conditional type?</summary><div class="answer"><p>It declares a new type variable that captures a piece of the type being matched against, so you can use that captured piece in the "true" branch — e.g. capturing an array's element type or a promise's resolved type.</p></div></details>
+        <details class="qa"><summary>What is a distributive conditional type, in one sentence?</summary><div class="answer"><p>A conditional type whose checked type is a bare type parameter, which — when given a union — is evaluated separately per union member and the results are unioned back together, rather than evaluated once against the whole union.</p></div></details>
+        <details class="qa"><summary>How do you extract the element type of an array type T?</summary><div class="answer"><p><code>type ElementType&lt;T&gt; = T extends (infer U)[] ? U : never;</code></p></div></details>
+        <details class="qa"><summary>What's the syntax for renaming keys in a mapped type?</summary><div class="answer"><p>The <code>as</code> clause: <code>{ [K in keyof T as NewKeyExpression]: T[K] }</code>, introduced in TS 4.1, usually combined with a template literal type to compute the new key name.</p></div></details>
+        <details class="qa"><summary>Write a template literal type that extracts the file extension from a filename literal type.</summary><div class="answer"><p><code>type Ext&lt;S extends string&gt; = S extends `${string}.${infer E}` ? E : never;</code></p></div></details>
+      </div>
+      <div class="qa-level medium">
+        <h4>Medium</h4>
+        <details class="qa"><summary>Explain exactly why <code>Exclude&lt;"a"|"b"|"c", "a"&gt;</code> works correctly but a naive "wrap it in a tuple" version wouldn't.</summary><div class="answer"><p>`Exclude` is defined as `T extends U ? never : T` with T as a bare type parameter, so passing the union distributes the check across "a", "b", "c" individually and unions the non-excluded results. Wrapping as `[T] extends [U] ? never : T` would evaluate the whole union against U in one shot, which — since the whole union isn't assignable to "a" — would just return the entire original union unfiltered.</p></div></details>
+        <details class="qa"><summary>How does TypeScript decide whether an inferred type from multiple `infer` matches in different branches becomes a union or an intersection?</summary><div class="answer"><p>It follows the same covariance/contravariance rule as generic inference generally: candidates found in covariant (output/return-like) positions are combined via union; candidates found in contravariant (function parameter) positions are combined via intersection, because a value needing to satisfy "could be called with any of these parameter types" requires the intersection of them.</p></div></details>
+        <details class="qa"><summary>Why does matching a template literal type against a non-literal `string` degrade to `string` for the inferred capture groups?</summary><div class="answer"><p>Without concrete literal character data, the checker has no information to narrow the captured substring beyond "some string," so each `infer` group in the pattern falls back to the widest type consistent with that position, which is `string` itself.</p></div></details>
+        <details class="qa"><summary>Design a recursive template literal type that converts `"hello_world_foo"` into `"helloWorldFoo"` (snake_case to camelCase) at the type level.</summary><div class="answer"><p>Recursively match on the underscore: `type CamelCase&lt;S&gt; = S extends \`${infer Head}_${infer Tail}\` ? \`${Head}${Capitalize&lt;CamelCase&lt;Tail&gt;&gt;}\` : S;` — each recursive step strips one underscore and capitalizes everything after it, recursing until no underscore remains.</p></div></details>
+        <details class="qa"><summary>What's the practical difference between checking equality of two types with `A extends B ? B extends A ? true : false : false` versus the generic-function-comparison `Equal` pattern?</summary><div class="answer"><p>The naive mutual-extends check has known false positives, notably both directions being (vacuously) true when either type is `any`, and subtle mismatches around certain union/optional-property edge cases. The generic-function trick compares how a fresh, unconstrained type parameter would resolve against each type inside a conditional, which is sensitive to structural differences the naive check misses, making it the more reliable community-standard test.</p></div></details>
+      </div>
+      <div class="qa-level advanced">
+        <h4>Advanced</h4>
+        <details class="qa"><summary>Walk through, mechanically, how `ExtractParams` on `"/users/:userId/posts/:postId"` resolves to `"userId" | "postId"`, including each recursive step's intermediate types.</summary><div class="answer"><p>Step 1: the first branch matches with `_Start="/users/"`, `Param="userId"`, `Rest="posts/:postId"`, emitting `"userId" | ExtractParams&lt;"/posts/:postId"&gt;`. Step 2: recursing on `"/posts/:postId"`, the first branch (requiring a trailing `/`) fails to match since there's no second `:param` after it, so it falls to the single-param branch, matching `_Start="/posts/"`, `Param="postId"`, emitting `"postId"`. The final union assembled bottom-up is `"userId" | "postId"`.</p></div></details>
+        <details class="qa"><summary>Why does TS 4.5's tail-recursion optimization for conditional types matter for recursive utility types, and what shape must a conditional type have to benefit from it?</summary><div class="answer"><p>Before TS 4.5, every recursive step in a conditional type added to a fixed internal recursion depth counter regardless of structure, hitting the "excessively deep" error relatively quickly on real inputs (e.g. long route strings or deep JSON). TS 4.5 recognizes when a conditional type's recursive reference is in "tail position" (the recursive call's result is returned directly, not wrapped in further type-level computation) and defers/iterates these differently, substantially raising the practical recursion ceiling for that specific shape — mis-structuring the recursive call (e.g. wrapping it, like `Param | Recurse&lt;Rest&gt;` instead of pure tail position) can lose this optimization.</p></div></details>
+        <details class="qa"><summary>Design a type-safe SQL-like query builder where `.select("id", "name")` on a typed table narrows the eventual row type to just those columns, using template literal types to also validate dotted `table.column` references.</summary><div class="answer"><p>Model the table as a plain object type for columns; `.select` takes a generic tuple of keys constrained to `keyof Table` and returns a builder re-typed with `Pick&lt;Table, Tup[number]&gt;` as its row type. For dotted references, use a template literal type like `` `${TableName}.${keyof Table & string}` `` as the allowed key shape, and a conditional/infer pattern to strip the table prefix back off when resolving the actual column before indexing into the row type.</p></div></details>
+        <details class="qa"><summary>Explain a scenario where a distributive conditional type over a union containing `never` produces a surprising result, and why.</summary><div class="answer"><p>Distributing over a union that includes `never` effectively removes `never` from the distributed result, because TypeScript's union normalization drops `never` members (union with `never` is itself) — so `Exclude&lt;T, never&gt;`-style patterns, or any distributive conditional applied to `T | never`, silently behave as if `never` was never part of the union at all, which can hide a bug where `never` was meant to represent "no match found" and be meaningfully present in a downstream check.</p></div></details>
+        <details class="qa"><summary>How would you write a depth-limited recursive `DeepReadonly` that stops recursing after N levels, using a literal-number type parameter, and why can't you just use runtime-style decrementing (`N - 1`) directly?</summary><div class="answer"><p>TypeScript's type system has no native arithmetic on number literal types; "decrementing" is simulated by indexing into a fixed tuple of literal numbers (a precomputed "digit" tuple) by length, e.g. using a `Prev` lookup type mapping each literal 0-20 to the previous one via a tuple's `length` property, then threading that `Prev&lt;N&gt;` through each recursive call and stopping when it hits 0 — true arbitrary arithmetic isn't supported, so these tricks only work up to a bounded range before hitting the same depth/instantiation limits.</p></div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment">
+        <span class="level-tag">Beginner (30-60 min)</span>
+        <h4>Distributive vs non-distributive conditional types</h4>
+        <p>Write both a distributive and a non-distributive version of a type that converts a type to its array form,
+        apply both to a union of 3 types, and write a comment explaining the different results.</p>
+        <ul><li>Must use the <code>[T] extends [U]</code> trick for the non-distributive version.</li><li>Include an <code>Equal</code>-based type test proving the two produce different results on a union.</li></ul>
+        <p><strong>Acceptance criteria:</strong> the type test compiles and demonstrably shows the two are NOT equal for a 3-member union.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>Start from the chapter's <code>ToArray</code>/<code>ToArrayNonDist</code> examples and adapt them.</p></div></details>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Intermediate (2-4 hrs)</span>
+        <h4>Typed route param extractor</h4>
+        <p>Build <code>ExtractParams&lt;S&gt;</code> and <code>RouteParams&lt;S&gt;</code> fully from scratch (don't
+        copy the chapter's version verbatim — write your own recursive pattern), then build a small
+        <code>navigate(route: S, params: RouteParams&lt;S&gt;)</code> function that's fully type-checked.</p>
+        <ul><li>Must correctly handle routes with 0, 1, and 3+ params.</li><li>Must handle a route with no trailing segment after the last param.</li></ul>
+        <p><strong>Acceptance criteria:</strong> calling <code>navigate</code> with a missing or extra param key is a compile error for at least 3 different route shapes.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>Write the single-param base case first, get it working, then add the recursive multi-param case on top — don't try to write both branches at once.</p></div></details>
+        <p><strong>Bonus:</strong> support optional params with a `?` suffix syntax, e.g. `:id?`.</p>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Advanced (1-2 days)</span>
+        <h4>Type-level JSON path getter</h4>
+        <p>Build a <code>Get&lt;T, Path extends string&gt;</code> type that, given a dotted path string like
+        <code>"user.address.city"</code>, resolves to the actual nested value type on T (or <code>never</code> if the
+        path is invalid), plus a runtime <code>get(obj, path)</code> function whose return type matches.</p>
+        <ul><li>Must support at least 4 levels of nesting.</li><li>Must fail to compile (via the return type resolving to `never`, or an overload rejecting it) for a path that doesn't exist on T.</li></ul>
+        <p><strong>Acceptance criteria:</strong> a battery of <code>Equal</code>-based type tests covering valid paths, invalid paths, and array-indexed segments if you attempt the bonus.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>Split the path on `.` using a recursive template literal conditional, then recursively index into T using each segment, combining `infer` for the split with a standard indexed-access type for the lookup.</p></div></details>
+      </div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet"><ul>
+        <li>Distribution happens only when the checked type is a <strong>bare</strong> type parameter — <code>[T] extends [U]</code> opts out.</li>
+        <li><code>infer</code> captures a piece of a matched type; multiple candidates union in covariant positions, intersect in contravariant ones.</li>
+        <li>Mapped type <code>as</code> clause (TS 4.1+) lets you rename/filter keys, often with template literals.</li>
+        <li>Template literal types pattern-match literal strings; matching against plain <code>string</code> degrades captures to <code>string</code>.</li>
+        <li>Use the generic-function-comparison <code>Equal</code> pattern for type-level tests, not naive mutual-extends.</li>
+        <li>Recursive conditional/template literal types can hit "excessively deep" — cap recursion depth for unbounded input.</li>
+        <li>TS 4.5+ tail-recursion optimization raises the practical depth limit for correctly tail-positioned recursive conditional types.</li>
+        <li><code>Exclude&lt;T, never&gt;</code>-style distribution silently drops <code>never</code> from a union — union normalization removes it.</li>
+      </ul></div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://www.typescriptlang.org/docs/handbook/2/conditional-types.html">TS Handbook: Conditional Types</a></li>
+        <li><a href="https://www.typescriptlang.org/docs/handbook/2/mapped-types.html">TS Handbook: Mapped Types</a></li>
+        <li><a href="https://www.typescriptlang.org/docs/handbook/2/template-literal-types.html">TS Handbook: Template Literal Types</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="03-utility-types.html"><span class="dir">← Previous</span>Utility Types</a>
+        <a class="next" href="05-type-safe-patterns.html"><span class="dir">Next →</span>Type-Safe Patterns for React &amp; Node</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · TypeScript Advanced</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-typescript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-jsx.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "02-typescript-advanced", chapterKey: "04-conditional-mapped-template" });</script>
+</body>
+</html>

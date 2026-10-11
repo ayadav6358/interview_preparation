@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Databases — System Design — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">System Design</a><span class="sep">›</span>Databases</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>Databases: SQL vs NoSQL, Indexing Internals, Query Optimization</h1>
+      <p class="meta-line"><span>⏱ 3 hrs</span><span>📍 Chapter 5 of 14</span></p>
+      <p><strong>One-line summary:</strong> Picking a database is really picking which access patterns you want to be fast and which consistency guarantees you're willing to pay latency for — and once picked, indexing and query-plan literacy is the difference between a table that scales to 500M rows and one that falls over at 5M.</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>You've written thousands of queries. What separates a senior engineer is knowing <em>why</em> a query is slow before opening the query plan, knowing when "just add an index" is wrong, and being able to articulate precisely when relational modeling breaks down instead of reflexively reaching for MongoDB because "it's more flexible." Interviewers at the Staff/Tech Lead level will hand you a schema and ask "why is this slow at 10M rows" or "would you denormalize this" — this chapter gives you the internals (B-trees, query planners) to answer with mechanism, not vibes.</p>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>Helpful background: <a href="01-fundamentals.html">Fundamentals</a> (CAP/PACELC — the consistency vocabulary used throughout) and <a href="04-caching.html">Caching</a> (read-heavy mitigation that often defers a hard database decision). This chapter feeds directly into <a href="06-database-scaling.html">Database Scaling</a> and <a href="07-transactions.html">Transactions</a>.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="sql-vs-nosql">SQL vs NoSQL: where relational modeling actually breaks down</h3>
+      <p>"NoSQL is for scale, SQL is for consistency" is the oversimplified answer interviewers will probe past. The real question is: does your access pattern fit a normalized relational model, and do you need multi-row/multi-table transactional guarantees? Relational modeling breaks down in three concrete ways:</p>
+      <p><strong>1. Multi-document/multi-entity transactions that don't match your write pattern.</strong> If a single logical "unit of work" in your domain is naturally one document (e.g., a product catalog entry with variants, images, and reviews embedded) and you almost never query across entities in ways that need a join, forcing it into 5 normalized tables adds join overhead for zero transactional benefit. Conversely, if "transfer $50 from account A to account B" is core to your domain, you need atomic multi-row updates — exactly what relational engines and their ACID guarantees were built for (see <a href="07-transactions.html">Chapter 7</a>).</p>
+      <p><strong>2. Flexible/evolving schema with heterogeneous shapes.</strong> A product catalog where a "laptop" has 15 attributes and a "t-shirt" has 4 different ones is painful in a rigid relational schema (either a sparse wide table with 50 nullable columns, or an EAV anti-pattern that kills query performance). A document store lets each document carry its own shape natively. The tradeoff: you lose schema enforcement at the database layer and push validation to the application — fine for a catalog, dangerous for financial records.</p>
+      <p><strong>3. Write-heavy, denormalized, single-key access patterns at extreme scale.</strong> Systems like a chat application's message store, an IoT time-series ingest pipeline, or a leaderboard doing millions of writes/sec often read and write by a single partition key and never need a join. Here, a relational engine's B-tree index maintenance and transaction log overhead on every write becomes the bottleneck, and a wide-column/key-value store (Cassandra, DynamoDB) that's engineered for write throughput and horizontal partitioning wins. The tradeoff is you give up ad-hoc querying — you must know your access patterns at design time (query-first modeling) rather than modeling your entities first and querying later.</p>
+      <p>Senior framing: the decision isn't "SQL vs NoSQL" as a binary — it's "what's my dominant access pattern, and do I need cross-entity atomicity." Many production systems use both: Postgres for the transactional core (orders, payments, inventory) and a document or wide-column store for a specific high-volume, schema-flexible subsystem (activity feed, search index, session store).</p>
+
+      <h3 id="indexing-internals">Indexing internals: B-trees, clustered vs secondary, composite order</h3>
+      <p><strong>B-tree structure.</strong> Relational databases (and many NoSQL engines) index data using a B+tree: a balanced tree where internal nodes hold only keys (used for navigation) and leaf nodes hold the actual key + pointer (or key + row, for a clustered index), all leaves at the same depth, linked to each other for efficient range scans. Each node is sized to a disk page (typically 8KB in Postgres/MySQL InnoDB) and holds hundreds of keys, so a tree with even a few hundred million rows is only 3-4 levels deep — meaning a point lookup is 3-4 page reads, not O(log₂ n) individual comparisons against disk.</p>
+      <p><strong>How a range scan works.</strong> Because leaf pages are linked in sorted order (a doubly linked list), a query like <code>WHERE created_at BETWEEN 'X' AND 'Y'</code> does one descent to find the starting leaf, then walks sideways across linked leaf pages until it passes the end of the range — no re-descending the tree per row. This is why range queries on an indexed column are cheap, and why an index on a column you only ever do equality lookups on gains nothing extra from being a B-tree (a hash index would do fine there, though most engines use B-tree universally for consistency of tooling).</p>
+      <p><strong>Clustered vs non-clustered (secondary) index.</strong> A <strong>clustered index</strong> determines the physical row order on disk — the leaf pages of the clustered index <em>are</em> the table data (InnoDB builds this automatically on the primary key). There can be only one per table because rows can only be physically sorted one way. A <strong>secondary/non-clustered index</strong> is a separate B-tree whose leaves store the indexed column(s) plus a pointer back to the row (in InnoDB, the primary key value; a lookup via secondary index is therefore two B-tree traversals — one on the secondary index to get the PK, one on the clustered index to get the full row — called a "bookmark lookup"). This is why over-indexing has a write cost: every secondary index is a separate tree that must be updated on every INSERT/UPDATE/DELETE.</p>
+      <p><strong>Composite index column order matters.</strong> An index on <code>(status, created_at)</code> is NOT the same as one on <code>(created_at, status)</code>. The B-tree sorts by the first column, then by the second within each value of the first — so <code>WHERE status = 'active' ORDER BY created_at</code> uses <code>(status, created_at)</code> perfectly (equality on leading column, then the tree hands you rows already sorted by the second), but a query filtering only on <code>created_at</code> cannot use this index efficiently at all, because the tree isn't globally sorted by <code>created_at</code> — it's sorted by <code>created_at</code> only within each status bucket. Rule of thumb: put equality-filtered columns first, range-filtered or sort columns last, and match the leading columns to your most selective, most frequent WHERE clause.</p>
+      <p><strong>Covering indexes.</strong> If a secondary index includes every column a query needs (in the index itself, or via an INCLUDE clause in Postgres), the engine never needs to do the bookmark lookup back to the clustered index — it answers entirely from the secondary index's leaf pages. This is called an <strong>index-only scan</strong> and can be 2-10x faster than a regular index scan for read-heavy hot paths, at the cost of a larger index (more columns duplicated) and more write overhead.</p>
+
+      <h3 id="query-optimization">Query optimization: reading EXPLAIN, index-only scans, N+1, planner statistics</h3>
+      <p><strong>Reading EXPLAIN ANALYZE.</strong> Consider a Postgres query:</p>
+      <pre><code class="language-sql">EXPLAIN ANALYZE
+SELECT o.id, o.total, u.email
+FROM orders o
+JOIN users u ON u.id = o.user_id
+WHERE o.status = 'pending' AND o.created_at > now() - interval '7 days';</code></pre>
+      <p>A healthy plan looks like:</p>
+      <pre><code class="language-sql">Nested Loop  (cost=0.85..42.10 rows=120) (actual time=0.05..1.20 rows=118 loops=1)
+  -> Index Scan using idx_orders_status_created on orders o
+       (cost=0.43..8.45 rows=120) (actual time=0.02..0.40 rows=118 loops=1)
+       Index Cond: (status = 'pending' AND created_at > ...)
+  -> Index Scan using users_pkey on users u
+       (cost=0.42..0.28 rows=1) (actual time=0.004..0.004 rows=1 loops=118)
+Planning Time: 0.3 ms
+Execution Time: 1.4 ms</code></pre>
+      <p>Key things to read: (1) <strong>estimated rows vs actual rows</strong> — if these diverge wildly (planner expected 10, got 100,000), your statistics are stale and the planner is making bad decisions downstream; (2) <strong>Seq Scan vs Index Scan</strong> — a sequential scan on a large table filtered by a selective predicate is the single most common "why is this slow" finding; (3) <strong>loops</strong> on a nested inner scan — 118 loops means that inner index scan ran 118 times, so its per-loop cost matters a lot; (4) <strong>actual time</strong> is wall-clock, cost is the planner's internal unitless estimate — only compare cost across plans for the *same* query, never across different queries.</p>
+      <p><strong>Index-only scans.</strong> In the plan output you'd see "Index Only Scan" instead of "Index Scan" when the covering index described above lets Postgres skip the heap (table) fetch entirely — look for "Heap Fetches: 0" in the output to confirm it's truly avoiding the table.</p>
+      <p><strong>The N+1 query problem.</strong> This is the single most common performance bug senior engineers are expected to catch in code review. Bad (N+1 — one query to get orders, then one query per order to get its user):</p>
+      <pre><code class="language-typescript">// BAD: 1 + N queries
+const orders = await db.query('SELECT * FROM orders WHERE status = $1', ['pending']);
+for (const order of orders) {
+  order.user = await db.query('SELECT * FROM users WHERE id = $1', [order.user_id]); // N queries!
+}</code></pre>
+      <pre><code class="language-typescript">// GOOD: 1 query via JOIN, or a single batched IN() lookup
+const rows = await db.query(`
+  SELECT o.*, u.email, u.name
+  FROM orders o JOIN users u ON u.id = o.user_id
+  WHERE o.status = $1`, ['pending']);
+
+// Or, when using an ORM / separate data sources (e.g. one SQL + one cache),
+// batch the second lookup instead of looping:
+const orders = await db.query('SELECT * FROM orders WHERE status = $1', ['pending']);
+const userIds = [...new Set(orders.map(o => o.user_id))];
+const users = await db.query('SELECT * FROM users WHERE id = ANY($1)', [userIds]); // 1 query
+const userById = new Map(users.map(u => [u.id, u]));
+orders.forEach(o => o.user = userById.get(o.user_id));</code></pre>
+      <p>N+1 is especially sneaky behind ORM lazy-loading (e.g., accessing <code>order.user</code> as a property that silently fires a query) and GraphQL resolvers (a resolver per field, called once per item in a list) — the DataLoader pattern (batch + cache within a single request tick) is the standard GraphQL fix.</p>
+      <p><strong>Query planner statistics.</strong> The planner decides seq-scan-vs-index-scan-vs-which-join-algorithm based on cardinality estimates stored in catalog statistics (histograms of value distribution, null fraction, distinct value count), refreshed by <code>ANALYZE</code> (Postgres) or auto-triggered after enough rows change. After a bulk load or a big data shape change, stale statistics are a classic silent-regression cause — the query worked fine in staging with 1,000 rows and a tiny index, then in production with 50M rows the planner (using outdated stats, or none yet gathered) picks a disastrous plan. Running <code>ANALYZE</code> manually after large batch operations is cheap insurance.</p>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>When you issue a query, the flow is: parse → rewrite (views, rules expanded) → <strong>plan/optimize</strong> (the planner enumerates candidate join orders and access paths — seq scan, index scan, index-only scan, bitmap scan — and picks the one with lowest estimated cost using table/index statistics) → execute. The planner's cost model estimates disk I/O (page reads) and CPU (tuple comparisons) for each candidate plan; it is a heuristic search over an exponentially large space of join orders, which is why complex queries with 8+ joins can sometimes get a surprisingly bad plan — the planner gives up exhaustive search and uses genetic/heuristic algorithms past a threshold (Postgres: <code>join_collapse_limit</code>, <code>geqo_threshold</code>).</p>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+flowchart TD
+    Root["Root node<br/>[50 | 150]"] --> N1["Internal node<br/>[10 | 30]"]
+    Root --> N2["Internal node<br/>[90 | 120]"]
+    N1 --> L1["Leaf: keys 1-10<br/>&lt;-&gt; linked"]
+    N1 --> L2["Leaf: keys 11-30<br/>&lt;-&gt; linked"]
+    N2 --> L3["Leaf: keys 51-90<br/>&lt;-&gt; linked"]
+    N2 --> L4["Leaf: keys 91-120<br/>&lt;-&gt; linked"]
+    L1 -.sibling pointer.-> L2
+    L2 -.sibling pointer.-> L3
+    L3 -.sibling pointer.-> L4
+    Query["Range scan WHERE key BETWEEN 15 AND 95"] -.descend once.-> N1
+    Query -.then walk siblings.-> L2
+      </div>
+      <div class="mermaid">
+sequenceDiagram
+    participant App as Application
+    participant Parser as Parser/Rewriter
+    participant Planner as Query Planner
+    participant Stats as Catalog Statistics
+    participant Exec as Executor
+    App->>Parser: SQL query
+    Parser->>Planner: parsed + rewritten query tree
+    Planner->>Stats: fetch histograms, row counts, index info
+    Stats-->>Planner: cardinality estimates
+    Planner->>Planner: enumerate join orders & access paths,<br/>pick lowest estimated cost
+    Planner->>Exec: chosen plan (index scan / seq scan / join algo)
+    Exec->>Exec: run plan, read pages from buffer pool or disk
+    Exec-->>App: result rows
+    Note over Planner,Stats: Stale stats after bulk load =<br/>bad cardinality estimate = wrong plan chosen
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <p>Composite index column order in practice:</p>
+      <pre><code class="language-sql">-- Query pattern: filter by status (equality), sort by created_at
+SELECT * FROM orders WHERE status = 'pending' ORDER BY created_at DESC LIMIT 20;
+
+-- GOOD: equality column leads, range/sort column trails
+CREATE INDEX idx_orders_status_created ON orders (status, created_at DESC);
+
+-- BAD for this query: created_at leads, so the tree isn't globally
+-- sorted by created_at per status -- planner likely falls back to seq scan
+CREATE INDEX idx_orders_created_status ON orders (created_at, status);
+
+-- Covering index: avoid the heap fetch entirely for a hot read path
+CREATE INDEX idx_orders_covering ON orders (status, created_at DESC) INCLUDE (total, user_id);
+-- Now "SELECT total, user_id FROM orders WHERE status=... ORDER BY created_at"
+-- is answered purely from the index -- Index Only Scan, Heap Fetches: 0</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4><p>An e-commerce order-history page started timing out as the orders table crossed 80M rows. The query was <code>SELECT * FROM orders WHERE user_id = ? ORDER BY created_at DESC LIMIT 20</code>, with an index only on <code>user_id</code>. EXPLAIN showed an index scan on <code>user_id</code> returning all of a power-user's 4,000 orders, then a sort step on all 4,000 rows before applying LIMIT — the index helped find the rows but not the ordering. The fix was a composite index <code>(user_id, created_at DESC)</code>: now the B-tree hands back rows already sorted within each user's bucket, and the planner can stop after reading the first 20 leaf entries, turning an O(n log n) sort over thousands of rows into an O(1) leaf walk. This single index change took p99 latency on that endpoint from 1.8s to 4ms. The lesson generalizes: an index that only satisfies the WHERE clause but forces a separate sort for ORDER BY is a common half-measure that looks fine until row counts grow.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Adding an index on every column that appears in any WHERE clause without considering composite order or write cost. Each index slows down every INSERT/UPDATE/DELETE on that table and consumes memory in the buffer pool — indexes are not free, and a table with 15 single-column indexes is often worse than 3 well-chosen composite ones.</p></div>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Trusting that "it has an index" means the query uses it. A function applied to the indexed column (<code>WHERE LOWER(email) = ?</code> against a plain index on <code>email</code>), an implicit type cast, or a leading-wildcard LIKE (<code>LIKE '%foo'</code>) all prevent the planner from using a standard B-tree index — always verify with EXPLAIN, don't assume.</p></div>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Choosing a document database purely because the initial schema "feels more natural as JSON," then discovering 8 months later that the product now needs cross-entity reporting/joins that the chosen engine handles poorly. Model your dominant <em>and future likely</em> access patterns, not just your first one.</p></div>
+
+      <h2 id="tradeoffs">Tradeoffs: When to Use vs When NOT To</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>Relational (Postgres/MySQL)</td><td>Multi-entity transactions, ad-hoc queries, strong consistency needs</td><td>Extremely high write throughput on a single key, wildly heterogeneous schemas</td><td>Document or wide-column store</td></tr>
+        <tr><td>Document store (Mongo)</td><td>Schema varies per entity, access is mostly single-document</td><td>Need multi-document ACID transactions as the common case, heavy ad-hoc joins</td><td>Relational with JSONB columns</td></tr>
+        <tr><td>Wide-column/KV (Cassandra/Dynamo)</td><td>Massive write throughput, known access patterns, horizontal scale</td><td>Need flexible querying or strong cross-row consistency</td><td>Sharded relational (Ch. 6)</td></tr>
+        <tr><td>Covering index</td><td>Hot, read-heavy query path with stable column set</td><td>Write-heavy table, rarely-run query, wide result set</td><td>Regular secondary index + accept bookmark lookup</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic"><h4>Basic</h4>
+        <details class="qa"><summary>What is the difference between a clustered and a non-clustered index?</summary><div class="answer"><p>A clustered index determines the physical storage order of rows — its leaf pages are the table data; there can be only one. A non-clustered (secondary) index is a separate tree whose leaves point back to the row, requiring an extra lookup.</p></div></details>
+        <details class="qa"><summary>Why does column order matter in a composite index?</summary><div class="answer"><p>The B-tree is sorted by the first column, then the second within each value of the first. A query that doesn't filter on the leading column(s) by equality generally can't use the index efficiently.</p></div></details>
+        <details class="qa"><summary>What is the N+1 query problem?</summary><div class="answer"><p>Running one query to fetch a list, then one additional query per item to fetch related data, instead of a single join or batched IN() query — turns O(1) round trips into O(n).</p></div></details>
+        <details class="qa"><summary>What does EXPLAIN ANALYZE actually run?</summary><div class="answer"><p>It executes the query for real and reports actual timing and row counts alongside the planner's estimates, unlike plain EXPLAIN which only estimates.</p></div></details>
+        <details class="qa"><summary>When would you reach for a document database instead of relational?</summary><div class="answer"><p>When entities have heterogeneous, evolving shapes and you rarely query across entities — e.g., a product catalog with wildly different attributes per category.</p></div></details>
+        <details class="qa"><summary>What is a covering index?</summary><div class="answer"><p>An index that includes every column a query needs, so the engine can answer entirely from the index without fetching the underlying row (index-only scan).</p></div></details>
+      </div>
+      <div class="qa-level medium"><h4>Medium</h4>
+        <details class="qa"><summary>You have an index on (status, created_at) but a query filters only on created_at. Why doesn't it use the index well?</summary><div class="answer"><p>The tree is sorted by status first, then created_at within each status bucket — it's not globally sorted by created_at, so the planner would need to scan every status bucket, usually making a seq scan cheaper instead.</p></div><div class="followup">Follow-up: What index would fix this if both query patterns (status-filtered and created_at-only) are common?</div></details>
+        <details class="qa"><summary>Walk through why a bookmark lookup via a secondary index can be slower than expected at scale.</summary><div class="answer"><p>Each matching row requires two B-tree traversals: one on the secondary index to find the primary key, one on the clustered index to fetch the full row — and if those rows are scattered across many data pages, this becomes many random I/Os instead of a sequential read, which is why a seq scan sometimes beats an index scan for low-selectivity predicates.</p></div></details>
+        <details class="qa"><summary>How would you diagnose and fix an N+1 problem hidden behind ORM lazy loading?</summary><div class="answer"><p>Turn on query logging / use a profiler to count queries per request; look for a repeated query shape fired once per loop iteration. Fix via eager loading (JOIN/include), or batch loading (collect IDs, one IN() query) — in GraphQL, the DataLoader pattern batches and caches within a tick.</p></div></details>
+        <details class="qa"><summary>What would make a query planner choose a bad plan even though the right index exists?</summary><div class="answer"><p>Stale statistics after a bulk load/delete, a non-sargable predicate (function on the indexed column, leading wildcard LIKE, implicit type cast) that prevents index usage, or genuinely low selectivity where a seq scan actually is cheaper.</p></div></details>
+        <details class="qa"><summary>Explain the tradeoff of adding a covering index for a hot read path.</summary><div class="answer"><p>Faster reads (index-only scan, no heap fetch) at the cost of a larger index (duplicated columns) and slower writes (more data to maintain per INSERT/UPDATE) — worth it only when the read path is hot enough relative to writes.</p></div></details>
+        <details class="qa"><summary>Why might "SELECT *" be a performance problem even with a perfect WHERE-clause index?</summary><div class="answer"><p>It forces a heap fetch for every matching row to retrieve all columns, defeating a potential index-only scan, and pulls unnecessary data over the wire/into application memory.</p></div></details>
+      </div>
+      <div class="qa-level advanced"><h4>Advanced</h4>
+        <details class="qa"><summary>Design the indexing strategy for a table with 500M rows that needs both "recent orders per user" and "all pending orders globally" queries fast.</summary><div class="answer"><p>Two composite indexes: (user_id, created_at DESC) for the per-user recency query, and (status, created_at DESC) for the global pending query — accept the write-amplification cost of two indexes since both read patterns are presumably hot; consider a partial index on status='pending' if that's a small, frequently-queried subset, since a partial index is smaller and cheaper to maintain than indexing all status values.</p></div></details>
+        <details class="qa"><summary>You migrate a table from Postgres to a document store for flexibility, but now need an occasional cross-entity report. How do you handle it without migrating back?</summary><div class="answer"><p>Options: run periodic ETL into a relational/analytical store (or a data warehouse) for reporting purposes, keeping the document store as the operational system of record; or use the document database's own aggregation pipeline for simple cases. The key senior insight is not forcing the operational store to serve a fundamentally different access pattern (analytical joins) it wasn't designed for — separate OLTP from OLAP.</p></div></details>
+        <details class="qa"><summary>How does the query planner's cost-based optimizer sometimes get join order wrong, and what's the practical fix?</summary><div class="answer"><p>With many joins, the search space of orderings is exponential, so the planner uses heuristics past a threshold and may misestimate cardinality when correlated columns are involved (it typically assumes column independence). Practical fixes: add extended statistics on correlated columns (Postgres CREATE STATISTICS), restructure the query, or use query hints/materialized intermediate results where the engine allows.</p></div></details>
+        <details class="qa"><summary>When is denormalization the right call in a relational schema, and what's the operational cost?</summary><div class="answer"><p>When read patterns vastly outweigh writes and the join cost of normalized tables is the measured bottleneck (confirmed via EXPLAIN, not guessed) — e.g., storing a computed order_total on the order row instead of summing line items every read. Cost: you now must keep the denormalized field in sync on every write (via trigger, application logic, or eventual batch job), introducing a new class of consistency bug if that sync logic has gaps.</p></div></details>
+        <details class="qa"><summary>Explain index-only scans and a scenario where they silently stop working after seeming to work.</summary><div class="answer"><p>An index-only scan avoids the heap fetch when all needed columns are in the index AND the visibility map shows the page hasn't been recently modified (MVCC: Postgres must still check row visibility unless the page is marked all-visible by vacuum). Heavy write/update traffic without timely autovacuum can push "Heap Fetches" back up even with a perfect covering index, because the visibility map goes stale — a classic "why did this suddenly get slow with no schema change" production mystery.</p></div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment"><span class="level-tag">Beginner (30-60 min)</span><h4>Index the right way</h4><p>Given a <code>products</code> table with columns (id, category, price, created_at, name), and a query <code>SELECT * FROM products WHERE category = 'electronics' ORDER BY price ASC LIMIT 20</code>, write the CREATE INDEX statement that lets the planner avoid both a seq scan and a separate sort step.</p><ul><li>Explain in one sentence why column order in your index matches this query.</li><li>State what EXPLAIN output you'd expect to see (which scan type, and whether a Sort node appears).</li></ul><p><strong>Acceptance criteria:</strong> Correct composite index with equality column leading, range/sort column trailing, and correct reasoning.</p><details class="qa"><summary>Hints</summary><div class="answer"><p><code>CREATE INDEX idx_products_category_price ON products (category, price ASC);</code> — equality filter leads, sort column trails so the tree is pre-sorted within each category.</p></div></details><p><strong>Bonus:</strong> What happens to this plan if the query instead does <code>ORDER BY price DESC</code>?</p></div>
+      <div class="assignment"><span class="level-tag">Intermediate (2-4 hrs)</span><h4>Find and fix an N+1</h4><p>Take any real (or sample) API endpoint you have access to that returns a list with related data (e.g., posts with authors, orders with line items). Add query logging/count and confirm whether an N+1 exists. If it does, fix it with a JOIN or batched lookup and measure the before/after query count and latency.</p><ul><li>Document the before query count and after query count for a list of 50 items.</li><li>Explain the fix you chose and why (JOIN vs batched IN() vs DataLoader-style batching).</li></ul><p><strong>Acceptance criteria:</strong> Concrete before/after numbers and a correct explanation of the mechanism.</p><details class="qa"><summary>Hints</summary><div class="answer"><p>Use the bad/good code pattern from the Code Examples section as a template — count queries via your DB driver's logging or an APM tool.</p></div></details><p><strong>Bonus:</strong> Would a DataLoader-style per-request batch cache help here, and why/why not?</p></div>
+      <div class="assignment"><span class="level-tag">Advanced (1-2 days)</span><h4>Diagnose a production-scale slow query</h4><p>You're given (hypothetically, or construct it yourself with a seeded 10M+ row table) a query that's slow in production but fast in staging (1,000 rows). Diagnose using EXPLAIN ANALYZE, propose an index or query rewrite, and justify it with the planner's own cost/row estimates before and after.</p><ul><li>Identify whether the root cause is missing index, wrong composite order, stale statistics, or a non-sargable predicate.</li><li>Show the EXPLAIN output before and after your fix (or describe precisely what you'd expect to change).</li></ul><p><strong>Acceptance criteria:</strong> A root-cause diagnosis grounded in planner output, not guesswork, plus a fix with before/after reasoning.</p><details class="qa"><summary>Hints</summary><div class="answer"><p>Seed a table with pgbench or a simple generate_series script to 10M+ rows, run ANALYZE, then try the query with and without your proposed index — compare "actual rows" vs "estimated rows" for divergence first.</p></div></details><p><strong>Bonus:</strong> What's the operational process you'd put in place so this class of regression is caught before it hits production (query review, automated EXPLAIN diffing in CI, etc.)?</p></div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet"><ul>
+        <li>Relational breaks down for: multi-shape schemas, no cross-entity transactions needed, extreme single-key write throughput.</li>
+        <li>B-tree: balanced, leaf pages linked for range scans, 3-4 levels deep even at hundreds of millions of rows.</li>
+        <li>Clustered index = physical row order, one per table. Secondary index = separate tree + bookmark lookup back to the row.</li>
+        <li>Composite index column order: equality-filtered columns first, range/sort columns last.</li>
+        <li>Covering index lets the engine answer from the index alone — index-only scan, watch for "Heap Fetches: 0".</li>
+        <li>EXPLAIN ANALYZE: compare estimated vs actual rows — big divergence means stale statistics.</li>
+        <li>N+1: one query becomes 1+N — fix with JOIN, batched IN(), or DataLoader-style batching.</li>
+        <li>Functions/casts/leading wildcards on an indexed column usually prevent standard index use (non-sargable).</li>
+        <li>Run ANALYZE after large bulk loads — stale stats silently produce bad plans.</li>
+      </ul></div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://www.postgresql.org/docs/current/indexes.html">PostgreSQL Documentation — Indexes</a></li>
+        <li><a href="https://www.postgresql.org/docs/current/using-explain.html">PostgreSQL Documentation — Using EXPLAIN</a></li>
+        <li><a href="https://use-the-index-luke.com/">Use The Index, Luke — SQL indexing fundamentals</a></li>
+        <li><a href="https://dev.mysql.com/doc/refman/8.0/en/innodb-index-types.html">MySQL InnoDB Index Types</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="04-caching.html"><span class="dir">← Previous</span>Caching</a>
+        <a class="next" href="06-database-scaling.html"><span class="dir">Next →</span>Database Scaling</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · System Design</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-typescript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-sql.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-yaml.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "01-system-design", chapterKey: "05-databases" });</script>
+</body>
+</html>

@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Docker Compose — Cloud, AWS, Docker &amp; K8s — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">Cloud, AWS, Docker &amp; K8s</a><span class="sep">›</span>Docker Compose</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>Docker Compose</h1>
+      <p class="meta-line"><span>⏱ 2 hrs</span><span>📍 Chapter 2 of 7</span></p>
+      <p><strong>One-line summary:</strong> Compose is a thin declarative layer over the Docker Engine API that
+      wires multiple containers into one named network with dependency ordering — it is not an orchestrator,
+      and knowing exactly where that line sits saves you from reaching for it (or K8s) at the wrong time.</p>
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>Every team has a docker-compose.yml, and most of them have at least one subtle bug: a service that
+      starts before its dependency is actually ready (not just "started"), a volume that silently diverges
+      between dev and prod, or a network misconfiguration that only breaks under a specific startup order. At
+      senior level you're expected to design the local dev environment so it's a faithful enough model of
+      production that bugs show up locally instead of in staging.</p>
+      <div class="box why"><h4>Why</h4><p>Compose is also frequently used as a lightweight deployment tool for
+      single-host production (small startups, side projects, internal tools) — understanding its restart
+      policies, healthchecks, and networking model matters even outside "just local dev."</p></div>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>Comfortable with the Docker CLI and Dockerfiles. Related: <a href="01-docker-deep-dive.html">Docker
+      Deep Dive</a>, <a href="03-kubernetes-core.html">Kubernetes Core</a>.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="basics">Services, networks, volumes</h3>
+      <p>A Compose file declares services (each maps to one or more containers from an image/build context),
+      networks (by default Compose creates one bridge network per project and attaches every service to it,
+      giving each service DNS resolution by service name), and volumes (named volumes for persistent data,
+      bind mounts for live-reloading source code into a container during dev).</p>
+
+      <h3 id="depends-on-health">depends_on vs real readiness</h3>
+      <p><code>depends_on</code> without a condition only waits for the dependency's container to <em>start</em>
+      — not for Postgres to finish accepting connections, not for a migration to finish. This is the single most
+      common Compose bug: an API container starts, tries to connect to Postgres, and crash-loops for the first
+      few seconds until Postgres is actually ready, by which time a naive restart policy may have already given
+      up. The fix is <code>depends_on</code> with <code>condition: service_healthy</code>, tied to a
+      <code>healthcheck</code> block on the dependency — Compose then genuinely blocks startup of the dependent
+      service until the healthcheck passes.</p>
+      <div class="box gotcha"><h4>Gotcha</h4><p>A healthcheck that just checks "is the process running" (e.g.
+      <code>pg_isready</code> with no retries/interval tuning) can still race during slow disk I/O on CI
+      runners. Tune <code>interval</code>, <code>retries</code>, and <code>start_period</code> deliberately —
+      don't just copy a healthcheck snippet from docs without matching it to your actual startup time.</p></div>
+
+      <h3 id="networking-model">Compose networking model</h3>
+      <p>Each project gets an isolated bridge network; services reach each other by service name via Compose's
+      embedded DNS (backed by the Docker daemon's internal resolver, 127.0.0.11 inside each container). Ports
+      exposed via <code>ports:</code> are published to the host; ports only listed in a service's own
+      <code>expose</code> (or not listed at all) are reachable from other containers on the same network but not
+      from the host — this is why your API container can reach <code>postgres:5432</code> with no published
+      port, but your laptop's <code>psql</code> client needs an explicit <code>ports: ["5432:5432"]</code> to
+      do the same.</p>
+
+      <h3 id="override-files">Override files and environment parity</h3>
+      <p>Compose merges <code>docker-compose.yml</code> with <code>docker-compose.override.yml</code> (loaded
+      automatically) or an explicit <code>-f base.yml -f dev.yml</code> chain, letting you keep one base
+      definition and layer dev-only bind mounts / debug ports on top without duplicating the whole file. The
+      discipline this buys you: the base file should look structurally like what you'd actually run in
+      production (same image build, same env var names, same healthchecks), with only genuinely
+  dev-specific concerns (hot reload mounts, exposed debug ports) in the override.</p>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>Compose is a client of the Docker Engine API, not a separate orchestration daemon. <code>docker compose
+      up</code> resolves the dependency graph from <code>depends_on</code>, topologically orders service
+      creation, creates the project network and volumes if missing, then for each service: builds the image if
+      a <code>build:</code> context is given (subject to the same layer caching as a plain <code>docker
+      build</code>), creates the container with the declared config, and starts it — waiting on healthcheck
+      conditions where declared. There is no scheduler, no rescheduling across hosts, no built-in load balancing
+      across replicas beyond what <code>docker compose up --scale</code> gives you (multiple containers of one
+      service sharing the project network, with no automatic load balancing — you'd still need an external proxy
+      in front). This is exactly the ceiling that pushes real multi-host, self-healing production workloads to
+      Kubernetes or ECS.</p>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+graph LR
+  subgraph Project Network (bridge)
+    FE[frontend] -->|http://api:3000| API[api]
+    API -->|postgres:5432| DB[(postgres)]
+    API -->|redis:6379| R[(redis)]
+  end
+  Host -->|ports: 5173:5173| FE
+  Host -->|ports: 3000:3000| API
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-yaml">name: myapp
+
+services:
+  frontend:
+    build:
+      context: ./frontend
+      target: dev
+    ports: ["5173:5173"]
+    environment:
+      VITE_API_URL: http://localhost:3000
+    depends_on:
+      api:
+        condition: service_started
+    volumes:
+      - ./frontend/src:/app/src   # bind mount for hot reload, dev only
+
+  api:
+    build:
+      context: ./api
+      target: dev
+    ports: ["3000:3000"]
+    environment:
+      DATABASE_URL: postgres://app:app@postgres:5432/app
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./api/src:/app/src
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: app
+      POSTGRES_DB: app
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app -d app"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 2s
+      retries: 10
+
+volumes:
+  pgdata:
+</code></pre>
+      <pre><code class="language-bash"># Bring the stack up, rebuilding only services whose build context changed
+docker compose up -d --build
+
+# Tail logs across all services with service-name prefixes
+docker compose logs -f
+
+# Run a one-off migration against the running postgres service
+docker compose run --rm api npm run migrate
+
+# Scale the api service to 3 replicas (no built-in LB — pair with a proxy)
+docker compose up -d --scale api=3
+</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4><p>A team's CI integration tests were flaky roughly 1 in 20 runs —
+      API tests failing with connection-refused against Postgres. Root cause: <code>depends_on</code> listed
+      <code>postgres</code> with no condition, so Compose considered the dependency "ready" the instant the
+      container process started, not when Postgres finished WAL recovery and began accepting connections (which
+      varied with CI runner disk speed). Adding a proper <code>healthcheck</code> on Postgres with
+      <code>condition: service_healthy</code> on the API's <code>depends_on</code> eliminated the flakiness
+      entirely — zero app-level retry logic needed, because Compose now guarantees real readiness order.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Bind-mounting <code>node_modules</code> from the host into the
+      container (or not excluding it from a bind mount) silently overwrites the container's Linux-built native
+      modules with the host's (possibly macOS/Windows) build — classic "works outside Docker, breaks inside" or
+      vice versa. Use an anonymous volume to "shadow" <code>node_modules</code> inside the container instead of
+      letting the host bind mount cover it.</p></div>
+      <ul>
+        <li>Never bake secrets into the Compose file committed to git — use an untracked <code>.env</code> file
+        or Docker secrets, and commit a <code>.env.example</code>.</li>
+        <li>Give every stateful service a named volume, not an anonymous one, so <code>docker compose down</code>
+        (without <code>-v</code>) doesn't silently orphan it.</li>
+        <li>Keep the base Compose file structurally close to production (same image, same healthchecks); push
+        dev-only conveniences into an override file.</li>
+        <li><code>restart: unless-stopped</code> is usually the right default for anything meant to stay up
+        locally across a daemon restart.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>Docker Compose for prod</td><td>Single host, low-traffic internal tool/side project</td>
+        <td>Need multi-host scaling, rolling deploys, self-healing</td><td>Kubernetes / ECS</td></tr>
+        <tr><td>Bind mounts for hot reload</td><td>Local dev inner-loop speed</td>
+        <td>Anywhere resembling production (never bind-mount source in prod)</td>
+        <td>Build the image, redeploy</td></tr>
+        <tr><td>docker compose --scale</td><td>Quick local load testing of N identical replicas</td>
+        <td>Real load balancing / health-aware routing needed</td>
+        <td>Add nginx/traefik in front, or move to K8s</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic"><h4>Basic</h4>
+        <details class="qa"><summary>What problem does Docker Compose solve that plain docker run doesn't?</summary><div class="answer"><p>It declaratively defines multiple related containers, their shared network, volumes, and startup dependencies in one file, replacing a series of manual docker run/network/volume commands.</p></div><div class="followup">Follow-up: is Compose an orchestrator like Kubernetes?</div></details>
+        <details class="qa"><summary>How do services in the same Compose project reach each other?</summary><div class="answer"><p>By service name, via Compose's embedded DNS on the shared project network — e.g. the api service connects to postgres:5432, not localhost:5432.</p></div><div class="followup">Follow-up: why doesn't localhost work between two containers?</div></details>
+        <details class="qa"><summary>What's the difference between ports and expose in a Compose service?</summary><div class="answer"><p>ports publishes the port to the host machine; expose (or omitting both) only makes it reachable from other containers on the same network, not from the host.</p></div><div class="followup">Follow-up: why would you intentionally not publish a database port to the host?</div></details>
+        <details class="qa"><summary>What does depends_on actually guarantee by default?</summary><div class="answer"><p>Only container start order, not application readiness — the dependency container has started, not that the service inside it is ready to accept connections.</p></div><div class="followup">Follow-up: how do you make it wait for real readiness?</div></details>
+        <details class="qa"><summary>Why use a named volume instead of a bind mount for a database?</summary><div class="answer"><p>Named volumes are managed by Docker, persist independently of the host filesystem layout, and survive docker compose down without -v, giving more predictable lifecycle semantics than a bind mount tied to a host path.</p></div><div class="followup">Follow-up: when would a bind mount actually be preferable?</div></details>
+        <details class="qa"><summary>How do you view logs for all services in a Compose project at once?</summary><div class="answer"><p>docker compose logs -f, which tails and prefixes output by service name across every running container in the project.</p></div><div class="followup">Follow-up: how would you filter to just one service's logs?</div></details>
+      </div>
+      <div class="qa-level medium"><h4>Medium</h4>
+        <details class="qa"><summary>Explain exactly how to make an API service wait for Postgres to be truly ready, not just started.</summary><div class="answer"><p>Add a healthcheck block to the postgres service (e.g. pg_isready) with tuned interval/retries/start_period, then set the api service's depends_on to { postgres: { condition: service_healthy } }. Compose then blocks api's start until the healthcheck reports healthy.</p></div><div class="followup">Follow-up: what happens if the healthcheck never passes — does Compose hang forever?</div></details>
+        <details class="qa"><summary>Why might bind-mounting the entire project directory into a Node container break native dependencies?</summary><div class="answer"><p>If node_modules (containing OS-specific compiled native modules) is included in the bind mount, the host's build of those modules overwrites the container's Linux build, causing ABI mismatches at runtime. Fix with an anonymous volume mounted at node_modules to shadow the bind mount for that specific subdirectory.</p></div><div class="followup">Follow-up: does this issue exist for pure-JS dependencies too?</div></details>
+        <details class="qa"><summary>How would you structure Compose files to keep dev and "prod-like" configs in sync without duplication?</summary><div class="answer"><p>Keep a base docker-compose.yml that mirrors production shape (image build target, env var names, healthchecks), then layer a docker-compose.override.yml (auto-loaded) or explicit -f chain adding only dev-specific bind mounts, debug ports, and verbose logging — never duplicating the whole service definition.</p></div><div class="followup">Follow-up: how do multiple -f files merge when the same key is set in both?</div></details>
+        <details class="qa"><summary>What actually happens on the network when you run docker compose up --scale api=3 with no proxy in front?</summary><div class="answer"><p>Three containers are created for the api service, all reachable via the same service-name DNS entry which round-robins at the DNS level across the replicas' IPs — but there's no health-aware load balancing, retry, or connection draining, so a crashed replica can still receive traffic briefly.</p></div><div class="followup">Follow-up: how would you add real load balancing locally?</div></details>
+        <details class="qa"><summary>Why is committing a .env file with real secrets to git in a Compose project dangerous even for "just local dev"?</summary><div class="answer"><p>Local dev credentials are often reused or structurally similar to staging/prod ones, get picked up by secret scanners anyway, and git history retains them even after later removal/rotation — the fix is .env in .gitignore plus a committed .env.example with placeholder values.</p></div><div class="followup">Follow-up: how would you rotate a secret that was already committed and pushed?</div></details>
+      </div>
+      <div class="qa-level advanced"><h4>Advanced</h4>
+        <details class="qa"><summary>Your team wants to run a small production workload on Compose on a single EC2 box rather than standing up Kubernetes. What do you need to add beyond the dev Compose file to make this defensible?</summary><div class="answer"><p>restart: always/unless-stopped policies, resource limits (mem_limit/cpus) to prevent one service from starving others, log rotation (Compose logging driver config, since container logs grow unbounded by default), a reverse proxy (nginx/traefik/Caddy) for TLS termination and routing, externalized secrets (not in the committed file), a backup strategy for named volumes, and a plan for what happens on host reboot/Docker daemon restart. Also explicitly document the ceiling: no multi-host failover, no rolling zero-downtime deploys without extra tooling.</p></div><div class="followup">Follow-up: at what point would you say "this should move to K8s/ECS now"?</div></details>
+        <details class="qa"><summary>Design a Compose-based local environment for a monorepo with 6 services and 2 databases such that a fresh clone + one command gets a new engineer to a fully working, seeded environment in under 5 minutes.</summary><div class="answer"><p>One docker-compose.yml with healthchecked dependency ordering, a one-off init/migrate/seed service (depends_on all datastores being healthy, runs once via profiles or a dedicated `docker compose run`), cached builds via BuildKit so repeat `up --build` is fast, and a Makefile/script wrapping `docker compose up -d && docker compose run --rm migrate && docker compose run --rm seed` into one command. Document expected first-run time vs cached-run time.</p></div><div class="followup">Follow-up: how do you avoid the seed step accidentally re-running destructively on every up?</div></details>
+        <details class="qa"><summary>Why can depends_on with service_healthy still not fully prevent a startup race in a service that does async initialization after its HTTP server starts listening?</summary><div class="answer"><p>If the healthcheck only tests "process/port is up" but the app does further async init (e.g. warming a cache, running in-process migrations) after the server starts accepting connections, a dependent service can still hit it mid-initialization. The healthcheck endpoint itself needs to reflect true application readiness (e.g. a /health endpoint gated on init completion), not just process liveness — this is the same readiness-vs-liveness distinction that matters even more in Kubernetes.</p></div><div class="followup">Follow-up: how does this map to Kubernetes' separate readiness and liveness probes?</div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment"><span class="level-tag">Beginner (30-60 min)</span><h4>Fix a flaky Compose stack</h4>
+      <p>Given a Compose file where an API service depends_on postgres with no condition and intermittently crash-loops on startup, diagnose and fix it.</p>
+      <ul><li>Add a correct healthcheck to postgres</li><li>Wire depends_on with condition: service_healthy</li><li>Verify with repeated `docker compose up` runs that the race is gone</li></ul>
+      <p><strong>Acceptance criteria:</strong> 20 consecutive `docker compose up` runs with zero API crash-loop restarts.</p>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>pg_isready is the standard healthcheck test for Postgres; tune start_period to your actual cold-start time.</p></div></details>
+      <p><strong>Bonus:</strong> Add a similar healthcheck-gated dependency for Redis.</p>
+      </div>
+      <div class="assignment"><span class="level-tag">Intermediate (2-4 hrs)</span><h4>Build a full local dev stack with hot reload</h4>
+      <p>Compose stack with a React frontend, Node API, Postgres, and Redis, with bind-mount hot reload for both frontend and API source, without breaking native node_modules.</p>
+      <ul><li>Base file resembling prod shape; override file for dev-only mounts</li><li>Anonymous volume shadowing node_modules</li><li>One-command fresh-clone-to-running setup</li></ul>
+      <p><strong>Acceptance criteria:</strong> Editing a source file on the host reflects in the running container within 2 seconds, with no native-module breakage.</p>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>volumes: [./api/src:/app/src, /app/node_modules] — the second entry is the anonymous-volume shadow trick.</p></div></details>
+      <p><strong>Bonus:</strong> Add a seed service that only runs once and is idempotent on repeat `up`.</p>
+      </div>
+      <div class="assignment"><span class="level-tag">Advanced (1-2 days)</span><h4>Harden a Compose stack for small-scale single-host production</h4>
+      <p>Take the dev stack and produce a production variant: resource limits, log rotation, reverse proxy with TLS, externalized secrets, and a documented backup/restore procedure for the Postgres volume.</p>
+      <ul><li>nginx or Caddy in front with TLS (self-signed is fine for the exercise)</li><li>mem/cpu limits on every service</li><li>Backup script for the named Postgres volume + restore drill</li></ul>
+      <p><strong>Acceptance criteria:</strong> left as an exercise — think through what happens on host reboot, what happens if one container OOMs, and how you'd actually restore from a backup under time pressure.</p>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>docker run with --volumes-from or a tar of the volume's mountpoint is the simplest backup mechanism to start from.</p></div></details>
+      </div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet"><ul>
+        <li>Compose = declarative multi-container wiring over the Docker Engine API; not an orchestrator.</li>
+        <li>Services reach each other by name via embedded DNS on the shared project network.</li>
+        <li>ports publishes to host; expose (or nothing) is container-network-only.</li>
+        <li>depends_on alone = start order only. Add healthcheck + condition: service_healthy for real readiness.</li>
+        <li>Named volumes for persistent state; bind mounts for dev hot-reload only.</li>
+        <li>Shadow node_modules with an anonymous volume when bind-mounting source into a Node container.</li>
+        <li>Base file should mirror prod shape; push dev-only concerns into an override file.</li>
+        <li>--scale gives you N replicas with zero health-aware load balancing — pair with a proxy if you need that.</li>
+      </ul></div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://docs.docker.com/compose/compose-file/">Compose file reference</a></li>
+        <li><a href="https://docs.docker.com/compose/startup-order/">Compose startup order and healthchecks</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="01-docker-deep-dive.html"><span class="dir">← Previous</span>Docker Deep Dive</a>
+        <a class="next" href="03-kubernetes-core.html"><span class="dir">Next →</span>Kubernetes Core</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · Cloud, AWS, Docker &amp; K8s</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-yaml.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-hcl.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-docker.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "06-cloud-aws-docker-k8s", chapterKey: "02-docker-compose" });</script>
+</body>
+</html>

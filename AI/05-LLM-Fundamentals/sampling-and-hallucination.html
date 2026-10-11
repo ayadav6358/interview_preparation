@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sampling & Hallucination</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <input class="searchbox" placeholder="Search topics..." />
+    <a href="../index.html">← Home</a>
+    <h3>05-LLM-Fundamentals</h3>
+    <a href="what-is-llm.html">What is an LLM</a>
+    <a href="tokens-and-context-window.html">Tokens & Context Window</a>
+    <a href="sampling-and-hallucination.html">Sampling & Hallucination</a>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumbs"><a href="../index.html">Home</a> / 05-LLM-Fundamentals / Sampling & Hallucination</div>
+      <button class="theme-toggle" onclick="toggleTheme()">🌓 Theme</button>
+    </div>
+    <h1>Sampling (Temperature / Top-p / Top-k) & Hallucination</h1>
+    <span class="tag good">Stable</span><span class="tag">Last verified: 2026-10-06</span>
+
+    <div class="toc">
+      <b>On this page</b>
+      <a href="#what">1. What is this?</a>
+      <a href="#whyexist">2. Why does it exist?</a>
+      <a href="#whyimportant">3. Why is it important?</a>
+      <a href="#whereused">4. Where is it used?</a>
+      <a href="#prereq">5. Prerequisites</a>
+      <a href="#core">6. Core concepts</a>
+      <a href="#terms">7. Terminology</a>
+      <a href="#arch">8. Architecture</a>
+      <a href="#internal">9. How it works internally</a>
+      <a href="#steps">10. Step-by-step explanation</a>
+      <a href="#simple">11. Simple example</a>
+      <a href="#real">12. Real-world example</a>
+      <a href="#code">13. Code example</a>
+      <a href="#advanced">14. Advanced example</a>
+      <a href="#mistakes">15. Common mistakes</a>
+      <a href="#best">16. Best practices</a>
+      <a href="#production">17. Production considerations</a>
+      <a href="#security">18. Security considerations</a>
+      <a href="#performance">19. Performance considerations</a>
+      <a href="#cost">20. Cost considerations</a>
+      <a href="#debug">21. Debugging/troubleshooting</a>
+      <a href="#related">22. Related concepts</a>
+      <a href="#comparison">23. Comparison with alternatives</a>
+      <a href="#exercise">24. Mini practical exercise</a>
+      <a href="#project">25. Practical project</a>
+      <a href="#projectarch">26. Project architecture</a>
+      <a href="#interview-b">27. Interview Questions — Beginner</a>
+      <a href="#interview-i">28. Interview Questions — Intermediate</a>
+      <a href="#interview-a">29. Interview Questions — Advanced</a>
+      <a href="#interview-s">30. Interview Questions — Senior/Architect</a>
+      <a href="#interview-sc">31. Scenario-Based Questions</a>
+      <a href="#revision">32. Quick revision notes</a>
+      <a href="#cheat">33. Cheat sheet</a>
+      <a href="#further">34. Further topics to learn</a>
+    </div>
+
+    <h2 id="what">1. What is this?</h2>
+    <p>At each generation step, the model produces a probability distribution over the entire vocabulary for "what token comes next." <b>Sampling</b> is the process of turning that distribution into an actual chosen token, controlled by <b>temperature</b>, <b>top-p</b>, and <b>top-k</b>. <b>Hallucination</b> is fluent, confident, plausible-sounding output that is factually incorrect, unsupported, or inconsistent with provided context.</p>
+
+    <h2 id="whyexist">2. Why does it exist?</h2>
+    <p>Sampling controls exist because pure "always pick the highest probability token" (greedy decoding) produces repetitive, bland, sometimes looping text; controlled randomness produces more natural and varied output. Hallucination exists as an inherent consequence of generative sampling from a learned distribution that has no built-in fact-checking or grounding mechanism by default — the model is optimized to be plausible, not necessarily correct.</p>
+
+    <h2 id="whyimportant">3. Why is it important?</h2>
+    <p>Misunderstanding sampling leads to picking the wrong settings for a task (e.g., high temperature for data extraction, causing inconsistent results). Misunderstanding hallucination leads to shipping products that confidently state wrong facts to users — one of the most common and damaging failure modes in production GenAI systems.</p>
+
+    <h2 id="whereused">4. Where is it used?</h2>
+    <p>Every text-generation API call exposes sampling parameters. Hallucination mitigation is relevant anywhere an LLM output could be presented as fact: chatbots, summarization, Q&A, code generation, RAG systems.</p>
+
+    <h2 id="prereq">5. Prerequisites</h2>
+    <p><a href="what-is-llm.html">What is an LLM</a>, <a href="tokens-and-context-window.html">Tokens & Context Window</a>.</p>
+
+    <h2 id="core">6. Core concepts</h2>
+    <ul>
+      <li>Greedy decoding (temperature 0) always picks the single most probable next token — deterministic but can be repetitive/bland.</li>
+      <li>Sampling methods (temperature, top-p, top-k) introduce controlled randomness for more natural, varied text.</li>
+      <li>Hallucination is structural, not a bug to be "fixed" by prompting alone — mitigation requires external grounding.</li>
+    </ul>
+
+    <h2 id="terms">7. Terminology</h2>
+    <table>
+      <tr><th>Term</th><th>Meaning</th></tr>
+      <tr><td>Temperature</td><td>Scales the probability distribution before sampling; 0 ≈ deterministic, higher = more diverse/random.</td></tr>
+      <tr><td>Top-p (nucleus sampling)</td><td>Samples only from the smallest set of tokens whose cumulative probability ≥ p.</td></tr>
+      <tr><td>Top-k</td><td>Samples only from the k most probable tokens.</td></tr>
+      <tr><td>Greedy decoding</td><td>Always picks the single highest-probability token (equivalent to temperature → 0).</td></tr>
+      <tr><td>Hallucination</td><td>Fluent but factually incorrect or unsupported output.</td></tr>
+      <tr><td>Grounding</td><td>Tying model output to verifiable external sources (e.g., via RAG) to reduce hallucination risk.</td></tr>
+      <tr><td>Self-consistency</td><td>Sampling multiple outputs and taking the majority/most consistent answer for higher reliability.</td></tr>
+    </table>
+
+    <h2 id="arch">8. Architecture</h2>
+    <pre><code>Model's raw output logits (one score per vocabulary token)
+ → scaled by temperature
+ → restricted by top-p and/or top-k to a candidate pool
+ → converted to a probability distribution over that pool
+ → sampled → next token</code></pre>
+
+    <h2 id="internal">9. How it works internally</h2>
+    <p>The model outputs unnormalized scores (logits) for every token in the vocabulary. Temperature divides logits before the softmax normalization: lower temperature sharpens the distribution (making the top token even more dominant), higher temperature flattens it (making many tokens more competitive). Top-p/top-k then restrict which tokens are even eligible to be sampled, before the final random draw.</p>
+
+    <h2 id="steps">10. Step-by-step explanation</h2>
+    <ol>
+      <li>Model computes logits for every token in the vocabulary given current context.</li>
+      <li>Logits are divided by temperature, then passed through softmax to get probabilities.</li>
+      <li>Top-p and/or top-k filter the candidate pool to the most likely subset.</li>
+      <li>A token is randomly drawn from that filtered, re-normalized distribution.</li>
+      <li>The chosen token is appended; the process repeats for the next token.</li>
+    </ol>
+
+    <h2 id="simple">11. Simple example</h2>
+    <p>Prompt: "The capital of France is" → the model assigns very high probability to "Paris." At temperature 0, it's always chosen; at higher temperature, a less likely (and possibly wrong) token has a small but nonzero chance of being sampled instead.</p>
+
+    <h2 id="real">12. Real-world example</h2>
+    <p>A legal-document summarizer set at temperature 0.7 occasionally invents a clause that "sounds like" standard legal boilerplate but doesn't actually appear in the source document — a classic hallucination caused by the model filling gaps with plausible-sounding learned patterns rather than grounded extraction.</p>
+
+    <h2 id="code">13. Code example</h2>
+    <pre><code class="language-python">from anthropic import Anthropic
+client = Anthropic()
+
+# Deterministic-ish: good for extraction / structured tasks
+precise = client.messages.create(
+    model="claude-sonnet-5", max_tokens=50, temperature=0,
+    messages=[{"role": "user", "content": "Extract the city from: 'I live in Austin, Texas.'"}]
+)
+
+# Creative: good for brainstorming
+creative = client.messages.create(
+    model="claude-sonnet-5", max_tokens=200, temperature=0.9,
+    messages=[{"role": "user", "content": "Brainstorm 5 unusual startup ideas about coffee."}]
+)
+</code></pre>
+
+    <h2 id="advanced">14. Advanced example</h2>
+    <p>Self-consistency sampling for a hard reasoning question: sample N completions at moderate temperature, extract each candidate's final answer, and return the majority vote — trading cost for reliability on high-stakes, lower-volume questions.</p>
+    <pre><code class="language-python">answers = []
+for _ in range(5):
+    resp = client.messages.create(
+        model="claude-sonnet-5", max_tokens=300, temperature=0.7,
+        messages=[{"role": "user", "content": "Solve step by step, then give final answer: ..."}]
+    )
+    answers.append(extract_final_answer(resp.content[0].text))
+
+from collections import Counter
+majority_answer = Counter(answers).most_common(1)[0][0]
+</code></pre>
+
+    <h2 id="mistakes">15. Common mistakes</h2>
+    <ul>
+      <li>Using high temperature for factual extraction/classification tasks, introducing unnecessary inconsistency.</li>
+      <li>Believing temperature=0 fully eliminates hallucination — it only reduces sampling-driven variance, not knowledge errors.</li>
+      <li>Combining top-p and top-k carelessly without understanding how they interact (both apply as filters; the more restrictive one dominates).</li>
+      <li>Not testing sampling parameter changes against an evaluation set before deploying to production.</li>
+    </ul>
+
+    <h2 id="best">16. Best practices</h2>
+    <ul>
+      <li>Use low temperature (0–0.3) for extraction, classification, structured output, code.</li>
+      <li>Use higher temperature (0.6–1.0) for creative writing, brainstorming, varied content generation.</li>
+      <li>Ground factual claims with RAG and require citations rather than relying on sampling settings alone.</li>
+      <li>Use self-consistency sampling only for high-stakes, lower-volume decisions due to its cost multiplier.</li>
+    </ul>
+
+    <h2 id="production">17. Production considerations</h2>
+    <p>Pin sampling parameters per use case and version them like code — a silent default change by a provider can shift product behavior. Monitor hallucination-prone tasks (e.g., via LLM-as-judge or user feedback) continuously, since hallucination rate isn't a one-time-measured constant.</p>
+
+    <h2 id="security">18. Security considerations</h2>
+    <p>Hallucinated outputs presented as authoritative (e.g., fabricated security advice, invented API behavior in generated code) can cause real harm if trusted blindly — always validate/sandbox LLM-generated code or security-relevant content rather than executing it unchecked.</p>
+
+    <h2 id="performance">19. Performance considerations</h2>
+    <p>Sampling parameter choice doesn't materially affect latency (the forward pass cost is the same); self-consistency sampling (multiple full generations) does multiply latency and cost linearly with sample count.</p>
+
+    <h2 id="cost">20. Cost considerations</h2>
+    <p>Self-consistency and other multi-sample techniques directly multiply token spend — reserve them for cases where the accuracy gain justifies N× the cost of a single call.</p>
+
+    <h2 id="debug">21. Debugging/troubleshooting</h2>
+    <ul>
+      <li><b>Outputs too repetitive/bland:</b> raise temperature or top-p slightly.</li>
+      <li><b>Outputs too random/incoherent:</b> lower temperature, tighten top-p/top-k.</li>
+      <li><b>Model confidently states something false:</b> this is hallucination, not a sampling bug — add retrieval grounding, ask for citations, or add a verification pass.</li>
+      <li><b>Inconsistent results across identical requests:</b> check that temperature isn't accidentally left high for a task needing determinism.</li>
+    </ul>
+
+    <h2 id="related">22. Related concepts</h2>
+    <p><a href="what-is-llm.html">What is an LLM</a> · <a href="tokens-and-context-window.html">Tokens & Context Window</a> · <a href="../12-RAG/">RAG</a> · <a href="../35-AI-Evaluation/">AI Evaluation</a></p>
+
+    <h2 id="comparison">23. Comparison with alternatives (hallucination mitigation)</h2>
+    <table>
+      <tr><th>Mitigation</th><th>How it helps</th><th>Limitation</th></tr>
+      <tr><td>Lower temperature</td><td>Reduces sampling-driven variance</td><td>Doesn't fix wrong parametric knowledge</td></tr>
+      <tr><td>RAG / grounding</td><td>Supplies verifiable source material</td><td>Only as good as retrieval quality</td></tr>
+      <tr><td>Structured output + validation</td><td>Catches malformed/inconsistent outputs programmatically</td><td>Doesn't catch plausible-but-wrong facts within valid structure</td></tr>
+      <tr><td>Self-consistency</td><td>Reduces single-sample sampling errors on reasoning tasks</td><td>Costly; doesn't fix systematic knowledge gaps</td></tr>
+      <tr><td>Human review</td><td>Catches anything automated checks miss</td><td>Doesn't scale to high volume</td></tr>
+    </table>
+
+    <h2 id="exercise">24. Mini practical exercise</h2>
+    <p>Run the same factual question through the API at temperature 0, 0.5, and 1.0, five times each. Observe how often the answer changes at each setting.</p>
+
+    <h2 id="project">25. Practical project</h2>
+    <p><b>Hallucination-Checking Pipeline:</b> build a two-call pipeline where the first call answers a question from a provided document, and a second "verifier" call checks whether every claim in the answer is actually supported by the document, flagging unsupported claims.</p>
+
+    <h2 id="projectarch">26. Project architecture</h2>
+    <pre><code>Document + Question
+ → Call 1 (temperature 0): generate answer
+ → Call 2 (verifier, temperature 0): "List any claims in this answer NOT supported by the document"
+ → If unsupported claims found: flag/regenerate/escalate to human</code></pre>
+
+    <h2 id="interview-b">27. Interview Questions — Beginner</h2>
+    <div class="qa"><b>Q1.</b> What does temperature=0 mean?<br><b>A.</b> It makes generation nearly deterministic — the model almost always picks the highest-probability next token (greedy decoding), reducing randomness/creativity.</div>
+    <div class="qa"><b>Q2.</b> What is hallucination in the context of LLMs?<br><b>A.</b> Fluent, confident output that is factually wrong, fabricated, or unsupported by the given context.</div>
+    <div class="qa"><b>Q3.</b> What does top-p (nucleus sampling) control?<br><b>A.</b> It restricts sampling to the smallest set of tokens whose cumulative probability reaches a threshold p, adapting pool size to model confidence.</div>
+    <div class="qa"><b>Q4.</b> What does top-k control?<br><b>A.</b> It restricts sampling to only the k most probable next tokens, regardless of their probability mass.</div>
+    <div class="qa"><b>Q5.</b> Is hallucination a bug that can be fully patched?<br><b>A.</b> No — it's an inherent property of generative sampling without built-in fact-checking; it can only be mitigated, not fully eliminated.</div>
+    <div class="qa"><b>Q6.</b> Which sampling setting would you use for extracting a date from text?<br><b>A.</b> Low temperature (near 0), for consistent, deterministic extraction.</div>
+    <div class="qa"><b>Q7.</b> Which sampling setting would you use for brainstorming creative ideas?<br><b>A.</b> Higher temperature (e.g., 0.7–1.0), for more diverse, varied output.</div>
+    <div class="qa"><b>Q8.</b> What is greedy decoding?<br><b>A.</b> Always picking the single highest-probability next token at each step — equivalent to temperature near 0.</div>
+    <div class="qa"><b>Q9.</b> Name one way to reduce hallucination in a Q&A system.<br><b>A.</b> Ground answers with retrieval (RAG) against verified source documents.</div>
+    <div class="qa"><b>Q10.</b> Does higher temperature make the model "smarter"?<br><b>A.</b> No — it only increases output randomness/diversity; it has no effect on the model's actual knowledge or reasoning ability.</div>
+
+    <h2 id="interview-i">28. Interview Questions — Intermediate</h2>
+    <div class="qa"><b>Q1.</b> Why can't you fully eliminate hallucination just by setting temperature to 0?<br><b>A.</b> Hallucination stems from the model's learned (possibly wrong or outdated) knowledge and lack of grounding, not just from sampling randomness — even the single most-probable continuation can be factually wrong if that's what the training distribution favored.</div>
+    <div class="qa"><b>Q2.</b> Explain the difference between top-p and top-k sampling with an example where they'd behave differently.<br><b>A.</b> Top-k always considers exactly k candidates regardless of confidence. Top-p adapts: if the model is very confident (one token has 95% probability), top-p with p=0.9 might consider only 1–2 tokens; if the model is uncertain, top-p considers more candidates. Top-k could force inclusion of low-probability "wrong" candidates when the model is confident, or force too narrow a set when it's uncertain.</div>
+    <div class="qa"><b>Q3.</b> Why might a model hallucinate more on questions about recent events than on well-established facts?<br><b>A.</b> The model's parametric knowledge is frozen at its training cutoff; for events after that cutoff, it has no real knowledge and will generate plausible-sounding but fabricated details unless grounded via retrieval.</div>
+    <div class="qa"><b>Q4.</b> What's the trade-off of self-consistency sampling?<br><b>A.</b> It improves accuracy on hard reasoning tasks by sampling multiple reasoning paths and taking a majority answer, but multiplies cost and latency by the number of samples — only worth it for high-stakes, lower-volume calls.</div>
+    <div class="qa"><b>Q5.</b> Why is asking the model to "cite sources" not a complete hallucination fix on its own?<br><b>A.</b> Without actual retrieval grounding, the model can hallucinate plausible-looking but fake citations just as easily as it hallucinates facts — citations need to be verified against real retrieved content, not just requested in the prompt.</div>
+    <div class="qa"><b>Q6.</b> How would you measure hallucination rate for a RAG system in an automated evaluation pipeline?<br><b>A.</b> Use an LLM-as-judge or rule-based checker to compare each claim in the generated answer against the retrieved source documents, flagging claims not supported by any source, and aggregate the unsupported-claim rate across a labeled eval set.</div>
+    <div class="qa"><b>Q7.</b> Why might combining a very low top-p with a very high top-k (or vice versa) be redundant?<br><b>A.</b> The more restrictive of the two filters effectively determines the candidate pool — if top-p already narrows to 3 tokens, setting top-k to 50 has no additional effect, and vice versa.</div>
+    <div class="qa"><b>Q8.</b> What's a concrete production risk of using high temperature for a code-generation feature?<br><b>A.</b> Increased chance of syntactically or logically inconsistent code across repeated generations for the same prompt, making the feature feel unreliable and harder to test/cache.</div>
+    <div class="qa"><b>Q9.</b> How does hallucination differ from a model simply being "wrong" due to lack of training data on a topic?<br><b>A.</b> They're related but distinct: lack of training data causes genuine uncertainty that should ideally produce a hedge or "I don't know"; hallucination is the failure mode where the model instead generates a confident, fabricated-sounding answer despite that uncertainty.</div>
+    <div class="qa"><b>Q10.</b> Why would you want a model to explicitly be instructed to say "I don't know" when context is insufficient?<br><b>A.</b> Without that explicit permission/instruction, models are statistically biased toward generating a plausible-sounding answer rather than admitting uncertainty, since confident completions were more common in training data than hedged ones.</div>
+
+    <h2 id="interview-a">29. Interview Questions — Advanced</h2>
+    <div class="qa"><b>Q1.</b> How would you design an automated hallucination-detection system for a production RAG pipeline, and what are its failure modes?<br><b>A.</b> Use a secondary LLM-as-judge pass that cross-checks each claim in the generated answer against the retrieved source documents, scoring claim-level support; failure modes include the judge model itself hallucinating a "supported" verdict, subtle paraphrasing that's technically unsupported but judged as fine, and cost/latency overhead from the extra verification call.</div>
+    <div class="qa"><b>Q2.</b> Why might a reasoning model still hallucinate even after producing seemingly rigorous step-by-step reasoning?<br><b>A.</b> Chain-of-thought reasoning improves logical consistency and reduces certain error classes, but the reasoning itself is still generated text — it can contain plausible-sounding but incorrect intermediate claims (e.g., citing a wrong fact mid-reasoning) that then get carried forward into a confidently stated, still-wrong final answer.</div>
+    <div class="qa"><b>Q3.</b> How would you calibrate a model's stated confidence to actually correlate with correctness?<br><b>A.</b> Post-hoc calibration techniques: collect a labeled dataset of model answers with correctness labels, analyze whether the model's self-reported confidence (if elicited via prompting) or token-level log-probabilities correlate with actual accuracy, and if not, build an external calibration layer (e.g., a secondary classifier) rather than trusting the model's native confidence signal.</div>
+
+    <h2 id="interview-s">30. Interview Questions — Senior/Architect</h2>
+    <div class="qa"><b>Q1.</b> You're building a financial-advice chatbot. How do you architect against hallucination given it's a generative model?<br><b>A.</b> Ground every factual claim in retrieved, auditable sources (RAG) with mandatory citations; keep temperature low; constrain outputs to a validated schema separating "facts from source" vs "general guidance"; add a verification/guardrail pass that flags unsupported claims; require human review for high-stakes recommendations; log everything for audit/compliance.</div>
+    <div class="qa"><b>Q2.</b> How would you set organization-wide sampling parameter defaults and governance across many LLM-powered features built by different teams?<br><b>A.</b> Publish guidelines mapping task type to recommended temperature/top-p ranges (e.g., extraction: 0; creative: 0.7+), require teams to justify deviations in code review, version sampling parameters alongside prompts in source control, and run eval-suite regression checks whenever defaults change.</div>
+    <div class="qa"><b>Q3.</b> A regulator asks you to prove your system doesn't hallucinate on a specific class of high-stakes questions. How do you respond?<br><b>A.</b> Explain that a hard guarantee against hallucination isn't possible for any generative system; present instead a defense-in-depth evidence package: grounding architecture (RAG with citations), automated+human evaluation results on a representative test set, monitoring/alerting for detected hallucinations in production, and an escalation/human-review process for the highest-stakes question classes.</div>
+
+    <h2 id="interview-sc">31. Scenario-Based Questions</h2>
+    <div class="qa"><b>Scenario 1.</b> A customer-support bot occasionally invents a refund policy that doesn't exist. How do you fix it?<br><b>A.</b> Ground all policy answers in RAG against the actual current policy documents, require the model to quote/cite the specific policy clause, and instruct it to say it doesn't know rather than guess when no matching policy is found.</div>
+    <div class="qa"><b>Scenario 2.</b> Your code-generation tool sometimes produces code calling APIs/functions that don't exist. What's happening and how do you reduce it?<br><b>A.</b> Classic hallucination — the model generates plausible-sounding but fabricated API usage based on general patterns rather than your actual codebase; mitigate by grounding generation in actual repo context (retrieval over real code/docs) and validating/compiling generated code before presenting it as final.</div>
+    <div class="qa"><b>Scenario 3.</b> Leadership wants to increase temperature across all production features to make outputs "feel more natural." What do you flag?<br><b>A.</b> Flag that this is a blanket change affecting tasks with very different needs — factual/extraction features will become less consistent and more hallucination-prone, while only genuinely creative features benefit; recommend per-feature tuning validated against each feature's own eval set instead of a global change.</div>
+
+    <h2 id="revision">32. Quick revision notes</h2>
+    <ul>
+      <li>Temperature/top-p/top-k control randomness of next-token sampling.</li>
+      <li>Hallucination is inherent to generation, not a bug.</li>
+      <li>Mitigate via RAG, low temperature for factual tasks, structured output + validation, citations, and human review — not by "asking it to be careful."</li>
+      <li>Self-consistency trades cost for reliability on hard reasoning tasks.</li>
+    </ul>
+
+    <h2 id="cheat">33. Cheat sheet</h2>
+    <div class="callout">Temperature/top-p/top-k control randomness of next-token sampling. Hallucination is inherent to generation, not a bug — mitigate via RAG, low temperature for factual tasks, structured output + validation, citations, and human review, not by "asking it to be careful."</div>
+
+    <h2 id="further">34. Further topics to learn</h2>
+    <p><a href="../08-Prompt-Engineering/prompt-engineering-fundamentals.html">Prompt Engineering Fundamentals</a> → <a href="../12-RAG/">RAG</a> → <a href="../35-AI-Evaluation/">AI Evaluation</a> → <a href="../37-AI-Guardrails/">AI Guardrails</a></p>
+
+    <div class="prevnext">
+      <a href="tokens-and-context-window.html">← Tokens & Context Window</a>
+      <a href="../08-Prompt-Engineering/prompt-engineering-fundamentals.html">Next: Prompt Engineering Fundamentals →</a>
+    </div>
+  </main>
+</div>
+<script src="../assets/app.js"></script>
+</body>
+</html>

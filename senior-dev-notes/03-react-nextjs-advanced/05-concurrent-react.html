@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Concurrent React — React & Next.js Advanced — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">React &amp; Next.js Advanced</a><span class="sep">›</span>Concurrent React</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>Concurrent React: Suspense, Transitions, Streaming</h1>
+      <p class="meta-line"><span>⏱ 2.5 hrs</span><span>📍 Chapter 5 of 11</span></p>
+      <p><strong>One-line summary:</strong> Concurrent React is a priority-based scheduler (the "lane model")
+      that lets React prepare multiple versions of the UI at different urgencies and interrupt low-priority
+      work for high-priority work — Suspense, transitions, and streaming SSR are all built on this one
+      mechanism.</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>"Concurrent React" is widely used as a buzzword without engineers understanding the actual scheduling
+      model underneath it. Being able to explain lanes, why Suspense needs them, and the difference between
+      "concurrent" and "async" is a strong differentiator in Staff-level interviews, and it's the direct
+      prerequisite for understanding Server Components streaming (Ch. 7).</p>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>Read <a href="01-react-internals.html">React Internals</a> first. Related: <a href="04-performance.html">Performance</a>, <a href="07-server-client-components.html">Server vs Client Components</a>.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="lanes">The lane model: priority as a bitmask</h3>
+      <p>Each unit of pending work is tagged with a <strong>lane</strong> — a bit in a 31-bit integer bitmask
+      (<code>SyncLane</code>, <code>InputContinuousLane</code>, <code>DefaultLane</code>,
+      <code>TransitionLanes</code> — a range of lanes for transitions, <code>RetryLanes</code>, <code>IdleLane</code>,
+      etc.). Using a bitmask (rather than a single numeric priority) lets React represent and merge
+      <em>multiple simultaneous pending priorities</em> on the same fiber with cheap bitwise operations
+      (<code>lanes | newLane</code> to add, <code>lanes &amp; mask</code> to check membership) instead of
+      list/queue management. When React picks "the next lane to work on," it picks the highest-priority bit
+      set anywhere in the tree and builds a render pass that satisfies <em>all</em> lanes at or above that
+      priority, batching compatible updates together.</p>
+
+      <h3 id="transitions">startTransition / useTransition: marking work as low priority</h3>
+      <p><code>startTransition(callback)</code> tells React: "state updates inside this callback are not
+      urgent — render them as a lower-priority (transition) lane, and if something higher priority comes in
+      before this finishes, throw away the in-progress work and handle that first." Critically, this does
+      <em>not</em> debounce or delay the call — the update is scheduled immediately, just at lower priority,
+      and React can still interrupt rendering it if the user keeps typing. <code>useTransition</code> adds an
+      <code>isPending</code> boolean so you can show a stale-but-interactive UI with a loading affordance while
+      the transition's render is in flight.</p>
+
+      <h3 id="use-deferred-value">useDeferredValue: a transition for a value you don't own</h3>
+      <p><code>useDeferredValue(value)</code> returns a version of <code>value</code> that "lags behind" during
+      urgent updates — internally it's implemented as a transition that updates an internal copy of the value
+      once the urgent render is done, letting an expensive subtree keep rendering the old value (fast, already
+      computed) while the fast-changing source value updates immediately elsewhere (e.g., the input box itself
+      stays responsive, the filtered results underneath catch up a beat later).</p>
+
+      <h3 id="suspense-mechanics">How Suspense actually works: throwing a promise</h3>
+      <p>Suspense's trick is almost absurdly simple at its core: a component that isn't ready to render
+      <strong>throws a Promise</strong> instead of returning JSX. React catches that throw during the render
+      phase, walks up to the nearest ancestor <code>&lt;Suspense&gt;</code> boundary, and renders its
+      <code>fallback</code> instead — while registering a <code>.then()</code> on the thrown promise to retry
+      rendering that subtree once it resolves. This is why <code>use(promise)</code> and Suspense-enabled data
+      libraries (React Query's suspense mode, Next.js's <code>fetch</code> in Server Components) can
+      transparently "pause" a component: they throw the in-flight promise the first time, and once it resolves
+      and is cached, the retry render reads the resolved value synchronously instead of re-throwing.</p>
+
+      <h3 id="streaming">Streaming: rendering doesn't wait for the slowest child</h3>
+      <p>On the server, streaming SSR means React can flush HTML for the <code>fallback</code> of a Suspense
+      boundary first, then — once the slow data resolves — stream a small inline <code>&lt;script&gt;</code>
+      that swaps the fallback markup for the real content in place client-side, without a full page reload.
+      This is the mechanism behind Next.js App Router's <code>loading.js</code> and nested
+      <code>&lt;Suspense&gt;</code> boundaries — the page's shell can reach the browser and become visible far
+      before the slowest data-dependent section finishes.</p>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>When React starts a render, it collects the set of lanes with pending work and determines the
+      <em>render lanes</em> for this pass (usually the highest-priority lane plus any lanes that can be
+      batched with it safely). If, mid-render, an update comes in on a lane of strictly higher priority than
+      the one currently rendering, React doesn't try to merge it into the current in-progress WIP tree — it
+      abandons that WIP tree (safe, because nothing has committed — see the double-buffering model in Ch. 1)
+      and starts a fresh render at the new higher-priority lane. Once that higher-priority work commits, React
+      returns to the lower-priority (e.g., transition) lane and resumes/restarts rendering it. This is the
+      literal mechanism behind "typing in an input stays responsive even while a big list re-filters in the
+      background" — the keystroke's lane always wins.</p>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+sequenceDiagram
+  participant U as User types in input
+  participant R as React Scheduler
+  participant T as Transition render (filtered list)
+  U->>R: keystroke (urgent lane)
+  R->>T: interrupt in-progress transition render
+  R->>R: render + commit urgent lane (input updates instantly)
+  R->>T: resume/restart transition lane render
+  T->>R: transition render completes
+  R->>R: commit transition lane (filtered list updates)
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-jsx">// useTransition: keep typing responsive while a big list re-filters
+import { useState, useTransition, useDeferredValue, Suspense } from "react";
+
+function SearchPage({ allItems }) {
+  const [query, setQuery] = useState("");
+  const [isPending, startTransition] = useTransition();
+
+  function handleChange(e) {
+    const value = e.target.value;
+    setQuery(value); // urgent: input must update instantly
+    // The actual expensive filtering/render work is deferred:
+  }
+
+  const deferredQuery = useDeferredValue(query);
+
+  return (
+    <div>
+      <input value={query} onChange={handleChange} />
+      {isPending && <span>Updating…</span>}
+      {/* ResultsList re-renders using deferredQuery, which lags behind
+         `query` just enough to keep typing smooth on a large dataset. */}
+      <ResultsList query={deferredQuery} allItems={allItems} />
+    </div>
+  );
+}
+
+// Suspense + a cache-backed resource: the actual "throw a promise" pattern
+const cache = new Map();
+function fetchUser(id) {
+  if (!cache.has(id)) {
+    cache.set(id, fetch(`/api/users/${id}`).then(r => r.json()));
+  }
+  const entry = cache.get(id);
+  // `use()` (React 19) unwraps a promise, suspending the component by
+  // throwing if it's still pending, and returning the value once resolved.
+  return entry;
+}
+
+function UserProfile({ id }) {
+  const user = use(fetchUser(id)); // suspends until resolved
+  return <h2>{user.name}</h2>;
+}
+
+function App({ id }) {
+  return (
+    <Suspense fallback={<p>Loading profile…</p>}>
+      <UserProfile id={id} />
+    </Suspense>
+  );
+}</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4>
+      <p>A product catalog page re-filtered 20,000 items on every keystroke in a price-range slider, freezing
+      the slider's own drag interaction for ~150ms per step because both the slider's own state and the
+      expensive filtered-list render were part of the same synchronous update. Wrapping the filtered list's
+      update in <code>startTransition</code> (keeping the slider's own visual position update urgent/outside
+      the transition) let the slider track the mouse at full frame rate while the list caught up a moment
+      later with a subtle pending indicator — no debounce delay was introduced, since the filtering still
+      started immediately, it just yielded to drag-input updates.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4>
+      <p>"Concurrent" does not mean "runs in parallel" or "asynchronous" — React is still single-threaded and
+      synchronous during each actual render/commit pass. "Concurrent" means React can <em>interleave</em>
+      preparing multiple versions of the UI at different priorities over time, interrupting lower-priority
+      work, not that two renders literally execute simultaneously.</p></div>
+      <ul>
+        <li>Wrapping the state update for the input's own value inside <code>startTransition</code> — this makes typing itself feel laggy, since the input's visual feedback is now deprioritized too.</li>
+        <li>Expecting <code>startTransition</code> to debounce — it doesn't delay the call, only deprioritizes the resulting render.</li>
+        <li>Using Suspense fallback for errors — a thrown non-promise (an actual Error) is not caught by Suspense, you need an Error Boundary alongside it.</li>
+        <li>Forgetting that a Suspense boundary resets all state of its children on re-suspend unless explicitly preserved (e.g., with `key` strategy or `startTransition` to avoid the fallback entirely during a revisit).</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>useTransition</td><td>You trigger the update yourself and want to mark it low-priority with a pending flag</td><td>The update must be instantly visible (e.g., text being typed)</td><td>Plain state update</td></tr>
+        <tr><td>useDeferredValue</td><td>You receive a value from a parent/prop and want to lag an expensive derived render behind it</td><td>You control the update site directly — prefer useTransition there</td><td>Debounce (adds artificial delay, not priority-based)</td></tr>
+        <tr><td>Suspense + streaming</td><td>Data-dependent content shouldn't block the rest of the page from becoming visible/interactive</td><td>Content is small/fast enough that a boundary adds complexity for no benefit</td><td>Plain loading state via conditional render</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic"><h4>Basic</h4>
+      <details class="qa"><summary>What problem does Concurrent React solve?</summary><div class="answer"><p>It lets React prepare UI updates at different priorities and interrupt lower-priority rendering work when something more urgent (like user input) comes in, keeping the app responsive during expensive updates.</p></div><div class="followup">Follow-up: Does this make React multi-threaded?</div></details>
+      <details class="qa"><summary>What's the difference between useTransition and useDeferredValue?</summary><div class="answer"><p>useTransition wraps a state update you trigger, marking it low priority and exposing an isPending flag. useDeferredValue takes an existing value (often from props) and returns a lagging copy for use in expensive derived rendering, without you controlling the original update site.</p></div><div class="followup">Follow-up: Can you use both together?</div></details>
+      <details class="qa"><summary>How does Suspense know when to show the fallback?</summary><div class="answer"><p>A descendant component throws a Promise during render; React catches it, finds the nearest Suspense ancestor, and shows its fallback until the promise resolves, then retries rendering that subtree.</p></div><div class="followup">Follow-up: What happens if a plain Error (not a Promise) is thrown inside a Suspense boundary?</div></details>
+      <details class="qa"><summary>What is streaming SSR?</summary><div class="answer"><p>Sending HTML to the browser in chunks as it becomes ready, instead of waiting for the entire page's data to resolve — fast parts of the page (and Suspense fallbacks for slow parts) reach the browser first, with slow sections swapped in once ready.</p></div><div class="followup">Follow-up: What HTTP mechanism allows a server to send a response in chunks?</div></details>
+      <details class="qa"><summary>Does startTransition delay when the update happens?</summary><div class="answer"><p>No — the update is scheduled immediately, just at lower priority, meaning React may interrupt it for higher-priority work before it finishes, not that it waits before starting.</p></div><div class="followup">Follow-up: How is this different from debouncing?</div></details>
+      </div>
+      <div class="qa-level medium"><h4>Medium</h4>
+      <details class="qa"><summary>Explain the lane model and why React uses a bitmask rather than a single numeric priority value.</summary><div class="answer"><p>A bitmask lets a single fiber represent multiple simultaneously-pending priorities (e.g., a sync update and a transition update both pending on the same component) and lets the scheduler use cheap bitwise operations to merge/check/clear priorities across a whole subtree, rather than needing list/queue structures per fiber. Picking "what to render next" becomes finding the highest-priority set bit across the root's aggregated lanes.</p></div><div class="followup">Follow-up: What happens when two different lanes' updates touch overlapping parts of the tree?</div></details>
+      <details class="qa"><summary>Walk through exactly what happens when a higher-priority update arrives while a transition render is in progress.</summary><div class="answer"><p>React does not try to merge the new update into the in-progress WIP tree. Because nothing has committed yet (double buffering — the WIP tree is disposable), React abandons that in-progress render, starts a fresh render pass for the higher-priority lane (potentially on the same WIP fiber objects, just restarted), commits it, and only afterward returns to restart the transition lane's render from scratch.</p></div><div class="followup">Follow-up: Is any work from the abandoned transition render reused, or is it fully redone?</div></details>
+      <details class="qa"><summary>Why does `use(promise)` need to be paired with a cache, and what breaks if you call fetch() directly inside use()?</summary><div class="answer"><p>Suspense works by throwing and re-rendering on retry; if you create a brand-new Promise inside the component body every render (e.g., calling fetch directly without caching), each retry throws a *new* unresolved promise instead of eventually reading a resolved cached one, causing an infinite suspend loop instead of ever rendering the resolved value.</p></div><div class="followup">Follow-up: How do frameworks like Next.js handle this caching for you automatically?</div></details>
+      <details class="qa"><summary>Why does a Suspense boundary reset its children's state when it re-suspends, and how would you avoid losing scroll position on a revisit?</summary><div class="answer"><p>When a subtree re-suspends, React unmounts the previously-rendered content and shows the fallback again by default (since the content may be stale/incorrect once a dependency changes) — mounted state (local component state, scroll position) is lost with the unmount. To preserve it on predictable navigations, wrap the triggering update in startTransition so React prefers keeping the old content visible (showing isPending) rather than falling back to the Suspense boundary, when supported by the data source.</p></div><div class="followup">Follow-up: Does this avoid-fallback behavior work for the *initial* mount of a Suspense boundary?</div></details>
+      </div>
+      <div class="qa-level advanced"><h4>Advanced</h4>
+      <details class="qa"><summary>Explain why Suspense "throwing a promise" needed the fiber double-buffering model from Ch. 1 to be safe, specifically.</summary><div class="answer"><p>Throwing out of a component mid-render means the render phase is abandoned for that subtree without committing anything — which is only safe because render-phase work never mutates the current (on-screen) tree or the real DOM; it only builds the disposable WIP tree. If render-phase work were allowed to have side effects or partially mutate shared state, a thrown promise mid-render would leave the UI/state in an inconsistent half-updated condition. Suspense is, in effect, a deliberate exploitation of the render phase's purity/interruptibility guarantee that Fiber was built to provide.</p></div><div class="followup">Follow-up: Could Suspense have been implemented pre-Fiber, on the old stack reconciler?</div></details>
+      <details class="qa"><summary>Two components in the same tree suspend on different promises at the same time, under one shared Suspense boundary. Explain exactly how React decides when to stop showing the fallback.</summary><div class="answer"><p>React tracks all thrown promises registered against that boundary's render attempt; the boundary only retries rendering (and stops showing fallback) once *all* outstanding suspensions for that commit have resolved — it doesn't partially render with one resolved and one still-pending, since that would mean committing an incomplete tree. This is why granular loading UX requires multiple nested Suspense boundaries rather than one shared one, if you want independent resolve-and-reveal per section.</p></div><div class="followup">Follow-up: How would you restructure boundaries so each section reveals independently as its own data resolves?</div></details>
+      <details class="qa"><summary>How does streaming SSR handle a Suspense boundary that suspends on the server, mechanically, including what gets sent over the wire before the data resolves?</summary><div class="answer"><p>React's server renderer flushes the fallback's HTML into the response stream immediately (inside a placeholder wrapper, typically within an HTML comment-delimited template/`<template>` segment keyed by a boundary ID) and continues rendering the rest of the page around it. Once the suspended promise resolves server-side, React renders the real content for that boundary and streams a small inline script tag that, on the client, locates the placeholder by ID and swaps in the resolved markup (and hydrates it), all without blocking the rest of the already-sent response or requiring a client-side refetch.</p></div><div class="followup">Follow-up: What happens if the client's JS hasn't loaded yet when this swap script arrives?</div></details>
+      <details class="qa"><summary>Why can't you safely call `startTransition` around a state update that must be synchronously reflected for an immediate DOM measurement (e.g., auto-scrolling to a newly added item)?</summary><div class="answer"><p>A transition update may be deferred, interrupted, or batched arbitrarily later than the triggering event, so by the time it actually commits, code that assumed "the DOM reflects this change immediately after the call" (e.g., `scrollIntoView` right after calling the updater in the same synchronous block) will run against stale DOM. Synchronous-dependent DOM measurement/mutation sequences need to happen in response to the actual commit (e.g., inside a `useLayoutEffect` keyed on the relevant state, or using `flushSync` deliberately to force a synchronous commit when truly necessary) rather than assuming transition timing.</p></div><div class="followup">Follow-up: When, if ever, is reaching for `flushSync` the correct answer instead of restructuring the effect?</div></details>
+      <details class="qa"><summary>Contrast how `useDeferredValue` behaves on a value's *first* render (when there's no previous value to "lag" from) versus subsequent updates.</summary><div class="answer"><p>On initial mount, there's no stale previous value to show, so `useDeferredValue` simply returns the current value immediately with no deferral — deferral only has meaning relative to a previously committed value. On subsequent updates, React renders using the old deferred value first (fast, reusing previous work where possible) while a background transition-priority render computes the new deferred value, then commits that once ready, without blocking the urgent update that changed the source value.</p></div><div class="followup">Follow-up: How would you detect, from inside the component, whether the deferred value is currently "lagging"?</div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment"><span class="level-tag">Beginner (30-60 min)</span><h4>Build a responsive filter with useDeferredValue</h4>
+      <p>Render a text input and a list of 5,000 generated strings filtered by substring match on every keystroke, first without any concurrent features (observe the input lag), then with `useDeferredValue` wrapping the filter value fed to the list.</p>
+      <p><strong>Acceptance criteria:</strong> Typing remains visually smooth in the deferred version; document the measured difference.</p>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>Keep the input's own `value`/`onChange` state separate from the deferred value passed to the expensive list.</p></div></details>
+      <p><strong>Bonus:</strong> Add a visual "stale" indicator (e.g., reduced opacity) while the deferred value lags behind the live input.</p></div>
+
+      <div class="assignment"><span class="level-tag">Intermediate (2-4 hrs)</span><h4>Build a Suspense-based data-fetching layer with a cache</h4>
+      <p>Implement a minimal `use()`-compatible cache (map of key -> promise) and a component tree with nested Suspense boundaries for independent sections (e.g., a user profile card and a separate activity feed) that resolve at different times.</p>
+      <ul><li>Confirm each section reveals independently as its data resolves, not all-at-once.</li></ul>
+      <p><strong>Acceptance criteria:</strong> Artificially stagger mock fetch delays and confirm the UI reveals sections in the correct independent order.</p>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>One shared Suspense boundary around both sections will wait for both to resolve together — you need two separate boundaries.</p></div></details>
+      <p><strong>Bonus:</strong> Add an Error Boundary alongside Suspense and simulate one section's fetch failing.</p></div>
+
+      <div class="assignment"><span class="level-tag">Advanced (1-2 days)</span><h4>Reproduce and explain a transition interruption</h4>
+      <p>Build a component where typing in an input triggers an expensive (artificially slowed with a busy-loop) transition-wrapped render of a derived list. While the transition is mid-render, keep typing and use the React DevTools Profiler (or manual timestamped logging inside the component) to prove that the in-progress transition render is abandoned and restarted rather than completed-then-superseded.</p>
+      <ul><li>No full solution provided — design your own instrumentation to prove the interruption behavior.</li></ul>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>Log a render-start timestamp and compare against commit timestamps; an abandoned render will show a render-start with no matching commit.</p></div></details>
+      </div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet"><ul>
+        <li>Concurrent = interleaving/interruption of priorities over time, not literal multi-threading.</li>
+        <li>Lanes = a bitmask-based priority system letting React merge/check pending work cheaply.</li>
+        <li>startTransition: you control the update, marks it low priority, gives isPending.</li>
+        <li>useDeferredValue: value comes from elsewhere, you get a lagging copy for expensive derived renders.</li>
+        <li>Neither transitions nor deferred values debounce — the work starts immediately, just deprioritized.</li>
+        <li>Suspense catches a thrown Promise during render, shows fallback, retries on resolve.</li>
+        <li>A component must cache its promise (not create a new one every render) or Suspense retries forever.</li>
+        <li>Streaming SSR flushes fast content/fallbacks first, swaps in resolved content via an inline script later.</li>
+        <li>A shared Suspense boundary waits for ALL its suspending descendants before revealing anything.</li>
+      </ul></div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://react.dev/reference/react/Suspense">react.dev — Suspense</a></li>
+        <li><a href="https://react.dev/reference/react/useTransition">react.dev — useTransition</a></li>
+        <li><a href="https://react.dev/reference/react/useDeferredValue">react.dev — useDeferredValue</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="04-performance.html"><span class="dir">← Previous</span>React Performance</a>
+        <a class="next" href="06-nextjs-app-router.html"><span class="dir">Next →</span>Next.js App Router</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · React &amp; Next.js Advanced</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-jsx.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-typescript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-tsx.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "03-react-nextjs-advanced", chapterKey: "05-concurrent-react" });</script>
+</body>
+</html>

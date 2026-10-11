@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Type System Deep Dive — TypeScript Advanced — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">TypeScript Advanced</a><span class="sep">›</span>Type System Deep Dive</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>Type System Deep Dive</h1>
+      <p class="meta-line"><span>⏱ ~2.5 hrs</span><span>📍 Chapter 1 of 6</span></p>
+      <p><strong>One-line summary:</strong> TypeScript's type system is structural, unsound by design, and resolved by
+      a narrowing algorithm that tracks types per-reference through control flow — understanding that model explains
+      almost every "weird" TS behavior you'll be asked about.</p>
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <div class="box why">
+        <h4>Why</h4>
+        <p>Every senior TS interview eventually probes whether you actually understand the type system or just
+        memorized utility types. Questions like "why doesn't this narrow after an array access", "why is this union
+        collapsing to <code>string</code>", or "why does my discriminated union stop narrowing in a callback" are all
+        explained by the same handful of compiler mechanics: structural typing, the control flow analyzer, and widening/narrowing
+        rules. Knowing this lets you debug real production type errors in minutes instead of sprinkling <code>as any</code>
+        until it compiles — which is exactly the anti-pattern interviewers are screening for.</p>
+      </div>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>Assumes comfort with basic TS syntax (interfaces, types, generics basics, union/intersection). Related: <a href="02-generics.html">Generics In Depth</a>, <a href="03-utility-types.html">Utility Types</a>.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="structural-typing">Structural typing: TS doesn't care about names</h3>
+      <p>TypeScript is a <strong>structural</strong> type system, not nominal (unlike Java/C#/most of Python's type
+      system mentally). Two types are compatible if their shapes are compatible, regardless of declared name. This is
+      why this compiles:</p>
+      <pre><code class="language-typescript">interface Point2D { x: number; y: number; }
+interface Vector2D { x: number; y: number; }
+
+function distance(p: Point2D) { return Math.sqrt(p.x ** 2 + p.y ** 2); }
+
+const v: Vector2D = { x: 3, y: 4 };
+distance(v); // OK — same shape, different name, TS doesn't care
+
+// Extra properties are fine for ALREADY-TYPED values (structural subtyping)...
+const p3d = { x: 1, y: 2, z: 3 };
+distance(p3d); // OK — p3d is assignable to Point2D, z is just ignored
+
+// ...but "excess property checks" flag literal object literals passed directly,
+// as a lint-like safety net, NOT a type system rule:
+distance({ x: 1, y: 2, z: 3 }); // Error: object literal may only specify known props</code></pre>
+      <p>Excess property checking only fires on <em>fresh object literals</em> — assign it to a variable first and the
+      check disappears. This trips up almost everyone the first time; it's a convenience heuristic bolted onto an
+      otherwise fully structural system, not a soundness guarantee.</p>
+
+      <h3 id="widening-narrowing">Widening and narrowing</h3>
+      <p>TypeScript infers two different "resolutions" of a type depending on context: the <strong>widened</strong>
+      literal type (used for <code>let</code>/mutable bindings so you can reassign) and the <strong>narrow literal</strong>
+      type (used for <code>const</code> and literal contexts).</p>
+      <pre><code class="language-typescript">let a = "GET";        // widened to type string
+const b = "GET";       // narrowed literal type "GET"
+
+function send(method: "GET" | "POST") {}
+send(b);               // OK, "GET" is assignable to "GET" | "POST"
+send(a);               // Error, string is not assignable to "GET" | "POST"
+
+// "as const" freezes the literal type through an object/array
+const config = { method: "GET", retries: 3 } as const;
+// config.method: "GET" (not string), config: { readonly method: "GET"; readonly retries: 3 }</code></pre>
+      <p><strong>Control-flow narrowing</strong> is a separate, more interesting mechanism: inside a function body, TS
+      maintains a *per-reference* type that narrows as you pass through <code>typeof</code>, <code>instanceof</code>,
+      <code>in</code>, equality checks, discriminant property checks, and user-defined type guards.</p>
+      <pre><code class="language-typescript">function describe(x: string | number | string[]) {
+  if (typeof x === "string") {
+    x.toUpperCase();      // x: string here
+  } else if (Array.isArray(x)) {
+    x.join(",");           // x: string[] here
+  } else {
+    x.toFixed(2);           // x: number here (process of elimination)
+  }
+}</code></pre>
+      <p>Crucially, narrowing is tied to the <em>binding</em>, not the value. Extracting a property into a new
+      variable, or calling a function in between checks, can invalidate the narrowing because TS can't prove the
+      property didn't change (closures, getters, etc.):</p>
+      <pre><code class="language-typescript">interface State { status: "loading" | "error" | "ready"; data?: string; }
+
+function render(s: State) {
+  if (s.status === "ready") {
+    doSomethingAsync();     // TS can't see inside this — if it mutated s.status...
+    console.log(s.data);    // still narrowed here IF s.status is a property read fresh
+                             // narrowing on a plain property access is usually preserved
+                             // UNLESS the type is behind a getter, a union of interfaces
+                             // with different control flow, or accessed via a destructure
+                             // that happened BEFORE the check.
+  }
+
+  const { status } = s;      // destructure BEFORE narrowing — fine, same rules apply to `status`
+  if (status === "ready") {
+    // s.data is NOT narrowed here even though `status` is — TS narrows the destructured
+    // binding `status`, not `s`, and doesn't re-link it back to `s.data`.
+  }
+}</code></pre>
+
+      <h3 id="unions-intersections">Unions, intersections, and how they really combine</h3>
+      <p>A union <code>A | B</code> means "assignable from A or from B"; reading a member off a union gives you only
+      members common to all branches, unless narrowed. An intersection <code>A & B</code> means "has all members of A
+      <em>and</em> all members of B" — for object types this is a shape merge, but for primitives it usually collapses
+      to <code>never</code> because nothing is simultaneously a <code>string</code> and a <code>number</code>.</p>
+      <pre><code class="language-typescript">type A = { id: string; name: string };
+type B = { id: string; age: number };
+
+type Merged = A & B;
+// Merged = { id: string; name: string; age: number } — id: string & string = string, fine.
+
+type Impossible = string & number; // never — no value satisfies both
+
+// Function intersections are more useful than they look: they create overloads.
+type Handler = ((req: string) => void) & ((req: number) => void);
+// a value typed Handler can be called with a string OR a number
+</code></pre>
+
+      <h3 id="discriminated-unions">Discriminated unions: the real workhorse</h3>
+      <p>A discriminated (tagged) union is a union of object types sharing a common literal-typed property. The
+      narrowing algorithm uses that tag to eliminate branches — this is the single most important pattern for
+      type-safe state machines, Redux actions, API responses, and more.</p>
+      <pre><code class="language-typescript">type Result&lt;T&gt; =
+  | { status: "success"; data: T }
+  | { status: "error"; error: Error }
+  | { status: "loading" };
+
+function handle&lt;T&gt;(r: Result&lt;T&gt;) {
+  switch (r.status) {
+    case "success": return r.data;    // r narrowed to the success branch
+    case "error": throw r.error;       // narrowed to error branch
+    case "loading": return undefined;  // narrowed to loading branch
+    default:
+      // exhaustiveness check: if a new variant is added and not handled,
+      // `r` here is `never`, assigning it to never-typed var fails the build.
+      const _exhaustive: never = r;
+      throw new Error(`Unhandled: ${JSON.stringify(_exhaustive)}`);
+  }
+}</code></pre>
+      <p>That <code>never</code> exhaustiveness check is a genuinely senior-level trick: it converts "forgot to handle
+      a new state" from a runtime bug into a compile-time error, and interviewers love asking you to demonstrate it live.</p>
+
+      <h3 id="any-vs-unknown-vs-never">any, unknown, never — and why unsoundness is intentional</h3>
+      <table>
+        <tr><th>Type</th><th>Meaning</th><th>Can assign TO it</th><th>Can assign FROM it</th></tr>
+        <tr><td><code>any</code></td><td>Escape hatch — opts a value entirely out of type checking</td><td>anything</td><td>anything (unsafely)</td></tr>
+        <tr><td><code>unknown</code></td><td>Safe top type — "could be anything, must narrow first"</td><td>anything</td><td>nothing without narrowing</td></tr>
+        <tr><td><code>never</code></td><td>Bottom type — no value ever has this type</td><td>nothing (except never)</td><td>anything (never occurs, so vacuously safe)</td></tr>
+      </table>
+      <p>TypeScript is deliberately unsound in a few documented places for ergonomics — e.g. array covariance
+      (<code>string[]</code> assignable to <code>readonly unknown[]</code> params is fine, but plain array parameter
+      covariance can let you push the wrong type into an array through an alias), and bivariant method parameter
+      checking (methods declared with the <code>method()</code> shorthand are checked bivariantly for backward-compat
+      reasons, while function-typed properties declared with <code>: (x) =&gt; void</code> are checked contravariantly
+      — a classic "gotcha" interview question).</p>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>The compiler's checker builds a <strong>control flow graph (CFG)</strong> of each function body. At each node
+      it tracks a "type at this point" for every binding, derived from its declared type plus any narrowings applied
+      by conditions dominating that node. This is why narrowing works through <code>&amp;&amp;</code>, ternaries, early
+      returns, and <code>switch</code>, but can be invalidated by anything the checker can't statically reason about
+      (an intervening function call that could reassign a captured variable, assignment inside a closure, etc).</p>
+      <p>Inference itself works by generating a set of "inference candidates" per generic type parameter from the
+      argument types at a call site, then picking the <strong>best common supertype</strong> among candidates (with
+      special-casing for literal types, which widen unless the context calls for literal preservation, e.g. inferring
+      against a <code>const</code> type parameter in TS 5.0+).</p>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+flowchart TD
+  A["Union type: string | number | string[]"] --> B{typeof x === 'string'?}
+  B -->|true branch| C["x: string"]
+  B -->|false branch| D{Array.isArray(x)?}
+  D -->|true branch| E["x: string[]"]
+  D -->|false branch| F["x: number (by elimination)"]
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-typescript">// BAD: loses narrowing by destructuring too early, then re-checking the wrong binding
+interface Shape { kind: "circle" | "square"; radius?: number; side?: number; }
+function areaBad(s: Shape) {
+  const { kind, radius, side } = s;
+  if (kind === "circle") {
+    return Math.PI * radius! * radius!; // forced to use `!` — type system lost the link
+  }
+  return side! * side!;
+}
+
+// GOOD: keep the discriminant and payload on the same narrowed object
+type ShapeGood =
+  | { kind: "circle"; radius: number }
+  | { kind: "square"; side: number };
+
+function areaGood(s: ShapeGood) {
+  if (s.kind === "circle") return Math.PI * s.radius * s.radius; // no `!` needed
+  return s.side * s.side;
+}
+
+// User-defined type guard — teaches the compiler a custom narrowing rule
+function isCircle(s: ShapeGood): s is Extract&lt;ShapeGood, { kind: "circle" }&gt; {
+  return s.kind === "circle";
+}
+
+function render(shapes: ShapeGood[]) {
+  const circles = shapes.filter(isCircle); // circles: Extract<ShapeGood,{kind:"circle"}>[]
+  return circles.map(c => c.radius);        // radius available without extra checks
+}</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod">
+        <h4>At scale</h4>
+        <p>A payments team modeled transaction state as one big interface with optional fields
+        (<code>status: string; failureReason?: string; refundId?: string</code>) instead of a discriminated union.
+        Over 18 months, five different invalid states became representable and shipped to production (a "refunded"
+        transaction with no <code>refundId</code>, a "failed" transaction with a populated <code>refundId</code> from
+        a stale object spread). Migrating to a discriminated union with exhaustive <code>switch</code> handling at
+        every consumption site (controllers, webhooks, the admin dashboard) turned 5 historical incidents into 5
+        compile errors the moment the model was fixed — that's the pitch you should be able to give in an interview
+        for "why discriminated unions matter at scale", with a concrete number attached.</p>
+      </div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha">
+        <h4>Gotcha</h4>
+        <p><code>Array.prototype.includes</code>/<code>.indexOf</code> narrow worse than you'd expect:
+        <code>const arr = ["a","b"] as const; arr.includes(x)</code> where <code>x: string</code> errors in strict
+        setups because TS infers <code>arr</code>'s element type as the literal union and won't widen <code>x</code>
+        against it — the fix is typing the array as <code>readonly string[]</code> or using a type predicate helper,
+        not sprinkling casts.</p>
+      </div>
+      <ul>
+        <li>Prefer discriminated unions over "bag of optional fields" for any type representing state/variants.</li>
+        <li>Don't fight narrowing invalidation with <code>!</code> — restructure so the discriminant and its payload live on the same object.</li>
+        <li>Use <code>unknown</code> at API/library boundaries instead of <code>any</code>, and narrow explicitly before use.</li>
+        <li>Add the <code>never</code> exhaustiveness check to every <code>switch</code> over a closed union.</li>
+        <li>Remember excess property checks only apply to fresh literals — don't rely on them as a general safety net.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>Discriminated union</td><td>Modeling closed sets of variants/state</td><td>Shape is genuinely open-ended/extensible by consumers</td><td>Interface with optional fields + runtime validation</td></tr>
+        <tr><td><code>unknown</code> at boundary</td><td>Parsing external/untyped data (API, JSON, user input)</td><td>Internal, already-typed data flow</td><td><code>any</code> (faster but unsafe) or a schema validator</td></tr>
+        <tr><td>Type guard functions</td><td>Narrowing logic reused across many call sites</td><td>One-off inline checks</td><td>Inline <code>typeof</code>/<code>in</code> checks</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic">
+        <h4>Basic</h4>
+        <details class="qa"><summary>What's the difference between structural and nominal typing, and which does TypeScript use?</summary><div class="answer"><p>Structural typing compares shapes (member names/types); nominal typing compares declared names/identity. TypeScript is structural — two differently-named types with the same shape are interchangeable.</p></div><div class="followup">Follow-up: name one place TS fakes nominal typing. (Branded/tagged types using a unique symbol or literal property.)</div></details>
+        <details class="qa"><summary>What is excess property checking and why doesn't it fire on every assignment?</summary><div class="answer"><p>It's a check that flags extra properties on object literals assigned directly to a typed target. It only applies to "fresh" literals, not to pre-existing variables, because once a value is stored in a variable TS can't be sure it won't be read elsewhere with its full shape.</p></div><div class="followup">Follow-up: how would you bypass it deliberately? (Assign to a variable first, or use a type assertion.)</div></details>
+        <details class="qa"><summary>Explain the difference between <code>any</code>, <code>unknown</code>, and <code>never</code>.</summary><div class="answer"><p><code>any</code> disables checking entirely in both directions. <code>unknown</code> accepts anything but requires narrowing before use — the type-safe top type. <code>never</code> is the bottom type with no inhabitants, used for exhaustiveness checks and unreachable code.</p></div><div class="followup">Follow-up: what does a function returning <code>never</code> signal to callers? (It never returns normally — always throws or infinite loops.)</div></details>
+        <details class="qa"><summary>What is a discriminated union and why is it preferred over optional fields?</summary><div class="answer"><p>A union of object types sharing a common literal-typed "tag" property. The compiler uses the tag to narrow which variant you're in, which prevents impossible field combinations and enables exhaustiveness checking — optional fields allow invalid states to be representable.</p></div></details>
+        <details class="qa"><summary>What's the difference between <code>let</code> and <code>const</code> inference for a string literal?</summary><div class="answer"><p><code>let x = "a"</code> widens to <code>string</code> since it can be reassigned; <code>const x = "a"</code> keeps the literal type <code>"a"</code> since it can't change.</p></div></details>
+        <details class="qa"><summary>What does <code>as const</code> do to an object literal?</summary><div class="answer"><p>Freezes every property to its literal type and marks them <code>readonly</code>, recursively, instead of widening to their base types — useful for config objects and tuple literals.</p></div></details>
+        <details class="qa"><summary>Can you narrow a type inside a callback passed to another function, e.g. inside <code>.forEach</code>?</summary><div class="answer"><p>Generally no, not reliably — TS can't prove the callback runs synchronously before the narrowed condition could change, so narrowing applied before the callback is often not preserved inside it, especially for closed-over mutable variables.</p></div></details>
+      </div>
+      <div class="qa-level medium">
+        <h4>Medium</h4>
+        <details class="qa"><summary>Why does narrowing on <code>obj.prop</code> sometimes "disappear" after calling an unrelated function?</summary><div class="answer"><p>If the property is accessed through a getter, or the object's type is behind an interface the checker can't prove is unaliased, the compiler conservatively assumes the function call could have mutated it (especially across module boundaries or via closures), and re-widens the property's type at that point.</p></div><div class="followup">Follow-up: how do you work around it? (Re-check locally, store the narrowed value in a local const before the call, or restructure to pass the narrowed value explicitly.)</div></details>
+        <details class="qa"><summary>Explain bivariant vs contravariant parameter checking for methods vs function properties.</summary><div class="answer"><p>Methods declared with shorthand syntax (<code>foo(x: T): void</code>) are checked bivariantly for backward compatibility with pre-strict-function-types code, meaning TS is lenient about parameter type mismatches. Function-typed properties (<code>foo: (x: T) =&gt; void</code>) are checked contravariantly under <code>strictFunctionTypes</code>, correctly rejecting unsafe parameter widening. This is a real soundness hole that shows up in callback-heavy APIs.</p></div></details>
+        <details class="qa"><summary>Why is <code>string & number</code> resolved to <code>never</code>, but intersecting two object types merges them?</summary><div class="answer"><p>Intersection means "satisfies all members simultaneously." For primitives with disjoint value sets, no value can satisfy both, so TS collapses it to <code>never</code>. For object types, satisfying both just means having all the properties of both, which is a normal (if possibly redundant/conflicting-field) shape — hence a merge rather than collapse.</p></div></details>
+        <details class="qa"><summary>How does the exhaustiveness check pattern using <code>never</code> actually catch missed cases at compile time?</summary><div class="answer"><p>At the end of an exhaustive switch over a closed union, if every case has been handled, the remaining type of the discriminant is narrowed to <code>never</code> by elimination. Assigning that remaining value to a variable explicitly typed <code>never</code> only compiles if it's really never — adding a new union member without handling it leaves a non-never residual type there, causing a compile error.</p></div></details>
+        <details class="qa"><summary>What's the practical difference between widening a literal type and a type being "fresh"?</summary><div class="answer"><p>Widening is about literal types generalizing to their base primitive type at mutable bindings. "Freshness" is a separate, transient flag on object literal expressions used only for excess property checking, and is lost as soon as the literal is assigned to a variable or passed through most operations.</p></div></details>
+        <details class="qa"><summary>Why does destructuring a discriminant property sometimes break downstream narrowing of sibling properties?</summary><div class="answer"><p>TS narrows the specific binding you check, not the whole object it came from. If you destructure <code>status</code> out of <code>s</code> and later narrow `status`, TS does not retroactively infer that `s.data` is now safe, because narrowing is tracked per-binding and the link between the destructured variable and the original object's other properties isn't re-established.</p></div></details>
+        <details class="qa"><summary>What is the "best common supertype" algorithm and when does it surprise you?</summary><div class="answer"><p>When inferring an array or union type from multiple values, TS looks for a type that all candidates are assignable to, preferring one of the actual candidate types if possible rather than synthesizing a new structural type. It surprises people when mixing unrelated object shapes produces a wide, loosely-typed union rather than a clean merged interface, or when no good common type exists and it falls back to a broader union or `unknown`/`any` in `noImplicitAny`-off code.</p></div></details>
+      </div>
+      <div class="qa-level advanced">
+        <h4>Advanced</h4>
+        <details class="qa"><summary>Design a type-safe reducer for a state machine with 5 states using discriminated unions, and explain how exhaustiveness is enforced across every action handler.</summary><div class="answer"><p>Model state as a discriminated union on a `status`/`type` tag, model actions the same way, and write the reducer as a function that switches on `action.type`. End the reducer switch with a `never`-typed exhaustiveness assertion. For actions valid only in certain states, further narrow `state` inside each case before producing the next state, and type the reducer's return as the same union so illegal transitions become type errors rather than runtime checks.</p></div></details>
+        <details class="qa"><summary>Why is TypeScript's array type covariant, and what unsound scenario does that enable? How would you guard against it?</summary><div class="answer"><p>Arrays are covariant for ergonomics: `Dog[]` is assignable to `Animal[]` so you can pass a more specific array where a general one is expected. This is unsound because the receiving function could push an `Animal` (e.g. a `Cat`) into what's actually backed by a `Dog[]`, corrupting the original array's invariant at runtime. Guard with `readonly Animal[]` parameters wherever the function only reads, which blocks mutating methods like `push` at the type level.</p></div></details>
+        <details class="qa"><summary>Walk through, step by step, how the control flow analyzer decides the type of `x` at a point after multiple nested conditionals and a loop.</summary><div class="answer"><p>The checker builds the CFG for the function, computing a type for the binding at each flow node by merging ("union-ing") the narrowed types flowing in from every predecessor edge. A loop introduces a fixed-point-like re-evaluation: the type at the loop header must account for both the type entering the loop and the type flowing back from the loop body's end, so the analyzer iterates until the inferred type stabilizes (often widening on the second pass if the body reassigns the variable to a different narrowed type than it started with).</p></div></details>
+        <details class="qa"><summary>Explain exactly why excess property checks don't catch structurally-assignable-but-wrong literals passed through an intermediate variable, and whether that's a soundness bug.</summary><div class="answer"><p>It's an intentional ergonomic tradeoff, not a bug: structural typing fundamentally allows wider objects to satisfy narrower interfaces (an object with extra fields is still "at least" the required shape), so passing via a variable is never actually unsafe for the receiving function — it just can't see or use the extra fields. The literal-only check exists purely to catch likely typos (e.g. `{ nmae: "x" }`) at the point of authorship, where there's no other object the fields could "belong to."</p></div></details>
+        <details class="qa"><summary>How would you type a function overload set so that passing a string literal narrows the return type, but a plain string falls back to a union return type — without duplicating logic?</summary><div class="answer"><p>Use a generic constrained to the literal/string union (`&lt;T extends "a" | "b"&gt;`) with the parameter typed as `T` and the return type expressed as a conditional or mapped lookup keyed by `T`, rather than literal overload signatures. Because generic inference prefers the narrowest literal type at the call site when the parameter position allows it, passing a literal infers `T` as that literal and the conditional return type resolves precisely, while passing a widened `string` infers `T` as `string` and the conditional resolves to the full union.</p></div></details>
+        <details class="qa"><summary>What causes "type instantiation is excessively deep and possibly infinite" and how do you diagnose which type caused it?</summary><div class="answer"><p>It's thrown when the checker's recursive type resolution (common in deeply recursive conditional or mapped types, e.g. recursive tuple-length arithmetic or deep `Partial`-like recursion over arbitrarily nested structures) exceeds an internal recursion depth limit. Diagnose by bisecting: comment out suspect recursive type aliases, use `// @ts-expect-error` isolation, or hover intermediate type aliases in the editor to see where resolution balloons; the fix is usually adding a depth-limiting type parameter or short-circuiting a base case earlier.</p></div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment">
+        <span class="level-tag">Beginner (30-60 min)</span>
+        <h4>Model a traffic light as a discriminated union</h4>
+        <p>Create a type <code>TrafficLight</code> with states <code>"red" | "yellow" | "green"</code>, each carrying
+        a different payload (e.g. red has <code>waitSeconds: number</code>, green has <code>minGoSeconds: number</code>,
+        yellow has none). Write a <code>next(light: TrafficLight): TrafficLight</code> function with an exhaustive switch.</p>
+        <ul><li>Use a discriminated union, not optional fields.</li><li>Add the <code>never</code> exhaustiveness check.</li><li>No <code>any</code> or type assertions anywhere.</li></ul>
+        <p><strong>Acceptance criteria:</strong> adding a 4th state without updating <code>next()</code> must fail <code>tsc</code>.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>Start by writing the three object type literals first, union them, then write the switch body-first before worrying about the exhaustiveness line.</p></div></details>
+        <p><strong>Bonus:</strong> add a user-defined type guard <code>isRed(l): l is Extract&lt;TrafficLight,{kind:"red"}&gt;</code> and use it with <code>Array.prototype.filter</code>.</p>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Intermediate (2-4 hrs)</span>
+        <h4>Type-safe event emitter with per-event payloads</h4>
+        <p>Build a tiny typed event emitter: <code>type Events = { login: { userId: string }; logout: {}; error: { message: string } }</code>.
+        Implement <code>on&lt;K extends keyof Events&gt;(event: K, handler: (payload: Events[K]) =&gt; void)</code> and
+        <code>emit&lt;K extends keyof Events&gt;(event: K, payload: Events[K])</code> such that calling
+        <code>emit("login", { message: "x" })</code> is a compile error.</p>
+        <ul><li>No <code>any</code> in the implementation or public API.</li><li>Handler registered for one event must only ever be called with that event's payload shape.</li></ul>
+        <p><strong>Acceptance criteria:</strong> a suite of 6 "should fail to compile" snippets (using <code>// @ts-expect-error</code>) all correctly fail.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>Store handlers in a <code>Partial&lt;Record&lt;keyof Events, Function[]&gt;&gt;</code> internally — the internal storage can use a looser type than the public generic API as long as the public methods are correctly typed.</p></div></details>
+        <p><strong>Bonus:</strong> add a <code>once()</code> method and an <code>off()</code> method with the same type safety.</p>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Advanced (1-2 days)</span>
+        <h4>Diagnose and fix a real narrowing regression</h4>
+        <p>Given a ~150-line reducer-style file (you write it) that intentionally breaks narrowing in 4 different
+        ways (destructuring before check, narrowing lost across an async boundary, bivariant method parameter hole,
+        incorrect use of a type predicate), identify and fix each one, documenting in comments exactly why the
+        compiler lost the narrowing in each case.</p>
+        <ul><li>Each fix must be minimal — no wholesale rewrites.</li><li>Document the root cause per fix in a one-line comment.</li></ul>
+        <p><strong>Acceptance criteria:</strong> strict mode passes with zero type errors and zero new <code>any</code>/assertions introduced.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>Think about which of the four categories above each bug belongs to before touching code — the fix pattern differs per category.</p></div></details>
+      </div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet"><ul>
+        <li>TS is structural — shape matters, names don't.</li>
+        <li>Excess property checks only apply to fresh object literals, not variables.</li>
+        <li><code>let</code> widens literal types; <code>const</code> and <code>as const</code> preserve them.</li>
+        <li>Control-flow narrowing is per-binding, tracked through the CFG; destructuring breaks the link to the source object.</li>
+        <li>Prefer discriminated unions over optional-field bags for state/variants.</li>
+        <li>End exhaustive switches with a <code>never</code>-typed assignment to catch missed cases at compile time.</li>
+        <li>Use <code>unknown</code>, not <code>any</code>, at untrusted boundaries.</li>
+        <li>Methods (shorthand) are bivariantly checked; function-typed properties are contravariantly checked under <code>strictFunctionTypes</code>.</li>
+        <li>Arrays are covariant (unsound by design) — use <code>readonly T[]</code> for read-only params.</li>
+      </ul></div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://www.typescriptlang.org/docs/handbook/2/narrowing.html">TS Handbook: Narrowing</a></li>
+        <li><a href="https://www.typescriptlang.org/docs/handbook/type-compatibility.html">TS Handbook: Type Compatibility</a></li>
+        <li><a href="https://github.com/microsoft/TypeScript/wiki/FAQ">TypeScript FAQ (compiler team)</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="index.html"><span class="dir">← Previous</span>Topic Overview</a>
+        <a class="next" href="02-generics.html"><span class="dir">Next →</span>Generics In Depth</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · TypeScript Advanced</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-typescript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-jsx.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "02-typescript-advanced", chapterKey: "01-type-system" });</script>
+</body>
+</html>

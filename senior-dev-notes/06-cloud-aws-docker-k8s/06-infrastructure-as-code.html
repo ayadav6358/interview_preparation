@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Infrastructure as Code — Cloud, AWS, Docker &amp; K8s — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">Cloud, AWS, Docker &amp; K8s</a><span class="sep">›</span>Infrastructure as Code</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>Infrastructure as Code: Terraform Internals</h1>
+      <p class="meta-line"><span>⏱ 3 hrs</span><span>📍 Chapter 6 of 7</span></p>
+      <p><strong>One-line summary:</strong> Terraform's entire value proposition rests on one artifact — the
+      state file — being an accurate record of real infrastructure; nearly every production IaC incident traces
+      back to state drifting from reality or two people writing to state at once, not to HCL syntax.</p>
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>You've already run <code>terraform apply</code> a hundred times. What separates a senior from someone
+      who treats Terraform as "YAML with extra steps" is understanding what's actually happening between plan
+      and apply: how state locking prevents two engineers from corrupting each other's changes, why drift
+      happens and how to detect it before it bites you, and how to structure modules so a 200-resource stack
+      doesn't become an unreviewable, unrefactorable mess. In an interview, "I use Terraform" is table stakes —
+      being able to explain exactly why a <code>terraform apply</code> failed with a stale state lock, or how
+      you'd safely refactor a module without destroying and recreating resources, is what demonstrates depth.</p>
+      <div class="box why"><h4>Why</h4><p>State corruption, drift, and lock contention cause real outages —
+      a bad apply that deletes a production database because state didn't match reality is a career-defining
+      incident, not a hypothetical. Understanding the state model is what prevents it.</p></div>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>Comfortable deploying cloud infrastructure manually and reading HCL/JSON-like config. Related:
+      <a href="04-aws-core.html">AWS Core</a>, <a href="05-serverless.html">Serverless</a>.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="state-file">The state file: what it actually is</h3>
+      <p>Terraform state (<code>terraform.tfstate</code>) is a JSON document mapping every resource in your
+      config to the real-world object it created — not just IDs, but a full cached copy of each resource's
+      attributes as of the last successful apply or refresh. This cache is why <code>terraform plan</code>
+      doesn't need to re-read every attribute of every resource from the provider API on every run (though it
+      does refresh by default before diffing) — state is Terraform's source of truth for "what do I believe
+      exists," and the live cloud API is the source of truth for "what actually exists." A plan is the diff
+      between config (desired), state (believed), and a live refresh (actual). When those three disagree, you
+      get drift, surprising plans, or in the worst case, Terraform proposing to destroy and recreate something
+      a human changed out-of-band.</p>
+
+      <h3 id="plan-apply-internals">Plan/apply internals and the dependency graph</h3>
+      <p>Terraform builds a directed acyclic graph (DAG) of resources from implicit references (one resource's
+      attribute referencing another's output) and explicit <code>depends_on</code>, then walks that graph to
+      determine apply order and what can run in parallel (default parallelism is 10). <code>terraform plan</code>
+      produces a plan file that is a concrete, serializable diff of create/update/destroy/no-op actions per
+      resource address — this is why <code>terraform plan -out=tfplan</code> followed by
+      <code>terraform apply tfplan</code> is safer in CI than a bare <code>apply</code>: the exact plan reviewed
+      by a human (or a policy check) is the exact plan executed, with no window for state to change in between.
+      A resource replacement (destroy then create, or create then destroy if <code>create_before_destroy</code>
+      is set) happens when a change touches an attribute that isn't updatable in place — e.g. changing an EC2
+      instance's AMI forces replacement, while changing its tags doesn't.</p>
+
+      <h3 id="state-locking">State locking and remote backends</h3>
+      <p>Local state (a file on one engineer's laptop) doesn't scale past one person — the practical baseline is
+      a remote backend (S3 + DynamoDB for locking, or Terraform Cloud/HCP Terraform's managed state) that both
+      centralizes state and, critically, provides locking: before any plan or apply that could write state,
+      Terraform acquires a lock (a row in DynamoDB, or an API-level lock in Terraform Cloud) so a second
+      concurrent <code>apply</code> blocks or fails instead of racing the first and corrupting state. A stale
+      lock (process killed mid-apply, CI job hard-cancelled) leaves the lock held with nobody to release it —
+      <code>terraform force-unlock &lt;lock-id&gt;</code> clears it, but only after you've confirmed no apply is
+      actually still running, since force-unlocking a genuinely in-progress apply is exactly how you get real
+      corruption.</p>
+      <div class="box gotcha"><h4>Gotcha</h4><p>S3 backend state storage without DynamoDB locking (or without
+      S3's native conditional-writes locking, now supported as an alternative) means two simultaneous applies
+      can both read the same state, both compute a diff against it, and both write back — the second write wins
+      and silently discards the first apply's recorded changes, even though both applies may have succeeded
+      against real infrastructure. Always enable locking.</p></div>
+
+      <h3 id="drift-detection">Drift detection and reconciliation</h3>
+      <p>Drift is any divergence between state and real infrastructure caused by something other than
+      Terraform — a console change, another tool, a manual <code>kubectl</code> edit on a Terraform-managed
+      resource, or an auto-scaling action. <code>terraform plan</code> refreshes state against the live API by
+      default and will show drift as part of the diff; <code>terraform apply -refresh-only</code> lets you pull
+      drifted values into state without changing real infrastructure (accepting the manual change as the new
+      truth), while a normal apply will try to revert the drift back to what config declares. Detecting drift
+      proactively (a scheduled <code>terraform plan</code> in CI that alerts on any non-empty diff, rather than
+      discovering it during the next unrelated change) is the difference between drift being a minor surprise
+      and drift silently accumulating until an apply does something destructive nobody expected.</p>
+
+      <h3 id="module-composition">Module composition and state boundaries</h3>
+      <p>A module is a reusable grouping of resources with declared inputs/outputs, but the real design
+      decision is state boundary placement — how many modules share one state file versus how many separate
+      <code>terraform apply</code> runs (and separate state files) you end up managing. One giant state file for
+      an entire org's infrastructure means every apply's blast radius is "everything," and lock contention
+      between teams becomes constant; too many tiny state files means wiring cross-stack references becomes its
+      own integration problem solved via remote state data sources (<code>terraform_remote_state</code>) or a
+      shared registry of outputs. The common senior-level pattern is one state file per logical,
+      independently-deployable unit (a service's infra, a shared network layer, a shared IAM layer), with
+      explicit, versioned interfaces between them rather than implicit coupling through one shared state blob.</p>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>On <code>terraform apply</code>: Terraform acquires the state lock, refreshes state against each
+      resource's provider API (unless <code>-refresh=false</code>), builds the dependency graph from the
+      current config, computes a diff per resource address against refreshed state, and if a plan file wasn't
+      pre-supplied, prompts for confirmation. It then walks the graph, calling each provider's CRUD-equivalent
+      API operations (Create/Read/Update/Delete) for each changed resource in dependency order, writing the new
+      resource attributes back into state incrementally as each resource completes (not all at once at the end)
+      — this is why a partially-failed apply leaves state accurately reflecting the resources that did succeed,
+      and why rerunning apply after a partial failure is normally safe: Terraform resumes from the state it has,
+      it doesn't start over. Finally it releases the lock. Provider plugins are the layer translating HCL
+      resource blocks into actual cloud API calls — "the AWS provider doesn't support X" really means no code
+      exists yet to translate that resource type into AWS API calls, which is why brand-new AWS features often
+      lag behind in Terraform support.</p>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+graph TD
+  CFG[HCL Config] --> GRAPH[Build dependency DAG]
+  STATE[(State file)] -->|refresh| LIVE[Live provider API]
+  GRAPH --> DIFF[Diff: config vs refreshed state]
+  LIVE --> DIFF
+  DIFF --> PLAN[Plan: create/update/destroy per resource]
+  PLAN -->|apply| WALK[Walk graph, call provider CRUD APIs]
+  WALK -->|incremental writes| STATE
+      </div>
+      <div class="mermaid">
+sequenceDiagram
+  participant EngA as Engineer A
+  participant EngB as Engineer B
+  participant Lock as DynamoDB Lock
+  participant S3 as S3 State
+  EngA->>Lock: Acquire lock
+  Lock-->>EngA: Granted
+  EngB->>Lock: Acquire lock
+  Lock-->>EngB: Blocked (held by A)
+  EngA->>S3: Write updated state
+  EngA->>Lock: Release lock
+  Lock-->>EngB: Granted
+  EngB->>S3: Read latest state (sees A's changes)
+  EngB->>S3: Write updated state
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-hcl"># BAD: no locking, local-ish state behavior even with a remote backend
+terraform {
+  backend "s3" {
+    bucket = "acme-tfstate"
+    key    = "prod/network/terraform.tfstate"
+    region = "us-east-1"
+    # no dynamodb_table set — concurrent applies can corrupt state
+  }
+}
+
+# GOOD: remote backend with state locking enabled
+terraform {
+  backend "s3" {
+    bucket         = "acme-tfstate"
+    key            = "prod/network/terraform.tfstate"
+    region         = "us-east-1"
+    dynamodb_table = "acme-tfstate-locks"   # enables locking
+    encrypt        = true
+  }
+}
+</code></pre>
+      <pre><code class="language-hcl"># Module composition with explicit, versioned interface — not shared state
+module "network" {
+  source = "./modules/network"
+  cidr_block = "10.0.0.0/16"
+}
+
+module "service_api" {
+  source     = "./modules/service"
+  vpc_id     = module.network.vpc_id        # explicit cross-module interface
+  subnet_ids = module.network.private_subnet_ids
+}
+
+# Reading another team's state as a data source instead of merging state files
+data "terraform_remote_state" "shared_iam" {
+  backend = "s3"
+  config = {
+    bucket = "acme-tfstate"
+    key    = "shared/iam/terraform.tfstate"
+    region = "us-east-1"
+  }
+}
+
+resource "aws_iam_role_policy_attachment" "attach" {
+  role       = data.terraform_remote_state.shared_iam.outputs.service_role_name
+  policy_arn = "arn:aws:iam::aws:policy/ReadOnlyAccess"
+}
+</code></pre>
+      <pre><code class="language-bash"># Detect drift in CI without changing anything
+terraform plan -detailed-exitcode
+# exit 0 = no changes, 1 = error, 2 = changes present (drift or pending config changes)
+
+# Pull a manual change into state without reverting it
+terraform apply -refresh-only
+
+# Clear a stale lock after confirming no apply is actually running
+terraform force-unlock a1b2c3d4-lock-id
+</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4><p>A platform team's single monolithic state file covered networking,
+      IAM, and 40+ microservices' infra. A routine apply by one engineer to add a security group rule took the
+      lock for several minutes; during that window three other teams' CI pipelines queued up waiting for the
+      lock, backing up deploys org-wide. Separately, an on-call engineer had manually bumped an RDS instance's
+      storage via the console during an incident two weeks earlier, and nobody ran a drift-detecting plan since
+      — the next unrelated apply to that state silently proposed reverting the storage size back down, which
+      would have truncated available disk had it not been caught in review. Fix: split the monolithic state into
+      per-service state files with explicit remote-state data sources for shared IAM/network outputs (reducing
+      lock contention to only the engineers actually touching a given service), and added a scheduled CI job
+      running <code>terraform plan -detailed-exitcode</code> against every state file nightly, alerting on any
+      drift before it could surface as a surprise in someone else's apply.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Manually editing resources in the cloud console "just this once"
+      during an incident, without later reconciling state, is the single most common source of drift-driven
+      production incidents — the next apply has no idea the manual change was intentional and will try to
+      revert it.</p></div>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Committing <code>terraform.tfstate</code> to git instead of using
+      a remote backend means state is never locked, frequently goes stale between clones, and routinely contains
+      secrets in plaintext (e.g. a generated DB password resource attribute) committed straight into version
+      control history.</p></div>
+      <ul>
+        <li>Always use a remote backend with locking enabled — never local state for anything beyond a solo
+        throwaway experiment.</li>
+        <li>Run <code>terraform plan</code> in CI on every PR and require a human review of the plan output
+        before merge, not just a syntax/lint check.</li>
+        <li>Treat any manual console change as an incident follow-up item: reconcile state via
+        <code>-refresh-only</code> or re-apply, don't let drift silently accumulate.</li>
+        <li>Split state by independently-deployable boundary; use remote state data sources for cross-stack
+        references instead of one shared state blob.</li>
+        <li>Never store secrets as plain resource attributes in state without encryption at rest on the backend
+        — state itself is a sensitive artifact.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>One state file per stack</td><td>Small team, tightly coupled resources that always change
+        together</td><td>Multiple teams, large resource count, frequent concurrent changes</td>
+        <td>Split state per service/boundary</td></tr>
+        <tr><td>S3 + DynamoDB backend</td><td>Already on AWS, want full control, no extra cost for a managed
+        service</td><td>Want policy-as-code, run history UI, SSO out of the box</td>
+        <td>Terraform Cloud / HCP Terraform</td></tr>
+        <tr><td>remote_state data source</td><td>Stable, infrequently-changing cross-stack outputs (VPC id, IAM
+        role ARN)</td><td>Tightly coupled resources that change together often</td>
+        <td>Merge into one state, or use a service registry/SSM parameter instead</td></tr>
+        <tr><td>-refresh-only to accept drift</td><td>Manual change was intentional and should become the new
+        desired state</td><td>Manual change was accidental/unauthorized</td>
+        <td>Normal apply to revert drift back to config</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+      <div class="qa-level basic"><h4>Basic</h4>
+        <details class="qa"><summary>What is Terraform state and why is it needed?</summary><div class="answer"><p>A JSON file mapping config-declared resources to the real-world objects they created, including cached attribute values. It's needed because Terraform can't infer which real resource corresponds to which config block from the provider API alone — state is the mapping that makes incremental plan/apply possible.</p></div><div class="followup">Follow-up: what would happen if you deleted the state file but the real resources still existed?</div></details>
+        <details class="qa"><summary>What's the difference between terraform plan and terraform apply?</summary><div class="answer"><p>Plan computes and displays the diff between config, state, and refreshed live resources without changing anything. Apply executes that diff, calling provider APIs to create/update/destroy resources and writing results back to state.</p></div><div class="followup">Follow-up: how do you guarantee the exact reviewed plan is what gets applied?</div></details>
+        <details class="qa"><summary>What is state drift?</summary><div class="answer"><p>Any divergence between what state records and what actually exists in the cloud, usually caused by a change made outside Terraform (console edit, another tool, auto-scaling).</p></div><div class="followup">Follow-up: how can you detect drift without applying any changes?</div></details>
+        <details class="qa"><summary>Why does a remote backend need a locking mechanism?</summary><div class="answer"><p>To prevent two concurrent applies from reading the same state, computing independent diffs, and writing back in a way where the second write silently discards the first's recorded changes — corrupting state's accuracy.</p></div><div class="followup">Follow-up: what backend options provide locking on AWS?</div></details>
+        <details class="qa"><summary>What causes a resource to be destroyed and recreated instead of updated in place?</summary><div class="answer"><p>A changed attribute that the provider doesn't support updating in place (e.g. an EC2 instance's AMI) forces replacement; attributes the provider can update in place (like tags) don't.</p></div><div class="followup">Follow-up: what does create_before_destroy change about this behavior?</div></details>
+        <details class="qa"><summary>What's a Terraform module?</summary><div class="answer"><p>A reusable grouping of resources with declared input variables and output values, used for composition and DRY infrastructure code.</p></div><div class="followup">Follow-up: does a module necessarily get its own state file?</div></details>
+      </div>
+      <div class="qa-level medium"><h4>Medium</h4>
+        <details class="qa"><summary>Walk through exactly what happens internally when you run terraform apply.</summary><div class="answer"><p>Acquire state lock, refresh state against live provider APIs (unless disabled), build the resource dependency DAG from config, diff config against refreshed state per resource address, walk the graph calling provider create/update/delete APIs in dependency order (parallelizing independent resources), writing each resource's new state incrementally as it completes, then release the lock.</p></div><div class="followup">Follow-up: why is incremental state writing important for partial-failure recovery?</div></details>
+        <details class="qa"><summary>Why is terraform plan -out=tfplan followed by apply tfplan safer in CI than a bare terraform apply?</summary><div class="answer"><p>A bare apply computes its own plan at apply time, which could differ from what a human reviewed moments earlier if state or live resources changed in between. Using a saved plan file guarantees the exact reviewed diff is the exact diff executed, closing that race window.</p></div><div class="followup">Follow-up: what happens if you try to apply a saved plan against state that has since changed?</div></details>
+        <details class="qa"><summary>Your team has one state file for 40 microservices' infra. What problems does this cause at scale, and how would you fix it?</summary><div class="answer"><p>Lock contention (every team's apply blocks every other team's), large blast radius per apply, slow plans (every resource refreshed), and unreviewable diffs. Fix: split into per-service state files aligned to independently-deployable boundaries, with explicit remote_state data sources or a parameter store for cross-stack references instead of implicit shared state.</p></div><div class="followup">Follow-up: what's the tradeoff of splitting state too granularly?</div></details>
+        <details class="qa"><summary>An engineer manually changed a resource's configuration in the AWS console during an incident. What happens on the next terraform apply, and what should the team have done instead?</summary><div class="answer"><p>The next plan/apply refreshes state, detects the live value no longer matches config, and (by default) proposes reverting it back to what config declares — silently undoing the manual fix unless caught in review. The team should have either updated the HCL to match the intentional change and applied it properly, or run terraform apply -refresh-only to pull the change into state as the accepted new truth, immediately after the incident rather than weeks later.</p></div><div class="followup">Follow-up: how would a scheduled drift-detection CI job have caught this earlier?</div></details>
+        <details class="qa"><summary>Why does committing terraform.tfstate to git create both a correctness and a security problem?</summary><div class="answer"><p>Correctness: no locking exists across clones, so concurrent applies by different engineers can't coordinate and will corrupt state; state also goes stale the moment anyone else applies without pushing. Security: state frequently contains sensitive resource attributes (passwords, keys) in plaintext, now permanently in git history even if later removed.</p></div><div class="followup">Follow-up: how would you remediate a secret that's already in state file history in git?</div></details>
+      </div>
+      <div class="qa-level advanced"><h4>Advanced</h4>
+        <details class="qa"><summary>Design a multi-team Terraform setup for an org with 15 teams, shared networking/IAM, and a requirement that no team's apply can be blocked by another team's lock.</summary><div class="answer"><p>One state file per team/service boundary, each with its own remote backend and lock, so lock contention is scoped to a single team's own concurrent applies rather than org-wide. Shared networking and IAM live in their own small number of stable, infrequently-changed state files, exposed to other teams exclusively via terraform_remote_state data sources (or outputs published to SSM Parameter Store/a registry) — read-only consumption, never direct state sharing. CI enforces plan review gates per team's own state, and a separate scheduled drift-detection job runs against every state file independently so no team's drift blocks another's pipeline.</p></div><div class="followup">Follow-up: how would you handle a breaking change to a shared network output that every team's remote_state reads?</div></details>
+        <details class="qa"><summary>Explain exactly how S3+DynamoDB state locking prevents corruption, and what happens if the DynamoDB table is deleted while applies are in flight.</summary><div class="answer"><p>Before writing state, Terraform attempts to write a lock record (a specific item keyed by the state's LockID) into DynamoDB using a conditional write that fails if the item already exists — this is DynamoDB's strong consistency guarantee being used as a distributed mutex. If the table is deleted mid-flight, any in-progress apply that already acquired its lock conceptually still holds it (nothing enforces release), but any new apply attempting to acquire a lock will fail outright since the lock table doesn't exist — safer than silently proceeding unlocked, since Terraform treats a lock-acquisition failure as a hard stop by default.</p></div><div class="followup">Follow-up: why is S3's native conditional-writes locking (newer alternative to DynamoDB) considered simpler operationally?</div></details>
+        <details class="qa"><summary>A terraform apply partially fails after creating 8 of 12 planned resources. Is it safe to just rerun apply? What could go wrong?</summary><div class="answer"><p>Generally yes — state was written incrementally as each of the 8 resources succeeded, so a rerun recomputes a plan against accurate current state and only acts on the remaining 4. What can go wrong: if the failure was mid-resource (e.g. a cloud API call that partially provisioned something before erroring, like a resource created but a dependent sub-resource failed), state may not perfectly reflect reality, requiring a manual terraform import or state surgery; also, if the failure was caused by a dependency ordering issue that the graph didn't correctly capture (e.g. an implicit dependency Terraform couldn't infer), the rerun can fail identically without a depends_on fix.</p></div><div class="followup">Follow-up: when would you reach for terraform state rm or terraform import instead of just rerunning apply?</div></details>
+        <details class="qa"><summary>How would you build CI/CD guardrails so a Terraform apply can never run against drifted state without human awareness?</summary><div class="answer"><p>Run plan with -detailed-exitcode on every PR and on a schedule against main; exit code 2 (changes present) on the scheduled run specifically means drift (since no PR triggered it) and should page/alert rather than silently sit until the next real change surfaces it. Gate actual apply behind a required review of the saved plan file's exact diff, generated fresh immediately before apply (not reused from PR time) to catch drift that occurred between PR approval and merge. Optionally add policy-as-code (Sentinel/OPA) checks on the plan JSON output to hard-block specific dangerous diffs (e.g. any destroy on a production database resource) regardless of human review.</p></div><div class="followup">Follow-up: why generate the plan fresh immediately before apply rather than reusing the PR-time plan?</div></details>
+        <details class="qa"><summary>What's the practical difference between terraform state rm, terraform import, and terraform apply -refresh-only, and when would each be the correct tool?</summary><div class="answer"><p>state rm removes a resource from state without touching real infrastructure — used when Terraform should stop managing something (e.g. ownership moved to another team/tool) but the resource should keep existing. import brings an existing, unmanaged real resource under Terraform's management by creating its state entry from config plus live attributes — used for adopting manually-created infra. -refresh-only updates already-managed resources' state attributes to match live reality without creating/destroying anything — used to accept drift on resources already under management. Mixing these up (e.g. using import when you actually need refresh-only) either leaves a resource unmanaged when it shouldn't be, or duplicates management.</p></div><div class="followup">Follow-up: what's the newer alternative to a manual import command for bulk-importing many resources?</div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment"><span class="level-tag">Beginner (30-60 min)</span><h4>Observe state locking in action</h4>
+      <p>Set up an S3 + DynamoDB backend for a trivial resource (e.g. a single S3 bucket), then deliberately
+      trigger a lock conflict by starting an apply, pausing it (e.g. a slow resource), and running a second
+      apply from another terminal before the first completes.</p>
+      <ul><li>Confirm the second apply reports the lock is held</li><li>Inspect the DynamoDB table's lock item
+      while the lock is held</li></ul>
+      <p><strong>Acceptance criteria:</strong> Screenshot/log showing the actual lock-held error message and the
+      DynamoDB item contents.</p>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>A resource with an artificial delay (local-exec provisioner with a sleep) is an easy way to create a window to race against.</p></div></details>
+      <p><strong>Bonus:</strong> Force-unlock it and explain in your own words why that command should almost
+      never be run against a lock you didn't personally confirm is stale.</p>
+      </div>
+      <div class="assignment"><span class="level-tag">Intermediate (2-4 hrs)</span><h4>Create, detect, and reconcile real drift</h4>
+      <p>Provision a small set of resources with Terraform, then manually change one of them via the AWS console
+      (or CLI) outside of Terraform. Run terraform plan to observe the drift, then reconcile it two different
+      ways on two separate copies: once by accepting it with -refresh-only, once by letting a normal apply revert it.</p>
+      <ul><li>Capture the plan output showing drift</li><li>Document both reconciliation outcomes</li></ul>
+      <p><strong>Acceptance criteria:</strong> Clear before/after state showing which approach kept the manual
+      change and which reverted it, with the actual plan output as evidence.</p>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>Changing a tag or a simple mutable attribute (not one that forces replacement) makes this safer and clearer to observe.</p></div></details>
+      <p><strong>Bonus:</strong> Build a tiny CI job (a scheduled script is fine) that runs plan -detailed-exitcode
+      and alerts on exit code 2.</p>
+      </div>
+      <div class="assignment"><span class="level-tag">Advanced (1-2 days)</span><h4>Split a monolithic state file into per-service state with cross-stack references</h4>
+      <p>Build a small "monolith" Terraform config with a shared network module and two independent services in
+      one state file. Refactor it into three separate state files (network, service-a, service-b) using
+      terraform_remote_state to wire the services to the network's outputs, without destroying and recreating
+      the underlying real resources.</p>
+      <ul><li>Use terraform state mv / import strategies to migrate existing resources into the new state files
+      without recreation</li><li>Verify no resource shows as destroyed/recreated in any plan during the
+      migration</li></ul>
+      <p><strong>Acceptance criteria:</strong> left as an exercise — think through why a naive "just change the
+      backend config" approach doesn't actually split state, and what command actually moves a resource's state
+      entry between state files.</p>
+      <details class="qa"><summary>Hints</summary><div class="answer"><p>terraform state mv supports moving resources between two different state files by specifying both source and destination state file paths.</p></div></details>
+      </div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet"><ul>
+        <li>State = Terraform's cached belief of reality; plan = diff of config vs refreshed state vs live API.</li>
+        <li>Remote backend + locking (S3+DynamoDB or Terraform Cloud) is mandatory beyond solo experiments.</li>
+        <li>A stale lock needs force-unlock only after confirming no apply is genuinely still running.</li>
+        <li>Drift = reality diverged from state via out-of-band changes; -refresh-only accepts it, normal apply reverts it.</li>
+        <li>State is written incrementally per resource during apply — safe to rerun after a partial failure.</li>
+        <li>Resource replacement happens when a changed attribute can't be updated in place by the provider API.</li>
+        <li>Split state by independently-deployable boundary; use remote_state data sources, not shared state blobs.</li>
+        <li>plan -out=tfplan + apply tfplan removes the race window between review and execution.</li>
+        <li>Never commit state to git — no locking across clones, and secrets frequently end up plaintext in it.</li>
+      </ul></div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://developer.hashicorp.com/terraform/language/state">Terraform state documentation</a></li>
+        <li><a href="https://developer.hashicorp.com/terraform/language/state/locking">State locking</a></li>
+        <li><a href="https://developer.hashicorp.com/terraform/language/modules/develop">Module development</a></li>
+        <li><a href="https://developer.hashicorp.com/terraform/cli/import">terraform import</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="05-serverless.html"><span class="dir">← Previous</span>Serverless (Lambda, API Gateway)</a>
+        <a class="next" href="07-advanced-cicd.html"><span class="dir">Next →</span>Advanced CI/CD (Blue-Green, Canary, Rollbacks)</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · Cloud, AWS, Docker &amp; K8s</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-yaml.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-hcl.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-docker.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "06-cloud-aws-docker-k8s", chapterKey: "06-infrastructure-as-code" });</script>
+</body>
+</html>

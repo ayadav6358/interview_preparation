@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MCP Fundamentals</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <input class="searchbox" placeholder="Search topics..." />
+    <a href="../index.html">← Home</a>
+    <h3>22-MCP</h3>
+    <a href="mcp-fundamentals.html">MCP Fundamentals</a>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumbs"><a href="../index.html">Home</a> / 22-MCP</div>
+      <button class="theme-toggle" onclick="toggleTheme()">🌓 Theme</button>
+    </div>
+    <h1>MCP (Model Context Protocol) Fundamentals</h1>
+    <span class="tag good">Production-ready, actively evolving</span><span class="tag">Last verified: 2026-10-06</span>
+
+    <div class="toc">
+      <b>On this page</b>
+      <a href="#what">1. What is this?</a>
+      <a href="#whyexist">2. Why does it exist?</a>
+      <a href="#whyimportant">3. Why is it important?</a>
+      <a href="#whereused">4. Where is it used?</a>
+      <a href="#prereq">5. Prerequisites</a>
+      <a href="#core">6. Core concepts</a>
+      <a href="#terms">7. Terminology</a>
+      <a href="#arch">8. Architecture</a>
+      <a href="#internal">9. How it works internally</a>
+      <a href="#steps">10. Step-by-step: a tool call over MCP</a>
+      <a href="#simple">11. Simple example</a>
+      <a href="#real">12. Real-world example</a>
+      <a href="#code">13. Code example</a>
+      <a href="#advanced">14. Advanced example (remote MCP + auth)</a>
+      <a href="#mistakes">15. Common mistakes</a>
+      <a href="#best">16. Best practices</a>
+      <a href="#production">17. Production considerations</a>
+      <a href="#security">18. Security considerations</a>
+      <a href="#performance">19. Performance considerations</a>
+      <a href="#cost">20. Cost considerations</a>
+      <a href="#debug">21. Debugging/troubleshooting</a>
+      <a href="#related">22. Related concepts</a>
+      <a href="#comparison">23. Comparison with alternatives</a>
+      <a href="#exercise">24. Mini practical exercise</a>
+      <a href="#project">25. Practical project</a>
+      <a href="#projectarch">26. Project architecture</a>
+      <a href="#interview-b">27. Interview Questions — Beginner</a>
+      <a href="#interview-i">28. Interview Questions — Intermediate</a>
+      <a href="#interview-a">29. Interview Questions — Advanced</a>
+      <a href="#interview-s">30. Interview Questions — Senior/Architect</a>
+      <a href="#interview-sc">31. Scenario-Based Questions</a>
+      <a href="#revision">32. Quick revision notes</a>
+      <a href="#cheat">33. Cheat sheet</a>
+      <a href="#further">34. Further topics to learn</a>
+    </div>
+
+    <h2 id="what">1. What is this?</h2>
+    <p>MCP (Model Context Protocol) is an open standard protocol for connecting LLM applications (hosts) to external tools, data sources, and prompts via a standardized client-server interface — think of it as a "USB-C port for AI applications," letting any MCP-compatible host connect to any MCP server without custom integration code per combination.</p>
+
+    <h2 id="whyexist">2. Why does it exist?</h2>
+    <p>Before MCP, every AI application needed custom, one-off integration code for every external tool/data source it wanted to connect to (N applications × M tools = N×M integrations). MCP exists to standardize this into N+M: any MCP host works with any MCP server.</p>
+
+    <h2 id="whyimportant">3. Why is it important?</h2>
+    <p>MCP has rapidly become the dominant standard for AI-to-tool integration since its introduction, adopted across major AI coding tools and agent platforms — understanding its architecture is now essential baseline knowledge for AI engineers, not a niche specialty.</p>
+
+    <h2 id="whereused">4. Where is it used?</h2>
+    <p>Claude Code and other coding agents (file system, git, database access), IDE integrations, enterprise data connectors (Slack, GitHub, databases), any agent needing standardized, reusable tool/data access.</p>
+
+    <h2 id="prereq">5. Prerequisites</h2>
+    <p><a href="../16-Tool-Calling/tool-calling-fundamentals.html">Tool Calling</a>.</p>
+
+    <h2 id="core">6. Core concepts</h2>
+    <ul>
+      <li><b>MCP Host:</b> the AI application the user interacts with (e.g., Claude Code, Claude Desktop) that wants to use external capabilities.</li>
+      <li><b>MCP Client:</b> the component within the host that connects to and communicates with MCP servers.</li>
+      <li><b>MCP Server:</b> a separate process/service exposing Tools, Resources, and Prompts over the MCP protocol.</li>
+      <li><b>Tools:</b> callable functions an MCP server exposes (like standard tool calling, but standardized and discoverable).</li>
+      <li><b>Resources:</b> data/content an MCP server can provide (files, database records, API responses) for the host to read.</li>
+      <li><b>Prompts:</b> reusable prompt templates an MCP server can expose for the host to use.</li>
+      <li><b>Transport:</b> the communication channel between client and server — stdio (local process) or HTTP/SSE (remote).</li>
+    </ul>
+
+    <h2 id="terms">7. Terminology</h2>
+    <table>
+      <tr><th>Term</th><th>Meaning</th></tr>
+      <tr><td>Local MCP</td><td>An MCP server running as a local subprocess, communicating via stdio — typical for file system/local tool access.</td></tr>
+      <tr><td>Remote MCP</td><td>An MCP server accessed over the network (HTTP/SSE), typical for cloud services/enterprise data sources.</td></tr>
+      <tr><td>MCP discovery</td><td>The process by which a host learns what tools/resources/prompts a server exposes.</td></tr>
+      <tr><td>Authentication/Authorization</td><td>Remote MCP servers typically require auth (e.g., OAuth) to control access to sensitive data/actions.</td></tr>
+    </table>
+
+    <h2 id="arch">8. Architecture</h2>
+    <pre><code>User
+ ↓
+MCP Host (e.g., Claude Code)
+ ↓
+MCP Client (built into the host)
+ ↓  (stdio or HTTP/SSE transport)
+MCP Server (exposes Tools, Resources, Prompts)
+ ↓
+External System (database, API, file system, SaaS product)</code></pre>
+
+    <h2 id="internal">9. How it works internally</h2>
+    <p>On connection, the MCP client queries the server for its capabilities (available tools/resources/prompts and their schemas) — this discovery step is what lets a host dynamically support any MCP server without hardcoded knowledge of it. When the LLM decides to use a tool, the host's client sends a standardized JSON-RPC-based request to the server, which executes the actual logic (hitting a database, calling an API) and returns a structured result, following essentially the same tool-calling mechanics covered in 16-Tool-Calling, but with the server as a separate, reusable, standardized component instead of bespoke in-application code.</p>
+
+    <h2 id="steps">10. Step-by-step: a tool call over MCP</h2>
+    <ol>
+      <li>Host starts/connects to an MCP server (local subprocess or remote endpoint).</li>
+      <li>Client performs discovery, learning the server's available tools/resources/prompts.</li>
+      <li>Host presents discovered tools to the LLM as available tool-call options.</li>
+      <li>LLM decides to call a specific tool; host's client sends the request to the MCP server.</li>
+      <li>Server executes the actual logic and returns a structured result.</li>
+      <li>Host feeds the result back to the LLM, which continues or produces a final answer.</li>
+    </ol>
+
+    <h2 id="simple">11. Simple example</h2>
+    <p>A local MCP server exposes a `read_file(path)` tool; Claude Code (the host) discovers this tool, and when the user asks to "look at config.py," the LLM requests the tool call, the MCP server reads the actual file from disk, and returns its content.</p>
+
+    <h2 id="real">12. Real-world example</h2>
+    <p>An enterprise connects a remote MCP server exposing their internal ticketing system's API as Tools (create_ticket, search_tickets) and Resources (ticket details) — any MCP-compatible AI tool in the company (coding assistants, chat assistants) can now interact with the ticketing system without each needing custom integration code.</p>
+
+    <h2 id="code">13. Code example</h2>
+    <pre><code class="language-python"># Minimal MCP server using the official Python SDK
+from mcp.server.fastmcp import FastMCP
+
+mcp = FastMCP("demo-server")
+
+@mcp.tool()
+def get_weather(city: str) -> str:
+    """Get current weather for a city."""
+    return f"Weather in {city}: 22C, sunny"
+
+@mcp.resource("config://settings")
+def get_settings() -> str:
+    return '{"theme": "dark"}'
+
+if __name__ == "__main__":
+    mcp.run(transport="stdio")
+</code></pre>
+    <pre><code class="language-json">// Host configuration connecting to this local MCP server
+{
+  "mcpServers": {
+    "demo-server": {
+      "command": "python",
+      "args": ["demo_server.py"]
+    }
+  }
+}
+</code></pre>
+
+    <h2 id="advanced">14. Advanced example (remote MCP + auth)</h2>
+    <pre><code class="language-python">from mcp.server.fastmcp import FastMCP
+from mcp.server.auth import OAuthProvider
+
+mcp = FastMCP("enterprise-server", auth=OAuthProvider(
+    authorization_endpoint="https://auth.company.com/authorize",
+    token_endpoint="https://auth.company.com/token",
+))
+
+@mcp.tool()
+def search_tickets(query: str, user_context: dict) -> list:
+    # user_context carries authenticated user identity for scoped access
+    return ticketing_db.search(query, tenant_id=user_context["tenant_id"])
+
+if __name__ == "__main__":
+    mcp.run(transport="sse", port=8080)  # remote, network-accessible
+</code></pre>
+
+    <h2 id="mistakes">15. Common mistakes</h2>
+    <ul>
+      <li>Exposing overly broad/dangerous tools (e.g., unrestricted shell access) via MCP without scoping.</li>
+      <li>Not validating tool arguments server-side, trusting the host/LLM's generated input blindly.</li>
+      <li>Running remote MCP servers without proper authentication, exposing sensitive data/actions.</li>
+      <li>Poor tool/resource descriptions, leading to the same misuse issues as any poorly-described tool.</li>
+    </ul>
+
+    <h2 id="best">16. Best practices</h2>
+    <ul>
+      <li>Scope each tool to the minimum necessary capability (least privilege).</li>
+      <li>Validate all arguments server-side regardless of client trust.</li>
+      <li>Use proper authentication/authorization for any remote MCP server handling sensitive data.</li>
+      <li>Write clear, specific tool/resource descriptions, just as critical as in direct tool calling.</li>
+    </ul>
+
+    <h2 id="production">17. Production considerations</h2>
+    <p>Treat MCP servers as production services: health checks, logging, rate limiting, and versioning of tool schemas (breaking schema changes can silently break hosts depending on them).</p>
+
+    <h2 id="security">18. Security considerations</h2>
+    <p>MCP servers are a significant attack surface — they can expose powerful capabilities (file access, database access, code execution) to an LLM-driven caller; apply authentication for remote servers, strict argument validation, least-privilege tool scoping, and treat any content returned via Resources as potentially injectable content requiring the same prompt-injection precautions as other untrusted data. See <a href="../38-AI-Security/">AI Security</a>.</p>
+
+    <h2 id="performance">19. Performance considerations</h2>
+    <p>Local (stdio) MCP servers have minimal transport overhead; remote (HTTP/SSE) servers add network latency — cache discovery results where appropriate and avoid unnecessary round trips for frequently-used tools.</p>
+
+    <h2 id="cost">20. Cost considerations</h2>
+    <p>MCP itself doesn't add LLM token cost beyond standard tool calling, but hosting remote MCP servers has its own infrastructure cost (compute, bandwidth) — factor this into overall platform cost alongside LLM API spend.</p>
+
+    <h2 id="debug">21. Debugging/troubleshooting</h2>
+    <ul>
+      <li><b>Host doesn't see expected tools:</b> check server connection/discovery — verify the server started correctly and the host's configuration points to it correctly.</li>
+      <li><b>Tool calls fail silently:</b> check server-side logs for argument validation failures or execution errors not being properly surfaced back to the host.</li>
+      <li><b>Remote server access denied:</b> verify authentication/authorization configuration and token validity.</li>
+    </ul>
+
+    <h2 id="related">22. Related concepts</h2>
+    <p><a href="../16-Tool-Calling/tool-calling-fundamentals.html">Tool Calling</a> · <a href="../23-MCP-Development/">MCP Development</a> · <a href="../24-A2A/">A2A</a> · <a href="../38-AI-Security/">AI Security</a></p>
+
+    <h2 id="comparison">23. Comparison with alternatives</h2>
+    <table>
+      <tr><th>Approach</th><th>Notes</th></tr>
+      <tr><td>Custom per-app tool integration</td><td>N×M integration effort; no reusability across hosts</td></tr>
+      <tr><td>MCP</td><td>Standardized N+M; reusable servers across any compatible host</td></tr>
+      <tr><td>A2A</td><td>A different protocol for agent-to-agent communication, not model-to-tool (see A2A page for distinction)</td></tr>
+    </table>
+
+    <h2 id="exercise">24. Mini practical exercise</h2>
+    <p>Build the minimal MCP server above, connect it to an MCP-compatible host (like Claude Desktop or Claude Code), and verify the host can discover and call the `get_weather` tool.</p>
+
+    <h2 id="project">25. Practical project</h2>
+    <p>See <a href="../23-MCP-Development/">23-MCP-Development</a> for the full build: a database-connected MCP server, a REST-API-connected MCP server, and an agent using MCP tools end to end.</p>
+
+    <h2 id="projectarch">26. Project architecture</h2>
+    <pre><code>Host (Claude Code / Claude Desktop)
+ → MCP Client → connects via stdio to local demo_server.py
+ → demo_server.py exposes get_weather tool + settings resource
+ → test: ask host "what's the weather in Tokyo" and verify tool call occurs</code></pre>
+
+    <h2 id="interview-b">27. Interview Questions — Beginner</h2>
+    <div class="qa"><b>Q1.</b> What is MCP?<br><b>A.</b> Model Context Protocol — an open standard for connecting LLM applications to external tools, data, and prompts via a standardized client-server interface.</div>
+    <div class="qa"><b>Q2.</b> What is an MCP Host?<br><b>A.</b> The AI application the user interacts with that wants to use external capabilities via MCP (e.g., Claude Code).</div>
+    <div class="qa"><b>Q3.</b> What is an MCP Server?<br><b>A.</b> A separate process/service exposing Tools, Resources, and Prompts over the MCP protocol.</div>
+    <div class="qa"><b>Q4.</b> What problem does MCP solve?<br><b>A.</b> It avoids N×M custom integrations between every AI application and every tool/data source by standardizing the interface to N+M.</div>
+    <div class="qa"><b>Q5.</b> What's the difference between local and remote MCP?<br><b>A.</b> Local MCP runs as a subprocess communicating via stdio; remote MCP is accessed over the network via HTTP/SSE.</div>
+    <div class="qa"><b>Q6.</b> What are MCP Resources?<br><b>A.</b> Data/content an MCP server can provide (files, records, API responses) for the host to read.</div>
+    <div class="qa"><b>Q7.</b> What are MCP Prompts?<br><b>A.</b> Reusable prompt templates an MCP server can expose for the host to use.</div>
+    <div class="qa"><b>Q8.</b> What is MCP discovery?<br><b>A.</b> The process by which a host learns what tools/resources/prompts a connected server exposes.</div>
+    <div class="qa"><b>Q9.</b> Who executes an MCP tool's actual logic — the host or the server?<br><b>A.</b> The server — the host's client only sends the request; the server performs the real work.</div>
+    <div class="qa"><b>Q10.</b> Why do remote MCP servers typically need authentication?<br><b>A.</b> To control access to potentially sensitive data/actions exposed over the network.</div>
+
+    <h2 id="interview-i">28. Interview Questions — Intermediate</h2>
+    <div class="qa"><b>Q1.</b> How does MCP's standardization reduce integration effort compared to custom tool integrations?<br><b>A.</b> Without MCP, every host-to-tool pairing needs bespoke integration code (N hosts × M tools); with MCP, any compliant host can connect to any compliant server through the same protocol, reducing the effort to roughly N+M (each host implements the client once, each tool provider implements the server once).</div>
+    <div class="qa"><b>Q2.</b> Why is MCP's discovery mechanism important for its "USB-C for AI" value proposition?<br><b>A.</b> It lets a host dynamically learn what a server offers at connection time, without needing hardcoded prior knowledge of that specific server — the same way a USB-C port doesn't need to know in advance what device will be plugged in.</div>
+    <div class="qa"><b>Q3.</b> Why must MCP servers validate tool arguments server-side even though the host/LLM generated them?<br><b>A.</b> The server has no guarantee the connecting host validated anything, and the LLM-generated arguments are untrusted input from the server's perspective — the server is the actual execution boundary and must independently enforce correctness/safety.</div>
+    <div class="qa"><b>Q4.</b> What's the architectural difference between MCP and a traditional REST API integration?<br><b>A.</b> MCP standardizes discovery (the host learns available tools/resources dynamically) and is specifically designed for LLM-driven tool-call semantics (structured arguments matched to a model's tool-calling capability); a traditional REST API requires the integrating application to have prior, hardcoded knowledge of its endpoints and schemas.</div>
+    <div class="qa"><b>Q5.</b> Why might an enterprise expose internal systems via a remote MCP server rather than giving the AI host direct API credentials?<br><b>A.</b> Centralizing access through an MCP server lets the organization enforce consistent authentication, authorization, logging, and rate limiting at one controlled boundary, rather than distributing raw API credentials to every AI host/application that needs access.</div>
+
+    <h2 id="interview-a">29. Interview Questions — Advanced</h2>
+    <div class="qa"><b>Q1.</b> How would you design an MCP server's tool schema to minimize the risk of excessive agency while still providing useful capability?<br><b>A.</b> Expose narrow, purpose-specific tools (e.g., `create_ticket_in_category_X` rather than a generic `execute_database_query`) rather than broad, general-purpose capabilities, require explicit parameters that constrain scope (e.g., mandatory tenant/category fields validated server-side), and avoid exposing any tool whose blast radius if misused exceeds what's actually needed for the intended use cases.</div>
+    <div class="qa"><b>Q2.</b> What's a subtle risk of an MCP server's Resources feature when the host passes resource content directly into the LLM's context?<br><b>A.</b> Resource content (e.g., a file's contents, a database record) is external, potentially untrusted data from the model's perspective — if it contains text that looks like instructions, it's a prompt-injection vector exactly like any other externally-sourced content in RAG or tool results, requiring the same defensive framing/delimiting.</div>
+
+    <h2 id="interview-s">30. Interview Questions — Senior/Architect</h2>
+    <div class="qa"><b>Q1.</b> Design an enterprise MCP platform strategy for exposing internal systems (ticketing, CRM, internal docs) to multiple AI tools across the company securely.<br><b>A.</b> Build/deploy dedicated remote MCP servers per internal system, each enforcing its own authentication (tied to the company's SSO/identity provider) and authorization scoped to the calling user's actual permissions (not a shared service-account with broad access), implement centralized logging/auditing of all tool calls across servers, version tool schemas carefully to avoid breaking changes for dependent hosts, and apply rate limiting per server to prevent any single AI integration from overwhelming backend systems.</div>
+
+    <h2 id="interview-sc">31. Scenario-Based Questions</h2>
+    <div class="qa"><b>Scenario 1.</b> A security review finds an MCP server exposes a generic `run_shell_command` tool with no restrictions. What's your recommendation?<br><b>A.</b> Replace the generic tool with a set of narrow, purpose-specific tools covering only the actually-needed operations, remove unrestricted shell access entirely, and if shell-like flexibility is genuinely required, sandbox execution with a strict allowlist and mandatory human approval for anything destructive.</div>
+    <div class="qa"><b>Scenario 2.</b> An AI host using a remote MCP server starts behaving oddly after the server team pushed an update. What's the likely issue and how do you prevent it in the future?<br><b>A.</b> Likely a breaking change in the tool schema (renamed parameter, changed return format) that the host wasn't expecting; prevent by versioning MCP server tool schemas and following a deprecation/migration process for breaking changes rather than silently modifying live schemas that dependent hosts rely on.</div>
+
+    <h2 id="revision">32. Quick revision notes</h2>
+    <ul>
+      <li>MCP = standardized protocol connecting AI hosts to tools/data/prompts, "USB-C for AI."</li>
+      <li>Host → Client → Server (local stdio or remote HTTP/SSE) → external system.</li>
+      <li>Discovery lets hosts dynamically learn server capabilities.</li>
+      <li>Validate arguments server-side; scope tools tightly; auth for remote servers.</li>
+    </ul>
+
+    <h2 id="cheat">33. Cheat sheet</h2>
+    <div class="callout">MCP: Host → Client → Server (stdio/local or HTTP-SSE/remote) → external system. Exposes Tools, Resources, Prompts. Discovery removes need for hardcoded integration knowledge. Validate server-side, scope tightly, auth for remote.</div>
+
+    <h2 id="further">34. Further topics to learn</h2>
+    <p><a href="../23-MCP-Development/">MCP Development</a> → <a href="../24-A2A/">A2A</a> → <a href="../43-AI-Protocols/">AI Protocols</a></p>
+
+    <div class="prevnext">
+      <a href="../21-Multi-Agent-Systems/multi-agent-systems.html">← Multi-Agent Systems</a>
+      <a href="../23-MCP-Development/mcp-development-projects.html">Next: MCP Development →</a>
+    </div>
+  </main>
+</div>
+<script src="../assets/app.js"></script>
+</body>
+</html>

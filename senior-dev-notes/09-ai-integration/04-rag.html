@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RAG: Architecture & Evaluation — AI Integration — Senior Dev Notes</title>
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><button id="menu-toggle" class="icon-btn menu-toggle">☰</button><a href="../index.html">📘 Senior Dev Notes</a></div>
+    <input id="global-search" class="sidebar-search" type="text" placeholder="Search chapters...">
+    <ul id="search-results" style="list-style:none;padding:0;margin:0 0 10px;display:none;"></ul>
+    <nav id="sidebar-nav"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><a href="../index.html">Home</a><span class="sep">›</span><a href="index.html">AI Integration</a><span class="sep">›</span>RAG</div>
+      <div class="topbar-actions">
+        <label class="done-toggle"><input type="checkbox" id="done-checkbox"> Mark done</label>
+        <button id="theme-toggle" class="icon-btn">🌙</button>
+      </div>
+    </div>
+    <div class="content">
+      <h1>RAG: Architecture, Chunking, Retrieval, Evaluation</h1>
+      <p class="meta-line"><span>⏱ ~3 hrs</span><span>📍 Chapter 4 of 7</span></p>
+      <p><strong>One-line summary:</strong> RAG (Retrieval-Augmented Generation) fixes hallucination and
+      knowledge-cutoff problems by inserting real, retrieved text into the model's context before it answers —
+      the entire discipline is retrieval quality engineering, because the LLM only ever answers as well as the
+      context it's given.</p>
+
+      <div class="toc"><h4>On this page</h4><ol id="toc-list"></ol></div>
+
+      <h2 id="why-it-matters">Why It Matters for a Senior Developer</h2>
+      <p>RAG is the single most commonly asked-about AI architecture in senior interviews, precisely because it's
+      the pattern that turns "chatbot toy" into "production feature that answers questions about our actual
+      data." It's also where most naive implementations quietly fail — teams ship a RAG bot that works great in
+      the demo (3 example questions, cherry-picked) and then struggles in production because chunking was
+      arbitrary, retrieval returned marginally related chunks that happened to share vocabulary, or nobody ever
+      measured whether retrieval quality was good instead of just "the chatbot answers something." Being able to
+      walk through chunking tradeoffs, retrieval failure modes, and how you'd actually evaluate a RAG system
+      (not just vibes-check it) is one of the highest-leverage things you can demonstrate in this track.</p>
+      <div class="box why"><h4>Why</h4><p>An LLM answering from retrieved context is still just predicting
+      plausible next tokens — if the retrieved context is wrong, irrelevant, or missing the actual answer, the
+      model will still confidently generate <em>something</em>. RAG does not make hallucination impossible; it
+      makes it <em>fixable</em>, because the failure now traces to a debuggable retrieval step instead of an
+      opaque "the model just knows wrong things" problem.</p></div>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>Requires <a href="01-how-llms-work.html">How LLMs Work</a> and
+      <a href="03-embeddings-vector-db.html">Embeddings & Vector Databases</a>. Related:
+      <a href="05-ai-agents.html">AI Agents</a>.</p>
+
+      <h2 id="core-concepts">Core Concepts</h2>
+
+      <h3 id="rag-architecture">The basic RAG pipeline</h3>
+      <p>At its simplest: (1) ingest documents, chunk them, embed each chunk, store in a vector DB; (2) at query
+      time, embed the user's question, retrieve the top-k most similar chunks; (3) insert those chunks into the
+      LLM's prompt as context, along with the question; (4) the LLM generates an answer grounded in that
+      context, ideally with citations back to which chunk(s) supported each claim. Every production RAG system
+      is this pipeline with additional stages bolted on to fix specific failure modes: query rewriting, hybrid
+      search, re-ranking, and evaluation loops — covered below.</p>
+
+      <h3 id="chunking">Chunking strategies and their tradeoffs</h3>
+      <p>Chunking is the single highest-leverage decision in a RAG pipeline, and the one most teams get wrong by
+      defaulting to an arbitrary fixed size. Options, in increasing sophistication:</p>
+      <ul>
+        <li><strong>Fixed-size chunking</strong> (e.g. every 500 tokens, with 50-token overlap) — simple,
+        predictable, but blind to document structure: it will routinely cut a sentence, a table row, or a
+        step-by-step instruction in half, destroying exactly the local coherence retrieval depends on.</li>
+        <li><strong>Overlap</strong> between consecutive chunks (commonly 10-20% of chunk size) mitigates the
+        "cut mid-thought" problem by ensuring content near a boundary appears fully in at least one chunk, at
+        the cost of some storage/retrieval redundancy.</li>
+        <li><strong>Structure-aware / heading-aware chunking</strong> — split along natural document boundaries
+        (markdown headings, paragraphs, code function boundaries) so each chunk is a topically coherent unit,
+        attaching the heading path as metadata (e.g. "Chapter 3 > Error Handling > Retries") so the chunk
+        carries context about where it sits even in isolation. This is almost always better for well-structured
+        docs (like markdown or technical documentation) than blind fixed-size splitting.</li>
+        <li><strong>Semantic chunking</strong> — use embedding similarity between adjacent sentences/paragraphs
+        to detect topic shifts and split there, producing variable-size chunks that track actual topic
+        boundaries rather than a fixed token count. More expensive to compute at ingestion time, often worth it
+        for heterogeneous or poorly-structured source documents.</li>
+        <li><strong>Parent-child / hierarchical chunking</strong> — embed and search over small, precise child
+        chunks (for retrieval precision) but return the larger parent chunk/section they belong to as the
+        actual context fed to the LLM (for enough surrounding information to answer fully) — decoupling "what
+        you search against" from "what you feed the model."</li>
+      </ul>
+      <p>The core tension: <strong>smaller chunks → higher retrieval precision</strong> (a tightly-scoped chunk
+      scores well specifically against a matching query, with less dilution from unrelated content in the same
+      chunk) <strong>but less self-contained context</strong> (the chunk alone may not have enough surrounding
+      information to let the model answer fully or correctly); <strong>larger chunks → more complete context
+      per chunk but worse retrieval precision</strong> (more unrelated content diluting the embedding, more
+      likely to retrieve a chunk that's only tangentially relevant alongside the part that actually matters).
+      Parent-child chunking exists specifically to escape this tradeoff rather than just picking a point on it.</p>
+
+      <h3 id="retrieval-strategies">Retrieval: beyond naive top-k vector search</h3>
+      <p><strong>Pure vector (semantic) search</strong> finds chunks with similar <em>meaning</em> but can miss
+      exact keyword/term matches that matter a lot in practice — e.g. a query containing a specific product SKU,
+      error code, or proper noun may retrieve semantically-similar-but-wrong chunks if the exact term isn't
+      weighted heavily in the embedding. <strong>Keyword/lexical search</strong> (BM25, classic TF-IDF-based
+      ranking) is excellent at exact-term matches but blind to synonyms and paraphrasing. <strong>Hybrid
+      search</strong> runs both in parallel and merges/re-ranks the combined candidate set (often via a fusion
+      method like Reciprocal Rank Fusion), capturing the strengths of both — this is now standard practice in
+      serious RAG systems, not an advanced nicety.</p>
+      <p><strong>Query rewriting/expansion</strong> addresses the case where the user's literal query is a poor
+      search query (too short, ambiguous given conversation context, or phrased very differently from how the
+      source documents phrase the same concept) — an LLM call rewrites the query (optionally using chat history)
+      into one or more better search queries before retrieval runs. <strong>HyDE</strong> (Hypothetical Document
+      Embeddings) is a specific technique: ask the LLM to generate a hypothetical, plausible-sounding answer to
+      the query first, then embed <em>that</em> hypothetical answer (not the query) for retrieval — because a
+      hypothetical answer's phrasing is often closer, in embedding space, to how the real answer is phrased in
+      the source documents than the original question's phrasing is.</p>
+
+      <h3 id="reranking">Re-ranking</h3>
+      <p>Vector/hybrid retrieval is optimized for speed over a large corpus, which means it uses a comparatively
+      cheap similarity signal. A <strong>re-ranker</strong> — typically a cross-encoder model that jointly
+      processes the query and each candidate chunk together (rather than comparing independently-computed
+      vectors) — is far more accurate at judging true relevance but too slow to run over an entire corpus. The
+      standard pattern: retrieve a larger candidate set (e.g. top 50) cheaply via vector/hybrid search, then
+      re-rank just those 50 with the more expensive cross-encoder, and keep only the true top-k (e.g. 5-8) to
+      actually put in the LLM's prompt. This two-stage "retrieve wide, re-rank narrow" pattern consistently
+      improves answer quality over single-stage retrieval and is considered a baseline best practice in 2025-26
+      RAG systems, not an optional add-on.</p>
+
+      <h3 id="rag-failure-modes">RAG-specific failure modes</h3>
+      <ul>
+        <li><strong>Retrieval miss</strong> — the correct information exists in the corpus but wasn't retrieved
+        (wrong chunking, embedding mismatch, query phrased too differently from source text). The model then
+        either admits it doesn't know (good) or hallucinates a plausible-sounding answer anyway (bad, and the
+        default behavior unless explicitly prompted/trained to say "the context doesn't contain this").</li>
+        <li><strong>Retrieval noise</strong> — correct chunk retrieved alongside several irrelevant ones,
+        diluting the prompt and risking the model latching onto a wrong-but-plausible distractor chunk instead.</li>
+        <li><strong>Lost-in-the-middle</strong> (from <a href="01-how-llms-work.html">chapter 1</a>) — the
+        correct chunk is in context but buried among several others in a position the model attends to less
+        reliably; ordering retrieved chunks (most relevant last, closest to the question) mitigates this.</li>
+        <li><strong>Stale index</strong> — the source document changed or was deleted but the vector index
+        wasn't updated, so retrieval confidently returns outdated information as if current.</li>
+        <li><strong>Chunk fragmentation</strong> — the answer genuinely requires combining information split
+        across multiple chunks/documents (e.g. a multi-step process spanning sections), and single-pass top-k
+        retrieval doesn't guarantee all the necessary pieces are retrieved together.</li>
+        <li><strong>Over-trusting retrieval</strong> — the system assumes anything retrieved is both relevant
+        and correct; if source documents themselves are wrong or outdated, RAG faithfully launders that error
+        into a confident-sounding answer — RAG grounds the model in your corpus, not in truth.</li>
+      </ul>
+
+      <h3 id="rag-evaluation">Evaluating a RAG system</h3>
+      <p>"The chatbot gives reasonable-looking answers" is not an evaluation. A real RAG eval separates
+      <strong>retrieval quality</strong> from <strong>generation quality</strong>, because they fail
+      independently and need different fixes:</p>
+      <ul>
+        <li><strong>Retrieval metrics</strong> — for a labeled eval set (query → known-relevant chunk IDs),
+        compute precision@k (fraction of retrieved chunks that are actually relevant), recall@k (fraction of all
+        relevant chunks that were retrieved), and Mean Reciprocal Rank (MRR, rewarding relevant results that
+        appear earlier/higher-ranked).</li>
+        <li><strong>Generation/answer metrics</strong> — given correct, sufficient context, did the model
+        produce a correct, well-grounded answer? This is typically scored with an "LLM-as-judge" approach
+        (a separate, often more capable model scores the generated answer against a reference answer and the
+        retrieved context on faithfulness/groundedness and correctness), since exact-string-match scoring is
+        too brittle for free-form answers.</li>
+        <li><strong>Faithfulness/groundedness</strong> specifically checks whether every claim in the generated
+        answer is actually supported by the retrieved context — this catches the specific failure where the
+        model answers "correctly" by accident from its own pretrained knowledge rather than the provided
+        context, which will fail silently the moment the corpus's actual content diverges from the model's
+        general knowledge.</li>
+        <li><strong>End-to-end</strong> metrics (did the final answer satisfy the user) matter too, but without
+        decomposing into retrieval vs. generation you can't tell whether a bad answer needs a chunking fix, a
+        re-ranking fix, or a prompt fix.</li>
+      </ul>
+
+      <h2 id="under-the-hood">How It Works Under the Hood</h2>
+      <p>A production-grade RAG query path, in order:</p>
+      <ol>
+        <li>User query arrives, possibly with conversation history.</li>
+        <li><strong>Query rewriting</strong> (optional but recommended for multi-turn chat): an LLM call
+        rewrites the query into a standalone, retrieval-optimized search query using the conversation context
+        (e.g. "what about the second one?" → "What is the pricing for the Enterprise plan?").</li>
+        <li><strong>Retrieval</strong>: the rewritten query is embedded and run against the vector index
+        (semantic search) and, in a hybrid setup, also run through a lexical/BM25 search; results from both are
+        merged into a wider candidate set (e.g. top 50).</li>
+        <li><strong>Re-ranking</strong>: a cross-encoder or LLM-based re-ranker scores the candidate set against
+        the query, and only the true top-k (e.g. 5-8) survive.</li>
+        <li><strong>Context assembly</strong>: surviving chunks are formatted into the prompt, typically with
+        source citations/IDs attached, ordered with the most relevant placed closest to the actual question to
+        mitigate lost-in-the-middle.</li>
+        <li><strong>Generation</strong>: the LLM generates an answer instructed to cite which chunk(s) support
+        each claim and to explicitly say when the provided context doesn't contain the answer, rather than
+        falling back to its own general knowledge.</li>
+        <li><strong>(Optional) Faithfulness check</strong>: before returning the answer, a cheaper validation
+        pass (rule-based citation-presence check, or a second LLM call) verifies claims are actually grounded
+        in the cited chunks, flagging or regenerating if not.</li>
+      </ol>
+
+      <h2 id="diagrams">Diagrams</h2>
+      <div class="mermaid">
+flowchart LR
+  U[User query + history] --> QR[Query rewrite]
+  QR --> VS[Vector search]
+  QR --> LS[Lexical/BM25 search]
+  VS --> M[Merge candidates ~top 50]
+  LS --> M
+  M --> RR[Re-rank cross-encoder]
+  RR --> TOPK[Top-k chunks ~5-8]
+  TOPK --> CA[Assemble prompt + citations]
+  CA --> GEN[LLM generation]
+  GEN --> FC[Faithfulness check]
+  FC --> OUT[Answer with citations]
+      </div>
+
+      <h2 id="code-examples">Code Examples</h2>
+      <pre><code class="language-typescript">// Heading-aware markdown chunking with parent-child structure: small chunks for
+// retrieval precision, larger parent sections returned as actual LLM context.
+interface Chunk {
+  id: string;
+  text: string;
+  headingPath: string;
+  parentSectionId: string;
+}
+
+function chunkMarkdown(markdown: string, source: string): { chunks: Chunk[]; parents: Map<string, string> } {
+  const lines = markdown.split("\n");
+  const chunks: Chunk[] = [];
+  const parents = new Map<string, string>(); // parentSectionId -> full section text
+  let headingStack: string[] = [];
+  let sectionLines: string[] = [];
+  let sectionId = "";
+  let chunkIndex = 0;
+
+  const flushSection = () => {
+    if (sectionLines.length === 0) return;
+    const sectionText = sectionLines.join("\n").trim();
+    if (!sectionText) return;
+    parents.set(sectionId, sectionText);
+
+    // Split the section into smaller retrieval chunks with overlap, but keep the link
+    // back to the full parent section for context assembly.
+    const words = sectionText.split(/\s+/);
+    const chunkSize = 150, overlap = 30;
+    for (let i = 0; i < words.length; i += chunkSize - overlap) {
+      const slice = words.slice(i, i + chunkSize).join(" ");
+      chunks.push({
+        id: `${source}-${chunkIndex++}`,
+        text: slice,
+        headingPath: headingStack.join(" > "),
+        parentSectionId: sectionId,
+      });
+      if (i + chunkSize >= words.length) break;
+    }
+  };
+
+  for (const line of lines) {
+    const match = line.match(/^(#{1,4})\s+(.*)/);
+    if (match) {
+      flushSection();
+      const level = match[1].length;
+      headingStack = headingStack.slice(0, level - 1).concat(match[2]);
+      sectionId = `${source}-section-${headingStack.join("/")}`;
+      sectionLines = [line];
+    } else {
+      sectionLines.push(line);
+    }
+  }
+  flushSection();
+  return { chunks, parents };
+}
+
+// BAD: naive fixed-size chunking with no structure awareness — routinely splits
+// mid-sentence or mid-list-item, destroying local coherence.
+function badFixedChunk(text: string, size = 500): string[] {
+  const chunks: string[] = [];
+  for (let i = 0; i < text.length; i += size) chunks.push(text.slice(i, i + size));
+  return chunks;
+}
+
+// Retrieve-wide, re-rank-narrow pattern.
+async function retrieveAndRerank(query: string, vectorDb: any, reranker: any, k = 6) {
+  const candidates = await vectorDb.search(query, { topK: 50 }); // cheap, wide net
+  const scored = await reranker.score(query, candidates);        // expensive, accurate
+  return scored.sort((a: any, b: any) => b.score - a.score).slice(0, k);
+}
+
+// Faithfulness-oriented prompt assembly: force explicit citations and an explicit
+// "not in context" escape hatch, instead of silently falling back to pretrained knowledge.
+function buildRagPrompt(question: string, chunks: { id: string; text: string }[]): string {
+  const context = chunks.map((c) => `[${c.id}] ${c.text}`).join("\n\n");
+  return `Answer the question using ONLY the context below. Cite the chunk id(s) that support
+each claim, like [chunk-3]. If the context does not contain enough information to answer,
+say so explicitly instead of guessing.
+
+Context:
+${context}
+
+Question: ${question}`;
+}
+</code></pre>
+
+      <h2 id="production-scenario">Real-World Production Scenario at Scale</h2>
+      <div class="box prod"><h4>At scale</h4><p>An internal docs chatbot launches with fixed-size 500-token
+      chunking and no re-ranking. It demos well on simple factual questions but, two weeks in, support tickets
+      reveal a pattern: multi-step "how do I configure X" questions get confidently wrong partial answers,
+      because the setup steps for X were split across a chunk boundary and only one half got retrieved. The
+      team adds heading-aware parent-child chunking (search small, return the full parent section) plus a
+      re-ranking stage, and separately builds a 40-question labeled eval set covering exactly this
+      multi-step-instruction pattern. Retrieval recall@5 on that eval set goes from 61% to 89% after the
+      chunking change alone, measured before ever touching the generation prompt — proving the fix was
+      retrieval, not "the model needs better instructions," which is what the team's first (wrong) guess had
+      been.</p></div>
+
+      <h2 id="mistakes">Common Mistakes, Gotchas and Best Practices</h2>
+      <div class="box gotcha"><h4>Gotcha</h4><p>Shipping RAG without ever building a labeled eval set, then
+      "fixing" quality issues by iterating on the generation prompt. Most RAG quality problems are retrieval
+      problems wearing a generation-shaped costume — if the right chunk was never in context, no amount of
+      prompt engineering on the generation step can fix it, and teams that skip decomposed evaluation waste
+      significant time tuning the wrong layer.</p></div>
+      <ul>
+        <li>Don't default to fixed-size chunking for structured documents (markdown, docs with headings) —
+        heading-aware chunking is usually a strictly better default.</li>
+        <li>Always instruct the model explicitly to say when context is insufficient, and test that it actually
+        does — otherwise the default behavior is to paper over retrieval gaps with plausible-sounding guesses.</li>
+        <li>Re-index on every document update, not just on a schedule — a stale index returning outdated
+        information is a correctness bug, not a staleness nicety, especially for fast-changing docs.</li>
+        <li>Order retrieved chunks with the most relevant closest to the question in the prompt, not in
+        arbitrary retrieval-score order, to reduce lost-in-the-middle risk.</li>
+        <li>Separate retrieval and generation evaluation — a single end-to-end "did the answer seem good" score
+        can't tell you which layer to fix.</li>
+      </ul>
+
+      <h2 id="tradeoffs">Tradeoffs</h2>
+      <table>
+        <tr><th>Approach</th><th>Use when</th><th>Avoid when</th><th>Alternative</th></tr>
+        <tr><td>Fixed-size chunking</td><td>Unstructured/plain text, quick prototyping</td><td>Structured docs (markdown, docs with headings/lists)</td><td>Heading-aware / parent-child chunking</td></tr>
+        <tr><td>Pure vector search</td><td>Paraphrase-heavy, conceptual queries</td><td>Queries with exact terms/IDs/codes that matter</td><td>Hybrid (vector + BM25) search</td></tr>
+        <tr><td>Single-stage top-k retrieval</td><td>Small corpora, latency-critical, low-stakes answers</td><td>Quality-critical production RAG</td><td>Retrieve-wide + re-rank-narrow</td></tr>
+        <tr><td>No faithfulness check</td><td>Low-stakes, informal internal tools</td><td>Customer-facing or compliance-sensitive answers</td><td>Citation-enforcement + faithfulness scoring pass</td></tr>
+      </table>
+
+      <h2 id="interview-questions">Interview Questions</h2>
+
+      <div class="qa-level basic">
+        <h4>Basic</h4>
+        <details class="qa"><summary>What problem does RAG solve, and what mechanism does it use to solve it?</summary><div class="answer"><p>It addresses hallucination and knowledge-cutoff by inserting real, retrieved text relevant to the user's question into the model's context before generation, so the model answers from grounded, current information instead of only its trained-in (and possibly outdated or missing) knowledge.</p></div><div class="followup">Follow-up: does RAG eliminate hallucination entirely? Why or why not?</div></details>
+        <details class="qa"><summary>Walk through the basic RAG pipeline end to end.</summary><div class="answer"><p>Ingest documents, chunk them, embed each chunk and store in a vector DB; at query time, embed the question, retrieve the top-k most similar chunks; insert those chunks plus the question into the LLM's prompt; the LLM generates an answer grounded in that context, ideally with citations.</p></div><div class="followup">Follow-up: what two additional stages does a production system typically add beyond this basic pipeline?</div></details>
+        <details class="qa"><summary>Why does chunk size create a tradeoff rather than having one obviously correct value?</summary><div class="answer"><p>Smaller chunks give sharper, more precise retrieval matches but may lack enough surrounding context to answer fully. Larger chunks carry more context but dilute the embedding with unrelated content, hurting retrieval precision. Parent-child chunking exists to avoid picking a single point on this tradeoff.</p></div><div class="followup">Follow-up: what does parent-child chunking do differently?</div></details>
+        <details class="qa"><summary>What is hybrid search and why is it used instead of pure vector search?</summary><div class="answer"><p>Hybrid search combines semantic (vector) search with lexical/keyword search (e.g. BM25) and merges the results, because vector search alone can miss exact-term matches (IDs, codes, proper nouns) that keyword search handles well, while keyword search alone misses paraphrases and synonyms that vector search handles well.</p></div><div class="followup">Follow-up: how are the two result sets typically combined into one ranking?</div></details>
+        <details class="qa"><summary>Why isn't "the chatbot gives reasonable-looking answers" a sufficient evaluation for a RAG system?</summary><div class="answer"><p>It conflates retrieval quality and generation quality into one unmeasured impression, so when answers are bad you can't tell whether the fix needed is better chunking/retrieval or a better generation prompt — and subtle failures (wrong but plausible-sounding answers) are invisible without a labeled eval set to check against.</p></div><div class="followup">Follow-up: name one metric you'd use to measure retrieval quality specifically, separate from generation quality.</div></details>
+      </div>
+
+      <div class="qa-level medium">
+        <h4>Medium</h4>
+        <details class="qa"><summary>Explain the "retrieve wide, re-rank narrow" pattern and why it's considered a baseline best practice.</summary><div class="answer"><p>Cheap retrieval (vector/hybrid search) pulls a larger candidate set (e.g. top 50) quickly across a large corpus using a relatively weak relevance signal; a more expensive, more accurate cross-encoder re-ranker then scores just those 50 candidates jointly with the query, and only the true top-k (e.g. 5-8) are kept for the LLM prompt. This captures most of the accuracy benefit of an expensive relevance model while keeping it computationally feasible, since the expensive model never has to scan the whole corpus.</p></div><div class="followup">Follow-up: why can't you just use the cross-encoder as your primary search mechanism over the whole corpus?</div></details>
+        <details class="qa"><summary>What is HyDE and why does embedding a hypothetical answer sometimes retrieve better results than embedding the raw query?</summary><div class="answer"><p>HyDE asks the LLM to generate a plausible hypothetical answer to the query first, then embeds that hypothetical answer (instead of the query) for retrieval. Because source documents are typically phrased as answers/statements rather than as questions, a hypothetical answer's phrasing is often closer in embedding space to how the true answer is actually written in the corpus than the original question's phrasing is — improving retrieval for queries phrased very differently from the source material.</p></div><div class="followup">Follow-up: what's a risk of HyDE if the hypothetical answer the LLM generates is confidently wrong?</div></details>
+        <details class="qa"><summary>Decompose "the RAG chatbot gave a wrong answer" into the specific layers you'd check, in order.</summary><div class="answer"><p>First check retrieval: was the correct chunk among the retrieved/re-ranked set at all (a retrieval miss)? If yes, check whether it was buried in a position the model under-attends to (lost-in-the-middle/ordering issue) or diluted by irrelevant chunks (retrieval noise). If the correct chunk was clearly, prominently present, then check generation: did the model ignore available correct context (a faithfulness/grounding failure) or was the context itself stale/wrong (an indexing freshness issue, which is a data problem, not a model problem)?</p></div><div class="followup">Follow-up: which of these would a labeled retrieval eval set catch versus an LLM-as-judge faithfulness eval catch?</div></details>
+        <details class="qa"><summary>Why does instructing the model to "cite your sources" improve more than just answer traceability?</summary><div class="answer"><p>Forcing citations creates an implicit grounding constraint during generation — a model instructed to attribute each claim to a specific retrieved chunk is less likely to casually blend in unsupported pretrained knowledge, because doing so would require fabricating a citation for an unsupported claim, which well-aligned models are measurably less inclined to do than simply stating an unsupported claim with no citation requirement. It also makes faithfulness auditing (automated or human) tractable, since you can check each citation against its claim.</p></div><div class="followup">Follow-up: does a citation being present guarantee the claim is actually supported by that chunk? How would you verify it?</div></details>
+        <details class="qa"><summary>Why is "chunk fragmentation" (answer requiring multiple chunks/documents) a harder problem than simply increasing k (retrieving more chunks)?</summary><div class="answer"><p>Increasing k retrieves more candidates but doesn't guarantee the specific chunks needed to assemble a complete multi-part answer are among them, and it increases noise (more irrelevant chunks diluting the prompt and risking distractor-based errors) proportionally. The better fixes are structural: parent-child chunking that returns a fuller section once any part of it is matched, or explicitly detecting multi-hop questions and running multiple targeted retrieval passes (one per sub-question) rather than one larger single-pass retrieval.</p></div><div class="followup">Follow-up: how would you detect, from your eval set, that a failure is specifically a multi-hop/fragmentation issue rather than a plain retrieval miss?</div></details>
+      </div>
+
+      <div class="qa-level advanced">
+        <h4>Advanced</h4>
+        <details class="qa"><summary>Design a full evaluation harness for a production RAG system that would catch both a chunking regression and a prompt regression, run automatically in CI.</summary><div class="answer"><p>Maintain a versioned labeled eval set: for each query, the known-relevant chunk ID(s) (for retrieval metrics: precision@k, recall@k, MRR) and a reference answer or rubric (for generation metrics: an LLM-as-judge scoring correctness and faithfulness/groundedness against the retrieved context). Run the full pipeline (retrieval + generation) against this set on every change to chunking logic, embedding model, retrieval parameters, or prompt template; store scores per component separately and diff against a stored baseline, failing CI if either retrieval or generation metrics regress beyond a threshold. Critically, run retrieval metrics independent of generation (does the right chunk even get retrieved, regardless of what the LLM does with it) so a regression can be attributed to the correct layer immediately rather than requiring manual investigation each time.</p></div><div class="followup">Follow-up: why is it important that this eval set be versioned and not silently edited over time?</div></details>
+        <details class="qa"><summary>A RAG system's faithfulness eval shows high scores (answers are well-grounded in retrieved context) but user satisfaction is still low. What does this tell you, and what would you investigate next?</summary><div class="answer"><p>High faithfulness with low satisfaction suggests the model is accurately summarizing/using whatever it was given — the problem is more likely upstream: retrieval is confidently returning the wrong (but self-consistent) chunks, so the model faithfully builds a well-grounded answer from irrelevant context, or the corpus itself is missing the information users actually need (a coverage gap, not a pipeline bug). Investigate retrieval precision/recall against a fresh labeled sample drawn from real failing user queries (not just your original eval set, which may not represent what users are actually asking), and audit whether the source corpus covers those topics at all.</p></div><div class="followup">Follow-up: how would you distinguish "corpus coverage gap" from "retrieval is failing to find content that does exist" using your eval tooling?</div></details>
+        <details class="qa"><summary>How would you design chunking and retrieval for a corpus where documents change frequently (e.g. hourly-updated internal wiki pages) without re-embedding the entire corpus on every change?</summary><div class="answer"><p>Chunk and embed at the document (or section) level with stable, content-hash-based chunk IDs, so only chunks whose underlying content hash actually changed need re-embedding on an update — unchanged sections of an edited document are skipped. Track a last-modified/version field per chunk in the vector DB metadata, and run an incremental ingestion job triggered by document-change events (webhook from the wiki, or a periodic diff) rather than a full nightly re-embed. For HNSW specifically, plan for its weaker support of frequent deletes (tombstones accumulating) by scheduling periodic index compaction/rebuilds rather than assuming continuous updates are free.</p></div><div class="followup">Follow-up: how would you handle a race condition where a query runs during a partial re-index of a just-updated document?</div></details>
+        <details class="qa"><summary>Design the retrieval and prompt-assembly strategy for a multi-hop question that genuinely requires combining facts from three separate documents, none of which alone contains the full answer.</summary><div class="answer"><p>Detect (via a lightweight classification step, or just always attempt it for complex queries) that the question may require multi-hop reasoning, then decompose it into sub-questions (via an LLM call) and run separate retrieval passes per sub-question rather than relying on one top-k pass to coincidentally surface all three needed documents. Assemble the final prompt with each sub-question's retrieved context clearly delineated and attributed, and instruct the model to synthesize across them explicitly, citing which sub-context supported which part of the combined answer. This is architecturally closer to a simple agent loop (see chapter 5) than a single-pass RAG call — multi-hop retrieval is one of the main reasons RAG and agents blur together in practice.</p></div><div class="followup">Follow-up: how would you decide, for a given product, whether this multi-hop complexity is worth the added latency and cost versus accepting single-pass RAG's limitations?</div></details>
+        <details class="qa"><summary>Your RAG system's source documents themselves contain an outdated/incorrect fact that's been superseded elsewhere in the corpus by a corrected document. How does this manifest as a RAG failure, and how would you address it architecturally rather than per-incident?</summary><div class="answer"><p>It manifests as a confident, well-cited, faithfulness-passing answer that is simply wrong, because RAG grounds the model in your corpus, not in objective truth — if the corpus contains contradictory information, retrieval may surface the outdated document (especially if it's more semantically "central" or more frequently chunked/duplicated) and the model will faithfully report it as if authoritative. Architectural fixes: maintain explicit document versioning/supersession metadata (mark outdated documents and either exclude them from retrieval or down-weight them), retrieve and present multiple potentially-conflicting sources to the model with explicit instructions to flag contradictions rather than silently picking one, and treat "detect contradictory retrieved context" as its own eval category, not an edge case to handle ad hoc.</p></div><div class="followup">Follow-up: why is "just delete the outdated document" an incomplete fix at organizational scale, and what process would you put around document lifecycle instead?</div></details>
+      </div>
+
+      <h2 id="assignments">Practice Assignments</h2>
+      <div class="assignment">
+        <span class="level-tag">Beginner (30-60 min)</span>
+        <h4>Chunking strategy comparison</h4>
+        <p>Take a single long markdown document (2,000+ words, with headings) and implement two chunkers:
+        fixed-size (500 chars, no overlap) and heading-aware. Print the resulting chunks from each side by
+        side for a couple of headings.</p>
+        <ul>
+          <li>Show at least one concrete example where fixed-size chunking visibly splits a coherent idea
+          (a sentence, a list) across two chunks, and heading-aware chunking keeps it whole.</li>
+        </ul>
+        <p><strong>Acceptance criteria:</strong> a clear before/after example demonstrating the difference, plus
+        chunk counts and average chunk length for both strategies.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>Pick a document with at least one section containing a numbered list or multi-step instructions — these are the easiest places to visibly demonstrate the fixed-size splitting problem.</p></div></details>
+        <p><strong>Bonus:</strong> add overlap to the fixed-size chunker and show how it partially, but not fully, mitigates the problem compared to heading-aware chunking.</p>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Intermediate (2-4 hrs)</span>
+        <h4>Hybrid search + re-ranking pipeline</h4>
+        <p>Build a small retrieval pipeline over ~500 chunked documents that combines vector search and a
+        simple BM25 implementation (or a library), merges results, and re-ranks the merged candidates with a
+        cross-encoder (a small open-source one, or an LLM-based re-rank prompt if no cross-encoder is
+        available).</p>
+        <ul>
+          <li>Build a labeled eval set of 15 queries with known-relevant chunk IDs.</li>
+          <li>Measure recall@5 for: vector-only, BM25-only, hybrid (merged, no re-rank), and hybrid + re-rank.</li>
+          <li>Report all four numbers in a table.</li>
+        </ul>
+        <p><strong>Acceptance criteria:</strong> hybrid + re-rank measurably outperforms vector-only on recall@5
+        for at least a few of your queries, with the full comparison table included.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>If you don't want to stand up a real cross-encoder model, you can simulate re-ranking with an LLM prompt that scores each candidate chunk's relevance to the query on a 1-10 scale — it's slower and more expensive than a real cross-encoder but demonstrates the same architectural pattern.</p></div></details>
+        <p><strong>Bonus:</strong> include at least 3 queries in your eval set specifically designed to need exact-term matching (an ID, a code, a proper noun) and show vector-only underperforming on exactly those.</p>
+      </div>
+      <div class="assignment">
+        <span class="level-tag">Advanced (1-2 days)</span>
+        <h4>End-to-end RAG eval harness with retrieval/generation decomposition</h4>
+        <p>Build a full RAG pipeline (chunking → hybrid retrieval → re-rank → generation with citations) over a
+        real document set of your choosing, plus an automated eval harness that scores retrieval and generation
+        separately and can be re-run after any pipeline change.</p>
+        <ul>
+          <li>Labeled eval set: 25-30 queries, each with known-relevant chunk IDs and a reference answer.</li>
+          <li>Retrieval metrics: precision@k, recall@k, MRR, computed automatically from the eval set.</li>
+          <li>Generation metrics: an LLM-as-judge step scoring each generated answer for correctness (vs.
+          reference answer) and faithfulness (is every claim actually supported by the cited chunks), on a
+          defined rubric/scale.</li>
+          <li>Run the harness, record baseline scores, then deliberately introduce one regression (e.g. revert
+          to fixed-size chunking, or disable re-ranking) and show the harness catching the specific metric(s)
+          that regress.</li>
+        </ul>
+        <p><strong>Acceptance criteria:</strong> a baseline score report, a regression demonstration with the
+        harness correctly identifying which layer (retrieval vs. generation) degraded, and the harness runnable
+        as a single script/command.</p>
+        <details class="qa"><summary>Hints</summary><div class="answer"><p>Keep the LLM-as-judge prompt strict and structured (ask for a JSON score + short justification) so you can aggregate scores programmatically rather than eyeballing free-text judgments.</p></div></details>
+        <p><strong>Bonus:</strong> add a faithfulness-specific adversarial test case where the correct chunk is retrieved but a clearly contradicting distractor chunk is also present, and check whether the model's answer and citations correctly resolve the conflict rather than blending both.</p>
+      </div>
+
+      <h2 id="cheatsheet">Quick Revision Cheat Sheet</h2>
+      <div class="cheatsheet">
+        <ul>
+          <li>RAG = retrieve real text, insert into context, generate grounded answer — it makes hallucination debuggable, not impossible.</li>
+          <li>Chunking is the highest-leverage decision: prefer heading-aware/parent-child over blind fixed-size for structured docs.</li>
+          <li>Chunk size tradeoff: smaller = sharper retrieval, less self-contained context; larger = opposite.</li>
+          <li>Hybrid search (vector + BM25) beats pure vector search whenever exact terms/IDs/codes matter.</li>
+          <li>Retrieve wide (e.g. top 50), re-rank narrow (e.g. top 5-8) with a cross-encoder — standard 2025-26 best practice, not optional.</li>
+          <li>Query rewriting/HyDE help when the literal user query is a poor search query (multi-turn chat, phrasing mismatch).</li>
+          <li>Order retrieved chunks most-relevant-closest-to-question to mitigate lost-in-the-middle.</li>
+          <li>Evaluate retrieval (precision/recall/MRR) and generation (faithfulness/correctness via LLM-as-judge) separately — never just end-to-end vibes.</li>
+          <li>RAG grounds the model in your corpus, not in truth — contradictory or stale source documents still produce confident wrong answers.</li>
+        </ul>
+      </div>
+
+      <h2 id="further-reading">Further Reading</h2>
+      <ul>
+        <li><a href="https://arxiv.org/abs/2005.11401">Original RAG paper (Lewis et al., 2020)</a></li>
+        <li><a href="https://arxiv.org/abs/2212.10496">HyDE paper</a></li>
+        <li><a href="https://docs.anthropic.com/en/docs/build-with-claude/embeddings">Anthropic: RAG and embeddings guidance</a></li>
+        <li><a href="https://docs.ragas.io/">Ragas: open-source RAG evaluation framework</a></li>
+      </ul>
+
+      <div class="chapter-nav">
+        <a class="prev" href="03-embeddings-vector-db.html"><span class="dir">← Previous</span>Embeddings & Vector Databases</a>
+        <a class="next" href="05-ai-agents.html"><span class="dir">Next →</span>AI Agents & Workflows</a>
+      </div>
+    </div>
+    <footer class="page-footer">Senior Dev Notes · AI Integration</footer>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-typescript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  window.mermaid = mermaid;
+</script>
+<script src="../assets/script.js"></script>
+<script>initPage({ rootPrefix: "../", topic: "09-ai-integration", chapterKey: "04-rag" });</script>
+</body>
+</html>

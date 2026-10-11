@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Binary Search — DSA Notes</title>
+<style>
+  :root{
+    --ink:#12181B; --ink2:#1A2226; --ink3:#232C31;
+    --amber:#E8A33D; --amber-soft:#3A2E19;
+    --teal:#4FB3A9; --teal-soft:#12312D;
+    --rust:#D9695F; --rust-soft:#3A1F1C;
+    --slate:#8B9199;
+    --text:#E8E6E1; --text-dim:#A9AFAE;
+    --border: rgba(255,255,255,0.08);
+    --radius: 10px;
+    --mono: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{background:var(--ink); color:var(--text); font-family:var(--sans); line-height:1.65; font-size:16px;}
+  a{color:var(--amber);}
+  code, pre{font-family:var(--mono);}
+  #main{max-width:900px; margin:0 auto; padding:30px 22px 100px;}
+  h1{font-size:2rem; letter-spacing:-.01em; margin:0 0 6px;}
+  h2{font-size:1.5rem; margin-top:52px; padding-top:14px; border-top:1px solid var(--border); letter-spacing:-.01em;}
+  h2:first-of-type{border-top:none; margin-top:20px;}
+  h3{font-size:1.15rem; margin-top:30px; color:var(--amber);}
+  h4{font-size:1rem; margin-top:22px;}
+  .eyebrow{font-size:11px; text-transform:uppercase; letter-spacing:.12em; color:var(--teal); font-weight:700; margin-bottom:4px;}
+  .subtitle{color:var(--text-dim); font-size:15px; margin-bottom:28px;}
+  .callout{border-radius:var(--radius); padding:14px 16px; margin:18px 0; border:1px solid var(--border); font-size:14.5px;}
+  .callout .ctitle{font-weight:700; margin-bottom:4px; display:flex; gap:8px; align-items:center;}
+  .callout.concept{background:var(--teal-soft); border-color:var(--teal);}
+  .callout.concept .ctitle{color:var(--teal);}
+  .callout.example{background:var(--ink3);}
+  .callout.mistake{background:var(--rust-soft); border-color:var(--rust);}
+  .callout.mistake .ctitle{color:var(--rust);}
+  .callout.tip{background:var(--amber-soft); border-color:var(--amber);}
+  .callout.tip .ctitle{color:var(--amber);}
+  .codewrap{position:relative; margin:14px 0;}
+  pre{background:var(--ink3); border:1px solid var(--border); border-radius:var(--radius); padding:16px 18px; overflow-x:auto; font-size:13.5px; line-height:1.6;}
+  .copybtn{position:absolute; top:8px; right:8px; background:var(--ink); color:var(--text-dim); border:1px solid var(--border); border-radius:6px; padding:4px 9px; font-size:11px; cursor:pointer; font-family:var(--sans);}
+  .copybtn:hover{color:var(--amber); border-color:var(--amber);}
+  .lang-tag{font-size:10px; text-transform:uppercase; letter-spacing:.08em; color:var(--slate); margin-bottom:-4px; display:block;}
+  :not(pre) > code{background:var(--ink3); padding:2px 6px; border-radius:4px; font-size:.88em;}
+  table{width:100%; border-collapse:collapse; margin:16px 0; font-size:14px;}
+  th,td{border:1px solid var(--border); padding:9px 12px; text-align:left;}
+  th{background:var(--ink3); font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:var(--slate);}
+  .badge{display:inline-block; font-size:11px; font-weight:700; padding:3px 9px; border-radius:20px; text-transform:uppercase; letter-spacing:.03em;}
+  .badge.easy{background:var(--teal-soft); color:var(--teal);}
+  .badge.medium{background:var(--amber-soft); color:var(--amber);}
+  .badge.hard{background:var(--rust-soft); color:var(--rust);}
+  .qcard{border:1px solid var(--border); border-radius:var(--radius); padding:16px 18px; margin:14px 0; background:var(--ink2);}
+  .qcard .qhead{display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; gap:10px;}
+  .qcard .qhead b{font-size:14.5px;}
+  .qcard .meta{color:var(--text-dim); font-size:13px; margin:6px 0;}
+  .qcard .hint{color:var(--text-dim); font-size:13.5px; margin-top:8px; padding-top:8px; border-top:1px dashed var(--border);}
+  .qcard .hint b{color:var(--amber);}
+  hr.div{border:none; border-top:1px solid var(--border); margin:40px 0;}
+  .navlinks{display:flex; justify-content:space-between; gap:12px; font-size:14px; margin:18px 0; flex-wrap:wrap;}
+  .navlinks a{text-decoration:none; border:1px solid var(--border); padding:8px 14px; border-radius:8px; background:var(--ink2);}
+  .navlinks a:hover{border-color:var(--amber);}
+  .home{font-size:13px; color:var(--text-dim); margin-bottom:10px; display:inline-block;}
+</style>
+</head>
+<body>
+<div id="main">
+
+<a class="home" href="../index.html">&larr; Back to Index</a>
+<div class="navlinks">
+  <span></span>
+  <a href="../Phase-06-Sorting/01-sorting-algorithms.html">Next: Sorting Algorithms &rarr;</a>
+</div>
+
+<div class="eyebrow">Phase 5 · Searching</div>
+<h1>Binary Search — Deep Dive</h1>
+<p class="subtitle">Sorted data mein har step search space ko aadha karke target dhundhne ki technique — O(log n) mein. Interview mein sabse zyada under-appreciated technique, kyunki iske bahut saare "hidden" variants hote hain (binary search on answer, rotated array, etc.)</p>
+
+<h2>Concept</h2>
+
+<h3>1. What is it?</h3>
+<p>Binary Search ek searching technique hai jo <b>sorted</b> data mein, har step par search space ko <b>aadha</b> kar deta hai — jab tak answer na mil jaye.</p>
+
+<h3>2. Why does it work? (Sorted array requirement)</h3>
+<p>Binary Search sirf tab kaam karta hai jab data mein ek <b>monotonic property</b> ho — matlab agar tum beech ke element ko check karo, tumhe pata chal jaye ki answer uske left mein hai ya right mein. Sorted array mein: agar mid value target se chhoti hai, target zaroor right side mein hoga (kyunki sab kuch order mein hai). Yehi guarantee humein har baar aadha search space discard karne deti hai.</p>
+
+<h3>3. Real-Life Analogy</h3>
+<div class="callout example">
+  <div class="ctitle">📝 Dictionary / Phonebook</div>
+  Jab tum dictionary mein "mango" dhundhte ho, tum shuru se page-by-page nahi palatte. Tum beech se kholte ho, dekhte ho current page "m" se pehle hai ya baad — aur us hisaab se aadhe hisse ko ignore kar dete ho. Yehi Binary Search hai.
+</div>
+
+<h3>4. Core Concepts: Low, High, Mid, Search Space</h3>
+<ul>
+  <li><b>low</b> — search space ka start</li>
+  <li><b>high</b> — search space ka end</li>
+  <li><b>mid</b> — beech ka index, jahan hum check karte hain</li>
+  <li><b>search space</b> — wo range jisme answer ho sakta hai (low se high tak)</li>
+</ul>
+
+<h3>5. Visual Diagram</h3>
+<pre><code>Sorted Array
+    ↓
+Find Middle (mid)
+    ↓
+Compare mid with target
+    ↓
+  ┌─────┴─────┐
+target < mid   target > mid
+  ↓               ↓
+Search Left    Search Right
+(high = mid-1) (low = mid+1)
+    ↓               ↓
+    Repeat until found or low > high</code></pre>
+
+<h3>6. The Standard Template + Code</h3>
+<div class="lang-tag">JavaScript — Standard Binary Search Template</div>
+<div class="codewrap"><button class="copybtn" onclick="copyCode(this)">Copy</button>
+<pre><code>function binarySearch(arr, target) {
+  let low = 0, high = arr.length - 1;
+  while (low <= high) {
+    const mid = low + Math.floor((high - low) / 2); // avoids overflow
+    if (arr[mid] === target) return mid;
+    else if (arr[mid] < target) low = mid + 1;   // discard left half
+    else high = mid - 1;                          // discard right half
+  }
+  return -1; // not found
+}</code></pre></div>
+<p><b>Line-by-line:</b> Loop tab tak chalta hai jab tak search space valid hai (<code>low &lt;= high</code>). Mid calculate karke check karte hain: match mila to return; agar mid chhota hai target se, left half discard (kyunki wahan target nahi ho sakta sorted order mein); warna right half discard.</p>
+
+<h3>Linear Search vs Binary Search — Complexity Comparison</h3>
+<table>
+  <tr><th>Search Type</th><th>Requirement</th><th>Time</th></tr>
+  <tr><td>Linear Search</td><td>Any order</td><td>O(n)</td></tr>
+  <tr><td>Binary Search</td><td>Sorted (or monotonic condition)</td><td>O(log n)</td></tr>
+</table>
+
+<h3>7. Dry Run</h3>
+<div class="callout example">
+  <div class="ctitle">📝 arr = [2,4,6,8,10,12,14], target = 10</div>
+  <table>
+    <tr><th>low</th><th>high</th><th>mid</th><th>arr[mid]</th><th>Action</th></tr>
+    <tr><td>0</td><td>6</td><td>3</td><td>8</td><td>8&lt;10 → low=4</td></tr>
+    <tr><td>4</td><td>6</td><td>5</td><td>12</td><td>12&gt;10 → high=4</td></tr>
+    <tr><td>4</td><td>4</td><td>4</td><td>10</td><td>Match! return 4 ✅</td></tr>
+  </table>
+</div>
+
+<h3>8. Complexity</h3>
+<p>Time: O(log n) — har step search space aadha hota hai. Space: O(1) iterative, O(log n) if written recursively (call stack).</p>
+
+<hr class="div">
+<h3>Variant 1: First and Last Occurrence</h3>
+<p>Jab array mein duplicates ho, aur tumhe target ki <b>pehli</b> ya <b>aakhri</b> occurrence chahiye — normal binary search "match mile to return" kar deta hai, lekin hume aage/peeche continue karna hoga.</p>
+<div class="codewrap"><button class="copybtn" onclick="copyCode(this)">Copy</button>
+<pre><code>function firstOccurrence(arr, target) {
+  let low = 0, high = arr.length - 1, result = -1;
+  while (low <= high) {
+    const mid = low + Math.floor((high - low) / 2);
+    if (arr[mid] === target) {
+      result = mid;
+      high = mid - 1; // keep searching LEFT for an even earlier occurrence
+    } else if (arr[mid] < target) low = mid + 1;
+    else high = mid - 1;
+  }
+  return result;
+}
+
+function lastOccurrence(arr, target) {
+  let low = 0, high = arr.length - 1, result = -1;
+  while (low <= high) {
+    const mid = low + Math.floor((high - low) / 2);
+    if (arr[mid] === target) {
+      result = mid;
+      low = mid + 1; // keep searching RIGHT for a later occurrence
+    } else if (arr[mid] < target) low = mid + 1;
+    else high = mid - 1;
+  }
+  return result;
+}</code></pre></div>
+<p><b>Key idea:</b> Match milne par turant return mat karo — usko note karke usi direction mein aage search continue karo jaha aur occurrences ho sakti hain.</p>
+
+<h3>Variant 2: Lower Bound & Upper Bound</h3>
+<div class="callout concept">
+  <div class="ctitle">💡 Definitions</div>
+  <ul>
+    <li><b>Lower Bound</b> — first index jahan <code>arr[i] &gt;= target</code></li>
+    <li><b>Upper Bound</b> — first index jahan <code>arr[i] &gt; target</code></li>
+  </ul>
+  Ye "first occurrence" jaisa hi hai, bas target exist na karne par bhi "insertion point" deta hai.
+</div>
+<div class="codewrap"><button class="copybtn" onclick="copyCode(this)">Copy</button>
+<pre><code>function lowerBound(arr, target) {
+  let low = 0, high = arr.length; // note: high = length, not length-1
+  while (low < high) {
+    const mid = low + Math.floor((high - low) / 2);
+    if (arr[mid] < target) low = mid + 1;
+    else high = mid; // arr[mid] >= target, could be the answer
+  }
+  return low;
+}</code></pre></div>
+
+<h3>Variant 3: Search in Rotated Sorted Array</h3>
+<p>Array sorted tha, lekin ek point par "rotate" kar diya gaya (jaise [4,5,6,7,0,1,2]). Trick: har baar, dekh lo <b>kaunsa half properly sorted hai</b> (left ya right), phir decide karo target uss sorted half mein hai ya nahi.</p>
+<div class="codewrap"><button class="copybtn" onclick="copyCode(this)">Copy</button>
+<pre><code>function searchRotated(arr, target) {
+  let low = 0, high = arr.length - 1;
+  while (low <= high) {
+    const mid = low + Math.floor((high - low) / 2);
+    if (arr[mid] === target) return mid;
+
+    if (arr[low] <= arr[mid]) { // left half is sorted
+      if (arr[low] <= target && target < arr[mid]) high = mid - 1;
+      else low = mid + 1;
+    } else { // right half is sorted
+      if (arr[mid] < target && target <= arr[high]) low = mid + 1;
+      else high = mid - 1;
+    }
+  }
+  return -1;
+}</code></pre></div>
+<p><b>Why this works:</b> Ek sorted array ko ek jagah rotate karne par, hamesha kam se kam ek half (left ya right of mid) properly sorted rehta hai. Hum check karte hain kaunsa sorted hai, phir simple range check se decide karte hain target uss sorted half mein fit hota hai ya nahi.</p>
+
+<h3>Variant 4: Binary Search on Answer</h3>
+<div class="callout concept">
+  <div class="ctitle">💡 The Big Insight</div>
+  Binary Search sirf sorted arrays ke liye nahi hai! Agar tum kisi <b>answer value</b> par binary search kar sakte ho — matlab agar "answer = x kaam karega to answer &gt; x bhi kaam karega" (ya vice versa) jaisi monotonic property hai — tab bhi Binary Search use kar sakte ho, chahe koi array na ho.
+</div>
+<p>Example: "Minimum eating speed to finish bananas in h hours" (Koko Eating Bananas problem). Hum speed par binary search karte hain: agar speed=k kaam karti hai (h hours mein khatam), to koi bhi speed &gt; k bhi kaam karegi. Ye monotonic hai, so binary search chalega on the "answer space" (possible speeds), not on an array.</p>
+<div class="codewrap"><button class="copybtn" onclick="copyCode(this)">Copy</button>
+<pre><code>function minEatingSpeed(piles, h) {
+  function hoursNeeded(speed) {
+    let hours = 0;
+    for (const pile of piles) hours += Math.ceil(pile / speed);
+    return hours;
+  }
+
+  let low = 1, high = Math.max(...piles);
+  while (low < high) {
+    const mid = low + Math.floor((high - low) / 2);
+    if (hoursNeeded(mid) <= h) high = mid;   // mid works, try smaller
+    else low = mid + 1;                      // mid too slow, need bigger
+  }
+  return low;
+}</code></pre></div>
+
+<h3>How to Identify Binary Search Problems — Decision Checklist</h3>
+<div class="callout tip">
+  <div class="ctitle">🎯 Ask yourself:</div>
+  <ol>
+    <li>Is the array/data <b>sorted</b>, or can it be treated as sorted (like a rotated sorted array)?</li>
+    <li>Am I looking for the <b>first/last</b> position of something, or an <b>insertion point</b>?</li>
+    <li>Is there a value/parameter where I can ask <b>"does X work?"</b> and the answer is monotonic (yes...yes...yes...no...no...no, or vice versa)? → Binary Search on Answer.</li>
+    <li>Do keywords like "minimum that satisfies", "maximum that satisfies", "find the boundary" appear?</li>
+  </ol>
+  Agar haan to koi bhi ho — Binary Search socho, chahe koi obvious "array" na dikhe.
+</div>
+
+<h3>Common Mistakes</h3>
+<div class="callout mistake">
+  <ul>
+    <li><code>mid = (low + high) / 2</code> — bade numbers mein overflow ho sakta hai (other languages mein). Better: <code>low + (high - low) / 2</code>.</li>
+    <li><code>low &lt;= high</code> vs <code>low &lt; high</code> galat use karna — depends on whether high is inclusive (length-1) or exclusive (length).</li>
+    <li>Infinite loop ban jaana jab mid update galat ho (jaise <code>high = mid</code> ki jagah kabhi <code>high</code> update hi na ho).</li>
+    <li>Match milne par turant return kar dena jab first/last occurrence chahiye tha.</li>
+  </ul>
+</div>
+
+<h3>Interview Tips</h3>
+<div class="callout tip">
+  Binary Search likhte waqt loudly bolo apna invariant: "low se high tak jo range hai, usme answer guaranteed hai — main har step is range ko aadha kar raha hoon." Interviewer dekhna chahta hai tumhe apne loop invariant ka pata hai, sirf template yaad nahi hai.
+</div>
+
+<hr class="div">
+<h2>Interview Questions</h2>
+
+<h3>Easy <span class="badge easy">Easy</span></h3>
+
+<div class="qcard">
+  <div class="qhead"><b>Q1. Binary Search (basic)</b><span class="badge easy">Easy</span></div>
+  <p>Given a sorted array and a target, return its index or -1.</p>
+  <p><b>Example:</b> arr = [-1,0,3,5,9,12], target = 9 → Output: 4</p>
+  <div class="hint"><b>Hint:</b> Use the standard low/high/mid template above.</div>
+</div>
+
+<div class="qcard">
+  <div class="qhead"><b>Q2. Search Insert Position</b><span class="badge easy">Easy</span></div>
+  <p>Given a sorted array and a target, return the index if found, else the index where it would be inserted.</p>
+  <p><b>Example:</b> arr = [1,3,5,6], target = 2 → Output: 1</p>
+  <div class="hint"><b>Hint:</b> This IS lower bound — the first index where arr[i] &gt;= target.</div>
+</div>
+
+<div class="qcard">
+  <div class="qhead"><b>Q3. First Bad Version</b><span class="badge easy">Easy</span></div>
+  <p>You have n versions [1..n] and an API isBadVersion(v). Find the first bad version using minimum API calls.</p>
+  <p><b>Example:</b> n = 5, first bad = 4 → Output: 4</p>
+  <div class="hint"><b>Hint:</b> Binary search on version numbers; if isBadVersion(mid) is true, answer could be mid or earlier.</div>
+</div>
+
+<div class="qcard">
+  <div class="qhead"><b>Q4. Sqrt(x) — Integer Part</b><span class="badge easy">Easy</span></div>
+  <p>Return the integer part of the square root of a non-negative integer x, without using built-in power functions.</p>
+  <p><b>Example:</b> x = 8 → Output: 2</p>
+  <div class="hint"><b>Hint:</b> Binary search low=0, high=x. If mid*mid &lt;= x it could be the answer, track the largest valid mid.</div>
+</div>
+
+<div class="qcard">
+  <div class="qhead"><b>Q5. Find Peak Element</b><span class="badge easy">Easy</span></div>
+  <p>A peak element is one strictly greater than its neighbors. Find any peak's index in O(log n).</p>
+  <p><b>Example:</b> arr = [1,2,3,1] → Output: 2</p>
+  <div class="hint"><b>Hint:</b> Compare arr[mid] with arr[mid+1] to decide which direction has a guaranteed peak.</div>
+</div>
+
+<h3>Medium <span class="badge medium">Medium</span></h3>
+
+<div class="qcard">
+  <div class="qhead"><b>Q6. Find First and Last Position of Element in Sorted Array</b><span class="badge medium">Medium</span></div>
+  <p>Given a sorted array with duplicates, find the starting and ending index of a given target.</p>
+  <p><b>Example:</b> arr = [5,7,7,8,8,10], target = 8 → Output: [3,4]</p>
+  <div class="hint"><b>Hint:</b> Run firstOccurrence and lastOccurrence independently and combine.</div>
+</div>
+
+<div class="qcard">
+  <div class="qhead"><b>Q7. Search in Rotated Sorted Array</b><span class="badge medium">Medium</span></div>
+  <p>A sorted array is rotated at an unknown pivot. Search for a target in O(log n).</p>
+  <p><b>Example:</b> arr = [4,5,6,7,0,1,2], target = 0 → Output: 4</p>
+  <div class="hint"><b>Hint:</b> At each step identify which half (of mid) is properly sorted, then check if target lies in its range.</div>
+</div>
+
+<div class="qcard">
+  <div class="qhead"><b>Q8. Find Minimum in Rotated Sorted Array</b><span class="badge medium">Medium</span></div>
+  <p>Find the minimum element in a rotated sorted array (no duplicates) in O(log n).</p>
+  <p><b>Example:</b> arr = [4,5,6,7,0,1,2] → Output: 0</p>
+  <div class="hint"><b>Hint:</b> Compare arr[mid] with arr[high] to decide which side the minimum is on.</div>
+</div>
+
+<div class="qcard">
+  <div class="qhead"><b>Q9. Koko Eating Bananas</b><span class="badge medium">Medium</span></div>
+  <p>Koko must eat all banana piles within h hours, eating at a constant speed k per hour per pile. Find minimum k.</p>
+  <p><b>Example:</b> piles = [3,6,7,11], h = 8 → Output: 4</p>
+  <div class="hint"><b>Hint:</b> Binary search on possible speeds 1..max(piles); check feasibility with a helper computing total hours needed.</div>
+</div>
+
+<div class="qcard">
+  <div class="qhead"><b>Q10. Capacity To Ship Packages Within D Days</b><span class="badge medium">Medium</span></div>
+  <p>Find the minimum ship capacity so all packages (in given order) can be shipped within D days.</p>
+  <p><b>Example:</b> weights = [1,2,3,4,5,6,7,8,9,10], D = 5 → Output: 15</p>
+  <div class="hint"><b>Hint:</b> Binary search on the answer (capacity), feasibility check is monotonic — same pattern as Koko Eating Bananas.</div>
+</div>
+
+<h3>Hard <span class="badge hard">Hard</span></h3>
+
+<div class="qcard">
+  <div class="qhead"><b>Q11. Median of Two Sorted Arrays</b><span class="badge hard">Hard</span></div>
+  <p>Given two sorted arrays, find the median of the combined array in O(log(min(n,m))) time.</p>
+  <p><b>Example:</b> nums1 = [1,3], nums2 = [2] → Output: 2.0</p>
+  <div class="hint"><b>Hint:</b> Binary search on a partition point in the smaller array such that left-side elements of both partitions are ≤ right-side elements.</div>
+</div>
+
+<div class="qcard">
+  <div class="qhead"><b>Q12. Aggressive Cows (Binary Search on Answer)</b><span class="badge hard">Hard</span></div>
+  <p>Given stall positions, place C cows to maximize the minimum distance between any two cows.</p>
+  <p><b>Example:</b> stalls = [1,2,4,8,9], cows = 3 → Output: 3</p>
+  <div class="hint"><b>Hint:</b> Binary search on the "minimum distance" value; a greedy check tells you if that distance is achievable.</div>
+</div>
+
+<div class="qcard">
+  <div class="qhead"><b>Q13. Split Array Largest Sum</b><span class="badge hard">Hard</span></div>
+  <p>Split an array into m non-empty contiguous subarrays to minimize the largest sum among them.</p>
+  <p><b>Example:</b> arr = [7,2,5,10,8], m = 2 → Output: 18</p>
+  <div class="hint"><b>Hint:</b> Binary search on the answer (max allowed sum), check feasibility by greedily counting how many subarrays are needed.</div>
+</div>
+
+<hr class="div">
+<div class="navlinks">
+  <span></span>
+  <a href="../Phase-06-Sorting/01-sorting-algorithms.html">Next: Sorting Algorithms &rarr;</a>
+</div>
+
+</div>
+<script>
+function copyCode(btn){
+  const code = btn.parentElement.querySelector('code');
+  if(code){ navigator.clipboard.writeText(code.innerText); btn.textContent='Copied!'; setTimeout(()=>btn.textContent='Copy',1200); }
+}
+</script>
+</body>
+</html>
